@@ -33,11 +33,13 @@ Question: {question}
 """
 
 class ReActAgent:
-    def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor, max_steps: int | None = None):
+    def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor, max_steps: int | None = None,
+                 output=None):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
         self.max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
         self.history = []
+        self._output = output or print
 
     def _parse_output(self, text: str):
         """解析LLM的输出，提取Thought和Action。
@@ -87,7 +89,7 @@ class ReActAgent:
 
         while current_step < self.max_steps:
             current_step += 1
-            print(f"--- 第 {current_step} 步 ---")
+            self._output(f"--- 第 {current_step} 步 ---")
 
             tools_desc = self.tool_executor.getAvailableTools()
             history_str = "\n".join(self.history)
@@ -103,27 +105,27 @@ class ReActAgent:
             response_text = self.llm_client.think(messages=messages)
 
             if not response_text:
-                print("错误:LLM未能返回有效响应。")
+                self._output("错误:LLM未能返回有效响应。")
                 break
 
             thought, action = self._parse_output(response_text)
 
             if thought:
-                print(f"思考: {thought}")
+                self._output(f"思考: {thought}")
             if memory_manager:
                 memory_manager.append("assistant", response_text)
 
             if not action:
-                print("警告:未能解析出有效的Action，流程终止。")
+                self._output("警告:未能解析出有效的Action，流程终止。")
                 break
 
             if action.startswith("Finish"):
                 final_answer = self._parse_finish(action)
                 if final_answer is None:
-                    print(f"警告: Finish指令格式无法解析，原始Action为: {action}")
-                    print("流程终止，请检查LLM输出格式。")
+                    self._output(f"警告: Finish指令格式无法解析，原始Action为: {action}")
+                    self._output("流程终止，请检查LLM输出格式。")
                     return None
-                print(f"最终答案: {final_answer}")
+                self._output(f"最终答案: {final_answer}")
                 if memory_manager:
                     memory_manager.conclude(question, final_answer)
                 return final_answer
@@ -133,7 +135,7 @@ class ReActAgent:
                 # ... 处理无效Action格式 ...
                 continue
 
-            print(f"行动: {tool_name}[{tool_input}]")
+            self._output(f"行动: {tool_name}[{tool_input}]")
             
             tool_function = self.tool_executor.getTool(tool_name)
             if not tool_function:
@@ -141,12 +143,12 @@ class ReActAgent:
             else:
                 observation = tool_function(tool_input) # 调用真实工具
 
-                print(f"观察: {observation}")
+                self._output(f"观察: {observation}")
             
             # 将本轮的Action和Observation添加到历史记录中
             self.history.append(f"Action: {action}")
             self.history.append(f"Observation: {observation}")
 
         # 循环结束
-        print("已达到最大步数，流程终止。")
+        self._output("已达到最大步数，流程终止。")
         return None

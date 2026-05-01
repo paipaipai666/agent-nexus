@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     llm_model_id: str = Field(default="deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_timeout: int = Field(default=60, ge=1)
-    serpapi_api_key: SecretStr = Field(default=SecretStr(""))
+    tavily_api_key: SecretStr = Field(default=SecretStr(""))
     e2b_api_key: SecretStr = Field(default=SecretStr(""))
     max_agent_steps: int = Field(default=5, ge=1, le=50)
     embedding_model: str = Field(default="BAAI/bge-small-zh-v1.5")
@@ -54,5 +54,10 @@ def _load_yaml() -> dict:
 
 
 def get_settings() -> Settings:
-    settings = Settings(**_load_yaml(), **_default_paths())
+    data = _load_yaml()
+    if "serpapi_api_key" in data and "tavily_api_key" not in data:
+        data["tavily_api_key"] = data.pop("serpapi_api_key")
+        yaml_path = _config_dir() / "config.yaml"
+        yaml.dump(data, open(yaml_path, "w", encoding="utf-8"), allow_unicode=True)
+    settings = Settings(**data, **_default_paths())
     return settings

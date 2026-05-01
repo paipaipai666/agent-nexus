@@ -33,13 +33,12 @@ SUMMARIZE_PROMPT = """将以下对话历史总结为一段简洁摘要，保留:
 
 
 class MemoryManager:
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, llm=None):
         self.session_id = session_id
-        self.short_term = ShortTermMemory(session_id)
+        self.short_term = ShortTermMemory()
         self.long_term = LongTermMemory()
-        self._llm = AgentLLM()
+        self._llm = llm or AgentLLM()
         self._embed_model = get_embedding_model()
-        self.long_term.init_schema()
 
     def init_session(self, question: str) -> str:
         query_vec = self._embed_model.encode(question, normalize_embeddings=True).tolist()

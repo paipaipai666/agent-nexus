@@ -23,7 +23,7 @@ def config(
 
     SETTABLE_KEYS = [
         "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
-        "serpapi_api_key", "e2b_api_key", "max_agent_steps",
+        "tavily_api_key", "e2b_api_key", "max_agent_steps",
     ]
 
     if key is not None:

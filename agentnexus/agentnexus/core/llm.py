@@ -23,7 +23,7 @@ class AgentLLM:
         if apiKey and baseUrl:
             self._client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
 
-    def think(self, messages: List[Dict[str, str]], temperature: float = 0) -> str:
+    def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False) -> str:
         if not self._client:
             return ""
 
@@ -39,18 +39,26 @@ class AgentLLM:
             collected = []
             usage = {}
             text = Text()
-            with Live(text, console=console, refresh_per_second=15, transient=False) as live:
+            live = None
+            if not silent:
+                live = Live(text, console=console, refresh_per_second=15, transient=True)
+                live.__enter__()
+            try:
                 for chunk in response:
                     content = chunk.choices[0].delta.content or ""
                     collected.append(content)
                     text.append(content)
-                    live.update(text)
+                    if live:
+                        live.update(text)
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage = {
                             "input_tokens": chunk.usage.prompt_tokens or 0,
                             "output_tokens": chunk.usage.completion_tokens or 0,
                             "total_tokens": chunk.usage.total_tokens or 0,
                         }
+            finally:
+                if live:
+                    live.__exit__(None, None, None)
 
             result = "".join(collected)
 
