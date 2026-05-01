@@ -10,12 +10,49 @@ from agentnexus.agents.research_agent import ResearchAgent
 from agentnexus.agents.coder_agent import CoderAgent
 from agentnexus.agents.analyst_agent import AnalystAgent
 from agentnexus.agents.critic_agent import CriticAgent
+from agentnexus.observability.tracer import trace_manager
 
 console = Console()
 
 
 MAX_RETRIES = 3
 PASS_THRESHOLD = 7.0
+
+
+def _trunc(text: str, max_len: int = 500) -> str:
+    """Truncate string values for trace storage."""
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+
+
+def _state_preview(state: dict, keys: list[str]) -> dict[str, str]:
+    """Snapshot state values for trace input, truncating long strings."""
+    return {k: _trunc(str(state.get(k, ""))) for k in keys}
+
+
+def _trace_wrapper(fn, node_name: str, input_keys: list[str]):
+    """Wrap a node function to create a trace span around each invocation."""
+    def wrapped(state: AgentState) -> dict:
+        ctx = trace_manager.active
+        span = None
+        if ctx:
+            span = ctx.start_span(node_name, input_data=_state_preview(state, input_keys))
+        try:
+            result = fn(state)
+            if span and ctx:
+                ctx.end_span(span,
+                             output_data={k: _trunc(str(v)) for k, v in result.items()},
+                             metadata={"status": "ok"})
+            return result
+        except Exception as e:
+            if span and ctx:
+                ctx.end_span(span, metadata={"status": "error", "error": str(e)[:200]})
+            raise
+    return wrapped
+
 
 _research = ResearchAgent()
 _coder = CoderAgent()
@@ -25,6 +62,9 @@ _planner_llm = AgentLLM()
 
 
 def plan_node(state: AgentState) -> dict:
+    ctx = trace_manager.active
+    if ctx and state.get("trace_id"):
+        ctx.trace_id = state["trace_id"]
     prompt = f"""决定如何完成以下任务。必须输出至少一行，格式严格如下:
 research: <搜索关键词>
 code: <代码需求>
@@ -118,12 +158,12 @@ def retry_node(state: AgentState) -> dict:
 def build_orchestrator(checkpointer=None):
     builder = StateGraph(AgentState)
 
-    builder.add_node("plan", plan_node)
-    builder.add_node("research", research_node)
-    builder.add_node("code", code_node)
-    builder.add_node("analyze", analyze_node)
-    builder.add_node("critique", critique_node)
-    builder.add_node("retry", retry_node)
+    builder.add_node("plan", _trace_wrapper(plan_node, "plan_node", ["task", "retry_count"]))
+    builder.add_node("research", _trace_wrapper(research_node, "research_node", ["research_query", "task"]))
+    builder.add_node("code", _trace_wrapper(code_node, "code_node", ["code_spec", "task"]))
+    builder.add_node("analyze", _trace_wrapper(analyze_node, "analyze_node", ["task"]))
+    builder.add_node("critique", _trace_wrapper(critique_node, "critique_node", ["task"]))
+    builder.add_node("retry", _trace_wrapper(retry_node, "retry_node", ["retry_count"]))
 
     builder.add_edge(START, "plan")
     builder.add_conditional_edges("plan", continue_to_agents, ["research", "code", "analyze"])

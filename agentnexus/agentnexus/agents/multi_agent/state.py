@@ -4,6 +4,7 @@ import operator
 
 class AgentState(TypedDict):
     task: str
+    trace_id: str
     plan: list[str]
     research_result: str
     code_result: str

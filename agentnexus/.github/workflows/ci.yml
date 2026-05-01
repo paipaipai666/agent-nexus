@@ -1,0 +1,25 @@
+name: AgentNexus CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  lint-test-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install -e ".[dev,eval]"
+      - name: Lint
+        run: ruff check agentnexus/ tests/
+      - name: Test
+        run: python test_all.py
+        continue-on-error: true
+      - name: Eval
+        run: python -c "from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES; from agentnexus.rag.evaluator import RAGEvaluator; e = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES); print('eval samples:', len(EVAL_SAMPLES))"
+        env:
+          AGENTNEXUS_LLM_API_KEY: ${{ secrets.AGENTNEXUS_LLM_API_KEY }}

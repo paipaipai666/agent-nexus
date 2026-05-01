@@ -6,6 +6,7 @@ from rich.live import Live
 from rich.text import Text
 
 from agentnexus.core.config import get_settings
+from agentnexus.observability.tracer import trace_manager
 
 console = Console()
 
@@ -32,9 +33,11 @@ class AgentLLM:
                 messages=messages,
                 temperature=temperature,
                 stream=True,
+                stream_options={"include_usage": True},
             )
 
             collected = []
+            usage = {}
             text = Text()
             with Live(text, console=console, refresh_per_second=15, transient=False) as live:
                 for chunk in response:
@@ -42,8 +45,39 @@ class AgentLLM:
                     collected.append(content)
                     text.append(content)
                     live.update(text)
-            return "".join(collected)
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage = {
+                            "input_tokens": chunk.usage.prompt_tokens or 0,
+                            "output_tokens": chunk.usage.completion_tokens or 0,
+                            "total_tokens": chunk.usage.total_tokens or 0,
+                        }
+
+            result = "".join(collected)
+
+            ctx = trace_manager.active
+            if ctx:
+                span = ctx.start_span("llm", {
+                    "model": self.model,
+                    "messages_count": len(messages),
+                    "input_preview": _preview(messages[-1]["content"]) if messages else "",
+                })
+                ctx.end_span(span,
+                    output_data={"output_preview": _preview(result), "output_length": len(result)},
+                    metadata={"model": self.model, "status": "ok", **usage},
+                )
+
+            return result
 
         except Exception as e:
             console.print(f"[red]LLM 错误: {e}[/red]")
+            ctx = trace_manager.active
+            if ctx:
+                span = ctx.start_span("llm", {"model": self.model, "error": str(e)})
+                ctx.end_span(span, metadata={"model": self.model, "status": "error", "error": str(e)[:200]})
             return ""
+
+
+def _preview(text: str, max_len: int = 200) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
