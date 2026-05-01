@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 密钥 & 配置
+.env
+*.local
+
+# 运行时生成的数据
+.agentnexus_checkpoints/
+*.db
+*-journal
+
+# 缓存 & 测试
+.pytest_cache/
+.cache/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ChromaDB
+chroma_data/
