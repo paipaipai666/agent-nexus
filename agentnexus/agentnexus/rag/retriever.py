@@ -110,9 +110,13 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True):
 
 def search_knowledge_base(query: str) -> str:
     retriever = _get_retriever()
+    if not retriever._docs:
+        return "知识库为空，请先用 `nexus kb add` 添加文档。"
     model = get_embedding_model()
     vec = model.encode(query, normalize_embeddings=True).tolist()
     dense_results = chroma_search(query, limit=10)
+    if not dense_results:
+        return "未找到相关知识。"
     dense = [(i, r["score"]) for i, r in enumerate(dense_results)]
     results = retriever.search(query, dense, top_k=5)
     if not results:

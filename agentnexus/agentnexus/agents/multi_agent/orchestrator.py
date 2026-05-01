@@ -5,6 +5,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
 
 from agentnexus.core.llm import AgentLLM
+from agentnexus.agents.multi_agent.state import AgentState
 from agentnexus.agents.research_agent import ResearchAgent
 from agentnexus.agents.coder_agent import CoderAgent
 from agentnexus.agents.analyst_agent import AnalystAgent
@@ -24,16 +25,23 @@ _planner_llm = AgentLLM()
 
 
 def plan_node(state: AgentState) -> dict:
-    prompt = f"""分析任务，列出需要执行的动作（最多每种一个）:
-- research: <搜索查询>
-- code: <代码需求>
-不需要的动作不列出。如果需要搜索多个内容，合并为一个查询。
+    prompt = f"""决定如何完成以下任务。必须输出至少一行，格式严格如下:
+research: <搜索关键词>
+code: <代码需求>
+
+规则:
+- 需要搜索信息时输出 research 行
+- 需要运行/生成代码时输出 code 行
+- 两者都需要就输出两行
+- 不确定时必须输出 research 行
 
 任务: {state['task']}
 
-动作:"""
+输出:"""
     response = _planner_llm.think([{"role": "user", "content": prompt}]) or ""
     plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
+    if not plan:
+        plan = [f"research: {state['task']}"]
     return {"plan": plan, "retry_count": state.get("retry_count", 0),
             "messages": [("planner", response)]}
 

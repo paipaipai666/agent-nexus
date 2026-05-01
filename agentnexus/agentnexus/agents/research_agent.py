@@ -8,8 +8,14 @@ class ResearchAgent:
         self._llm = AgentLLM()
 
     def run(self, query: str) -> str:
-        kb = search_knowledge_base(query)
-        web = web_search(query)
+        try:
+            kb = search_knowledge_base(query)
+        except Exception:
+            kb = "知识库不可用"
+        try:
+            web = web_search(query)
+        except Exception:
+            web = "网络搜索不可用"
 
         prompt = f"""基于以下信息回答用户问题。如果信息不足，说明缺少什么。
 

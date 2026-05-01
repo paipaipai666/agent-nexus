@@ -4,9 +4,10 @@ from agentnexus.core.config import get_settings
 
 
 def web_search(query: str) -> str:
-    print(f"正在执行网页搜索：{query}")
     try:
         api_key = get_settings().serpapi_api_key.get_secret_value()
+        if not api_key:
+            return "网络搜索未配置 (请在 config.yaml 中设置 serpapi_api_key)"
 
         client = Client(api_key=api_key)
         results = client.search({
