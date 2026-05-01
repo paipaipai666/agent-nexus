@@ -1,0 +1,2 @@
+[console_scripts]
+nexus = agentnexus.cli:app
