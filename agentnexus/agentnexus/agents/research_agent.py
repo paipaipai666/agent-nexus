@@ -1,6 +1,6 @@
 from agentnexus.core.llm import AgentLLM
 from agentnexus.tools.web_search import web_search
-from agentnexus.rag.retriever import search_knowledge_base
+from agentnexus.rag.router import retrieve
 
 
 class ResearchAgent:
@@ -8,10 +8,15 @@ class ResearchAgent:
         self._llm = AgentLLM()
 
     def run(self, query: str) -> str:
-        try:
-            kb = search_knowledge_base(query)
-        except Exception:
-            kb = "知识库不可用"
+        kb_parts = []
+        for r in retrieve(query, top_k=5):
+            source = f"[{r.get('source', 'local')}]"
+            if "file" in r:
+                kb_parts.append(f"{source} {r['file']}:{r.get('line', '')}\n{r['text']}")
+            else:
+                kb_parts.append(f"{source} {r['text']}")
+
+        kb = "\n\n".join(kb_parts) if kb_parts else "本地无相关知识。"
         try:
             web = web_search(query)
         except Exception:
