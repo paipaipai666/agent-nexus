@@ -1,4 +1,8 @@
 from agentnexus.core.llm import AgentLLM
+from agentnexus.prompts import load_prompt
+
+
+CRITIC_PROMPT = load_prompt("critic")
 
 
 class CriticAgent:
@@ -6,23 +10,7 @@ class CriticAgent:
         self._llm = AgentLLM()
 
     def evaluate(self, task: str, answer: str) -> tuple[float, str]:
-        prompt = f"""评估以下答案的质量。
-
-原始任务: {task}
-
-待评答案: {answer[:3000]}
-
-请严格按以下格式输出:
-分数: X.X  (0-10分，10分为完美)
-反馈: <具体的改进建议或通过理由>
-
-评分标准:
-- 完整性(40%): 是否覆盖了任务的所有要求
-- 准确性(30%): 信息是否准确可靠
-- 清晰度(20%): 表达是否清晰易懂
-- 实用性(10%): 是否可直接使用
-
-评分:"""
+        prompt = CRITIC_PROMPT.format(task=task, answer=answer[:3000])
         response = self._llm.think([{"role": "user", "content": prompt}]) or "分数: 5.0\n反馈: 未能评估"
         try:
             score_line = [l for l in response.split("\n") if "分数" in l or "score" in l.lower()][0]

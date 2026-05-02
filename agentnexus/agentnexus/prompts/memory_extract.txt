@@ -1,0 +1,14 @@
+从以下对话中提取结构化记忆。只输出 JSON，不要任何其他文字。
+
+对话:
+Q: {question}
+A: {answer}
+
+输出格式（严格的 JSON）:
+{{
+  "user_preference": [{{content}}],
+  "entity_fact": [{{content}}],
+  "conclusion": [{{content}}]
+}}
+
+JSON:

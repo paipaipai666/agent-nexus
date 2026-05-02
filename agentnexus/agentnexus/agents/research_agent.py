@@ -1,6 +1,10 @@
 from agentnexus.core.llm import AgentLLM
 from agentnexus.tools.web_search import web_search
 from agentnexus.rag.router import retrieve
+from agentnexus.prompts import load_prompt
+
+
+RESEARCH_PROMPT = load_prompt("research")
 
 
 class ResearchAgent:
@@ -22,15 +26,5 @@ class ResearchAgent:
         except Exception:
             web = "网络搜索不可用"
 
-        prompt = f"""基于以下信息回答用户问题。如果信息不足，说明缺少什么。
-
-知识库结果:
-{kb[:2000]}
-
-网页搜索结果:
-{web[:2000]}
-
-问题: {query}
-
-回答:"""
+        prompt = RESEARCH_PROMPT.format(kb=kb[:2000], web=web[:2000], query=query)
         return self._llm.think([{"role": "user", "content": prompt}]) or ""

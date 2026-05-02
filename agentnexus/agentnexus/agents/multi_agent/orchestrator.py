@@ -11,8 +11,11 @@ from agentnexus.agents.coder_agent import CoderAgent
 from agentnexus.agents.analyst_agent import AnalystAgent
 from agentnexus.agents.critic_agent import CriticAgent
 from agentnexus.observability.tracer import trace_manager
+from agentnexus.prompts import load_prompt
 
 console = Console()
+
+PLANNER_PROMPT = load_prompt("planner")
 
 
 MAX_RETRIES = 3
@@ -65,19 +68,7 @@ def plan_node(state: AgentState) -> dict:
     ctx = trace_manager.active
     if ctx and state.get("trace_id"):
         ctx.trace_id = state["trace_id"]
-    prompt = f"""决定如何完成以下任务。必须输出至少一行，格式严格如下:
-research: <搜索关键词>
-code: <代码需求>
-
-规则:
-- 需要搜索信息时输出 research 行
-- 需要运行/生成代码时输出 code 行
-- 两者都需要就输出两行
-- 不确定时必须输出 research 行
-
-任务: {state['task']}
-
-输出:"""
+    prompt = PLANNER_PROMPT.format(task=state["task"])
     response = _planner_llm.think([{"role": "user", "content": prompt}]) or ""
     plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
     if not plan:

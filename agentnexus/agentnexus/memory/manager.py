@@ -2,34 +2,13 @@ from agentnexus.core.llm import AgentLLM
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.memory.long_term import LongTermMemory
 from agentnexus.rag.chroma_client import get_embedding_model
+from agentnexus.prompts import load_prompt
 
 
-EXTRACT_PROMPT = """从以下对话中提取结构化记忆。只输出 JSON，不要任何其他文字。
-
-对话:
-Q: {question}
-A: {answer}
-
-输出格式（严格的 JSON）:
-{{
-  "user_preference": [{content}],  // 用户明确表达的偏好（技术选型、工具选择等），没有则为空数组
-  "entity_fact": [{content}],       // 关于具体实体/技术/人的事实，没有则为空数组
-  "conclusion": [{content}]         // 关键结论、决策、行动结果，没有则为空数组
-}}
-
-JSON:"""
+EXTRACT_PROMPT = load_prompt("memory_extract")
 
 
-SUMMARIZE_PROMPT = """将以下对话历史总结为一段简洁摘要，保留:
-1. 用户的问题和意图
-2. 关键事实和数据
-3. 做出的决策或结论
-4. 用户的偏好（如有）
-
-对话:
-{history}
-
-摘要:"""
+SUMMARIZE_PROMPT = load_prompt("memory_summarize")
 
 
 class MemoryManager:
