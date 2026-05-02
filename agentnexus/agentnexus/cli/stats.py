@@ -22,11 +22,11 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
     summary_lines = [
         f"[bold]总任务数:[/bold] {s.total_tasks}",
         f"[bold]总 Token:[/bold] 输入 {s.total_input_tokens:,} / 输出 {s.total_output_tokens:,}",
-        f"[bold]总成本:[/bold] ¥{s.total_cost_cny:.4f}",
+        f"[bold]总成本:[/bold] CNY {s.total_cost_cny:.4f}",
         f"[bold]延迟:[/bold] 平均 {s.avg_latency_ms}ms | P95 {s.p95_latency_ms}ms | 最大 {s.max_latency_ms}ms",
     ]
     if s.total_tasks > 0:
-        summary_lines.append(f"[bold]预估 ¥/任务:[/bold] ¥{s.total_cost_cny / s.total_tasks:.4f}")
+        summary_lines.append(f"[bold]预估 CNY/任务:[/bold] CNY {s.total_cost_cny / s.total_tasks:.4f}")
 
     console.print(Panel(
         "\n".join(summary_lines),
@@ -40,7 +40,7 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
         model_table.add_column("任务数", justify="right")
         model_table.add_column("输入 Token", justify="right")
         model_table.add_column("输出 Token", justify="right")
-        model_table.add_column("成本 (¥)", justify="right")
+        model_table.add_column("成本 (CNY)", justify="right")
         model_table.add_column("占比", justify="right")
 
         for model, info in s.by_model.items():
@@ -50,7 +50,7 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
                 str(info["tasks"]),
                 f"{info['input_tokens']:,}",
                 f"{info['output_tokens']:,}",
-                f"¥{info['cost_cny']:.4f}",
+                f"CNY {info['cost_cny']:.4f}",
                 f"{pct:.1f}%",
             )
         console.print(model_table)

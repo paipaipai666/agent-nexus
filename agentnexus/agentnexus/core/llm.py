@@ -24,8 +24,17 @@ class AgentLLM:
             return ""
 
         try:
+            model = self.model
+            if "/" not in model:
+                if "deepseek.com" in (self.base_url or ""):
+                    model = f"deepseek/{model}"
+                elif "openai.com" in (self.base_url or ""):
+                    model = f"openai/{model}"
+                else:
+                    model = f"openai/{model}"
+
             response = litellm.completion(
-                model=self.model,
+                model=model,
                 messages=messages,
                 temperature=temperature,
                 stream=True,

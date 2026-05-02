@@ -34,7 +34,7 @@ def config(
             return
         if value is None:
             console.print(f"[yellow]请用 --value / -v 提供值[/yellow]")
-            console.print(f"示例: nexus config --set llm_model_id --value deepseek-v4-flash")
+            console.print(f"示例: nexus config --set llm_model_id --value deepseek/deepseek-chat")
             return
 
         data = yaml.safe_load(open(config_path, encoding="utf-8")) if config_path.exists() else {}
@@ -91,9 +91,9 @@ def init():
         console.print("[yellow]API Key 不能为空[/yellow]")
         api_key = input("LLM API Key (必填): ").strip()
 
-    model = input("LLM 模型 [deepseek-v4-flash]: ").strip()
+    model = input("LLM 模型 [deepseek/deepseek-v4-flash]: ").strip()
     if not model:
-        model = "deepseek-v4-flash"
+        model = "deepseek/deepseek-v4-flash"
 
     base_url = input("LLM Base URL [https://api.deepseek.com]: ").strip()
     if not base_url:

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
 
     llm_api_key: SecretStr = Field(default=SecretStr(""))
-    llm_model_id: str = Field(default="deepseek-v4-flash")
+    llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_timeout: int = Field(default=60, ge=1)
     tavily_api_key: SecretStr = Field(default=SecretStr(""))

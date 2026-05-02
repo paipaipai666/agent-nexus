@@ -7,13 +7,13 @@ class TestConfigSettings:
     def test_get_settings_returns_valid_settings(self, temp_agentnexus_home):
         s = get_settings()
         assert isinstance(s, Settings)
-        assert s.llm_model_id == "deepseek-v4-flash"
+        assert s.llm_model_id == "deepseek/deepseek-v4-flash"
         assert s.llm_base_url == "https://api.deepseek.com"
         assert s.llm_timeout == 60
 
     def test_default_field_values(self):
         s = Settings()
-        assert s.llm_model_id == "deepseek-v4-flash"
+        assert s.llm_model_id == "deepseek/deepseek-v4-flash"
         assert s.llm_timeout == 60
         assert s.max_agent_steps == 5
         assert s.embedding_model == "BAAI/bge-small-zh-v1.5"

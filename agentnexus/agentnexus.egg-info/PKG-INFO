@@ -4,7 +4,7 @@ Version: 0.1.0
 Summary: 企业级多智能体任务协同 CLI 工具
 Project-URL: Changelog, https://github.com/agentnexus/agentnexus/releases
 Requires-Python: >=3.11
-Requires-Dist: openai>=1.0
+Requires-Dist: litellm>=1.0
 Requires-Dist: pydantic>=2
 Requires-Dist: pydantic-settings>=2
 Requires-Dist: pyyaml>=6
@@ -24,6 +24,7 @@ Requires-Dist: httpx>=0.27
 Requires-Dist: prompt-toolkit>=3
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-mock>=3; extra == "dev"
 Requires-Dist: ruff>=0.3; extra == "dev"
 Provides-Extra: eval
 Requires-Dist: pytest>=8; extra == "eval"

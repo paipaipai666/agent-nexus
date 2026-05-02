@@ -9,14 +9,19 @@ import pytest
 
 @pytest.fixture
 def temp_agentnexus_home():
+    """临时 .agentnexus 目录，测试后自动清理"""
+    import agentnexus.core.config as cfg
+    old_home = os.environ.get("AGENTNEXUS_HOME")
+    old_cache = cfg._settings_cache
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        old = os.environ.get("AGENTNEXUS_HOME")
         os.environ["AGENTNEXUS_HOME"] = tmpdir
+        cfg._settings_cache = None
         try:
             yield Path(tmpdir)
         finally:
-            if old is not None:
-                os.environ["AGENTNEXUS_HOME"] = old
+            cfg._settings_cache = old_cache
+            if old_home:
+                os.environ["AGENTNEXUS_HOME"] = old_home
             else:
                 del os.environ["AGENTNEXUS_HOME"]
 

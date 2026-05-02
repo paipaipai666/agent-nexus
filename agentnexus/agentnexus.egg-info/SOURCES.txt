@@ -11,6 +11,7 @@ agentnexus/agents/__init__.py
 agentnexus/agents/analyst_agent.py
 agentnexus/agents/coder_agent.py
 agentnexus/agents/critic_agent.py
+agentnexus/agents/exceptions.py
 agentnexus/agents/re_act_agent.py
 agentnexus/agents/research_agent.py
 agentnexus/agents/multi_agent/orchestrator.py
@@ -34,6 +35,7 @@ agentnexus/memory/short_term.py
 agentnexus/observability/__init__.py
 agentnexus/observability/stats.py
 agentnexus/observability/tracer.py
+agentnexus/prompts/__init__.py
 agentnexus/rag/__init__.py
 agentnexus/rag/chroma_client.py
 agentnexus/rag/eval_dataset.py
