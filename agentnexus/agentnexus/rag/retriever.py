@@ -64,26 +64,30 @@ class HybridRetriever:
     def load_reranker(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
         self._reranker = CrossEncoder(model_name)
 
-    def search(self, query: str, dense_results: list[tuple[int, float]], top_k: int = 5, rrf_k: int = 60) -> list[SearchResult]:
+    def search(self, query: str, dense_results: list[tuple[int, float]], top_k: int = 5,
+               rrf_k: int = 60, min_score: float = 0.0) -> list[SearchResult]:
         sparse = self._bm25.search(query, top_k=top_k * 2)
         fused = reciprocal_rank_fusion(dense_results, sparse, k=rrf_k)
         ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k * 2]
 
         if self._reranker is not None and len(ranked) > 1:
-            return self._rerank(query, ranked, top_k)
+            return self._rerank(query, ranked, top_k, min_score=min_score)
 
         return [
             SearchResult(id=str(doc_id), text=self._docs[doc_id], score=score, source="rrf")
             for doc_id, score in ranked[:top_k]
         ]
 
-    def _rerank(self, query: str, candidates: list[tuple[int, float]], top_k: int) -> list[SearchResult]:
+    def _rerank(self, query: str, candidates: list[tuple[int, float]], top_k: int,
+                 min_score: float = 0.3) -> list[SearchResult]:
         pairs = [(query, self._docs[doc_id]) for doc_id, _ in candidates]
         scores = self._reranker.predict(pairs)
-        reranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)[:top_k]
+        scored = [(doc_id, float(score)) for (doc_id, _), score in zip(candidates, scores)]
+        filtered = [s for s in scored if s[1] >= min_score]
+        reranked = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_k]
         return [
-            SearchResult(id=str(doc_id), text=self._docs[doc_id], score=float(score), source="rerank")
-            for (doc_id, _), score in reranked
+            SearchResult(id=str(doc_id), text=self._docs[doc_id], score=score, source="rerank")
+            for doc_id, score in reranked
         ]
 
 

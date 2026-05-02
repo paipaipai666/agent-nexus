@@ -90,13 +90,13 @@ class RAGEvaluator:
             return self._docs
         return chunks
 
-    def _retrieve(self, query, model, retriever, use_hybrid):
+    def _retrieve(self, query, model, retriever, use_hybrid, top_k: int = 3, min_score: float = 0.3):
         if not use_hybrid:
-            return [r["text"] for r in search(query, limit=5)]
+            return [r["text"] for r in search(query, limit=top_k)]
         vec = model.encode(query, normalize_embeddings=True).tolist()
-        dense_results = search(query, limit=10)
+        dense_results = search(query, limit=top_k * 2)
         dense = [(i, r["score"]) for i, r in enumerate(dense_results)]
-        results = retriever.search(query, dense, top_k=5)
+        results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
         return [r.text for r in results]
 
     def _generate_answer(self, question: str, contexts: list[str]) -> str:
