@@ -1,4 +1,4 @@
-from openai import OpenAI
+import litellm
 from typing import List, Dict
 
 from rich.console import Console
@@ -15,25 +15,24 @@ class AgentLLM:
     def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
         settings = get_settings()
         self.model = model or settings.llm_model_id
-        apiKey = apiKey or settings.llm_api_key.get_secret_value()
-        baseUrl = baseUrl or settings.llm_base_url
-        timeout = timeout or settings.llm_timeout
-
-        self._client = None
-        if apiKey and baseUrl:
-            self._client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
+        self.api_key = apiKey or settings.llm_api_key.get_secret_value()
+        self.base_url = baseUrl or settings.llm_base_url
+        self.timeout = timeout or settings.llm_timeout
 
     def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False) -> str:
-        if not self._client:
+        if not self.api_key or not self.base_url:
             return ""
 
         try:
-            response = self._client.chat.completions.create(
+            response = litellm.completion(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
                 stream=True,
                 stream_options={"include_usage": True},
+                api_key=self.api_key,
+                api_base=self.base_url,
+                timeout=self.timeout,
             )
 
             collected = []

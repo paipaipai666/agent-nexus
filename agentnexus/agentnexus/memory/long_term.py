@@ -1,7 +1,7 @@
 import json
 import math
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agentnexus.core.config import get_settings
 
@@ -25,8 +25,8 @@ class LongTermMemory:
     def __init__(self):
         settings = get_settings()
         db_path = settings.memory_db_path
-        import os
-        os.makedirs(os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True)
+        from pathlib import Path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
@@ -79,7 +79,11 @@ class LongTermMemory:
             sim = dot / (norm_q * norm_e) if norm_q and norm_e else 0.0
             if sim < min_similarity:
                 continue
-            age_hours = (datetime.utcnow() - datetime.fromisoformat(r["created_at"])).total_seconds() / 3600
+            try:
+                created = datetime.fromisoformat(r["created_at"])
+            except ValueError:
+                created = datetime.now(timezone.utc).replace(tzinfo=None)
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - created).total_seconds() / 3600
             decay = 1.0 / (1.0 + age_hours / 168)
             score = sim * 0.6 + r["importance"] * 0.2 + decay * 0.2
             scored.append((score, dict(r)))

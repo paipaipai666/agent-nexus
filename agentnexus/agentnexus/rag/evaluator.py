@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from agentnexus.core.llm import AgentLLM
+from agentnexus.prompts import load_prompt
 from agentnexus.rag.ingestion import chunk_text, ChunkStrategy
 from agentnexus.rag.chroma_client import (
     get_embedding_model, insert_documents, search, delete_collection,
@@ -27,6 +28,11 @@ class EvalRun:
     context_precision: float = 0.0
     context_recall: float = 0.0
     avg_latency_ms: float = 0.0
+
+
+EVAL_GENERATE_PROMPT = load_prompt("eval_generate")
+EVAL_FAITHFULNESS_PROMPT = load_prompt("eval_faithfulness")
+EVAL_RELEVANCY_PROMPT = load_prompt("eval_relevancy")
 
 
 class RAGEvaluator:
@@ -101,35 +107,16 @@ class RAGEvaluator:
 
     def _generate_answer(self, question: str, contexts: list[str]) -> str:
         ctx = "\n---\n".join(contexts)
-        prompt = (
-            "仅基于以下上下文回答问题。如果上下文不足以回答，就说\"无法确定\"。\n\n"
-            f"上下文:\n{ctx}\n\n"
-            f"问题: {question}\n"
-            "回答:"
-        )
+        prompt = EVAL_GENERATE_PROMPT.format(context=ctx, question=question)
         return self._llm.think([{"role": "user", "content": prompt}]) or ""
 
     def _score_faithfulness(self, answer: str, contexts: list[str]) -> float:
         ctx = "\n".join(contexts)
-        prompt = (
-            "判断以下回答是否完全基于给定的上下文。\n"
-            "评分 0-1，其中 1 表示回答中的每个陈述都能在上下文中找到依据，0 表示完全无关。\n"
-            "只输出数字。\n\n"
-            f"上下文:\n{ctx}\n\n"
-            f"回答: {answer}\n\n"
-            "分数:"
-        )
+        prompt = EVAL_FAITHFULNESS_PROMPT.format(context=ctx, answer=answer)
         return _parse_score(self._llm.think([{"role": "user", "content": prompt}]))
 
     def _score_relevancy(self, question: str, answer: str, ground_truth: str) -> float:
-        prompt = (
-            "判断以下回答与标准答案在语义上的一致程度。\n"
-            "评分 0-1，1 表示完全一致，0 表示完全不相关。只输出数字。\n\n"
-            f"问题: {question}\n"
-            f"标准答案: {ground_truth}\n"
-            f"待评回答: {answer}\n\n"
-            "分数:"
-        )
+        prompt = EVAL_RELEVANCY_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
         return _parse_score(self._llm.think([{"role": "user", "content": prompt}]))
 
     def _score_precision(self, sample: EvalSample, retrieved: list[str]) -> float:

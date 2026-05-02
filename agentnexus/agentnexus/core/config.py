@@ -53,11 +53,12 @@ def _load_yaml() -> dict:
     return {}
 
 
+_settings_cache: Settings | None = None
+
+
 def get_settings() -> Settings:
-    data = _load_yaml()
-    if "serpapi_api_key" in data and "tavily_api_key" not in data:
-        data["tavily_api_key"] = data.pop("serpapi_api_key")
-        yaml_path = _config_dir() / "config.yaml"
-        yaml.dump(data, open(yaml_path, "w", encoding="utf-8"), allow_unicode=True)
-    settings = Settings(**data, **_default_paths())
-    return settings
+    global _settings_cache
+    if _settings_cache is None:
+        data = _load_yaml()
+        _settings_cache = Settings(**data, **_default_paths())
+    return _settings_cache

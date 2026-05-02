@@ -27,15 +27,17 @@ def _read_trace_spans(days: int):
     jsonl_files = sorted(traces_dir.glob("*.jsonl"), reverse=True)
     for f in jsonl_files:
         try:
-            for line in f.read_text(encoding="utf-8").strip().split("\n"):
-                if not line:
-                    continue
-                try:
-                    span = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if span.get("start_time", 0) >= cutoff:
-                    all_spans.append(span)
+            with open(f, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        span = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if span.get("start_time", 0) >= cutoff:
+                        all_spans.append(span)
         except Exception:
             continue
 
@@ -115,15 +117,17 @@ def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查
     spans: list[dict] = []
     for f in sorted(traces_dir.glob("*.jsonl")):
         try:
-            for line in f.read_text(encoding="utf-8").strip().split("\n"):
-                if not line:
-                    continue
-                try:
-                    span = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if span.get("trace_id") == trace_id:
-                    spans.append(span)
+            with open(f, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        span = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if span.get("trace_id") == trace_id:
+                        spans.append(span)
         except Exception:
             continue
 

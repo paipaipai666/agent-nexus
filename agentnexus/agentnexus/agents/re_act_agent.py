@@ -48,7 +48,7 @@ class ReActAgent:
     def _parse_action(self, action_text: str):
         """解析Action字符串，提取工具名称和输入。
         """
-        match = re.match(r"(\w+)\[(.*)\]", action_text, re.DOTALL)
+        match = re.match(r"([\w-]+)\[(.*)\]", action_text, re.DOTALL)
         if match:
             return match.group(1), match.group(2)
         return None, None
@@ -72,9 +72,8 @@ class ReActAgent:
                 tools=tools_desc,
                 question=question,
                 history=history_str,
+                memory_context=memory_context,
             )
-            if memory_context:
-                prompt = prompt.replace("== 当前任务 ==", f"{memory_context}\n== 当前任务 ==")
 
             messages = [{"role": "user", "content": prompt}]
             response_text = self.llm_client.think(messages=messages)

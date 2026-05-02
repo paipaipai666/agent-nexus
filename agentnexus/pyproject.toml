@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "企业级多智能体任务协同 CLI 工具"
 requires-python = ">=3.11"
 dependencies = [
-    "openai>=1.0",
+    "litellm>=1.0",
     "pydantic>=2",
     "pydantic-settings>=2",
     "pyyaml>=6",
@@ -31,12 +31,16 @@ Changelog = "https://github.com/agentnexus/agentnexus/releases"
 nexus = "agentnexus.cli:app"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.3"]
+dev = ["pytest>=8", "pytest-mock>=3", "ruff>=0.3"]
 eval = ["pytest>=8", "ruff>=0.3", "pyinstaller>=6"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

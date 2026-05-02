@@ -72,13 +72,15 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
     for f in jsonl_files:
         try:
             file_date = f.stem
-            for line in f.read_text(encoding="utf-8").strip().split("\n"):
-                if not line:
-                    continue
-                try:
-                    span = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+            with open(f, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        span = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
 
                 if span.get("start_time", 0) < cutoff:
                     continue

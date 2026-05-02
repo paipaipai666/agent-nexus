@@ -19,7 +19,7 @@ Action 可选格式：
 - 答案中不要出现方括号，避免破坏格式。
 - 不要在 Action 行添加额外说明、解释或标点。
 
-== 当前任务 ==
+{memory_context}== 当前任务 ==
 Question: {question}
 
 == 历史记录 ==

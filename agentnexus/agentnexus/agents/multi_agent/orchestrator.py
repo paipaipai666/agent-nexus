@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.constants import Send
+from langgraph.types import Send
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from rich.console import Console
@@ -68,13 +68,22 @@ def plan_node(state: AgentState) -> dict:
     ctx = trace_manager.active
     if ctx and state.get("trace_id"):
         ctx.trace_id = state["trace_id"]
-    prompt = PLANNER_PROMPT.format(task=state["task"])
-    response = _planner_llm.think([{"role": "user", "content": prompt}]) or ""
-    plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
-    if not plan:
-        plan = [f"research: {state['task']}"]
-    return {"plan": plan, "retry_count": state.get("retry_count", 0),
-            "messages": [("planner", response)]}
+    
+    feedback = ""
+    if state.get("retry_count", 0) > 0 and state.get("critique_feedback"):
+        feedback = f"\n上次评估反馈: {state['critique_feedback'][:300]}\n请根据反馈改进计划。"
+    
+    prompt = PLANNER_PROMPT.format(task=state["task"] + feedback)
+    try:
+        response = _planner_llm.think([{"role": "user", "content": prompt}]) or ""
+        plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
+        if not plan:
+            plan = [f"research: {state['task']}"]
+        return {"plan": plan, "retry_count": state.get("retry_count", 0),
+                "messages": [("planner", response)]}
+    except Exception as e:
+        return {"plan": [f"research: {state['task']}"], "retry_count": state.get("retry_count", 0),
+                "messages": [("planner", f"ERROR: {e}")]}
 
 
 def continue_to_agents(state: AgentState) -> list[Send]:
@@ -99,29 +108,45 @@ def continue_to_agents(state: AgentState) -> list[Send]:
 def research_node(state: AgentState) -> dict:
     query = state.get("research_query", state["task"])
     console.print(f"  [cyan][Research][/cyan] {query[:60]}")
-    result = _research.run(query)
+    try:
+        result = _research.run(query)
+    except Exception as e:
+        result = f"研究出错: {e}"
+        console.print(f"  [red][Research ERROR][/red] {e}")
     return {"research_result": result, "messages": [("research", result)]}
 
 
 def code_node(state: AgentState) -> dict:
     spec = state.get("code_spec", "数据分析")
     console.print(f"  [yellow][Coder][/yellow] {spec[:60]}")
-    result = _coder.run(spec)
+    try:
+        result = _coder.run(spec)
+    except Exception as e:
+        result = f"代码执行出错: {e}"
+        console.print(f"  [red][Coder ERROR][/red] {e}")
     return {"code_result": result, "messages": [("coder", result)]}
 
 
 def analyze_node(state: AgentState) -> dict:
     console.print("  [green][Analyst][/green] 综合分析...")
-    analysis = _analyst.run(
-        state.get("task", ""),
-        state.get("research_result", ""),
-        state.get("code_result", ""),
-    )
+    try:
+        analysis = _analyst.run(
+            state.get("task", ""),
+            state.get("research_result", ""),
+            state.get("code_result", ""),
+        )
+    except Exception as e:
+        analysis = f"分析出错: {e}"
+        console.print(f"  [red][Analyst ERROR][/red] {e}")
     return {"analysis": analysis, "messages": [("analyst", analysis)]}
 
 
 def critique_node(state: AgentState) -> dict:
-    score, feedback = _critic.evaluate(state["task"], state.get("analysis", ""))
+    try:
+        score, feedback = _critic.evaluate(state["task"], state.get("analysis", ""))
+    except Exception as e:
+        score, feedback = 5.0, f"评估出错: {e}"
+        console.print(f"  [red][Critic ERROR][/red] {e}")
     status = "[green]PASS[/green]" if score >= PASS_THRESHOLD else "[red]RETRY[/red]"
     console.print(f"  [magenta][Critic][/magenta] {score:.1f}/10 {status}")
     if feedback:
@@ -165,6 +190,9 @@ def build_orchestrator(checkpointer=None):
         {"approved": END, "retry": "retry"})
     builder.add_edge("retry", "plan")
 
+    # interrupt_before=["code"]: pause before code execution for HITL confirmation.
+    # "research" (web search/API calls) is intentionally NOT included — it is lower
+    # risk than arbitrary code execution and would create too-frequent interruptions.
     return builder.compile(checkpointer=checkpointer, interrupt_before=["code"])
 
 
@@ -172,7 +200,8 @@ orchestrator = build_orchestrator()
 
 import sqlite3
 from pathlib import Path
-_db_dir = Path(__file__).resolve().parent.parent.parent / ".agentnexus_checkpoints"
+from agentnexus.core.config import get_settings
+_db_dir = Path(get_settings().chroma_persist_dir).parent / "checkpoints"
 _db_dir.mkdir(exist_ok=True)
 _conn = sqlite3.connect(str(_db_dir / "checkpoints.db"), check_same_thread=False)
 checkpointer = SqliteSaver(_conn)

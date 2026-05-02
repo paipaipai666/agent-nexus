@@ -63,8 +63,11 @@ def chat():
         elif "达到最大步数" in msg:
             c.print(f"  [dim]{msg}[/dim]")
 
+    import uuid
+    session_id = f"chat_{uuid.uuid4().hex[:12]}"
+    memory = MemoryManager(session_id, llm=llm)
+
     agent = ReActAgent(llm, executor, output=lambda msg: _show_step(console, msg))
-    memory: MemoryManager | None = None
 
     while True:
         try:
@@ -87,13 +90,9 @@ def chat():
                 continue
 
             if text == "/clear":
-                memory = None
+                memory = MemoryManager(session_id, llm=llm)
                 console.print("[dim]已重置会话记忆[/dim]")
                 continue
-
-            import uuid
-            session_id = f"chat_{uuid.uuid4().hex[:12]}"
-            memory = MemoryManager(session_id, llm=llm)
 
             answer = agent.run(text, memory_manager=memory)
             if answer:

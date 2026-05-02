@@ -134,20 +134,20 @@ class TraceManager:
         file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        for span in ctx.spans:
-            record = {
-                "trace_id": ctx.trace_id,
-                "span_id": span.span_id,
-                "parent_span_id": span.parent_span_id,
-                "name": span.name,
-                "start_time": span.start_time,
-                "end_time": span.end_time,
-                "latency_ms": span.latency_ms,
-                "input": span.input,
-                "output": span.output,
-                "metadata": span.metadata,
-            }
-            with open(file_path, "a", encoding="utf-8") as f:
+        with open(file_path, "a", encoding="utf-8") as f:
+            for span in ctx.spans:
+                record = {
+                    "trace_id": ctx.trace_id,
+                    "span_id": span.span_id,
+                    "parent_span_id": span.parent_span_id,
+                    "name": span.name,
+                    "start_time": span.start_time,
+                    "end_time": span.end_time,
+                    "latency_ms": span.latency_ms,
+                    "input": span.input,
+                    "output": span.output,
+                    "metadata": span.metadata,
+                }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 

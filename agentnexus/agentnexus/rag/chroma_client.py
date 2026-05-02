@@ -1,3 +1,5 @@
+import uuid
+
 import chromadb
 from sentence_transformers import SentenceTransformer
 
@@ -42,7 +44,7 @@ def insert_documents(texts: list[str], metadatas: list[dict] | None = None):
     col = get_collection()
     model = get_embedding_model()
     embeddings = model.encode(texts, normalize_embeddings=True).tolist()
-    ids = [f"doc_{i}" for i in range(col.count(), col.count() + len(texts))]
+    ids = [uuid.uuid4().hex for _ in range(len(texts))]
     col.add(ids=ids, embeddings=embeddings, documents=texts)
 
 
@@ -64,6 +66,7 @@ def delete_collection():
     client = get_chroma_client()
     try:
         client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
+    except Exception as e:
+        from rich.console import Console
+        Console().print(f"[yellow]ChromaDB 删除集合异常: {e}[/yellow]")
     _collection = None

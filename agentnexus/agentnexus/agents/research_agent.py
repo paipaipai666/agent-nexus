@@ -27,4 +27,7 @@ class ResearchAgent:
             web = "网络搜索不可用"
 
         prompt = RESEARCH_PROMPT.format(kb=kb[:2000], web=web[:2000], query=query)
-        return self._llm.think([{"role": "user", "content": prompt}]) or ""
+        try:
+            return self._llm.think([{"role": "user", "content": prompt}]) or ""
+        except Exception as e:
+            return f"研究出错: {e}"

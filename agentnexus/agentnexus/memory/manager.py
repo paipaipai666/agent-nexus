@@ -56,12 +56,12 @@ class MemoryManager:
         if not answer:
             return
 
-        prompt = EXTRACT_PROMPT.replace("{question}", question).replace("{answer}", answer[:1500])
+        prompt = EXTRACT_PROMPT.format(question=question, answer=answer[:1500])
         response = self._llm.think([{"role": "user", "content": prompt}]) or "{}"
 
         try:
-            import json as _json
-            data = _json.loads(response.strip().lstrip("```json").rstrip("```").strip())
+            import json
+            data = json.loads(response.strip().lstrip("```json").rstrip("```").strip())
         except Exception:
             data = {}
 

@@ -12,4 +12,7 @@ class AnalystAgent:
     def run(self, task: str, research: str, code: str) -> str:
         prompt = ANALYST_PROMPT.format(task=task, research=research[:3000] or "无",
                                         code=code[:2000] or "无")
-        return self._llm.think([{"role": "user", "content": prompt}]) or ""
+        try:
+            return self._llm.think([{"role": "user", "content": prompt}]) or ""
+        except Exception as e:
+            return f"分析出错: {e}"

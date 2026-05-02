@@ -9,7 +9,10 @@ SUPPORTED_EXTENSIONS = frozenset({".pdf", ".md", ".txt"})
 
 
 def _extract_pdf(file_path: str) -> str:
-    doc = fitz.open(file_path)
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        return f"[PDF 解析失败: {e}]"
     blocks = []
     for page in doc:
         for block in page.get_text("blocks"):

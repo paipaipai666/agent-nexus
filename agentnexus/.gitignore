@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.agentnexus_checkpoints/
+*.egg-info/
+dist/
+build/

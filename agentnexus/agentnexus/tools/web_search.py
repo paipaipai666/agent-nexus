@@ -2,15 +2,19 @@ from tavily import TavilyClient
 
 from agentnexus.core.config import get_settings
 
+_tavily_client = None
+
 
 def web_search(query: str) -> str:
+    global _tavily_client
     try:
         api_key = get_settings().tavily_api_key.get_secret_value()
         if not api_key:
             return "网络搜索未配置 (请在 config.yaml 中设置 tavily_api_key)"
 
-        client = TavilyClient(api_key=api_key)
-        response = client.search(query, search_depth="advanced", max_results=5)
+        if _tavily_client is None:
+            _tavily_client = TavilyClient(api_key=api_key)
+        response = _tavily_client.search(query, search_depth="advanced", max_results=5)
         results = response.get("results", [])
 
         if not results:

@@ -10,7 +10,7 @@ def grep_search(query: str, root_dir: str = ".", top_k: int = 5, file_pattern: s
             "--no-heading", "--with-filename", "--line-number",
             "--max-count", str(top_k * 3),
             "--glob", file_pattern,
-            "-e", query,
+            "-e", "--", query,
             root_dir,
         ]
         result = subprocess.run(args, capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace")
@@ -23,7 +23,7 @@ def grep_search(query: str, root_dir: str = ".", top_k: int = 5, file_pattern: s
             if ":" not in line:
                 continue
             # 格式: file:lineno:content
-            parts = line.split(":", 2)
+            parts = line.split(":", 3)  # Extra split for Windows C:\ paths
             if len(parts) >= 3:
                 results.append({
                     "file": parts[0],

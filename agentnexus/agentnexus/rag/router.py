@@ -1,7 +1,7 @@
 """双路由检索：根据查询特征自动选择 Grep 或 RAG"""
 from .grep_search import grep_search, grep_available
 from .chroma_client import search as chroma_search
-from .retriever import search_knowledge_base as rag_search, _get_retriever
+from .retriever import search_knowledge_base as rag_search
 
 
 def is_code_query(query: str) -> bool:
@@ -26,8 +26,9 @@ def retrieve(query: str, kb_root: str = ".", top_k: int = 5) -> list[dict]:
         try:
             rag_text = rag_search(query)
             return [{"text": rag_text, "source": "rag_fallback"}]
-        except Exception:
-            pass
+        except Exception as e:
+            from rich.console import Console
+            Console().print(f"[dim]检索 fallback 异常: {e}[/dim]")
 
     # RAG path
     try:
@@ -35,5 +36,7 @@ def retrieve(query: str, kb_root: str = ".", top_k: int = 5) -> list[dict]:
         if "知识库为空" in rag_text or "未找到" in rag_text:
             return []
         return [{"text": rag_text, "source": "rag"}]
-    except Exception:
+    except Exception as e:
+        from rich.console import Console
+        Console().print(f"[dim]RAG 检索异常: {e}[/dim]")
         return []
