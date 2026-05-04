@@ -15,31 +15,39 @@
               ▼
 ┌──────────────────────────────────────────────────────────┐
 │                    CLI 层（Typer + Rich）                 │
-│         命令解析 / 流式渲染 / HITL 交互确认               │
+│         命令解析 / 阶段可视 / HITL 交互确认               │
 └───────────────────────┬──────────────────────────────────┘
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────┐
 │              Orchestrator（LangGraph FSM）                │
 │                                                          │
-│  START → plan → [research ∥ code] → execute              │
-│                → analyze → critique → (retry | END)      │
+│  START → plan → research → code → execute                │
+│                     ↑            │     ↓                 │
+│                     │    retry   │  success               │
+│                     │            ▼                        │
+│                     └─── code/research ← failure          │
 │                                                          │
-│  ┌──────────┐  ┌──────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Research │  │ Coder│  │ Executor │  │  Critic  │    │
-│  │ 搜索+来源│  │ 代码 │  │ 执行+验证│  │ 硬规则+  │    │
-│  │ 引用强制 │  │ Schema│  │ 自动安装 │  │ LLM 评分 │    │
-│  └──────────┘  └──────┘  └──────────┘  └──────────┘    │
-│       │           │           │              │          │
-│       └───────────┴─────┬─────┘              │          │
-│                         │                    │          │
-│                         ▼                    │          │
-│                  ┌──────────┐               │          │
-│                  │ Analyst  │ ◄─────────────┘          │
-│                  │ 综合分析 │                           │
-│                  │ +确定性  │  ← 执行报告由系统硬生成   │
-│                  │ 执行报告 │      LLM 只负责分析补充   │
-│                  └──────────┘                           │
+│  ┌──────────┐   ┌──────┐   ┌──────────┐                 │
+│  │ Research │   │ Coder│   │ Executor │                 │
+│  │ 搜索+来源│   │ Schema│  │ 执行+验证│                 │
+│  │ 引用强制 │   │ 门禁  │   │ 缺库安装 │                 │
+│  └──────────┘   └──────┘   └──────────┘                 │
+│       │              │            │                      │
+│       ▼              ▼            │                      │
+│   检索综合     代码生成 +         │                      │
+│   + LLM 摘要   __main__ 自动追加   │                      │
+│                          ┌────────┘                      │
+│                          ▼                               │
+│                   ┌──────────┐                           │
+│                   │ Analyst  │                           │
+│                   │ 综合分析 │                           │
+│                   │ +确定性  │ ← 执行报告由系统硬生成    │
+│                   │ 执行报告 │   LLM 只负责分析补充      │
+│                   └──────────┘                           │
+│                                                          │
+│  HITL 机制: 首次 code → 确认 → execute                   │
+│             重试 code → 自动 execute（不再询问）          │
 └───────────────────────┬──────────────────────────────────┘
                         │
                         ▼
@@ -54,15 +62,15 @@
 | 特性 | 说明 |
 |------|------|
 | **强 Schema 门禁** | 所有 Agent 输出通过 Pydantic 模型校验（CodeOutput / ResearchOutput / ExecutionResult），不通过不允许进入后续阶段 |
-| **独立执行验证** | Executor Agent 捕获 stdout/stderr/异常 + 智能输出比对（检测数据、图表、主题合规性）。缺库自动 `pip install` |
-| **硬规则 + LLM 评估** | Critic 先跑 5 条硬规则（缺代码/缺来源/运行时异常/无输出/空结果），通过后才让 LLM 打质量分 |
-| **8 类错误 + 分级 retry** | 错误分 MISSING_CODE / RUNTIME_ERROR / HALLUCINATION / TOOL_FAILURE / TRUNCATION 等 8 类，每类有独立策略和 checklist 式 escalating 指令 |
+| **独立执行验证** | fork 子进程隔离执行，捕获 stdout/stderr/异常。缺库自动 `pip install`。执行前添加 HITL 确认，重试时自动跳过 |
+| **8 类错误 + 智能重试** | 错误分 MISSING_CODE / RUNTIME_ERROR / NO_OUTPUT / TOOL_FAILURE / TRUNCATION 等 8 类，执行失败直接路由回 code 或 research 重试（最多 3 次） |
+| **__main__ 自动追加** | LLM 生成代码后，AST 解析检测入口块——缺失时自动追加 `if __name__ == '__main__':` 调用所有顶层函数（防御 LLM 忽略 prompt 指令） |
 | **Token 截断检测** | 捕获 `finish_reason=="length"`，触发 TRUNCATION 策略（精简/拆分），不再盲目 force_code_only |
-| **Planner 动态拆分** | 检测到上次代码截断时，强制 Planner 将复杂任务拆为多个独立 code 步骤 |
-| **确定性执行报告** | 代码执行后系统硬生成状态报告（✅ 成功 / ❌ 失败），Analyst 的 LLM 无权篡改 |
+| **确定性执行报告** | 代码执行后系统硬生成状态报告（✅ 成功 / ❌ 失败 + stdout预览），Analyst 的 LLM 无权篡改 |
+| **阶段全可视** | 每个阶段带 spinner 旋转器 + 进度指示，plan 显示执行计划，research 展示检索摘要，code 预览生成结果，execute 显示输出 |
 | **双模式运行** | `nexus run` 多 Agent 编排；`nexus chat` 单 Agent ReAct 对话 |
 | **RAG 双路由检索** | 稠密向量 + BM25 + Reranker，自动 Grep/RAG fallback |
-| **两级记忆系统** | 短期 deque + 长期 SQLite + 向量检索 |
+| **两级记忆系统** | 短期 deque + 长期 SQLite + 向量检索（含自动迁移逻辑） |
 | **全链路可观测性** | JSONL Trace + `nexus logs` Rich Tree 渲染 |
 | **API 容错** | LLM 调用 3 次指数退避重试（瞬时错误自动恢复） |
 
@@ -109,16 +117,16 @@ agentnexus/
 │   ├── cli/
 │   │   ├── run.py / chat.py / config.py / kb.py / logs.py / eval_cmd.py / stats.py
 │   ├── agents/
-│   │   ├── schema.py              # TaskOutput / CodeOutput / ExecutionResult / ErrorType (8 类) / RETRY_STRATEGIES
+│   │   ├── schema.py              # TaskOutput / CodeOutput / ExecutionResult / ErrorType (8 类)
 │   │   ├── coder_agent.py         # 代码生成 + Schema 校验 + AST 完整性检查
-│   │   ├── executor_agent.py      # 独立执行验证 + 缺库自动安装
+│   │   ├── executor_agent.py      # fork 子进程隔离执行 + 缺库自动安装 + Python 3.13 compat
 │   │   ├── research_agent.py      # RAG + Web 搜索 + 来源强制引用
 │   │   ├── analyst_agent.py       # 综合分析（LLM）
-│   │   ├── critic_agent.py        # 硬规则先行 + LLM 质量评分
-│   │   ├── critic_rules.py        # 5 条确定性硬规则
-│   │   ├── retry_manager.py       # 错误分类 + 分级 escalating 策略
+│   │   ├── critic_agent.py        # ⚠ deprecated（orchestrator 4.0 已移除 critic 阶段）
+│   │   ├── critic_rules.py        # ⚠ deprecated
+│   │   ├── retry_manager.py       # ⚠ deprecated（错误分类逻辑已内联到 orchestrator）
 │   │   └── multi_agent/
-│   │       ├── orchestrator.py    # LangGraph FSM + 确定性执行报告
+│   │       ├── orchestrator.py    # LangGraph FSM — plan→research→code→execute→analyst
 │   │       └── state.py           # AgentState 定义
 │   ├── tools/
 │   │   ├── code_executor.py       # 本地 + E2B 双执行器
@@ -126,7 +134,7 @@ agentnexus/
 │   │   ├── tool_executor.py       # 工具注册调度
 │   │   └── tool_wrapper.py        # safe_call + fallback 系统
 │   ├── rag/                       # 文档摄取 / ChromaDB / 双路由检索 / RAGAS 评估
-│   ├── memory/                    # 短期 deque + 长期 SQLite + 向量检索
+│   ├── memory/                    # 短期 deque + 长期 SQLite + 向量检索（含自动迁移）
 │   ├── observability/             # JSONL Trace + Token 成本统计
 │   ├── prompts/                   # 提示词模板（txt + 动态注入）
 │   └── core/

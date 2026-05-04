@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
 );
 CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_ltm_category ON long_term_memories(category);
-CREATE INDEX IF NOT EXISTS idx_ltm_chroma_id ON long_term_memories(chroma_id);
 """
 
 LTM_COLLECTION = "long_term_memories"
@@ -43,8 +42,18 @@ class LongTermMemory:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
         self._chroma_col = None
+
+    def _migrate(self):
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "chroma_id" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN chroma_id TEXT")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_ltm_chroma_id ON long_term_memories(chroma_id)")
+        if "metadata_json" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN metadata_json TEXT DEFAULT '{}'")
 
     def _ensure_chroma(self):
         if self._chroma_col is None:

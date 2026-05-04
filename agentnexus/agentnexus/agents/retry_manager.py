@@ -68,6 +68,8 @@ class RetryManager:
 
 
 def _error_from_exception(exception: str) -> ErrorType:
+    if "NO_OUTPUT" in exception:
+        return ErrorType.NO_OUTPUT
     if "ModuleNotFoundError" in exception or "ImportError" in exception:
         return ErrorType.TOOL_FAILURE
     return ErrorType.RUNTIME_ERROR

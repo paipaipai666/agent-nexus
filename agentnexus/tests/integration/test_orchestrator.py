@@ -2,10 +2,8 @@ from unittest.mock import MagicMock
 
 from agentnexus.agents.multi_agent.orchestrator import (
     MAX_RETRIES,
-    PASS_THRESHOLD,
-    continue_to_agents,
     plan_node,
-    should_retry,
+    route_after_execute,
 )
 from agentnexus.agents.multi_agent.state import AgentState
 
@@ -68,31 +66,22 @@ class TestPlanNode:
         assert len(plan) == 1
         assert "research" in plan[0]
 
-    def test_plan_node_returns_retry_count(self, mocker):
-        _mock_planner(mocker, "research: 搜索\ncode: 开发")
-        state = _default_state(task="test", retry_count=2)
-        result = plan_node(state)
-        assert result.get("retry_count") is None  # plan_node doesn't return retry_count
 
+class TestRouteAfterExecute:
 
-class TestShouldRetry:
+    def test_success_routes_to_analyst(self):
+        state = _default_state(exec_success=True)
+        assert route_after_execute(state) == "analyst"
 
-    def test_approved_when_score_above_threshold(self):
-        state = _default_state(critique_score=8.0)
-        assert should_retry(state) == "approved"
+    def test_failure_routes_to_code_first_retry(self):
+        state = _default_state(exec_success=False, retry_count=0)
+        assert route_after_execute(state) == "code"
 
-    def test_approved_when_score_equal_to_threshold(self):
-        state = _default_state(critique_score=PASS_THRESHOLD)
-        assert should_retry(state) == "approved"
+    def test_max_retries_exceeded_routes_to_analyst(self):
+        state = _default_state(exec_success=False, retry_count=MAX_RETRIES + 1)
+        assert route_after_execute(state) == "analyst"
 
-    def test_retry_when_score_below_threshold(self):
-        state = _default_state(critique_score=5.0, critique_feedback="不够好")
-        assert should_retry(state) == "retry"
-
-    def test_approved_when_max_retries_reached(self):
-        state = _default_state(critique_score=3.0, retry_count=MAX_RETRIES)
-        assert should_retry(state) == "approved"
-
-    def test_approved_when_retries_exceed_max(self):
-        state = _default_state(critique_score=1.0, retry_count=99)
-        assert should_retry(state) == "approved"
+    def test_no_output_late_retry_goes_to_research(self):
+        state = _default_state(exec_success=False, retry_count=2,
+                               exec_exception="NO_OUTPUT: code executed without error")
+        assert route_after_execute(state) == "research"

@@ -44,7 +44,7 @@ class ExecutorAgent:
 def _run_code(code: str, timeout: int) -> ExecutionResult:
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
-    namespace: dict[str, object] = {"__builtins__": builtins}
+    namespace: dict[str, object] = {"__builtins__": builtins, "__name__": "__main__"}
 
     def _run() -> None:
         old_stdout = sys.stdout
@@ -125,6 +125,8 @@ def _extract_error(traceback_text: str) -> str:
 
 
 def _classify_exception(exception: str) -> ErrorType:
+    if "NO_OUTPUT" in exception:
+        return ErrorType.NO_OUTPUT
     if "ModuleNotFoundError" in exception or "ImportError" in exception:
         return ErrorType.TOOL_FAILURE
     if "SyntaxError" in exception:
