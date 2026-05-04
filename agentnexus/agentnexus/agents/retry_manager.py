@@ -104,16 +104,28 @@ def _escalate(error_type: ErrorType, occurrences: int, last_error: str) -> str:
             f"上次错误详情: {last_error[:300]}"
         )
 
+    if error_type == ErrorType.TRUNCATION:
+        return (
+            f"输出已连续 {occurrences} 次因长度限制被截断。强制执行：\n"
+            f"[ ] 代码必须小于 500 字符\n"
+            f"[ ] 画图和数据分析无法同时容纳 → 只输出 print() 表格，放弃 plt\n"
+            f"[ ] 删除所有 import 中未使用的库"
+        )
+
     if error_type == ErrorType.MISSING_CODE:
         return (
-            f"已连续 {occurrences} 次未生成代码。强制要求：只输出 Python 代码，"
-            f"不要任何解释文字。代码必须包含 print() 语句输出结果。"
+            f"已连续 {occurrences} 次未生成代码。强制要求：\n"
+            f"[ ] 只输出 Python 代码，不要任何解释文字\n"
+            f"[ ] 代码必须包含 print() 语句输出结果\n"
+            f"[ ] JSON 格式: {{\"reasoning\":\"...\",\"code\":\"...\",\"expected_output\":\"...\"}}"
         )
 
     if error_type == ErrorType.HALLUCINATION:
         return (
-            f"数据错误已发生 {occurrences} 次。禁止生成任何未在检索结果中出现的数字或事实。"
-            f"只使用搜索返回的确切数据，不要自己估算。"
+            f"数据错误已发生 {occurrences} 次。\n"
+            f"[ ] 每条声明必须标注来源 URL\n"
+            f"[ ] 只能使用搜索返回的确切数据，禁止编造\n"
+            f"[ ] 信息不足时在 gaps 中写'无可用数据'，禁止估算"
         )
 
     strategy = RETRY_STRATEGIES[error_type]
@@ -143,6 +155,8 @@ def _infer_from_fail_reason(critic_verdict: CriticVerdict) -> ErrorType:
         return ErrorType.SCHEMA_VIOLATION
     if any(k in reason for k in ("输出与预期不符", "output mismatch", "logic error", "逻辑错误")):
         return ErrorType.LOGIC_ERROR
+    if any(k in reason for k in ("截断", "truncat", "token", "长度", "不完整")):
+        return ErrorType.TRUNCATION
     if any(k in reason for k in (
         "hallucinat", "source", "citation",
         "编造", "虚构", "不符合", "不实", "捏造", "不准确", "准确性", "错误", "数据错误",
@@ -165,6 +179,12 @@ def classify_and_decide(
     has_sources: bool = False,
     attempt_count: int = 0,
 ) -> tuple[ErrorType, bool, str]:
+    """Convenience: one-shot error classification with a fresh, stateless RetryManager.
+
+    Unlike the global ``_retry_mgr`` in orchestrator.py which tracks error history
+    for escalating strategies, this function creates a new instance each call —
+    escalation is always single-level. Use the global instance for persistent retry loops.
+    """
     mgr = RetryManager()
     error_type = mgr.classify_error(critic_verdict, exec_result, has_code, has_sources)
     can_retry = mgr.should_retry(error_type, attempt_count)

@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 from agentnexus.core.config import get_settings
 
@@ -34,29 +36,21 @@ def python_execute(code: str) -> str:
         return _execute_locally(code)
 
 
-def _execute_locally(code: str) -> str:
-    import io
-    import sys
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    namespace = {}
-    try:
-        sys.stdout = stdout
-        sys.stderr = stderr
-        exec(code, namespace)
-    except Exception as e:
-        return f"代码执行错误: {e}"
-    finally:
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+def _execute_locally(code: str, timeout: int = 30) -> str:
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0 and not result.stdout and not result.stderr:
+        return f"代码执行错误: exit_code={result.returncode}"
 
-    out = stdout.getvalue()
-    err = stderr.getvalue()
     parts = []
-    if out:
-        parts.append(f"[stdout]\n{out}")
-    if err:
-        parts.append(f"[stderr]\n{err}")
+    if result.stdout:
+        parts.append(f"[stdout]\n{result.stdout}")
+    if result.stderr:
+        parts.append(f"[stderr]\n{result.stderr}")
     return "\n".join(parts) if parts else "[execution completed with no output]"

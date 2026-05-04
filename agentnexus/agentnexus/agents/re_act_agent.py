@@ -53,6 +53,15 @@ class ReActAgent:
             return match.group(1), match.group(2)
         return None, None
 
+    def _ask_confirm(self, code: str) -> bool:
+        preview = code[:200] + ("..." if len(code) > 200 else "")
+        self._output(f"[警告] 即将执行代码 (预览): {preview}")
+        try:
+            response = input("确认执行? [y/N] ").strip().lower()
+            return response == "y"
+        except (EOFError, OSError):
+            return True
+
     def run(self, question: str, memory_manager=None):
         self.history = []
         current_step = 0
@@ -115,7 +124,13 @@ class ReActAgent:
             if not tool_function:
                 observation = f"错误:未找到名为 '{tool_name}' 的工具。"
             else:
-                observation = tool_function(tool_input) # 调用真实工具
+                if tool_name in ("python_execute", "code_executor"):
+                    if not self._ask_confirm(tool_input):
+                        observation = "用户取消了代码执行"
+                    else:
+                        observation = tool_function(tool_input)
+                else:
+                    observation = tool_function(tool_input)
 
                 self._output(f"观察: {observation}")
             

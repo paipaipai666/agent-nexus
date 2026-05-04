@@ -24,8 +24,15 @@ from agentnexus.agents.schema import (
 _CODE_KEYWORDS = {
     "代码", "code", "python", "函数", "function",
     "编程", "写代码", "画图", "绘图", "图表", "chart", "plot", "matplotlib", "import", "实现",
+    "脚本", "script", "算法", "algorithm", "自动化", "automate", "爬虫", "scrape",
+    "计算", "compute", "斐波那契", "fibonacci", "排序", "sort", "遍历",
 }
-_RESEARCH_KEYWORDS = {"搜索", "search", "查找", "find", "汇率", "数据", "research", "查"}
+_RESEARCH_KEYWORDS = {
+    "搜索", "search", "查找", "find", "汇率", "数据", "research", "查",
+    "调研", "调查", "survey", "总结", "summarize", "概括", "资料",
+    "报告", "report", "分析", "analyze", "趋势", "trend", "最新", "latest",
+    "新闻", "news", "GDP", "AI", "科技", "技术", "市场", "market",
+}
 
 
 def _task_requires_code(task: str) -> bool:
@@ -167,33 +174,30 @@ class HardRuleChecker:
 
         safe_sources: list[SourceClaim] = sources if sources is not None else []
 
-        # ── Priority order ─────────────────────────────────────────
-        #  1. Code requirements
-        #  2. Source citations (research integrity)
-        #  3. Runtime errors
-        #  4. Silent execution
-        #  5. Empty final result
+        failures: list[CriticVerdict] = []
+        order: list[tuple[str, Optional[CriticVerdict]]] = [
+            ("code", self.check_missing_code(task_requires_code, output_code)),
+            ("source", self.check_source_citation(task_requires_research, safe_sources)),
+            ("runtime", self.check_runtime_error(exec_result)),
+            ("output", self.check_no_output(exec_result)),
+            ("result", self.check_empty_result(output_result)),
+        ]
 
-        verdict: Optional[CriticVerdict]
+        for _label, verdict in order:
+            if verdict is not None:
+                failures.append(verdict)
 
-        verdict = self.check_missing_code(task_requires_code, output_code)
-        if verdict is not None:
-            return verdict
+        if not failures:
+            return None
 
-        verdict = self.check_source_citation(task_requires_research, safe_sources)
-        if verdict is not None:
-            return verdict
+        if len(failures) == 1:
+            return failures[0]
 
-        verdict = self.check_runtime_error(exec_result)
-        if verdict is not None:
-            return verdict
-
-        verdict = self.check_no_output(exec_result)
-        if verdict is not None:
-            return verdict
-
-        verdict = self.check_empty_result(output_result)
-        if verdict is not None:
-            return verdict
-
-        return None  # all passed
+        combined_reason = "; ".join(f.fail_reason for f in failures)
+        combined_feedback = "; ".join(f.feedback for f in failures)
+        return CriticVerdict(
+            passed=False,
+            score=0.0,
+            fail_reason=f"[{len(failures)} 项失败] {combined_reason}",
+            feedback=f"[{len(failures)} 项失败] {combined_feedback}",
+        )

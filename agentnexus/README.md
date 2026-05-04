@@ -3,86 +3,85 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-**AgentNexus** 是一个多智能体任务协同 CLI 工具。通过多 Agent 协作 + 本地知识库（RAG）+ 两级记忆系统 + 全链路可观测性，让复杂任务可靠地自动化执行。所有依赖本地运行，零部署成本，`pip install` 即可使用。
+**AgentNexus** 是一个工程级多智能体任务协同 CLI 工具。通过 LangGraph 状态机编排 + 本地 RAG 知识库 + 两级记忆系统 + 全链路可观测性，让复杂任务可靠地自动化执行。全部本地运行，`pip install` 即可使用。
 
 ---
 
 ## 系统架构
 
 ```
-用户在终端输入命令
-        │
-        ▼
-┌───────────────────────────────────┐
-│         CLI 层（Typer + Rich）     │
-│  命令解析 / 流式渲染 / 交互确认    │
-└───────────────┬───────────────────┘
-                │
-       ┌────────┴────────┐
-       ▼                 ▼
-  nexus run          nexus chat
-  ─────────          ─────────
-  Orchestrator       ReAct Agent
-  (LangGraph)        (ReAct 循环)
-   │  │  │            │
-   ▼  ▼  ▼            ▼
- Research Coder     web_search
- Analyst Critic     python_execute
-       │                 │
-       └────────┬────────┘
-                ▼
-┌───────────────────────────────────┐
-│           本地基础设施层           │
-│  ChromaDB  │  SQLite  │  JSONL   │
-│  （向量库） │ （记忆）  │ （追踪）  │
-└───────────────────────────────────┘
+用户在终端输入 nexus run "任务描述"
+              │
+              ▼
+┌──────────────────────────────────────────────────────────┐
+│                    CLI 层（Typer + Rich）                 │
+│         命令解析 / 流式渲染 / HITL 交互确认               │
+└───────────────────────┬──────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│              Orchestrator（LangGraph FSM）                │
+│                                                          │
+│  START → plan → [research ∥ code] → execute              │
+│                → analyze → critique → (retry | END)      │
+│                                                          │
+│  ┌──────────┐  ┌──────┐  ┌──────────┐  ┌──────────┐    │
+│  │ Research │  │ Coder│  │ Executor │  │  Critic  │    │
+│  │ 搜索+来源│  │ 代码 │  │ 执行+验证│  │ 硬规则+  │    │
+│  │ 引用强制 │  │ Schema│  │ 自动安装 │  │ LLM 评分 │    │
+│  └──────────┘  └──────┘  └──────────┘  └──────────┘    │
+│       │           │           │              │          │
+│       └───────────┴─────┬─────┘              │          │
+│                         │                    │          │
+│                         ▼                    │          │
+│                  ┌──────────┐               │          │
+│                  │ Analyst  │ ◄─────────────┘          │
+│                  │ 综合分析 │                           │
+│                  │ +确定性  │  ← 执行报告由系统硬生成   │
+│                  │ 执行报告 │      LLM 只负责分析补充   │
+│                  └──────────┘                           │
+└───────────────────────┬──────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│                  本地基础设施层                           │
+│   ChromaDB（向量库） │ SQLite（记忆+检查点）│ JSONL（追踪）│
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## 核心特性
 
 | 特性 | 说明 |
 |------|------|
-| **双模式运行** | `nexus run` 多 Agent 编排（plan→fan-out→analyze→critique→retry）；`nexus chat` 单 Agent 交互对话（ReAct 循环 + 工具调用） |
-| **RAG 双路由检索** | 稠密向量 + BM25 混合检索 + Reranker 精排，自动判断走 Grep 精确匹配还是语义检索，命中率不足自动 fallback |
-| **两级记忆系统** | 短期：进程内滚动窗口（deque，最多 50 条）；长期：SQLite 持久化 + 向量检索，跨会话上下文保持 |
-| **全链路可观测性** | 每个 Agent 节点/LMM 调用自动创建 trace span，JSONL 写入 `~/.agentnexus/traces/`，`nexus logs view` 终端渲染 span 树 |
-| **质量保障** | `nexus run` 内置 Critic Agent 评分（0-10），低于 7 分自动重试（最多 3 次）；`nexus eval` 跑 RAGAS 12 组策略组合评估 |
-| **纯本地运行** | ChromaDB 向量库 + SQLite 记忆 + JSONL 日志，全部存于 `~/.agentnexus/`，无需外部服务 |
-| **开箱即用** | `pip install -e .` → `nexus init` → 开始使用，PyInstaller 打包为单文件可执行文件 |
+| **强 Schema 门禁** | 所有 Agent 输出通过 Pydantic 模型校验（CodeOutput / ResearchOutput / ExecutionResult），不通过不允许进入后续阶段 |
+| **独立执行验证** | Executor Agent 捕获 stdout/stderr/异常 + 智能输出比对（检测数据、图表、主题合规性）。缺库自动 `pip install` |
+| **硬规则 + LLM 评估** | Critic 先跑 5 条硬规则（缺代码/缺来源/运行时异常/无输出/空结果），通过后才让 LLM 打质量分 |
+| **8 类错误 + 分级 retry** | 错误分 MISSING_CODE / RUNTIME_ERROR / HALLUCINATION / TOOL_FAILURE / TRUNCATION 等 8 类，每类有独立策略和 checklist 式 escalating 指令 |
+| **Token 截断检测** | 捕获 `finish_reason=="length"`，触发 TRUNCATION 策略（精简/拆分），不再盲目 force_code_only |
+| **Planner 动态拆分** | 检测到上次代码截断时，强制 Planner 将复杂任务拆为多个独立 code 步骤 |
+| **确定性执行报告** | 代码执行后系统硬生成状态报告（✅ 成功 / ❌ 失败），Analyst 的 LLM 无权篡改 |
+| **双模式运行** | `nexus run` 多 Agent 编排；`nexus chat` 单 Agent ReAct 对话 |
+| **RAG 双路由检索** | 稠密向量 + BM25 + Reranker，自动 Grep/RAG fallback |
+| **两级记忆系统** | 短期 deque + 长期 SQLite + 向量检索 |
+| **全链路可观测性** | JSONL Trace + `nexus logs` Rich Tree 渲染 |
+| **API 容错** | LLM 调用 3 次指数退避重试（瞬时错误自动恢复） |
 
 ## 快速安装
 
 ```bash
-# 从源码安装（开发模式）
 git clone https://github.com/agentnexus/agentnexus.git
 cd agentnexus
 pip install -e .
-
-# 安装全部依赖（含评估和打包工具）
-pip install -e ".[dev,eval]"
-
-# prompt_toolkit（chat 模式需要，已包含在 pip install -e . 中）
-pip install prompt-toolkit
 ```
 
 ## 快速开始
 
 ```bash
-# 1. 首次初始化（配置 API Key）
-nexus init
-
-# 2. 执行复杂任务（多 Agent 编排）
-nexus run "分析特斯拉最新财报并写投资简报"
-
-# 3. 交互式对话（单 Agent + 工具）
-nexus chat
-
-# 4. 添加知识库文档
-nexus kb add ./docs/
-
-# 5. 查看历史 trace
-nexus logs list
-nexus logs view --trace-id <trace_id>
+nexus init                                    # 配置 API Key
+nexus run "搜索 AI 趋势并写分析报告"           # 多 Agent 编排
+nexus chat                                     # 交互对话模式
+nexus kb add ./docs/                           # 添加知识库
+nexus logs list                                # 查看 trace 历史
 ```
 
 ## 命令参考
@@ -90,49 +89,54 @@ nexus logs view --trace-id <trace_id>
 | 命令 | 描述 |
 |------|------|
 | `nexus run <task>` | 多 Agent 编排执行复杂任务 |
-| `nexus chat` | 进入交互式对话模式（ReAct + 联网搜索 + 代码执行） |
-| `nexus version` | 显示版本信息 |
-| `nexus init` | 首次初始化引导（配置 API Key） |
+| `nexus chat` | 交互式对话（ReAct + 联网搜索 + 代码执行） |
+| `nexus init` | 首次初始化（配置 API Key） |
 | `nexus config [--set KEY --value VAL]` | 查看或修改配置 |
-| `nexus kb add <path>` | 添加文档到知识库（PDF / Markdown / TXT） |
-| `nexus kb list` | 查看知识库文档块数量 |
+| `nexus kb add <path>` | 添加文档到知识库 |
+| `nexus kb list` | 查看知识库状态 |
 | `nexus memory list [--limit N]` | 查看长期记忆 |
 | `nexus memory clear` | 清空长期记忆 |
-| `nexus logs list [--days N]` | 列出历史 Trace 记录 |
-| `nexus logs view --trace-id <id>` | 查看指定 Trace 的完整 Span 树 |
-| `nexus eval list` | 列出评估数据集样本 |
-| `nexus eval run` | 运行 RAG 评估（12 组策略组合） |
-| `nexus stats [--days N]` | 查看 Token 成本统计 |
+| `nexus logs list [--days N]` | 列出历史 Trace |
+| `nexus logs view --trace-id <id>` | 查看 Trace Span 树 |
+| `nexus eval run` | 运行 RAG 评估 |
+| `nexus stats [--days N]` | Token 成本统计 |
 
-## 数据存储
-
-所有数据存放在 `~/.agentnexus/`（可通过 `AGENTNEXUS_HOME` 环境变量修改）：
+## 项目结构
 
 ```
-~/.agentnexus/
-├── config.yaml        # 配置文件（API Key、模型等）
-├── memory.db           # 长期记忆（SQLite）
-├── chroma/             # 知识库向量（ChromaDB）
-└── traces/             # Trace 日志（JSONL，按日期分文件）
-    ├── 2026-05-01.jsonl
-    └── evals/          # 评估报告（JSON）
+agentnexus/
+├── agentnexus/
+│   ├── cli/
+│   │   ├── run.py / chat.py / config.py / kb.py / logs.py / eval_cmd.py / stats.py
+│   ├── agents/
+│   │   ├── schema.py              # TaskOutput / CodeOutput / ExecutionResult / ErrorType (8 类) / RETRY_STRATEGIES
+│   │   ├── coder_agent.py         # 代码生成 + Schema 校验 + AST 完整性检查
+│   │   ├── executor_agent.py      # 独立执行验证 + 缺库自动安装
+│   │   ├── research_agent.py      # RAG + Web 搜索 + 来源强制引用
+│   │   ├── analyst_agent.py       # 综合分析（LLM）
+│   │   ├── critic_agent.py        # 硬规则先行 + LLM 质量评分
+│   │   ├── critic_rules.py        # 5 条确定性硬规则
+│   │   ├── retry_manager.py       # 错误分类 + 分级 escalating 策略
+│   │   └── multi_agent/
+│   │       ├── orchestrator.py    # LangGraph FSM + 确定性执行报告
+│   │       └── state.py           # AgentState 定义
+│   ├── tools/
+│   │   ├── code_executor.py       # 本地 + E2B 双执行器
+│   │   ├── web_search.py          # Tavily 搜索
+│   │   ├── tool_executor.py       # 工具注册调度
+│   │   └── tool_wrapper.py        # safe_call + fallback 系统
+│   ├── rag/                       # 文档摄取 / ChromaDB / 双路由检索 / RAGAS 评估
+│   ├── memory/                    # 短期 deque + 长期 SQLite + 向量检索
+│   ├── observability/             # JSONL Trace + Token 成本统计
+│   ├── prompts/                   # 提示词模板（txt + 动态注入）
+│   └── core/
+│       ├── config.py              # Pydantic Settings
+│       └── llm.py                 # LLM 流式调用 + 指数退避重试 + 截断检测
+├── pyproject.toml
+└── README.md
 ```
 
 ## 配置
-
-```bash
-# 交互式配置向导
-nexus init
-
-# 查看当前配置（API Key 掩码显示）
-nexus config
-
-# 设置单项配置
-nexus config --set llm_model_id --value deepseek-v4-flash
-nexus config --set max_agent_steps --value 10
-```
-
-配置项与默认值：
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
@@ -140,118 +144,28 @@ nexus config --set max_agent_steps --value 10
 | `llm_model_id` | `deepseek-v4-flash` | 模型 ID |
 | `llm_base_url` | `https://api.deepseek.com` | API 地址 |
 | `llm_timeout` | `60` | 请求超时（秒） |
-| `max_agent_steps` | `5` | ReAct 最大步数 |
-| `tavily_api_key` | — | 搜索引擎 API Key（Tavily Search，可选） |
+| `tavily_api_key` | — | 搜索引擎 API Key（可选） |
 | `e2b_api_key` | — | 代码沙箱 API Key（可选） |
-
-## 评估
-
-```bash
-# 列出 15 个评估样本
-nexus eval list
-
-# 运行全量评估（自动对比 12 种策略组合）
-nexus eval run
-```
-
-评估指标：
-
-| 指标 | 说明 |
-|------|------|
-| **Faithfulness** | 生成答案是否忠实于检索上下文 |
-| **Answer Relevancy** | 答案与问题的语义相关度 |
-| **Context Precision** | 检索上下文中相关文档的占比 |
-| **Context Recall** | 检索上下文覆盖标准答案的程度 |
-
-## 项目结构
-
-```
-agentnexus/
-├── agentnexus/
-│   ├── __main__.py             # python -m agentnexus 入口
-│   ├── cli/
-│   │   ├── __init__.py         # Typer app 注册 + 子命令挂载
-│   │   ├── run.py              # nexus run / version
-│   │   ├── chat.py             # nexus chat
-│   │   ├── stats.py            # nexus stats
-│   │   ├── config.py           # nexus config / init
-│   │   ├── kb.py               # nexus kb add / list
-│   │   ├── memory_cmd.py       # nexus memory list / clear
-│   │   ├── logs.py             # nexus logs list / view
-│   │   └── eval_cmd.py         # nexus eval list / run
-│   ├── agents/
-│   │   ├── re_act_agent.py     # ReAct 单 Agent 循环
-│   │   ├── research_agent.py   # 信息检索 Agent
-│   │   ├── coder_agent.py      # 代码生成执行 Agent
-│   │   ├── analyst_agent.py    # 综合分析 Agent
-│   │   ├── critic_agent.py     # 质量评分 Agent
-│   │   └── multi_agent/
-│   │       ├── orchestrator.py # LangGraph 主状态机
-│   │       └── state.py        # AgentState 定义
-│   ├── tools/
-│   │   ├── tool_executor.py    # 工具注册与调度
-│   │   ├── web_search.py       # 互联网搜索
-│   │   └── code_executor.py    # 本地沙箱代码执行
-│   ├── rag/
-│   │   ├── ingestion.py        # 文档摄取（PDF/MD/TXT）
-│   │   ├── chroma_client.py    # ChromaDB 封装
-│   │   ├── retriever.py        # 混合检索（稠密 + BM25 + Reranker）
-│   │   ├── router.py           # 双路由策略（Grep / RAG）
-│   │   ├── grep_search.py      # ripgrep 精确匹配
-│   │   ├── evaluator.py        # RAGAS 评估器
-│   │   └── eval_dataset.py     # 评估样本数据集
-│   ├── memory/
-│   │   ├── short_term.py       # 短期记忆（deque）
-│   │   ├── long_term.py        # 长期记忆（SQLite + 向量检索）
-│   │   └── manager.py          # 记忆管理器（短+长期桥接）
-│   ├── observability/
-│   │   ├── tracer.py           # Trace Span / TraceContext / JSONL 写入
-│   │   └── stats.py            # Token 成本聚合
-│   └── core/
-│       ├── config.py           # Pydantic Settings + 路径管理
-│       └── llm.py              # OpenAI SDK 流式封装
-├── .github/workflows/
-│   ├── ci.yml                  # PR 触发 lint + test + eval
-│   └── release.yml             # Tag 触发 PyInstaller 打包 + Release
-├── agentnexus.spec             # PyInstaller 打包配置
-├── pyproject.toml
-├── test_all.py                 # 集成测试
-├── test_eval_routes.py         # 检索策略对比测试
-└── README.md
-```
 
 ## 开发
 
 ```bash
-# 安装开发依赖
 pip install -e ".[dev,eval]"
-
-# 代码检查
 ruff check agentnexus/
-
-# 运行测试
 python test_all.py
-
-# 打包为单文件可执行文件
-pip install pyinstaller
-pyinstaller agentnexus.spec --noconfirm
-# 产物: dist/agentnexus（Linux） / dist/agentnexus.exe（Windows）
 ```
 
 ## 技术栈
 
 | 类别 | 技术 |
 |------|------|
-| Agent 编排 | LangGraph（状态机 + SQLite Checkpointer） |
-| 单 Agent | ReAct 循环 + ToolExecutor |
-| LLM 接口 | OpenAI SDK（兼容 DeepSeek / 通义千问 / GPT-4o） |
+| Agent 编排 | LangGraph（FSM + SQLite Checkpointer） |
+| LLM 接口 | OpenAI SDK（兼容 DeepSeek / 通义千问 / GPT-4o）+ 3 次指数退避重试 |
+| 数据模型 | Pydantic v2（强 Schema 校验） |
 | 向量数据库 | ChromaDB（纯本地 PersistentClient） |
-| 记忆存储 | SQLite（短期 deque + 长期持久化 + 向量检索） |
 | CLI 框架 | Typer + Rich + prompt_toolkit |
-| 检索 | Sentence Transformers（稠密）+ rank-bm25（稀疏）+ BGE-Reranker |
-| 文档解析 | PyMuPDF（PDF）+ jieba（中文分词） |
+| 检索 | Sentence Transformers + rank-bm25 + BGE-Reranker |
 | 可观测性 | 自研 JSONL Trace + `nexus logs` Rich Tree 渲染 |
-| 评估 | 自研 RAGEvaluator（LLM-as-Judge，4 指标） |
 | 打包 | PyInstaller + GitHub Actions CI/CD |
 
 ## 许可

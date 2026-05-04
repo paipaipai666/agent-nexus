@@ -64,6 +64,7 @@ class ErrorType(str, Enum):
     NO_OUTPUT = "no_output"
     EMPTY_RESULT = "empty_result"
     LOGIC_ERROR = "logic_error"
+    TRUNCATION = "truncation"
 
 
 RETRY_STRATEGIES: dict[ErrorType, dict] = {
@@ -95,16 +96,29 @@ RETRY_STRATEGIES: dict[ErrorType, dict] = {
     ErrorType.NO_OUTPUT: {
         "strategy": "force_execution",
         "max_retries": 2,
-        "instruction": "代码执行无任何输出，请确保代码有 print() 或明确的输出语句。",
+        "instruction": (
+            "代码执行无任何输出。请确保: "
+            "1) 所有函数在代码顶层被调用(加 `if __name__ == '__main__':` 块); "
+            "2) print() 语句在模块层级执行而不仅仅定义在函数内。"
+        ),
     },
     ErrorType.EMPTY_RESULT: {
         "strategy": "force_execution",
         "max_retries": 2,
-        "instruction": "结果为空白，请生成有效内容。",
+        "instruction": "结果为空白，请生成有效内容。确保定义了测试数据并在顶层调用评估函数。",
     },
     ErrorType.LOGIC_ERROR: {
         "strategy": "fix_logic",
         "max_retries": 3,
         "instruction": "代码输出与预期不符。请根据预期输出和执行差异修复代码逻辑。",
+    },
+    ErrorType.TRUNCATION: {
+        "strategy": "simplify",
+        "max_retries": 2,
+        "instruction": (
+            "上一次输出因长度限制被截断。"
+            "请将代码压缩到 800 字符以内：删除所有注释和类型标注、用缩写变量名、"
+            "plt.show() 改为 plt.savefig('out.png')，删除不必要的格式化。"
+        ),
     },
 }

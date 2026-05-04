@@ -219,10 +219,11 @@ def safe_call_with_registry(
     """
     fallback = FALLBACK_REGISTRY.get(tool_name)
     if fallback is None:
-        raise RuntimeError(
-            f"No fallback registered for tool '{tool_name}'. "
-            f"Available keys: {list(FALLBACK_REGISTRY)}"
-        )
+        logger.warning("safe_call_with_registry: no fallback for '%s', calling fn directly", tool_name)
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            return f"[fallback] 工具 '{tool_name}' 不可用且无注册的降级方案: {exc}"
     return safe_call(fn, fallback_fn=fallback, *args, **kwargs)
 
 

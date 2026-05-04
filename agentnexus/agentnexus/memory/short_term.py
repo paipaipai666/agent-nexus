@@ -26,10 +26,14 @@ class ShortTermMemory:
         total = 0
         for m in self._messages:
             content = m.get("content", "")
-            import re
-            chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
-            other_chars = len(content) - chinese_chars
-            total += int(chinese_chars * 1.4 + other_chars * 0.4)
+            try:
+                import litellm
+                total += litellm.token_counter(text=content) or 0
+            except Exception:
+                import re
+                chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
+                other_chars = len(content) - chinese_chars
+                total += int(chinese_chars * 1.4 + other_chars * 0.4)
         return total
 
     def clear(self):

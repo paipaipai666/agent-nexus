@@ -83,7 +83,9 @@ def _run_code(code: str, timeout: int) -> ExecutionResult:
 
     if not stdout and not stderr:
         return ExecutionResult(
-            success=False, stdout="", stderr="", exception="", exit_code=1
+            success=False, stdout="", stderr="",
+            exception="NO_OUTPUT: code executed without error but produced no stdout or stderr",
+            exit_code=1,
         )
 
     return ExecutionResult(

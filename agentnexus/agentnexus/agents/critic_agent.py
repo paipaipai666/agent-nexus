@@ -88,32 +88,54 @@ class CriticAgent:
         return score, feedback, None
 
     def _llm_score(self, task: str, answer: str) -> tuple[float, str]:
-        """LLM 质量评分 — 只在硬规则通过后调用。"""
         try:
             prompt = CRITIC_PROMPT.format(task=task, answer=answer[:3000], date=get_current_date())
             response = (
                 self._llm.think([{"role": "user", "content": prompt}], silent=True)
-                or "分数: 5.0\n反馈: 未能评估"
+                or '{"score": 5.0, "feedback": "未能评估"}'
             )
 
-            score = 5.0
-            feedback = "未能解析评估结果"
+            best_score = 5.0
+            best_feedback = "未能解析评估结果"
+            json_parsed = False
 
+            # Primary: JSON parsing
+            import json as _json
+            import re as _re
+            json_text = None
+            match = _re.search(r"```json\s*\n?(.*?)```", response, _re.DOTALL)
+            if match:
+                json_text = match.group(1).strip()
+            elif response.strip().startswith("{"):
+                json_text = response.strip()
+
+            if json_text:
+                try:
+                    data = _json.loads(json_text)
+                    best_score = float(data.get("score", 5.0))
+                    best_feedback = data.get("feedback") or data.get("reasoning") or ""
+                    json_parsed = True
+                    if best_feedback:
+                        return min(max(best_score, 0.0), 10.0), best_feedback
+                    best_feedback = "评估完成但未提供详细反馈"
+                    return min(max(best_score, 0.0), 10.0), best_feedback
+                except (_json.JSONDecodeError, TypeError, ValueError):
+                    pass
+
+            # Fallback: regex line parsing
             for line in response.split("\n"):
                 stripped = line.strip()
                 if "分数" in stripped or "score" in stripped.lower():
                     if ":" in stripped:
                         try:
-                            score = float(
-                                stripped.split(":", 1)[1].strip().split()[0]
-                            )
+                            best_score = float(stripped.split(":", 1)[1].strip().split()[0])
                         except (ValueError, IndexError):
                             pass
                 elif "反馈" in stripped or "feedback" in stripped.lower():
                     if ":" in stripped:
-                        feedback = stripped.split(":", 1)[1].strip()
+                        best_feedback = stripped.split(":", 1)[1].strip()
 
-            return min(max(score, 0.0), 10.0), feedback
+            return min(max(best_score, 0.0), 10.0), best_feedback
 
         except Exception as exc:
             return 5.0, f"评估出错: {exc}"

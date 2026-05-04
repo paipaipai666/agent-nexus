@@ -52,7 +52,9 @@ class ResearchAgent:
             web = "网络搜索不可用"
 
         prompt = RESEARCH_PROMPT.format(
-            kb=kb[:2000], web=web[:3000], query=query, date=get_current_date()
+            kb=kb[:2000], web=web[:3000],
+            query=f"<user_query>{query}</user_query>",
+            date=get_current_date(),
         )
 
         try:

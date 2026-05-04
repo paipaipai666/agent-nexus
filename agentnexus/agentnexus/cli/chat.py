@@ -1,4 +1,5 @@
 """CLI chat command — 交互式多轮对话，Enter 提交"""
+import typer
 import warnings
 warnings.filterwarnings("ignore", message=".*pkg_resources.*")
 
@@ -6,7 +7,9 @@ from . import app, console
 
 
 @app.command()
-def chat():
+def chat(
+    no_memory: bool = typer.Option(False, "--no-memory", help="禁用长期记忆存储（敏感会话）"),
+):
     """进入交互对话模式
 
     直接输入问题，Enter 提交。 /exit 退出 | /help 帮助 | /clear 重置
@@ -65,7 +68,7 @@ def chat():
 
     import uuid
     session_id = f"chat_{uuid.uuid4().hex[:12]}"
-    memory = MemoryManager(session_id, llm=llm)
+    memory = MemoryManager(session_id, llm=llm, enable_long_term=not no_memory)
 
     agent = ReActAgent(llm, executor, output=lambda msg: _show_step(console, msg))
 
@@ -109,4 +112,4 @@ def chat():
         except Exception as e:
             import traceback
             console.print(f"\n[red]错误: {e}[/red]")
-            console.print(f"[dim]{traceback.format_exc()[-500:]}[/dim]")
+            console.print(f"[dim]{traceback.format_exc()[:500]}[/dim]")
