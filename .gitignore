@@ -24,6 +24,7 @@ venv/
 *-journal
 
 # 缓存 & 测试
+.ruff_cache/
 .pytest_cache/
 .cache/
 *.log

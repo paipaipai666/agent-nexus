@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .agentnexus_checkpoints/
+.ruff_cache/
 *.egg-info/
 dist/
 build/
