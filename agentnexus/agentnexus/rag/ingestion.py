@@ -92,6 +92,10 @@ def clean_text(text: str) -> str:
 from enum import Enum
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from agentnexus.prompts import load_prompt
+
+CONTEXTUAL_PROMPT = load_prompt("contextual")
+
 
 class ChunkStrategy(Enum):
     FIXED = "fixed"
@@ -203,6 +207,42 @@ def ingest(
     strategy: ChunkStrategy = ChunkStrategy.RECURSIVE,
     chunk_size: int = 512,
     chunk_overlap: int = 50,
+    enable_contextual: bool = False,
+    llm_client=None,
 ) -> list[str]:
     text = load_and_clean(file_path)
-    return chunk_text(text, strategy=strategy, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = chunk_text(text, strategy=strategy, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    if enable_contextual and llm_client and chunks:
+        chunks = enrich_chunks_with_context(chunks, text, llm_client)
+
+    return chunks
+
+
+def generate_chunk_context(document: str, chunk: str, llm_client) -> str:
+    prompt = CONTEXTUAL_PROMPT.format(document=document, chunk=chunk)
+    try:
+        response = llm_client.think(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            silent=True,
+        )
+        return response.strip() if response else ""
+    except Exception:
+        return ""
+
+
+def enrich_chunks_with_context(
+    chunks: list[str],
+    document: str,
+    llm_client,
+) -> list[str]:
+    from rich.progress import track
+    enriched = []
+    for chunk in track(chunks, description="生成上下文摘要..."):
+        context = generate_chunk_context(document, chunk, llm_client)
+        if context:
+            enriched.append(f"{context}\n\n{chunk}")
+        else:
+            enriched.append(chunk)
+    return enriched

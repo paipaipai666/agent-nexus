@@ -21,6 +21,7 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
 
     summary_lines = [
         f"[bold]总任务数:[/bold] {s.total_tasks}",
+        f"[bold]平均重试:[/bold] {s.avg_retries} 次/任务",
         f"[bold]总 Token:[/bold] 输入 {s.total_input_tokens:,} / 输出 {s.total_output_tokens:,}",
         f"[bold]总成本:[/bold] CNY {s.total_cost_cny:.4f}",
         f"[bold]延迟:[/bold] 平均 {s.avg_latency_ms}ms | P95 {s.p95_latency_ms}ms | 最大 {s.max_latency_ms}ms",

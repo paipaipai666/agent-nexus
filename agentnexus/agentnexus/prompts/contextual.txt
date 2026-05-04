@@ -1,0 +1,9 @@
+<document>
+{document}
+</document>
+
+<chunk>
+{chunk}
+</chunk>
+
+用 1-2 句话描述上面 chunk 片段在完整文档中的位置和作用，帮助理解它的上下文。只输出描述，不要解释，不要重复片段内容。

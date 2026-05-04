@@ -1,4 +1,3 @@
-import litellm
 from typing import List, Dict
 
 from rich.console import Console
@@ -24,6 +23,7 @@ class AgentLLM:
             return ""
 
         try:
+            import litellm
             model = self.model
             if "/" not in model:
                 if "deepseek.com" in (self.base_url or ""):

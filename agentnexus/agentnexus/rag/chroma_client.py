@@ -1,8 +1,5 @@
 import uuid
 
-import chromadb
-from sentence_transformers import SentenceTransformer
-
 from agentnexus.core.config import get_settings
 
 COLLECTION_NAME = "documents"
@@ -16,6 +13,7 @@ _model = None
 def get_chroma_client():
     global _client
     if _client is None:
+        import chromadb
         settings = get_settings()
         _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
     return _client
@@ -24,6 +22,7 @@ def get_chroma_client():
 def get_embedding_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
         settings = get_settings()
         _model = SentenceTransformer(settings.embedding_model)
     return _model

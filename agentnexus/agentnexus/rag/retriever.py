@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import jieba
 from rank_bm25 import BM25Okapi
-from sentence_transformers import CrossEncoder
 
 from .chroma_client import get_embedding_model, insert_documents, search as chroma_search
 
@@ -62,6 +61,7 @@ class HybridRetriever:
         self._bm25.build(documents)
 
     def load_reranker(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
+        from sentence_transformers import CrossEncoder
         self._reranker = CrossEncoder(model_name)
 
     def search(self, query: str, dense_results: list[tuple[int, float]], top_k: int = 5,
