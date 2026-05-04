@@ -11,9 +11,13 @@ agentnexus/agents/__init__.py
 agentnexus/agents/analyst_agent.py
 agentnexus/agents/coder_agent.py
 agentnexus/agents/critic_agent.py
+agentnexus/agents/critic_rules.py
 agentnexus/agents/exceptions.py
+agentnexus/agents/executor_agent.py
 agentnexus/agents/re_act_agent.py
 agentnexus/agents/research_agent.py
+agentnexus/agents/retry_manager.py
+agentnexus/agents/schema.py
 agentnexus/agents/multi_agent/orchestrator.py
 agentnexus/agents/multi_agent/state.py
 agentnexus/cli/__init__.py
@@ -47,4 +51,5 @@ agentnexus/rag/router.py
 agentnexus/tools/__init__.py
 agentnexus/tools/code_executor.py
 agentnexus/tools/tool_executor.py
+agentnexus/tools/tool_wrapper.py
 agentnexus/tools/web_search.py
