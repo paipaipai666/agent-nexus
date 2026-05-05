@@ -71,7 +71,7 @@ class MemoryManager:
         if len(all_msgs) <= 4:
             return
 
-        history_text = "\n".join(f"{m['role']}: {m['content'][:600]}" for m in all_msgs[:-4])
+        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs[:-4])
         if not history_text.strip():
             return
 
@@ -88,7 +88,7 @@ class MemoryManager:
         if _contains_pii(question) or _contains_pii(answer):
             return
 
-        prompt = EXTRACT_PROMPT.format(question=question, answer=answer[:1500])
+        prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
         response = self._llm.think([{"role": "user", "content": prompt}]) or "{}"
 
         try:

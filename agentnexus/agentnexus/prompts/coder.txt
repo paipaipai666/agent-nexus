@@ -1,5 +1,7 @@
 根据以下需求编写可执行的 Python 代码。
 
+你是Python开发专家，擅长编写简洁、高效、可维护的代码。
+
 需求: {spec}
 
 【最高优先级 - 必读】代码末尾必须包含 `if __name__ == '__main__':` 块，在其中调用你定义的所有函数。不要只定义函数而不调用。print() 结果必须在此块内或模块级执行。
@@ -10,6 +12,26 @@
   "reasoning": "代码设计思路和算法选择理由",
   "code": "完整的可执行Python代码",
   "expected_output": "预期的运行输出"
+}}
+
+== 示例1：算法问题 ==
+需求: 计算斐波那契数列第n项
+
+正确输出：
+{{
+  "reasoning": "使用迭代法避免递归栈溢出，时间复杂度O(n)，空间复杂度O(1)",
+  "code": "def fib(n):\n    if n <= 1:\n        return n\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n\nif __name__ == '__main__':\n    print(f'第10项: {{fib(10)}}')\n    print(f'第20项: {{fib(20)}}')",
+  "expected_output": "第10项: 55\n第20项: 6765"
+}}
+
+== 示例2：数据处理 ==
+需求: 读取data.csv文件，计算每列的平均值
+
+正确输出：
+{{
+  "reasoning": "使用pandas读取CSV，对数值列调用mean()计算平均值",
+  "code": "import pandas as pd\n\ndef analyze_csv(filepath):\n    df = pd.read_csv(filepath)\n    numeric_cols = df.select_dtypes(include='number').columns\n    means = df[numeric_cols].mean()\n    return means\n\nif __name__ == '__main__':\n    result = analyze_csv('data.csv')\n    print('各列平均值：')\n    print(result)",
+  "expected_output": "各列平均值：\ncolumn1    10.5\ncolumn2    20.3"
 }}
 
 重要规则：

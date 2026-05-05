@@ -54,8 +54,7 @@ class ReActAgent:
         return None, None
 
     def _ask_confirm(self, code: str) -> bool:
-        preview = code[:200] + ("..." if len(code) > 200 else "")
-        self._output(f"[警告] 即将执行代码 (预览): {preview}")
+        self._output(f"[警告] 即将执行代码 (预览): {code}")
         try:
             response = input("确认执行? [y/N] ").strip().lower()
             return response == "y"

@@ -231,7 +231,7 @@ def safe_call_with_registry(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _summarise(value: Any, max_len: int = 80) -> str:
+def _summarise(value: Any, max_len: int = 10000) -> str:
     """Truncate long values for log messages."""
     s = repr(value)
     return s[:max_len] + "..." if len(s) > max_len else s

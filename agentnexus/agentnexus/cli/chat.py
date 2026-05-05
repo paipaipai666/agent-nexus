@@ -112,4 +112,4 @@ def chat(
         except Exception as e:
             import traceback
             console.print(f"\n[red]错误: {e}[/red]")
-            console.print(f"[dim]{traceback.format_exc()[:500]}[/dim]")
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")

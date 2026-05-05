@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 from agentnexus.agents.multi_agent.orchestrator import (
-    MAX_RETRIES,
+    _MAX_RETRIES,
     plan_node,
     route_after_execute,
 )
@@ -78,7 +78,8 @@ class TestRouteAfterExecute:
         assert route_after_execute(state) == "code"
 
     def test_max_retries_exceeded_routes_to_analyst(self):
-        state = _default_state(exec_success=False, retry_count=MAX_RETRIES + 1)
+        limit = _MAX_RETRIES.get("code_error", 3)
+        state = _default_state(exec_success=False, retry_count=limit + 1)
         assert route_after_execute(state) == "analyst"
 
     def test_no_output_late_retry_goes_to_research(self):

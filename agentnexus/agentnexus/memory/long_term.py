@@ -199,7 +199,7 @@ class LongTermMemory:
             "SELECT id, category, content, importance, created_at FROM long_term_memories ORDER BY created_at DESC LIMIT ?",
             (limit,)
         ).fetchall()
-        return [{"id": r["id"], "category": r["category"], "content": r["content"][:120], "importance": r["importance"], "created_at": r["created_at"]} for r in rows]
+        return [{"id": r["id"], "category": r["category"], "content": r["content"], "importance": r["importance"], "created_at": r["created_at"]} for r in rows]
 
     def delete(self, memory_id: int):
         row = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE id = ?", (memory_id,)).fetchone()

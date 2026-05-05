@@ -107,13 +107,13 @@ class CoderAgent:
         if code:
             truncated = self._check_truncation(code)
             return CodeOutput(
-                reasoning=f"从非结构化输出中提取代码 (任务: {spec[:100]}){truncated}",
+                reasoning=f"从非结构化输出中提取代码 (任务: {spec}){truncated}",
                 code=code,
                 expected_output="",
             )
 
         return CodeOutput(
-            reasoning=raw[:500] if raw else "LLM 无输出",
+            reasoning=raw if raw else "LLM 无输出",
             code="",
             expected_output="",
         )

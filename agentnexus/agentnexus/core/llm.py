@@ -132,7 +132,7 @@ class AgentLLM:
             return result
 
         except Exception as e:
-            error_msg = str(e)[:300]
+            error_msg = str(e)
             self.last_error = error_msg
 
             is_transient = any(
@@ -154,11 +154,11 @@ class AgentLLM:
                 is_transient = True
 
             retry_tag = f"[retry {attempt + 1}/{LLM_MAX_RETRIES}]" if attempt < LLM_MAX_RETRIES - 1 else "[exhausted]"
-            console.print(f"[red]LLM 错误{retry_tag}: {_e(error_msg[:120])}[/red]")
+            console.print(f"[red]LLM 错误{retry_tag}: {_e(error_msg)}[/red]")
 
             if ctx and span:
                 ctx.end_span(span, metadata={
-                    "model": model, "status": "error", "error": error_msg[:200],
+                    "model": model, "status": "error", "error": error_msg,
                     "retry_attempt": attempt + 1, "transient": is_transient,
                 })
 
@@ -168,7 +168,7 @@ class AgentLLM:
             # transient error — outer retry loop continues
 
 
-def _preview(text: str, max_len: int = 200) -> str:
+def _preview(text: str, max_len: int = 500) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."

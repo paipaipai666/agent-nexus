@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd D:/code/AgentNexus/agentnexus && ruff check agentnexus/agents/critic_agent.py agentnexus/agents/multi_agent/orchestrator.py agentnexus/prompts/critic.txt agentnexus/prompts/analyst.txt ...",
-  "error": "Exit code 1\nerror: Failed to parse agentnexus\\prompts\\analyst.txt:1:1: Got unexpected token ⚠\nerror: Failed to parse agentnexus\\prompts\\critic.txt:1:10: Got unexpected token 。\nagentnexus\\agents\\multi_agent\\orchestrator.py:6:1: W293 [*] Blank line contains whitespace\nagentnexus\\agents\\multi_agent\\orchestrator.py:74:1: E402 Module level import not at top of file\nagentnexus\\agents\\multi_agent\\orchestrator.py:74:1: I001 [*] Import block is un-sorted or un-formatted\nagentnexus\\agents\\multi_agent\\orch...",
-  "timestamp": "2026-05-05T02:20:08.996Z",
+  "tool_input_preview": "{\"command\":\"git show HEAD:agentnexus/agents/multi_agent/orchestrator.py 2>/dev/null | findstr /n \\\"def analyst_node\\\"\",\"description\":\"Find analyst_node in HEAD commit to check original size\"}",
+  "error": "Exit code 1\nFINDSTR: �޷��� def analyst_node",
+  "timestamp": "2026-05-05T09:11:28.756Z",
   "retry_count": 1
 }

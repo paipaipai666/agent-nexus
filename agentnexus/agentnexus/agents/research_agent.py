@@ -14,7 +14,7 @@ from agentnexus.agents.schema import ResearchOutput, SourceClaim
 from agentnexus.core.llm import get_default_llm
 from agentnexus.prompts import get_current_date, load_prompt
 from agentnexus.rag.router import retrieve
-from agentnexus.tools.web_search import web_search
+from agentnexus.tools.web_search import web_search_structured
 
 RESEARCH_PROMPT = load_prompt("research")
 SUFFICIENCY_PROMPT = load_prompt("research_sufficiency")
@@ -32,6 +32,9 @@ class ResearchAgent:
         return output.summary if output.summary else "检索未产生有效结果"
 
     def search(self, query: str) -> ResearchOutput:
+        from agentnexus.tools.web_search import _seen_urls
+        _seen_urls.clear()
+
         all_results: list[dict] = []
         queries_used: list[str] = []
 
@@ -68,9 +71,14 @@ class ResearchAgent:
                 })
 
         try:
-            web_raw = web_search(query)
-            if web_raw and "网络搜索不可用" not in web_raw:
-                kb_parts.append({"text": f"[web] {web_raw[:2000]}", "source": "web"})
+            web_results = web_search_structured(query)
+            for wr in web_results:
+                url = wr.get("url", "")
+                date_str = f" ({wr['published_date']})" if wr.get("published_date") else ""
+                kb_parts.append({
+                    "text": f"[web] {wr['title']}{date_str}\n来源: {url}\n{wr['content']}",
+                    "source": "web",
+                })
         except Exception:
             pass
 
@@ -83,7 +91,7 @@ class ResearchAgent:
             prompt = SUFFICIENCY_PROMPT.format(
                 task=task,
                 iterations=iterations,
-                results_summary=results_summary[:2000],
+                results_summary=results_summary,
                 date=get_current_date(),
             )
             raw = self._llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
@@ -100,7 +108,9 @@ class ResearchAgent:
         except Exception:
             pass
 
-        return {"is_sufficient": True, "gap": "", "next_query": ""}
+        # Deterministic fallback: when LLM can't assess, default to insufficient
+        # (conservative — better to search again than to skip needed research)
+        return {"is_sufficient": False, "gap": "无法评估检索充分性（LLM 不可用），建议补充搜索", "next_query": task}
 
     def _synthesize(self, task: str, results: list[dict], queries: list[str]) -> ResearchOutput:
         if not results:
@@ -110,7 +120,7 @@ class ResearchAgent:
                 gaps="无任何检索结果",
             )
 
-        kb = "\n\n".join(r["text"][:2000] for r in results)
+        kb = "\n\n".join(r["text"] for r in results)
         web = "\n\n".join(
             r["text"] for r in results if r.get("source") == "web"
         )
@@ -118,8 +128,8 @@ class ResearchAgent:
             web = "网络搜索不可用"
 
         prompt = RESEARCH_PROMPT.format(
-            kb=kb[:4000],
-            web=web[:3000],
+            kb=kb,
+            web=web,
             query=f"<user_query>{task}</user_query>",
             date=get_current_date(),
         )
@@ -152,10 +162,7 @@ class ResearchAgent:
     @staticmethod
     def _summarize_results(results: list[dict]) -> str:
         texts = [r["text"] for r in results]
-        combined = "\n".join(texts)
-        if len(combined) <= 2000:
-            return combined
-        return combined[:1000] + "\n...(中间省略)...\n" + combined[-1000:]
+        return "\n".join(texts)
 
     def get_sources(self) -> list[SourceClaim]:
         if self.last_output is None:
@@ -180,12 +187,13 @@ class ResearchAgent:
                     SourceClaim(
                         claim=c.get("claim", ""),
                         source=c.get("source", "unknown"),
+                        url=c.get("url", ""),
                         confidence=float(c.get("confidence", 0.0)),
                     )
                     for c in data.get("claims", [])
                 ]
                 return ResearchOutput(
-                    summary=data.get("summary", raw[:500]),
+                    summary=data.get("summary", raw),
                     claims=claims,
                     gaps=data.get("gaps", ""),
                 )
@@ -193,7 +201,7 @@ class ResearchAgent:
                 pass
 
         return ResearchOutput(
-            summary=raw[:1000] if raw else "LLM 无输出",
+            summary=raw if raw else "LLM 无输出",
             claims=[],
             gaps="LLM 输出格式不符合 JSON Schema，无法提取结构化来源引用",
         )

@@ -21,7 +21,7 @@ def memory_list(limit: int = typer.Option(10, help="显示条数")):
     table.add_column("重要性")
     table.add_column("内容")
     for r in rows:
-        table.add_row(str(r["id"]), r["category"], f"{r['importance']:.1f}", r["content"][:60])
+        table.add_row(str(r["id"]), r["category"], f"{r['importance']:.1f}", r["content"])
     console.print(table)
 
 

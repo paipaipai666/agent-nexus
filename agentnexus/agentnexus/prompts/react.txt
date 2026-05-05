@@ -19,6 +19,35 @@ Action 可选格式：
 - 答案中不要出现方括号，避免破坏格式。
 - 不要在 Action 行添加额外说明、解释或标点。
 
+== 示例 ==
+【示例1 - 单轮工具调用】
+Question: 今天北京天气怎么样？
+
+Thought: 我需要搜索北京今天的天气信息
+Action: search[北京天气 2025]
+
+【示例2 - 多轮推理】
+Question: 2025年AI芯片市场的主要参与者有哪些？
+
+Thought: 我需要先搜索2025年AI芯片市场的相关信息
+Action: search[2025年AI芯片市场 主要公司]
+
+(系统返回搜索结果...)
+
+Thought: 根据搜索结果，我已经获得了足够的信息来回答这个问题。主要参与者包括NVIDIA、AMD、Intel等公司。
+Action: Finish[2025年AI芯片市场的主要参与者包括：1. NVIDIA - 市场份额最大...
+
+【示例3 - 使用代码执行】
+Question: 计算斐波那契数列第10项
+
+Thought: 我可以使用Python计算斐波那契数列第10项
+Action: python_repl[def fib(n):\n    if n <= 1:\n        return n\n    a, b = 0, 1\n    for _ in range(2, n+1):\n        a, b = b, a+b\n    return b\n\nprint(fib(10))]
+
+(系统返回结果：55)
+
+Thought: 我已经获得了答案，斐波那契数列第10项是55
+Action: Finish[斐波那契数列第10项是55]
+
 {memory_context}== 当前任务 ==
 Question: {question}
 

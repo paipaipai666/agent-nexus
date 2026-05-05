@@ -179,7 +179,7 @@ class _SpanContext:
             return
         md = {"status": "error" if exc_type else "ok"}
         if exc_type:
-            md["error"] = str(exc_val)[:500]
+            md["error"] = str(exc_val)
         ctx = self._manager.active
         if ctx is None:
             self.span.end_time = time.time()
@@ -191,13 +191,13 @@ class _SpanContext:
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _truncate(text: str, max_len: int = 1000) -> str:
+def _truncate(text: str, max_len: int = 5000) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + f"...[截断 {len(text) - max_len} 字符]"
 
 
-def _truncate_dict(d: dict[str, Any], max_len: int = 1000) -> dict[str, Any]:
+def _truncate_dict(d: dict[str, Any], max_len: int = 5000) -> dict[str, Any]:
     return {k: _truncate(str(v), max_len) for k, v in d.items()}
 
 

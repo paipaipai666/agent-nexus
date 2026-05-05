@@ -80,10 +80,9 @@ class TestLongTermMemory:
         )
         assert cursor.fetchone() is not None
 
-    def test_list_recent_truncates_content(self, ltm):
+    def test_list_recent_preserves_full_content(self, ltm):
         long_content = "A" * 200
         ltm.save("sess-1", long_content)
         recent = ltm.list_recent(limit=1)
         assert len(recent) == 1
-        # content truncated to 120 chars
-        assert len(recent[0]["content"]) <= 120
+        assert len(recent[0]["content"]) == 200

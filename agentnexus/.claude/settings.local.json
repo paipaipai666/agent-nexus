@@ -5,7 +5,15 @@
       "Bash(python -m pytest tests/unit/ -v)",
       "Bash(python -m pytest tests/integration/ -v)",
       "Bash(python -m pytest tests/unit/ -q)",
-      "Bash(python -m pytest tests/unit/ tests/integration/ -q)"
+      "Bash(python -m pytest tests/unit/ tests/integration/ -q)",
+      "mcp__plugin_oh-my-claudecode_t__lsp_diagnostics",
+      "Bash(python -m pytest tests/integration/test_orchestrator.py -q)",
+      "Bash(python -m pytest tests/integration/ -q)",
+      "mcp__plugin_oh-my-claudecode_t__state_write",
+      "Bash(findstr /n \"def analyst_node\")",
+      "Bash(git ls-tree *)",
+      "mcp__plugin_oh-my-claudecode_t__state_clear",
+      "mcp__plugin_oh-my-claudecode_t__state_list_active"
     ]
   }
 }

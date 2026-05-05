@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 class SourceClaim(BaseModel):
     claim: str = Field(..., description="具体事实声明")
-    source: str = Field(..., description="来源: URL / 文档路径 / 工具名称")
+    source: str = Field(..., description="来源标识: 'web' / 'local' / 文档名")
+    url: str = Field(default="", description="来源 URL（web 搜索时有值）")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="置信度 0-1")
 
 
@@ -67,58 +68,5 @@ class ErrorType(str, Enum):
     TRUNCATION = "truncation"
 
 
-RETRY_STRATEGIES: dict[ErrorType, dict] = {
-    ErrorType.MISSING_CODE: {
-        "strategy": "force_code_only",
-        "max_retries": 2,
-        "instruction": "必须只输出可执行 Python 代码，禁止任何解释文字。",
-    },
-    ErrorType.RUNTIME_ERROR: {
-        "strategy": "feed_error_back",
-        "max_retries": 3,
-        "instruction": "代码运行出错，请根据错误信息修复代码。",
-    },
-    ErrorType.HALLUCINATION: {
-        "strategy": "force_retrieval",
-        "max_retries": 2,
-        "instruction": "检测到编造数据。必须重新检索，每句话都要标注来源。禁止生成任何未在检索结果中出现的信息。",
-    },
-    ErrorType.TOOL_FAILURE: {
-        "strategy": "fallback",
-        "max_retries": 1,
-        "instruction": "工具调用失败，使用 fallback 方案。",
-    },
-    ErrorType.SCHEMA_VIOLATION: {
-        "strategy": "retry_with_schema",
-        "max_retries": 2,
-        "instruction": "输出格式不符合要求，请严格按照指定 Schema 重新输出。",
-    },
-    ErrorType.NO_OUTPUT: {
-        "strategy": "force_execution",
-        "max_retries": 2,
-        "instruction": (
-            "代码执行无任何输出。请确保: "
-            "1) 所有函数在代码顶层被调用(加 `if __name__ == '__main__':` 块); "
-            "2) print() 语句在模块层级执行而不仅仅定义在函数内。"
-        ),
-    },
-    ErrorType.EMPTY_RESULT: {
-        "strategy": "force_execution",
-        "max_retries": 2,
-        "instruction": "结果为空白，请生成有效内容。确保定义了测试数据并在顶层调用评估函数。",
-    },
-    ErrorType.LOGIC_ERROR: {
-        "strategy": "fix_logic",
-        "max_retries": 3,
-        "instruction": "代码输出与预期不符。请根据预期输出和执行差异修复代码逻辑。",
-    },
-    ErrorType.TRUNCATION: {
-        "strategy": "simplify",
-        "max_retries": 2,
-        "instruction": (
-            "上一次输出因长度限制被截断。"
-            "请将代码压缩到 800 字符以内：删除所有注释和类型标注、用缩写变量名、"
-            "plt.show() 改为 plt.savefig('out.png')，删除不必要的格式化。"
-        ),
-    },
-}
+# RETRY_STRATEGIES removed — escalation logic migrated to orchestrator._get_escalated_instruction().
+# ErrorType enum kept: still used by ExecutorAgent, CoderAgent, and orchestrator route logic.

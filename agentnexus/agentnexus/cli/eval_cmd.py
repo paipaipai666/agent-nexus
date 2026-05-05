@@ -27,7 +27,7 @@ def eval_list():
     table.add_column("标准答案（节选）", style="dim")
 
     for i, sample in enumerate(EVAL_SAMPLES, 1):
-        gt_display = sample.ground_truth[:65] + ("..." if len(sample.ground_truth) > 65 else "")
+        gt_display = sample.ground_truth
         table.add_row(str(i), sample.question, gt_display)
 
     console.print(table)

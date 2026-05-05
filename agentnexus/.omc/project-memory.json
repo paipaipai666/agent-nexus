@@ -26,7 +26,7 @@
   },
   "build": {
     "buildCommand": null,
-    "testCommand": "cd D:/code/AgentNexus/agentnexus && python -m pytest tests/unit/ tests/integration/ -q 2>&1 | tail -5",
+    "testCommand": "cd D:/code/AgentNexus/agentnexus && python -m pytest tests/unit/ -q 2>&1 | tail -3",
     "lintCommand": "ruff check",
     "devCommand": null,
     "scripts": {}
@@ -97,50 +97,116 @@
   "hotPaths": [
     {
       "path": "agentnexus\\agents\\multi_agent\\orchestrator.py",
-      "accessCount": 29,
-      "lastAccessed": 1777952816138,
+      "accessCount": 84,
+      "lastAccessed": 1777975252124,
       "type": "file"
     },
     {
       "path": "agentnexus\\agents\\critic_agent.py",
-      "accessCount": 9,
-      "lastAccessed": 1777950415393,
+      "accessCount": 21,
+      "lastAccessed": 1777972211132,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\agents\\research_agent.py",
+      "accessCount": 19,
+      "lastAccessed": 1777972211116,
       "type": "file"
     },
     {
       "path": "",
-      "accessCount": 7,
-      "lastAccessed": 1777946572921,
+      "accessCount": 9,
+      "lastAccessed": 1777972273871,
       "type": "directory"
     },
     {
+      "path": "agentnexus\\agents\\multi_agent\\state.py",
+      "accessCount": 9,
+      "lastAccessed": 1777972506523,
+      "type": "file"
+    },
+    {
       "path": "agentnexus\\prompts\\critic.txt",
-      "accessCount": 4,
-      "lastAccessed": 1777948542953,
+      "accessCount": 9,
+      "lastAccessed": 1777975194872,
       "type": "file"
     },
     {
       "path": "agentnexus\\observability\\tracer.py",
-      "accessCount": 4,
-      "lastAccessed": 1777949896376,
+      "accessCount": 8,
+      "lastAccessed": 1777965191764,
       "type": "directory"
-    },
-    {
-      "path": "agentnexus\\prompts\\analyst.txt",
-      "accessCount": 4,
-      "lastAccessed": 1777952315542,
-      "type": "file"
     },
     {
       "path": "agentnexus",
-      "accessCount": 3,
-      "lastAccessed": 1777951140865,
+      "accessCount": 8,
+      "lastAccessed": 1777968175016,
       "type": "directory"
     },
     {
+      "path": "agentnexus\\tools\\web_search.py",
+      "accessCount": 7,
+      "lastAccessed": 1777968133292,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\agents\\schema.py",
+      "accessCount": 7,
+      "lastAccessed": 1777968145253,
+      "type": "directory"
+    },
+    {
+      "path": "agentnexus\\core\\llm.py",
+      "accessCount": 6,
+      "lastAccessed": 1777965187988,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 6,
+      "lastAccessed": 1777973465892,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\prompts\\analyst.txt",
+      "accessCount": 6,
+      "lastAccessed": 1777975219829,
+      "type": "file"
+    },
+    {
       "path": "agentnexus\\agents\\analyst_agent.py",
-      "accessCount": 2,
-      "lastAccessed": 1777951141471,
+      "accessCount": 4,
+      "lastAccessed": 1777965179668,
+      "type": "file"
+    },
+    {
+      "path": "tests\\integration\\test_orchestrator.py",
+      "accessCount": 4,
+      "lastAccessed": 1777966360356,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\agents\\coder_agent.py",
+      "accessCount": 3,
+      "lastAccessed": 1777965178547,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\cli\\chat.py",
+      "accessCount": 3,
+      "lastAccessed": 1777965193389,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\memory\\manager.py",
+      "accessCount": 3,
+      "lastAccessed": 1777965199445,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\prompts\\research.txt",
+      "accessCount": 3,
+      "lastAccessed": 1777968166521,
       "type": "file"
     },
     {
@@ -150,15 +216,51 @@
       "type": "file"
     },
     {
-      "path": "requirements.txt",
-      "accessCount": 1,
-      "lastAccessed": 1777946561049,
+      "path": "agentnexus\\cli\\memory_cmd.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965194598,
       "type": "file"
     },
     {
-      "path": "README.md",
+      "path": "agentnexus\\cli\\eval_cmd.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965195729,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\memory\\long_term.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965197032,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\tools\\tool_wrapper.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965200614,
+      "type": "file"
+    },
+    {
+      "path": "agentnexus\\agents\\re_act_agent.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965201937,
+      "type": "file"
+    },
+    {
+      "path": "tests\\unit\\test_long_term.py",
+      "accessCount": 2,
+      "lastAccessed": 1777965473417,
+      "type": "file"
+    },
+    {
+      "path": "tests",
+      "accessCount": 2,
+      "lastAccessed": 1777966312572,
+      "type": "directory"
+    },
+    {
+      "path": "requirements.txt",
       "accessCount": 1,
-      "lastAccessed": 1777946561072,
+      "lastAccessed": 1777946561049,
       "type": "file"
     },
     {
@@ -192,16 +294,16 @@
       "type": "file"
     },
     {
-      "path": "agentnexus\\core\\llm.py",
-      "accessCount": 1,
-      "lastAccessed": 1777951166543,
-      "type": "file"
-    },
-    {
       "path": "agentnexus\\cli",
       "accessCount": 1,
       "lastAccessed": 1777955329547,
       "type": "directory"
+    },
+    {
+      "path": "agentnexus\\agents\\retry_manager.py",
+      "accessCount": 1,
+      "lastAccessed": 1777965635381,
+      "type": "file"
     }
   ],
   "userDirectives": []
