@@ -21,16 +21,18 @@ CREATE INDEX IF NOT EXISTS idx_ltm_category ON long_term_memories(category);
 """
 
 LTM_COLLECTION = "long_term_memories"
+_ltm_collection = None
 
 
 def _get_ltm_collection():
-    import chromadb
-    settings = get_settings()
-    client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-    return client.get_or_create_collection(
-        name=LTM_COLLECTION,
-        metadata={"hnsw:space": "cosine"},
-    )
+    global _ltm_collection
+    if _ltm_collection is None:
+        from agentnexus.rag.chroma_client import get_chroma_client
+        _ltm_collection = get_chroma_client().get_or_create_collection(
+            name=LTM_COLLECTION,
+            metadata={"hnsw:space": "cosine"},
+        )
+    return _ltm_collection
 
 
 class LongTermMemory:

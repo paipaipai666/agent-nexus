@@ -15,6 +15,7 @@ class AgentState(TypedDict):
     analysis: str
     critique_score: float
     critique_feedback: str
+    critique_fail_type: str
     hard_verdict: Optional[dict]
     error_type: str
     retry_count: int

@@ -16,10 +16,11 @@ from rich.console import Console
 from rich.markup import escape as _e
 
 from agentnexus.agents.coder_agent import CoderAgent
+from agentnexus.agents.critic_agent import PASS_THRESHOLD, CriticAgent
 from agentnexus.agents.executor_agent import ExecutorAgent
-from agentnexus.agents.multi_agent.state import AgentState
+from agentnexus.agents.multi_agent.state import AgentState, validate_state
 from agentnexus.agents.research_agent import ResearchAgent
-from agentnexus.agents.schema import ErrorType
+from agentnexus.agents.schema import ErrorType, ExecutionResult, SourceClaim
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.prompts import get_current_date, load_prompt
@@ -68,6 +69,7 @@ def _trace_wrapper(fn, node_name: str, input_keys: list[str]):
 _research = ResearchAgent()
 _coder = CoderAgent()
 _executor_agent = ExecutorAgent()
+_critic = CriticAgent()
 
 import threading
 _instance_local = threading.local()
@@ -85,14 +87,18 @@ def _get_analyst_llm() -> AgentLLM:
 
 # ── plan_node ───────────────────────────────────────────────────────────
 def plan_node(state: AgentState) -> dict:
+    validate_state(state, "plan")
     ctx = trace_manager.active
     if ctx and state.get("trace_id"):
         ctx.trace_id = state["trace_id"]
 
     feedback = ""
     instruction = state.get("retry_instruction", "")
+    critic_fb = state.get("critique_feedback", "")
     if instruction:
         feedback = f"\n上一次尝试的问题和修复指引:\n{instruction}\n请根据指引改进计划。"
+    elif critic_fb:
+        feedback = f"\n[Critic 反馈，请针对性改进]:\n{critic_fb}\n请根据反馈重新规划任务。"
 
     safe_task = state["task"].replace("{", "{{").replace("}", "}}")
     prompt = PLANNER_PROMPT.format(task=safe_task + feedback, date=get_current_date())
@@ -184,12 +190,18 @@ def route_after_plan(state: AgentState) -> str:
 
 # ── research_node ───────────────────────────────────────────────────────
 def research_node(state: AgentState) -> dict:
+    validate_state(state, "research")
     plan = state.get("plan", [])
     query = state["task"]
     for step in plan:
         if "research" in step.lower():
             query = step.split(":", 1)[1].strip() if ":" in step else query
             break
+
+    fail_type = state.get("critique_fail_type", "")
+    critic_fb = state.get("critique_feedback", "")
+    if fail_type == "info_insufficient" and critic_fb:
+        query = f"{query}（补充要求: {critic_fb[:500]}）"
 
     console.rule("[bold cyan]▸ 检索阶段[/bold cyan]")
     console.print(f"  [bold]查询:[/bold] {_e(query[:80])}")
@@ -249,6 +261,7 @@ def _extract_code_spec(state: AgentState) -> str:
 
 
 def code_node(state: AgentState) -> dict:
+    validate_state(state, "code")
     spec = _extract_code_spec(state)
 
     # 注入 research 结果作为上下文
@@ -266,7 +279,7 @@ def code_node(state: AgentState) -> dict:
                 break
         exec_err = state.get("exec_exception", "")
         if prev_code:
-            spec += f"\n\n[上文代码修改指引]\n上一次生成的代码（⚠️ 此代码存在问题，请勿原样复制）:\n```python\n{prev_code[:2000]}\n```"
+            spec += f"\n\n[上文代码修改指引]\n上一次生成的代码（⚠️ 此代码存在问题，请勿原样复制）:\n```python\n{prev_code}\n```"
         if exec_err:
             spec += f"\n执行错误（需修复）: {exec_err[:500]}"
         if "NO_OUTPUT" in exec_err:
@@ -274,6 +287,11 @@ def code_node(state: AgentState) -> dict:
                 "\n\n⚠️ 上述代码的问题：只定义了函数但没有在模块级调用。修复方法：在代码末尾添加\n"
                 "`if __name__ == '__main__':` 块，在其中调用所有顶层函数并 print 结果。"
             )
+
+    fail_type = state.get("critique_fail_type", "")
+    critic_fb = state.get("critique_feedback", "")
+    if fail_type == "code_error" and critic_fb and retry_count > 0:
+        spec += f"\n\n[Critic 代码问题反馈，请针对性修复]:\n{critic_fb}"
 
     if retry_count == 0:
         console.rule("[bold cyan]▸ 编码阶段[/bold cyan]")
@@ -342,6 +360,7 @@ def code_node(state: AgentState) -> dict:
 
 # ── execute_node ────────────────────────────────────────────────────────
 def execute_node(state: AgentState) -> dict:
+    validate_state(state, "execute")
     code = ""
     for msg in reversed(state.get("messages", [])):
         if isinstance(msg, tuple) and msg[0] == "coder" and not msg[1].startswith("ERROR"):
@@ -396,7 +415,7 @@ def execute_node(state: AgentState) -> dict:
         "exec_stderr": result.stderr,
         "exec_exception": result.exception,
         "retry_count": state.get("retry_count", 0) + (0 if result.success else 1),
-        "messages": [("executor", result.stdout[:1000] if result.stdout else result.exception[:500])],
+        "messages": [("executor", result.stdout or result.exception or "")],
     }
 
 
@@ -412,7 +431,7 @@ def route_after_execute(state: AgentState) -> str:
         return "analyst"
 
     retry_count = state.get("retry_count", 0)
-    if retry_count > MAX_RETRIES:
+    if retry_count >= MAX_RETRIES:
         console.rule("[bold red]▸ 重试耗尽[/bold red]")
         console.print(f"  [red]已达最大重试次数 {MAX_RETRIES}，强制通过[/red]\n")
         return "analyst"
@@ -428,8 +447,10 @@ def route_after_execute(state: AgentState) -> str:
 
 # ── analyst_node ────────────────────────────────────────────────────────
 def analyst_node(state: AgentState) -> dict:
+    validate_state(state, "analyst")
     console.rule("[bold cyan]▸ 综合分析阶段[/bold cyan]")
 
+    task = state.get("task", "")
     research = state.get("research_result", "无")
     exec_out = state.get("exec_stdout", "")
     exec_err = state.get("exec_exception", "")
@@ -442,64 +463,184 @@ def analyst_node(state: AgentState) -> dict:
             source_code = msg[1]
             break
 
-    # 确定性执行报告
-    if exec_success:
-        lines = ["## 代码执行报告", "", "**状态**: ✅ 执行成功"]
+    plan = state.get("plan", [])
+    has_code_step = any("code" in s.lower() for s in plan)
+    is_pure_research = not source_code and not exec_out and not exec_err
+
+    # ── 构建执行报告（诊断用，不输出给用户）──
+    if is_pure_research:
+        exec_report = "（本次无代码执行，基于研究结果直接生成答案）"
+        console.print("  [dim]基于研究结果合成答案...[/dim]")
+    elif exec_success:
+        exec_report = "**状态**: ✅ 执行成功"
         if retry_count > 0:
-            lines.append(f"**重试次数**: {retry_count}")
+            exec_report += f"\n**重试次数**: {retry_count}"
         if exec_out:
-            lines.extend(["", "**输出**:", "```", exec_out[:1500], "```"])
-        exec_report = "\n".join(lines)
+            exec_report += f"\n**输出**:\n```\n{exec_out[:1500]}\n```"
         console.print("  [bold green]✓ 代码执行成功[/bold green]")
     else:
-        lines = ["## 代码执行报告", "", "**状态**: ❌ 执行失败"]
-        if retry_count > 0:
-            lines.append(f"**重试次数**: {retry_count}")
+        exec_report = "**状态**: ❌ 执行失败"
         if exec_err:
             if "NO_OUTPUT" in exec_err:
-                lines.append("**原因**: 代码运行但未产生任何输出（缺少 `if __name__ == '__main__':` 入口）")
+                exec_report += "\n**原因**: 代码运行但未产生任何输出"
             else:
-                lines.append(f"**错误**: {exec_err[:300]}")
+                exec_report += f"\n**错误**: {exec_err[:300]}"
         else:
-            lines.append("**错误**: 代码未生成任何输出")
-        exec_report = "\n".join(lines)
+            exec_report += "\n**错误**: 代码未生成任何输出"
         console.print("  [red]✗ 代码执行失败[/red]")
 
-    # 无输出则跳过 LLM 分析
-    if not exec_success and not exec_out:
-        console.print("  [yellow]执行失败且无输出，跳过 LLM 分析[/yellow]\n")
-        return {
-            "analysis": exec_report,
-            "messages": [("analyst", "execution failed, no output")],
-        }
-
+    # ── LLM 合成最终答案 ──
     with console.status("  [dim]LLM 分析中...[/dim]", spinner="dots"):
         try:
+            fail_type = state.get("critique_fail_type", "")
+            critic_fb = state.get("critique_feedback", "")
+            task_with_feedback = task
+            if fail_type == "analysis_incomplete" and critic_fb:
+                task_with_feedback = f"{task}\n\n[上一轮 Critic 反馈，请针对性改进]:\n{critic_fb[:500]}"
             prompt = ANALYST_PROMPT.format(
-                task=state.get("task", ""),
-                research=research[:2000],
-                code=state.get("code_result", "无")[:2000],
-                source_code=source_code[:3000],
-                exec_output=exec_out[:1000],
+                task=task_with_feedback,
+                research=research[:1500],
+                code=state.get("code_result", "无")[:800],
+                exec_output_raw=exec_out or "（无输出）",
+                exec_output=exec_out,
                 exec_error=exec_err[:500],
-                exec_status="成功" if exec_success else "失败",
+                exec_status="成功" if exec_success else ("无执行" if is_pure_research else "失败"),
                 exec_report=exec_report,
                 date=get_current_date(),
             )
             analysis = _get_analyst_llm().think([{"role": "user", "content": prompt}], silent=True) or ""
+            if _get_analyst_llm().last_truncated:
+                console.print("  [yellow]⚠ Analyst 输出被 LLM 截断（max_tokens），最终答案可能不完整[/yellow]")
+                analysis += (
+                    "\n\n⚠️ [系统检测] LLM 输出在生成过程中被截断（达到 max_tokens 上限）。"
+                    "以上答案中的分析内容可能不完整，请检查。"
+                )
         except Exception as e:
             analysis = f"分析出错: {e}"
             console.print(f"  [red]✗ 分析失败: {_e(str(e))}[/red]")
 
     import re as _re
+
+    # ── 检测 Analyst 是否编造了执行数据 ──
+    if exec_out and exec_out.strip() and exec_success:
+        _data_row_re = _re.compile(r'\d+\s+\S+')
+        _real_rows = [ln for ln in exec_out.strip().split('\n') if _data_row_re.search(ln)]
+        _real_count = len(_real_rows)
+        if _real_count > 0:
+            _table_blocks = _re.findall(
+                r'(?:#|Reference|样本|测试数据|\d+\s+\S).*?(?:\n(?:#|Reference|样本|测试数据|\d+\s+\S).*?){2,}',
+                analysis, _re.DOTALL,
+            )
+            _analysis_rows = 0
+            for _block in _table_blocks:
+                _analysis_rows += len([ln for ln in _block.split('\n') if _data_row_re.search(ln)])
+            if _analysis_rows > _real_count:
+                _warn = (
+                    f"\n\n⚠️ [系统检测] 以上分析中展示的数据行数({_analysis_rows}行)多于实际执行输出"
+                    f"({_real_count}行)。分析中的数据可能包含编造内容，实际执行只产生了 {_real_count} 行数据。"
+                )
+                analysis += _warn
+                console.print(
+                    f"  [yellow]⚠ 检测到疑似数据编造: 分析中 {_analysis_rows} 行 vs 实际 {_real_count} 行[/yellow]"
+                )
+
     if exec_success:
         analysis = _re.sub(r'\*\*状态\*\*[：:]\s*❌\s*执行失败', '**状态**: ✅ 执行成功', analysis)
-    else:
+    elif not is_pure_research:
         analysis = _re.sub(r'\*\*状态\*\*[：:]\s*✅\s*执行成功', '**状态**: ❌ 执行失败', analysis)
 
-    analysis = exec_report + "\n\n" + analysis
+    # ── 机械拼接完整源代码（不由 LLM 复现，保证永不截断）──
+    if source_code and source_code.strip():
+        analysis += (
+            "\n\n---\n\n"
+            "## 完整源代码（系统附加，可运行）\n\n"
+            "```python\n"
+            f"{source_code}\n"
+            "```\n"
+        )
+
+    # ── Critic 评分最终答案 ──
+    raw_claims = state.get("research_claims", [])
+    sources = [SourceClaim(**c) for c in raw_claims] if raw_claims else []
+    exec_for_critic = ExecutionResult(
+        success=exec_success, stdout=exec_out,
+        stderr=state.get("exec_stderr", ""), exception=exec_err,
+        exit_code=0 if exec_success else 1,
+    ) if source_code else None
+
+    try:
+        critic_score, critic_feedback, hard_fail, fail_type = _critic.evaluate(
+            task=task, answer=analysis,
+            output_code=source_code or None, sources=sources,
+            exec_result=exec_for_critic,
+            task_requires_code=has_code_step,
+            task_requires_research=any("research" in s.lower() for s in plan),
+        )
+        if hard_fail:
+            console.print(f"  [red]✗ Critic 硬规则: {_e(hard_fail.fail_reason[:120])}[/red]")
+            fail_type = "replan"
+        else:
+            passed = critic_score >= PASS_THRESHOLD
+            console.print(f"  [bold]{'✓' if passed else '✗'} Critic 评分: {critic_score:.1f}/10{' ✓ 通过' if passed else ''}[/bold]")
+            if critic_feedback:
+                console.print(f"  [dim]{_e(critic_feedback[:200])}[/dim]")
+            if not passed:
+                console.print(f"  [dim]失败类型: {fail_type}[/dim]")
+        console.print()
+    except Exception:
+        critic_score, critic_feedback, hard_fail, fail_type = 5.0, "", None, "replan"
+
+    hard_verdict = hard_fail.model_dump() if hard_fail else None
+    retry_instruction = ""
+    next_retry_count = retry_count
+    if hard_fail:
+        retry_instruction = f"Critic 硬规则失败: {hard_fail.fail_reason}。请重新规划任务。"
+        next_retry_count += 1
+    elif critic_score < 7.0:
+        retry_instruction = f"Critic 评分 {critic_score:.1f}/10 低于阈值 7.0。反馈: {critic_feedback[:300]}。请改进输出质量。"
+        next_retry_count += 1
+
     console.print("  [bold green]✓ 分析完成[/bold green]\n")
-    return {"analysis": analysis, "messages": [("analyst", analysis)]}
+    return {
+        "analysis": analysis, "messages": [("analyst", analysis)],
+        "critique_score": critic_score, "critique_feedback": critic_feedback,
+        "critique_fail_type": fail_type,
+        "hard_verdict": hard_verdict, "retry_instruction": retry_instruction,
+        "retry_count": next_retry_count,
+    }
+
+
+# ── Router: analyst → END or targeted retry ────────────────────────────
+def route_after_analyst(state: AgentState) -> str:
+    hard = state.get("hard_verdict")
+    score = state.get("critique_score", 5.0)
+    retry_count = state.get("retry_count", 0)
+    fail_type = state.get("critique_fail_type", "replan")
+
+    if retry_count >= MAX_RETRIES:
+        console.print(f"  [red]已达最大重试次数 {MAX_RETRIES}，强制结束[/red]\n")
+        return "__end__"
+
+    if score >= 7.0:
+        return "__end__"
+
+    route_map = {
+        "code_error":          "code",
+        "info_insufficient":   "research",
+        "analysis_incomplete": "analyst",
+        "replan":              "plan",
+    }
+    target = route_map.get(fail_type, "plan")
+
+    target_labels = {
+        "code_error": "代码修复",
+        "info_insufficient": "补充检索",
+        "analysis_incomplete": "重新分析",
+        "replan": "重规划",
+    }
+    label = target_labels.get(fail_type, fail_type)
+    console.print(f"  [yellow]Critic 评分 {score:.1f}/10 < 7.0 ({label}) → {target}[/yellow]\n")
+    return target
 
 
 # ── Build graph ─────────────────────────────────────────────────────────
@@ -528,7 +669,13 @@ def build_orchestrator(checkpointer=None):
         "code": "code",
         "research": "research",
     })
-    builder.add_edge("analyst", END)
+    builder.add_conditional_edges("analyst", route_after_analyst, {
+        "plan": "plan",
+        "code": "code",
+        "research": "research",
+        "analyst": "analyst",
+        "__end__": END,
+    })
 
     return builder.compile(checkpointer=checkpointer)
 

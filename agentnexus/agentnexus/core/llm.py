@@ -14,6 +14,15 @@ console = Console()
 LLM_MAX_RETRIES = 3
 LLM_RETRY_BASE_DELAY = 2.0
 
+_default_llm: "AgentLLM | None" = None
+
+
+def get_default_llm() -> "AgentLLM":
+    global _default_llm
+    if _default_llm is None:
+        _default_llm = AgentLLM()
+    return _default_llm
+
 
 class AgentLLM:
     def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):

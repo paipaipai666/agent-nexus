@@ -1,0 +1,25 @@
+# AgentNexus 版本锁定 (pip freeze 生成)
+# 使用: pip install -r requirements.txt
+# 注意: 此文件包含传递依赖，用于 CI 和部署环境一致性
+
+chromadb==1.5.8
+e2b==2.20.2
+e2b-code-interpreter==2.6.1
+httpx==0.28.1
+jieba==0.42.1
+langgraph==1.1.10
+langgraph-checkpoint==4.0.3
+langgraph-checkpoint-sqlite==3.0.3
+langgraph-prebuilt==1.0.13
+langgraph-sdk==0.3.13
+litellm==1.83.14
+prompt-toolkit==3.0.52
+pydantic==2.12.5
+pydantic-settings==2.10.1
+PyMuPDF==1.27.2.3
+PyYAML==6.0.2
+rank-bm25==0.2.2
+rich==14.1.0
+sentence-transformers==5.2.0
+tavily-python==0.7.24
+typer==0.16.1

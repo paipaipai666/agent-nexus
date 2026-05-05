@@ -17,8 +17,7 @@ jobs:
       - name: Lint
         run: ruff check agentnexus/ tests/
       - name: Test
-        run: python test_all.py
-        continue-on-error: true
+        run: python -m pytest tests/ -v
       - name: Eval
         run: python -c "from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES; from agentnexus.rag.evaluator import RAGEvaluator; e = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES); print('eval samples:', len(EVAL_SAMPLES))"
         env:

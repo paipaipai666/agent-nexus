@@ -22,11 +22,17 @@
 ┌──────────────────────────────────────────────────────────┐
 │              Orchestrator（LangGraph FSM）                │
 │                                                          │
-│  START → plan → research → code → execute                │
-│                     ↑            │     ↓                 │
-│                     │    retry   │  success               │
-│                     │            ▼                        │
-│                     └─── code/research ← failure          │
+│  START → plan → research → code → execute → analyst → END │
+│              ↑        │          │     ↓     ↑              │
+│              │        │          │  success   │              │
+│              │        │          │     │      │              │
+│              │        │          │     │   crit < 7.0        │
+│              │        │          │     │      │              │
+│              │        │          │  failure → code (重试)    │
+│              │        │          │  ModuleNotFoundError       │
+│              │        │          └──→ research (查文档)      │
+│              │        │                                      │
+│              └─ plan ← crit < 7.0 / hard_verdict             │
 │                                                          │
 │  ┌──────────┐   ┌──────┐   ┌──────────┐                 │
 │  │ Research │   │ Coder│   │ Executor │                 │
@@ -63,7 +69,7 @@
 |------|------|
 | **强 Schema 门禁** | 所有 Agent 输出通过 Pydantic 模型校验（CodeOutput / ResearchOutput / ExecutionResult），不通过不允许进入后续阶段 |
 | **独立执行验证** | fork 子进程隔离执行，捕获 stdout/stderr/异常。缺库自动 `pip install`。执行前添加 HITL 确认，重试时自动跳过 |
-| **8 类错误 + 智能重试** | 错误分 MISSING_CODE / RUNTIME_ERROR / NO_OUTPUT / TOOL_FAILURE / TRUNCATION 等 8 类，执行失败直接路由回 code 或 research 重试（最多 3 次） |
+| **9 类错误 + 智能重试** | 错误分 MISSING_CODE / RUNTIME_ERROR / HALLUCINATION / TOOL_FAILURE / SCHEMA_VIOLATION / NO_OUTPUT / EMPTY_RESULT / LOGIC_ERROR / TRUNCATION 共 9 类，执行失败路由回 code（代码修复）或 research（查 API 文档）重试（最多 3 次） |
 | **__main__ 自动追加** | LLM 生成代码后，AST 解析检测入口块——缺失时自动追加 `if __name__ == '__main__':` 调用所有顶层函数（防御 LLM 忽略 prompt 指令） |
 | **Token 截断检测** | 捕获 `finish_reason=="length"`，触发 TRUNCATION 策略（精简/拆分），不再盲目 force_code_only |
 | **确定性执行报告** | 代码执行后系统硬生成状态报告（✅ 成功 / ❌ 失败 + stdout预览），Analyst 的 LLM 无权篡改 |
@@ -117,14 +123,14 @@ agentnexus/
 │   ├── cli/
 │   │   ├── run.py / chat.py / config.py / kb.py / logs.py / eval_cmd.py / stats.py
 │   ├── agents/
-│   │   ├── schema.py              # TaskOutput / CodeOutput / ExecutionResult / ErrorType (8 类)
+│   │   ├── schema.py              # TaskOutput / CodeOutput / ExecutionResult / ErrorType (9 类)
 │   │   ├── coder_agent.py         # 代码生成 + Schema 校验 + AST 完整性检查
 │   │   ├── executor_agent.py      # fork 子进程隔离执行 + 缺库自动安装 + Python 3.13 compat
 │   │   ├── research_agent.py      # RAG + Web 搜索 + 来源强制引用
 │   │   ├── analyst_agent.py       # 综合分析（LLM）
-│   │   ├── critic_agent.py        # ⚠ deprecated（orchestrator 4.0 已移除 critic 阶段）
-│   │   ├── critic_rules.py        # ⚠ deprecated
-│   │   ├── retry_manager.py       # ⚠ deprecated（错误分类逻辑已内联到 orchestrator）
+│   │   ├── critic_agent.py        # 质量评分 + 硬规则检查（analyst_node 内部调用）
+│   │   ├── critic_rules.py        # 硬规则检查器（critic_agent 依赖）
+│   │   ├── retry_manager.py       # ⚠ deprecated（错误分类已内联到 orchestrator）
 │   │   └── multi_agent/
 │   │       ├── orchestrator.py    # LangGraph FSM — plan→research→code→execute→analyst
 │   │       └── state.py           # AgentState 定义
@@ -149,7 +155,7 @@ agentnexus/
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `llm_api_key` | — | LLM API Key（必填） |
-| `llm_model_id` | `deepseek-v4-flash` | 模型 ID |
+| `llm_model_id` | `deepseek/deepseek-v4-flash` | 模型 ID（含 provider 前缀） |
 | `llm_base_url` | `https://api.deepseek.com` | API 地址 |
 | `llm_timeout` | `60` | 请求超时（秒） |
 | `tavily_api_key` | — | 搜索引擎 API Key（可选） |
@@ -159,8 +165,8 @@ agentnexus/
 
 ```bash
 pip install -e ".[dev,eval]"
-ruff check agentnexus/
-python test_all.py
+ruff check agentnexus/ tests/
+python -m pytest tests/ -v
 ```
 
 ## 技术栈

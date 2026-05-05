@@ -27,7 +27,7 @@ def run(
 
     analysis = result.get("analysis", "")
     if analysis:
-        console.print(Panel(analysis[:3000], title="结果", border_style="green"))
+        console.print(Panel(analysis, title="结果", border_style="green"))
     console.print(
         f"重试: {result.get('retry_count', 0)}"
     )

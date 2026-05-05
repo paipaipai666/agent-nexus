@@ -4,6 +4,7 @@
 最终以 JSONL 格式写入 ~/.agentnexus/traces/ 目录。
 """
 
+import atexit
 import json
 import time
 import uuid
@@ -203,3 +204,10 @@ def _truncate_dict(d: dict[str, Any], max_len: int = 1000) -> dict[str, Any]:
 # ── 全局实例 ─────────────────────────────────────────────────────────
 
 trace_manager = TraceManager()
+
+
+@atexit.register
+def _flush_on_exit():
+    ctx = trace_manager.active
+    if ctx is not None and ctx.spans:
+        trace_manager.end_trace()

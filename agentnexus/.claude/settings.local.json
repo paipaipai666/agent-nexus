@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(python -m pytest tests/unit/ -v)",
+      "Bash(python -m pytest tests/integration/ -v)",
+      "Bash(python -m pytest tests/unit/ -q)",
+      "Bash(python -m pytest tests/unit/ tests/integration/ -q)"
+    ]
+  }
+}
