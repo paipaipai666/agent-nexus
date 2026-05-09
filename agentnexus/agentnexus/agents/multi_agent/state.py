@@ -7,6 +7,7 @@ from pydantic import ValidationError
 class AgentState(TypedDict):
     task: str
     trace_id: str
+    memory_session_id: str
     plan: list[str]
     research_result: str
     research_status: Literal["ok", "error", ""]

@@ -33,7 +33,7 @@ class ShortTermMemory:
                 import re
                 chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
                 other_chars = len(content) - chinese_chars
-                total += int(chinese_chars * 1.4 + other_chars * 0.4)
+                total += int(chinese_chars * 1.8 + other_chars * 0.3)
         return total
 
     def clear(self):

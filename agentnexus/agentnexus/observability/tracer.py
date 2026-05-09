@@ -28,6 +28,7 @@ class TraceSpan:
     input: dict[str, Any] = field(default_factory=dict)
     output: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    _flushed: bool = False  # True if already written to disk (crash-safe)
 
     @property
     def latency_ms(self) -> float:
@@ -132,24 +133,64 @@ class TraceManager:
         if not self._traces_dir:
             return
         date_str = time.strftime("%Y-%m-%d")
-        file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        traces_path = Path(self._traces_dir)
+        traces_path.mkdir(parents=True, exist_ok=True)
+        file_path = traces_path / f"{date_str}.jsonl"
 
         with open(file_path, "a", encoding="utf-8") as f:
             for span in ctx.spans:
-                record = {
-                    "trace_id": ctx.trace_id,
-                    "span_id": span.span_id,
-                    "parent_span_id": span.parent_span_id,
-                    "name": span.name,
-                    "start_time": span.start_time,
-                    "end_time": span.end_time,
-                    "latency_ms": span.latency_ms,
-                    "input": span.input,
-                    "output": span.output,
-                    "metadata": span.metadata,
-                }
+                if span._flushed:
+                    continue  # already written by _flush_span
+                record = self._span_record(ctx.trace_id, span)
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                span._flushed = True
+
+        self._cleanup_old_traces()
+
+    def _flush_span(self, ctx: TraceContext, span: TraceSpan):
+        """Write a single span to disk immediately (crash-safe)."""
+        if not self._traces_dir or span._flushed:
+            return
+        date_str = time.strftime("%Y-%m-%d")
+        file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        record = self._span_record(ctx.trace_id, span)
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        span._flushed = True
+
+    @staticmethod
+    def _span_record(trace_id: str, span: TraceSpan) -> dict:
+        return {
+            "trace_id": trace_id,
+            "span_id": span.span_id,
+            "parent_span_id": span.parent_span_id,
+            "name": span.name,
+            "start_time": span.start_time,
+            "end_time": span.end_time,
+            "latency_ms": span.latency_ms,
+            "input": span.input,
+            "output": span.output,
+            "metadata": span.metadata,
+        }
+
+    def _cleanup_old_traces(self):
+        """Remove JSONL files older than the configured retention period."""
+        try:
+            from agentnexus.core.config import get_settings
+            retention_days = get_settings().trace_retention_days
+        except Exception:
+            retention_days = 30
+
+        cutoff = time.time() - retention_days * 86400
+        traces_dir = Path(self._traces_dir)
+        for f in traces_dir.glob("*.jsonl"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
 
 
 # ── Span Context Manager ─────────────────────────────────────────────

@@ -1,9 +1,12 @@
 import json
+import logging
 import math
 import sqlite3
 from datetime import datetime, timezone
 
 from agentnexus.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS long_term_memories (
@@ -39,6 +42,8 @@ class LongTermMemory:
     def __init__(self):
         settings = get_settings()
         db_path = settings.memory_db_path
+        self._max_memories = settings.max_memories
+        self._ttl_days = settings.memory_ttl_days
         from pathlib import Path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -94,8 +99,44 @@ class LongTermMemory:
                     documents=[content],
                     metadatas=[{"category": category, "importance": importance}],
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
+
+        self._evict_if_needed()
+
+    def _evict_if_needed(self):
+        """Evict oldest/lowest-importance memories when over max_memories."""
+        count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+        current = count_row["cnt"]
+        if current <= self._max_memories:
+            return
+
+        excess = current - self._max_memories
+        # Delete by lowest importance first, then oldest
+        self._conn.execute(
+            "DELETE FROM long_term_memories WHERE id IN ("
+            "  SELECT id FROM long_term_memories ORDER BY importance ASC, created_at ASC LIMIT ?"
+            ")",
+            (excess,)
+        )
+        deleted = self._conn.total_changes
+        self._conn.commit()
+        logger.info("Evicted %d memories (limit: %d)", deleted, self._max_memories)
+
+        # Also clean up expired memories opportunistically
+        self._cleanup_expired()
+
+    def _cleanup_expired(self):
+        """Delete memories older than memory_ttl_days."""
+        self._conn.execute(
+            "DELETE FROM long_term_memories WHERE "
+            "datetime(created_at) < datetime('now', ?)",
+            (f"-{self._ttl_days} days",)
+        )
+        removed = self._conn.total_changes
+        if removed:
+            self._conn.commit()
+            logger.info("Cleaned up %d expired memories (>%d days)", removed, self._ttl_days)
 
     def search(self, query_embedding: list[float] | None = None, category: str | None = None,
                limit: int = 5, min_similarity: float = 0.3) -> list[dict]:
@@ -121,7 +162,8 @@ class LongTermMemory:
                 n_results=limit * 3,
                 where=where_filter,
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("ChromaDB query failed, falling back to cosine search: %s", e)
             return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
 
         if not chroma_results["ids"] or not chroma_results["ids"][0]:
@@ -166,20 +208,38 @@ class LongTermMemory:
         if not rows:
             return []
 
+        # Batch fetch all embeddings in a single ChromaDB call
+        all_ids = [r["chroma_id"] for r in rows]
+        id_row_map = {r["chroma_id"]: r for r in rows}
+        try:
+            chroma_results = self._chroma_col.get(ids=all_ids, include=["embeddings"])
+        except Exception as e:
+            logger.warning("ChromaDB batch get failed in fallback search: %s", e)
+            return []
+
+        # Build id -> embedding map from batch results
+        id_vec_map: dict[str, list[float]] = {}
+        result_ids = chroma_results.get("ids", [])
+        result_embeddings = chroma_results.get("embeddings") or []
+        for cid, emb in zip(result_ids, result_embeddings):
+            if emb:
+                id_vec_map[cid] = emb
+
+        # Precompute query norm once
+        norm_q = math.sqrt(sum(a * a for a in query_embedding))
+        if norm_q == 0:
+            return []
+
         scored = []
         for r in rows:
-            try:
-                chroma_results = self._chroma_col.get(ids=[r["chroma_id"]], include=["embeddings"])
-                if not chroma_results["embeddings"] or not chroma_results["embeddings"][0]:
-                    continue
-                vec = chroma_results["embeddings"][0]
-                dot = sum(a * b for a, b in zip(query_embedding, vec))
-                norm_q = math.sqrt(sum(a * a for a in query_embedding))
-                norm_e = math.sqrt(sum(b * b for b in vec))
-                sim = dot / (norm_q * norm_e) if norm_q and norm_e else 0.0
-                if sim < min_similarity:
-                    continue
-            except Exception:
+            cid = r["chroma_id"]
+            vec = id_vec_map.get(cid)
+            if vec is None:
+                continue
+            dot = sum(a * b for a, b in zip(query_embedding, vec))
+            norm_e = math.sqrt(sum(b * b for b in vec))
+            sim = dot / (norm_q * norm_e) if norm_e else 0.0
+            if sim < min_similarity:
                 continue
 
             try:
@@ -207,7 +267,7 @@ class LongTermMemory:
             try:
                 self._ensure_chroma()
                 self._chroma_col.delete(ids=[row["chroma_id"]])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("ChromaDB delete failed for memory %s: %s", memory_id, e)
         self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))
         self._conn.commit()

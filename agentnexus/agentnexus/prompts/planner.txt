@@ -27,6 +27,7 @@ code: 使用matplotlib生成2025年AI芯片市场份额饼图
 - 如果任务涉及"最新""最近""当前"，搜索关键词必须包含 {date}
 - 搜索关键词中的年份不能早于 {date}
 
+{memory_context}
 任务: {task}
 
 输出:

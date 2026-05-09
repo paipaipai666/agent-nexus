@@ -98,8 +98,12 @@ class MemoryManager:
 
         for category, importance in MEMORY_CATEGORIES.items():
             for item in data.get(category, []):
-                if not isinstance(item, str) or len(item) < 5:
+                # Normalize: LLM may output strings or {{"content": "..."}} objects
+                if isinstance(item, dict):
+                    item = item.get("content") or item.get("text") or ""
+                if not isinstance(item, str) or len(item.strip()) < 5:
                     continue
+                item = item.strip()
                 vec = self._embed_model.encode(item, normalize_embeddings=True).tolist()
                 self.long_term.save(
                     session_id=self.session_id,

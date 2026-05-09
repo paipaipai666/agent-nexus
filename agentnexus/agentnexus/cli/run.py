@@ -1,6 +1,10 @@
 """CLI run and version commands"""
+import uuid
+
 import typer
 from rich.panel import Panel
+
+from agentnexus.memory.manager import MemoryManager
 
 from . import app, console
 
@@ -9,20 +13,31 @@ from . import app, console
 def run(
     task: str = typer.Argument(..., help="要执行的任务描述"),
     non_interactive: bool = typer.Option(False, "--non-interactive", "-n", help="跳过交互确认，自动执行代码"),
+    no_memory: bool = typer.Option(False, "--no-memory", help="禁用长期记忆"),
 ):
     """执行一个任务"""
-    from agentnexus.agents.multi_agent.orchestrator import orchestrator_persistent
+    from agentnexus.agents.multi_agent.orchestrator import (
+        orchestrator_persistent,
+        set_orchestrator_memory,
+    )
     from agentnexus.core.config import get_settings
+    from agentnexus.core.llm import AgentLLM
     from agentnexus.observability.tracer import trace_manager
 
     trace_manager.configure(get_settings().traces_dir)
     ctx = trace_manager.start_trace(task)
 
+    # Cross-session memory
+    session_id = f"run_{uuid.uuid4().hex[:12]}"
+    memory = MemoryManager(session_id, llm=AgentLLM(), enable_long_term=not no_memory)
+    set_orchestrator_memory(memory)
+
     console.print(Panel(f"[bold]{task}[/bold]", title="任务"))
 
     config = {"configurable": {"thread_id": ctx.trace_id}}
     result = orchestrator_persistent.invoke(
-        {"task": task, "trace_id": ctx.trace_id}, config=config
+        {"task": task, "trace_id": ctx.trace_id, "memory_session_id": session_id},
+        config=config,
     )
 
     analysis = result.get("analysis", "")
@@ -31,6 +46,9 @@ def run(
     console.print(
         f"重试: {result.get('retry_count', 0)}"
     )
+
+    # Persist learnings from this task
+    memory.conclude(task, analysis)
 
     trace_manager.end_trace()
 

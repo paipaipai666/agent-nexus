@@ -6,11 +6,12 @@
 Q: {question}
 A: {answer}
 
-输出格式（严格的 JSON）:
+输出格式（严格的 JSON，每个分类的值是字符串数组）:
 {{
-  "user_preference": [{{content}}],
-  "entity_fact": [{{content}}],
-  "conclusion": [{{content}}]
+  "user_preference": ["用户偏好描述1", "用户偏好描述2"],
+  "entity_fact": ["事实描述1", "事实描述2"],
+  "conclusion": ["结论描述1", "结论描述2"]
 }}
+每个字符串至少 5 个字。如果没有对应分类的记忆，返回空数组 []。
 
 JSON:

@@ -96,6 +96,7 @@ class ReActAgent:
                 self._output(f"思考: {thought}")
             if memory_manager:
                 memory_manager.append("assistant", response_text)
+                memory_manager.maybe_compact()
 
             if not action:
                 self._output("警告:未能解析出有效的Action，流程终止。")

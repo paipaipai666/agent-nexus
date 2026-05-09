@@ -32,6 +32,22 @@ console = Console()
 PLANNER_PROMPT = load_prompt("planner")
 ANALYST_PROMPT = load_prompt("analyst")
 
+# ── MemoryManager bridge ──────────────────────────────────────────────
+# Orchestrator nodes are pure functions; MemoryManager is not serializable.
+# The CLI runner injects a MemoryManager before invoking the graph.
+_orchestrator_memory = None
+
+
+def set_orchestrator_memory(memory):
+    """Set the MemoryManager instance for the current orchestrator run."""
+    global _orchestrator_memory
+    _orchestrator_memory = memory
+
+
+def get_orchestrator_memory():
+    """Get the MemoryManager instance set by the CLI runner."""
+    return _orchestrator_memory
+
 _MAX_RETRIES: dict[str, int] = {
     "code_error": 3,
     "info_insufficient": 3,
@@ -65,10 +81,12 @@ def _trace_wrapper(fn, node_name: str, input_keys: list[str]):
                     output_data={k: _trunc(str(v)) for k, v in result.items()},
                     metadata={"status": "ok"},
                 )
+                trace_manager._flush_span(ctx, span)
             return result
         except Exception as e:
             if span and ctx:
                 ctx.end_span(span, metadata={"status": "error", "error": str(e)[:200]})
+                trace_manager._flush_span(ctx, span)
             raise
     return wrapped
 
@@ -185,7 +203,21 @@ def plan_node(state: AgentState) -> dict:
         feedback = f"\n[Critic 反馈，请针对性改进]:\n{critic_fb}\n请根据反馈重新规划任务。"
 
     safe_task = state["task"].replace("{", "{{").replace("}", "}}")
-    prompt = PLANNER_PROMPT.format(task=safe_task + feedback, date=get_current_date())
+
+    # Inject cross-session memory context if available
+    memory = get_orchestrator_memory()
+    memory_context = ""
+    if memory:
+        try:
+            memory_context = memory.init_session(state["task"])
+        except Exception as e:
+            console.print(f"  [dim]记忆检索失败: {_e(str(e))}[/dim]")
+
+    prompt = PLANNER_PROMPT.format(
+        task=safe_task + feedback,
+        date=get_current_date(),
+        memory_context=memory_context,
+    )
 
     console.rule("[bold cyan]▸ 规划阶段[/bold cyan]")
 
