@@ -1,20 +1,21 @@
-from agentnexus.tools.tool_executor import ToolExecutor
-from agentnexus.core.llm import AgentLLM
-from agentnexus.core.config import get_settings
-from agentnexus.prompts import load_prompt
 import re
 
+from agentnexus.core.config import get_settings
+from agentnexus.core.llm import AgentLLM
+from agentnexus.prompts import load_prompt
+from agentnexus.tools.tool_executor import ToolExecutor
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 
 class ReActAgent:
     def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor, max_steps: int | None = None,
-                 output=None):
+                 output=None, confirm_fn=None):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
         self.max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
         self.history = []
         self._output = output or print
+        self._confirm = confirm_fn or self._default_confirm
 
     def _parse_output(self, text: str):
         """解析LLM的输出，提取Thought和Action。
@@ -30,7 +31,7 @@ class ReActAgent:
     def _parse_finish(self, action_text: str):
         """解析Finish指令，兼容多种LLM输出格式。返回答案字符串，解析失败返回None。"""
         # 标准格式: Finish[答案]
-        match = re.match(r"Finish\s*\[\s*(.*?)\s*\]", action_text, re.DOTALL)
+        match = re.match(r"Finish\s*\[\s*(.*)\s*\]", action_text, re.DOTALL)
         if match:
             return match.group(1).strip()
         # 冒号格式: Finish：答案 或 Finish: 答案
@@ -53,7 +54,7 @@ class ReActAgent:
             return match.group(1), match.group(2)
         return None, None
 
-    def _ask_confirm(self, code: str) -> bool:
+    def _default_confirm(self, code: str) -> bool:
         self._output(f"[警告] 即将执行代码 (预览): {code}")
         try:
             response = input("确认执行? [y/N] ").strip().lower()
@@ -112,20 +113,20 @@ class ReActAgent:
                 if memory_manager:
                     memory_manager.conclude(question, final_answer)
                 return final_answer
-            
+
             tool_name, tool_input = self._parse_action(action)
             if not tool_name or not tool_input:
                 # ... 处理无效Action格式 ...
                 continue
 
             self._output(f"行动: {tool_name}[{tool_input}]")
-            
+
             tool_function = self.tool_executor.getTool(tool_name)
             if not tool_function:
                 observation = f"错误:未找到名为 '{tool_name}' 的工具。"
             else:
                 if tool_name in ("python_execute", "code_executor"):
-                    if not self._ask_confirm(tool_input):
+                    if not self._confirm(tool_input):
                         observation = "用户取消了代码执行"
                     else:
                         observation = tool_function(tool_input)
@@ -133,7 +134,7 @@ class ReActAgent:
                     observation = tool_function(tool_input)
 
                 self._output(f"观察: {observation}")
-            
+
             # 将本轮的Action和Observation添加到历史记录中
             self.history.append(f"Action: {action}")
             self.history.append(f"Observation: {observation}")

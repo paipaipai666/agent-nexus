@@ -27,7 +27,11 @@ class EvalRun:
     answer_relevancy: float = 0.0
     context_precision: float = 0.0
     context_recall: float = 0.0
+    context_relevancy: float = 0.0
     avg_latency_ms: float = 0.0
+    p50_latency_ms: float = 0.0
+    p95_latency_ms: float = 0.0
+    p99_latency_ms: float = 0.0
 
 
 EVAL_GENERATE_PROMPT = load_prompt("eval_generate")
@@ -65,6 +69,7 @@ class RAGEvaluator:
         relevancy_scores = []
         precision_scores = []
         recall_scores = []
+        context_relevancy_scores = []
         latencies = []
 
         for sample in self._samples:
@@ -81,12 +86,19 @@ class RAGEvaluator:
             relevancy_scores.append(self._score_relevancy(sample.question, answer, sample.ground_truth))
             precision_scores.append(self._score_precision(sample, retrieved))
             recall_scores.append(self._score_recall(sample, retrieved))
+            context_relevancy_scores.append(self._score_context_relevancy(sample.question, retrieved))
 
         run.faithfulness = _safe_mean(faithfulness_scores)
         run.answer_relevancy = _safe_mean(relevancy_scores)
         run.context_precision = _safe_mean(precision_scores)
         run.context_recall = _safe_mean(recall_scores)
+        run.context_relevancy = _safe_mean(context_relevancy_scores)
         run.avg_latency_ms = _safe_mean(latencies)
+        sorted_lat = sorted(latencies)
+        if sorted_lat:
+            run.p50_latency_ms = _percentile(sorted_lat, 50)
+            run.p95_latency_ms = _percentile(sorted_lat, 95)
+            run.p99_latency_ms = _percentile(sorted_lat, 99)
         return run
 
     def _chunk_all(self, strategy: ChunkStrategy, size: int, overlap: int) -> list[str]:
@@ -142,6 +154,29 @@ def _parse_score(text: str | None) -> float:
     if m:
         return max(0.0, min(1.0, float(m.group(1))))
     return 0.0
+
+
+    def _score_context_relevancy(self, query: str, retrieved: list[str]) -> float:
+        """Score what fraction of retrieved chunks are relevant to the query.
+
+        Uses keyword overlap between query and each chunk. Threshold: >0.85 target.
+        """
+        if not retrieved:
+            return 0.0
+        query_terms = set(query.lower().split())
+        if not query_terms:
+            return 0.0
+        scores = []
+        for chunk in retrieved:
+            chunk_lower = chunk.lower()
+            matched = sum(1 for t in query_terms if t in chunk_lower)
+            scores.append(matched / len(query_terms))
+        return sum(scores) / len(scores) if scores else 0.0
+
+
+def _percentile(sorted_values: list[float], pct: int) -> float:
+    idx = max(0, int(len(sorted_values) * pct / 100) - 1)
+    return round(sorted_values[idx], 1)
 
 
 def _safe_mean(values: list[float]) -> float:

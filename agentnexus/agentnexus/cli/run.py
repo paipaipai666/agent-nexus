@@ -19,8 +19,10 @@ def run(
     from agentnexus.agents.multi_agent.orchestrator import (
         orchestrator_persistent,
         set_orchestrator_memory,
+        set_budget_tracker,
     )
     from agentnexus.core.config import get_settings
+    from agentnexus.core.budget import BudgetTracker
     from agentnexus.core.llm import AgentLLM
     from agentnexus.observability.tracer import trace_manager
 
@@ -32,11 +34,17 @@ def run(
     memory = MemoryManager(session_id, llm=AgentLLM(), enable_long_term=not no_memory)
     set_orchestrator_memory(memory)
 
+    # Token budget
+    budget = BudgetTracker.from_task(task)
+    set_budget_tracker(budget)
+
     console.print(Panel(f"[bold]{task}[/bold]", title="任务"))
 
     config = {"configurable": {"thread_id": ctx.trace_id}}
+    import time as _time
     result = orchestrator_persistent.invoke(
-        {"task": task, "trace_id": ctx.trace_id, "memory_session_id": session_id},
+        {"task": task, "trace_id": ctx.trace_id, "memory_session_id": session_id,
+         "started_at": _time.time(), "tool_call_count": 0},
         config=config,
     )
 

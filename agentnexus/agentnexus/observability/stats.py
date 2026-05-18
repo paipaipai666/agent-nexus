@@ -33,8 +33,10 @@ class TokenStats:
     total_cost_cny: float = 0.0
     avg_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
+    p99_latency_ms: float = 0.0
     max_latency_ms: float = 0.0
     avg_retries: float = 0.0
+    cost_per_query: float = 0.0
     by_model: dict[str, dict] = field(default_factory=dict)
     by_date: dict[str, dict] = field(default_factory=dict)
 
@@ -127,6 +129,9 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
         stats.max_latency_ms = round(all_latencies[-1], 1)
         p95_idx = math.ceil(len(all_latencies) * 0.95) - 1
         stats.p95_latency_ms = round(all_latencies[max(0, p95_idx)], 1)
+        p99_idx = math.ceil(len(all_latencies) * 0.99) - 1
+        stats.p99_latency_ms = round(all_latencies[max(0, p99_idx)], 1)
+        stats.cost_per_query = round(stats.total_cost_cny / max(1, stats.total_tasks), 4)
 
     stats.by_model = {
         model: {

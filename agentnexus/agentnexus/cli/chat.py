@@ -85,9 +85,40 @@ def chat(
 
     llm = _SilentLLM()
 
+    from agentnexus.tools.memory_search import memory_search
+
+    from agentnexus.cli.audit import _global_audit_log
+
     executor = ToolExecutor()
-    executor.registerTool("web_search", "搜索互联网获取实时信息，参数为搜索关键词", web_search)
-    executor.registerTool("python_execute", "在安全沙箱中执行Python代码，参数为代码字符串", python_execute)
+    executor.registry._audit_log = _global_audit_log  # share audit log with CLI
+    executor.registerTool("memory_search", "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词",
+                          memory_search,
+                          param_schema={
+                              "type": "object",
+                              "properties": {"query": {"type": "string"}},
+                              "required": ["query"],
+                          },
+                          risk_level="low",
+                          rate_limit_per_min=10)
+    executor.registerTool("web_search", "搜索互联网获取实时信息，参数为搜索关键词",
+                          web_search,
+                          param_schema={
+                              "type": "object",
+                              "properties": {"query": {"type": "string"}},
+                              "required": ["query"],
+                          },
+                          risk_level="low",
+                          rate_limit_per_min=10)
+    executor.registerTool("python_execute", "在安全沙箱中执行Python代码，参数为代码字符串",
+                          python_execute,
+                          param_schema={
+                              "type": "object",
+                              "properties": {"code": {"type": "string"}},
+                              "required": ["code"],
+                          },
+                          risk_level="high",
+                          require_hitl=True,
+                          timeout_sec=60)
 
     def _show_step(c, msg: str):
         if msg.startswith("--- 第"):

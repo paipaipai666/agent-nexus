@@ -106,6 +106,9 @@ class LongTermMemory:
 
     def _evict_if_needed(self):
         """Evict oldest/lowest-importance memories when over max_memories."""
+        # First, try to compact medium-importance memories
+        self._compact_low_score()
+
         count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
         current = count_row["cnt"]
         if current <= self._max_memories:
@@ -125,6 +128,49 @@ class LongTermMemory:
 
         # Also clean up expired memories opportunistically
         self._cleanup_expired()
+
+    def _compact_low_score(self):
+        """Compress medium-importance memories: merge same-category entries >5 into one.
+
+        Low importance (<0.3) is left for eviction. High (>0.6) is preserved.
+        Medium (0.3-0.6) with >5 entries in a category → merge oldest into a single summary.
+        """
+        rows = self._conn.execute(
+            "SELECT category, COUNT(*) as cnt FROM long_term_memories "
+            "WHERE importance BETWEEN 0.3 AND 0.6 "
+            "GROUP BY category HAVING cnt > 5"
+        ).fetchall()
+
+        for row in rows:
+            category = row["category"]
+            # Get the oldest medium-score entries in this category (keep newest 3)
+            entries = self._conn.execute(
+                "SELECT id, content, importance FROM long_term_memories "
+                "WHERE category = ? AND importance BETWEEN 0.3 AND 0.6 "
+                "ORDER BY created_at ASC",
+                (category,)
+            ).fetchall()
+
+            if len(entries) <= 5:
+                continue
+
+            # Keep the newest 3, merge the rest into one summary
+            to_merge = entries[:-3]
+            merged_content = "; ".join(e["content"] for e in to_merge)[:1000]
+            avg_importance = sum(e["importance"] for e in to_merge) / len(to_merge)
+
+            # Delete old entries
+            for e in to_merge:
+                self.delete(e["id"])
+
+            # Save merged summary (without embedding — will be re-embedded on next update)
+            self.save(
+                session_id="system",
+                content=f"[合并记忆] {merged_content}",
+                category=category,
+                importance=min(avg_importance, 0.6),
+            )
+            logger.info("Compacted %d medium-score '%s' memories into one", len(to_merge), category)
 
     def _cleanup_expired(self):
         """Delete memories older than memory_ttl_days."""

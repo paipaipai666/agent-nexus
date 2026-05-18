@@ -55,6 +55,50 @@ _MAX_RETRIES: dict[str, int] = {
     "replan": 2,
 }
 ABSOLUTE_MAX_RETRIES = 5
+MAX_DURATION_SEC = 180      # hard time limit per task
+MAX_TOOL_CALLS = 20         # hard tool call limit per task
+
+# ── Budget bridge (injected by CLI runner) ─────────────────────────
+_budget_tracker = None
+
+
+def set_budget_tracker(tracker):
+    global _budget_tracker
+    _budget_tracker = tracker
+
+
+def get_budget_tracker():
+    return _budget_tracker
+
+
+def _hard_limit_check(state: AgentState, node_name: str) -> dict | None:
+    """Return a forced-end dict if a hard limit is exceeded, else None."""
+    import time as _time
+    started = state.get("started_at", 0.0)
+    if started and _time.time() - started > MAX_DURATION_SEC:
+        return {
+            "analysis": f"[已终止] 任务执行超过 {MAX_DURATION_SEC}s 硬限制",
+            "critique_score": 0.0,
+            "critique_fail_type": "replan",
+            "messages": [("system", f"Hard limit: duration exceeded at {node_name}")],
+        }
+    if state.get("tool_call_count", 0) > MAX_TOOL_CALLS:
+        return {
+            "analysis": f"[已终止] 工具调用超过 {MAX_TOOL_CALLS} 次硬限制",
+            "critique_score": 0.0,
+            "critique_fail_type": "replan",
+            "messages": [("system", f"Hard limit: tool calls exceeded at {node_name}")],
+        }
+    # Budget BREAK
+    budget = get_budget_tracker()
+    if budget and budget.state.value == "break":
+        return {
+            "analysis": f"[已终止] Token 预算耗尽 ({budget.used}/{budget.total})",
+            "critique_score": 0.0,
+            "critique_fail_type": "replan",
+            "messages": [("system", f"Budget break at {node_name}")],
+        }
+    return None
 
 
 def _trunc(text: str, max_len: int = 2000) -> str:
@@ -69,6 +113,10 @@ def _state_preview(state: dict, keys: list[str]) -> dict[str, str]:
 
 def _trace_wrapper(fn, node_name: str, input_keys: list[str]):
     def wrapped(state: AgentState) -> dict:
+        # Hard limit guard
+        forced = _hard_limit_check(state, node_name)
+        if forced:
+            return forced
         ctx = trace_manager.active
         span = None
         if ctx:
@@ -185,6 +233,42 @@ def _get_analyst_llm() -> AgentLLM:
         _instance_local.analyst_llm = AgentLLM()
     return _instance_local.analyst_llm
 
+def _budget_aware_think(llm: AgentLLM, messages: list, task: str = "",
+                        silent: bool = False) -> str:
+    """LLM call with model routing and context compression based on budget state.
+
+    YELLOW: switch to fast model. RED: compress context + fast model.
+    """
+    from agentnexus.core.model_router import route_model
+    budget = get_budget_tracker()
+    state = budget.state.value if budget else "green"
+
+    # Model routing
+    model_id = route_model(task, state)
+    if model_id != getattr(llm, "model", ""):
+        try:
+            llm.model = model_id
+        except Exception:
+            pass
+
+    # Context compression for RED state
+    if state == "red" and messages:
+        messages = _compress_messages(messages)
+
+    return llm.think(messages, silent=silent) or ""
+
+
+def _compress_messages(messages: list[dict]) -> list[dict]:
+    """Aggressive context compression for RED budget."""
+    compressed = []
+    for m in messages:
+        content = m.get("content", "")
+        if len(content) > 1500:
+            # Keep first and last part
+            content = content[:800] + "\n...[预算限制，已截断]...\n" + content[-400:]
+        compressed.append({"role": m.get("role", "user"), "content": content})
+    return compressed
+
 
 # ── plan_node ───────────────────────────────────────────────────────────
 def plan_node(state: AgentState) -> dict:
@@ -223,7 +307,8 @@ def plan_node(state: AgentState) -> dict:
 
     try:
         with console.status("  [dim]规划中...[/dim]", spinner="dots"):
-            response = _get_planner_llm().think([{"role": "user", "content": prompt}], silent=True) or ""
+            response = _budget_aware_think(_get_planner_llm(), [{"role": "user", "content": prompt}],
+                                            task=state.get("task", ""), silent=True)
 
         plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
         if not plan:
@@ -544,6 +629,7 @@ def execute_node(state: AgentState) -> dict:
         "exec_stderr": result.stderr,
         "exec_exception": result.exception,
         "retry_count": state.get("retry_count", 0) + (0 if result.success else 1),
+        "tool_call_count": state.get("tool_call_count", 0) + 1,
         "messages": [("executor", result.stdout or result.exception or "")],
     }
 
@@ -633,8 +719,10 @@ def _synthesize_answer(state: dict, exec_report: str, is_pure_research: bool,
             exec_report=exec_report,
             date=get_current_date(),
         )
-        analysis = _get_analyst_llm().think([{"role": "user", "content": prompt}], silent=True) or ""
-        if _get_analyst_llm().last_truncated:
+        ana_llm = _get_analyst_llm()
+        analysis = _budget_aware_think(ana_llm, [{"role": "user", "content": prompt}],
+                                       task=state.get("task", ""), silent=True)
+        if ana_llm.last_truncated:
             console.print("  [yellow]⚠ Analyst 输出被 LLM 截断（max_tokens），最终答案可能不完整[/yellow]")
             analysis += (
                 "\n\n⚠️ [系统检测] LLM 输出在生成过程中被截断（达到 max_tokens 上限）。"

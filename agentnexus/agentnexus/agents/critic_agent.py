@@ -18,7 +18,7 @@ from agentnexus.agents.schema import (
     ExecutionResult,
     SourceClaim,
 )
-from agentnexus.core.llm import get_default_llm
+from agentnexus.core.judge_llm import get_judge_llm
 from agentnexus.prompts import get_current_date, load_prompt
 
 CRITIC_PROMPT = load_prompt("critic")
@@ -28,7 +28,7 @@ PASS_THRESHOLD = 7.0
 
 class CriticAgent:
     def __init__(self):
-        self._llm = get_default_llm()
+        self._llm = get_judge_llm()  # Independent judge model (different family from generator)
         self._hard_checker = HardRuleChecker()
         self.last_verdict: Optional[CriticVerdict] = None
         self.last_score: float = 0.0

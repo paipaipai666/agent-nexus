@@ -1,31 +1,46 @@
-from typing import Dict, Any
+"""Backward-compatible ToolExecutor wrapping the new ToolRegistry."""
+
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel, AuditEntry
+
 
 class ToolExecutor:
-    """
-    一个工具执行器，负责管理和执行工具。
-    """
+    """Thin wrapper around ToolRegistry — existing code works unchanged."""
+
     def __init__(self):
-        self.tools: Dict[str, Dict[str, Any]] = {}
+        self.registry = ToolRegistry()
 
-    def registerTool(self, name: str, description: str, func: callable):
-        """
-        向工具箱中注册一个新工具。
-        """
-        if name in self.tools:
-            pass  # 已存在则覆盖，不打印警告
-        self.tools[name] = {"description": description, "func": func}
+    def registerTool(self, name: str, description: str, func: callable,
+                     param_schema: dict | None = None,
+                     allowed_agents: list[str] | None = None,
+                     risk_level: str = "low",
+                     require_hitl: bool = False,
+                     timeout_sec: int = 30,
+                     rate_limit_per_min: int = 0,
+                     output_schema: dict | None = None,
+                     audit_enabled: bool = True):
+        """Register a tool with full metadata. Extra kwargs map to ToolMeta fields.
 
-    def getTool(self, name: str) -> callable:
+        Legacy signature (name, description, func) still works — metadata defaults apply.
         """
-        根据名称获取一个工具的执行函数。
-        """
-        return self.tools.get(name, {}).get("func")
+        risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
+        meta = ToolMeta(
+            name=name,
+            description=description,
+            param_schema=param_schema or {"type": "object", "properties": {}},
+            allowed_agents=allowed_agents or ["*"],
+            risk_level=risk,
+            require_hitl=require_hitl,
+            timeout_sec=timeout_sec,
+            rate_limit_per_min=rate_limit_per_min,
+            output_schema=output_schema,
+            audit_enabled=audit_enabled,
+        )
+        self.registry.register(meta, func)
 
-    def getAvailableTools(self) -> str:
-        """
-        获取所有可用工具的格式化描述字符串。
-        """
-        return "\n".join([
-            f"- {name}: {info['description']}" 
-            for name, info in self.tools.items()
-        ])
+    def getTool(self, name: str):
+        """Legacy API: return raw callable."""
+        return self.registry.get_tool(name)
+
+    def getAvailableTools(self, agent: str = "*") -> str:
+        """Legacy API: return formatted description string."""
+        return self.registry.get_available_tools(agent)

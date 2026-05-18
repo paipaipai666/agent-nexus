@@ -25,3 +25,5 @@ from agentnexus.cli import logs       # noqa: E402
 from agentnexus.cli import eval_cmd   # noqa: E402
 from agentnexus.cli import stats      # noqa: E402
 from agentnexus.cli import config     # noqa: E402
+from agentnexus.cli import audit      # noqa: E402
+from agentnexus.cli import tui_cmd    # noqa: E402

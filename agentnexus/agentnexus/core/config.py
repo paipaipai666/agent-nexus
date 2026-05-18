@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_timeout: int = Field(default=60, ge=1)
+    judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
+    judge_api_key: SecretStr = Field(default=SecretStr(""))
+    judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
     e2b_api_key: SecretStr = Field(default=SecretStr(""))
     max_agent_steps: int = Field(default=5, ge=1, le=50)
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
 
-    @field_validator("llm_base_url")
+    @field_validator("llm_base_url", "judge_base_url")
     @classmethod
     def must_have_scheme(cls, v: str) -> str:
         if v and not v.startswith(("http://", "https://")):
