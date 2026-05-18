@@ -29,6 +29,5 @@ def memory_list(limit: int = typer.Option(10, help="显示条数")):
 def memory_clear():
     """清空长期记忆"""
     ltm = LongTermMemory()
-    for m in ltm.list_recent(1000):
-        ltm.delete(m["id"])
+    ltm.clear_all()
     console.print("[green]+[/green] 记忆已清空")

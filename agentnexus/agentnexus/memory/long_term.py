@@ -271,3 +271,17 @@ class LongTermMemory:
                 logger.warning("ChromaDB delete failed for memory %s: %s", memory_id, e)
         self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))
         self._conn.commit()
+
+    def clear_all(self):
+        """Delete all LTM entries from both SQLite and ChromaDB."""
+        rows = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE chroma_id IS NOT NULL").fetchall()
+        chroma_ids = [r["chroma_id"] for r in rows]
+        if chroma_ids:
+            try:
+                self._ensure_chroma()
+                self._chroma_col.delete(ids=chroma_ids)
+            except Exception as e:
+                logger.warning("ChromaDB batch delete failed in clear_all: %s", e)
+        self._conn.execute("DELETE FROM long_term_memories")
+        self._conn.commit()
+        logger.info("Cleared all long-term memories")

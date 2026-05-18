@@ -40,6 +40,23 @@ class ShortTermMemory:
         self._messages.clear()
         self._summary = ""
 
+    def to_json(self) -> str:
+        """Serialize full state to JSON for checkpoint snapshots."""
+        return json.dumps({
+            "messages": list(self._messages),
+            "summary": self._summary,
+        }, ensure_ascii=False)
+
+    @classmethod
+    def from_json(cls, json_str: str, max_messages: int = 50) -> "ShortTermMemory":
+        """Restore from a JSON snapshot. Unknown keys are ignored for forward compat."""
+        data = json.loads(json_str)
+        inst = cls(max_messages=max_messages)
+        for msg in data.get("messages", []):
+            inst._messages.append(msg)
+        inst._summary = data.get("summary", "")
+        return inst
+
 
 # Alias for compatibility
 get_short_term_memory = ShortTermMemory
