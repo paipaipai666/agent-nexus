@@ -80,7 +80,7 @@ def tui():
     version = ConversationVersionManager(session_id, get_settings().memory_db_path)
 
     # Agent
-    agent = ReActAgent(llm, executor)
+    agent = ReActAgent(llm, executor, conversation_mode=True)
 
     # Launch TUI
     tui_app = AgentNexusTUI(agent=agent, memory=memory, version=version)

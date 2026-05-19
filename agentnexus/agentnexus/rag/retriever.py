@@ -1,9 +1,16 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import jieba
 from rank_bm25 import BM25Okapi
+import warnings
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
 
 from .chroma_client import get_embedding_model, insert_documents, search as chroma_search
+
+warnings.filterwarnings("ignore", message=".*pkg_resources.*")
 
 
 def _tokenize(text: str) -> list[str]:
@@ -54,7 +61,7 @@ class HybridRetriever:
     def __init__(self):
         self._bm25 = BM25Index()
         self._docs: list[str] = []
-        self._reranker: CrossEncoder | None = None
+        self._reranker: "CrossEncoder | None" = None
 
     def build_bm25(self, documents: list[str]):
         self._docs = list(documents)

@@ -64,6 +64,19 @@ class ReActAgent:
         except (EOFError, OSError):
             return True
 
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Estimate token count: Chinese chars ≈1.8, others ≈0.3. Tries litellm first."""
+        if not text:
+            return 0
+        try:
+            import litellm
+            return litellm.token_counter(text=text) or 0
+        except Exception:
+            chinese = len(re.findall(r'[一-鿿　-〿＀-￯]', text))
+            other = len(text) - chinese
+            return int(chinese * 1.8 + other * 0.3)
+
     def _assemble_budget_prompt(self, tools_desc: str, question: str, history_str: str,
                                  memory_context: str, conversation_context: str,
                                  budget_state) -> str:
@@ -86,20 +99,26 @@ class ReActAgent:
             "green":  dict(P1=3000, P2=2000, P3=3000),
             "yellow": dict(P1=2000, P2=1000, P3=1500),
             "red":    dict(P1=1500, P2=500,  P3=500),
-            "break":  dict(P1=800,  P2=0,    P3=0),
+            "break":  dict(P1=800,  P2=0,    P3=400),  # P3=400: keep ~2-3 minimal history entries
         }
         state_val = budget_state.value if hasattr(budget_state, 'value') else str(budget_state)
         cap = caps.get(state_val, caps["green"])
 
-        def _fit(text: str, max_tokens: int) -> str:
-            if max_tokens <= 0:
+        def _fit(text: str, token_budget: int) -> str:
+            """Truncate text to fit within token_budget estimated tokens (not chars)."""
+            if token_budget <= 0:
                 return ""
-            if len(text) <= max_tokens:
+            est = self._estimate_tokens(text)
+            if est <= token_budget:
                 return text
-            # Keep head + tail for continuity
-            head = int(max_tokens * 0.6)
-            tail = int(max_tokens * 0.4)
-            return text[:head] + "\n...[截断]...\n" + text[-tail:] if tail > 0 else text[:max_tokens]
+            # Scale char count proportionally to estimated token ratio
+            ratio = token_budget / est
+            target_chars = max(50, int(len(text) * ratio * 0.9))
+            head = int(target_chars * 0.6)
+            tail = int(target_chars * 0.4)
+            if tail <= 0:
+                return text[:target_chars] + "\n...[截断]..."
+            return text[:head] + "\n...[截断]...\n" + text[-tail:]
 
         # P1: conversation context (user messages + summary) — always keep
         conv = _fit(conversation_context, cap["P1"])
@@ -118,8 +137,12 @@ class ReActAgent:
             conversation_context=conv,
         )
 
-    def _build_conversation_context(self, memory_manager) -> str:
-        """Build conversation context from STM, prioritizing compressed summary."""
+    def _build_conversation_context(self, memory_manager, per_msg_limit: int = 500) -> str:
+        """Build conversation context from STM, prioritizing compressed summary.
+
+        Args:
+            per_msg_limit: max chars per message — raised in GREEN, lowered in BREAK.
+        """
         if not memory_manager or not memory_manager.short_term:
             return ""
         stm = memory_manager.short_term
@@ -128,25 +151,23 @@ class ReActAgent:
         user_assistant_msgs = [m for m in messages if m["role"] in ("user", "assistant")]
 
         if summary:
-            # Compressed summary available: show it prominently, plus minimal recent messages
             recent = user_assistant_msgs[-3:] if len(user_assistant_msgs) > 3 else user_assistant_msgs
             parts = ["== 对话历史摘要 ==", summary]
             if recent:
                 parts.append("\n== 最近对话 ==")
                 for m in recent:
                     role_label = "用户" if m["role"] == "user" else "助手"
-                    content = m["content"][:500]
+                    content = m["content"][:per_msg_limit]
                     parts.append(f"{role_label}: {content}")
             return "\n".join(parts) + "\n\n"
 
-        # No summary: use recent messages directly
         if not user_assistant_msgs:
             return ""
         recent = user_assistant_msgs[-6:]
         lines = []
         for m in recent:
             role_label = "用户" if m["role"] == "user" else "助手"
-            content = m["content"][:500]
+            content = m["content"][:per_msg_limit]
             lines.append(f"{role_label}: {content}")
         return "== 近期对话 ==\n" + "\n".join(lines) + "\n\n"
 
@@ -161,13 +182,15 @@ class ReActAgent:
 
         memory_context = ""
         conversation_context = ""
+        _last_budget_state = "green"
+        budget_state = "green"
         if memory_manager:
             # Init with initial budget state (green at start)
             memory_manager.set_budget_state("green")
             memory_context = memory_manager.init_session(question)
             memory_manager.append("user", question)
             if self.conversation_mode:
-                conversation_context = self._build_conversation_context(memory_manager)
+                conversation_context = self._build_conversation_context(memory_manager, per_msg_limit=800)
 
         while current_step < self.max_steps:
             current_step += 1
@@ -179,6 +202,12 @@ class ReActAgent:
                 memory_manager.set_budget_state(budget_state)
                 if self._budget.state == BudgetState.BREAK:
                     memory_manager._skip_llm_compact = True
+
+            # ── Periodic LTM context refresh ──
+            state_key = budget_state.value if hasattr(budget_state, 'value') else str(budget_state)
+            if memory_manager and (current_step % 3 == 0 or state_key != _last_budget_state):
+                memory_context = memory_manager.init_session(question)
+            _last_budget_state = state_key
 
             # ── Budget-aware prompt construction (priority-based) ──
             tools_desc = self.tool_executor.getAvailableTools()
@@ -232,7 +261,11 @@ class ReActAgent:
                 memory_manager.append("assistant", response_text)
                 # Refresh conversation context after potential compaction
                 if self.conversation_mode:
-                    conversation_context = self._build_conversation_context(memory_manager)
+                    state_key = budget_state.value if hasattr(budget_state, 'value') else str(budget_state)
+                    pm_limit = {"green": 800, "yellow": 600, "red": 400, "break": 200}.get(
+                        state_key, 500)
+                    conversation_context = self._build_conversation_context(memory_manager,
+                                                                            per_msg_limit=pm_limit)
                 tokens_after = memory_manager.short_term.estimate_tokens()
                 saved = max(0, tokens_before - tokens_after)
                 if saved > 0 and self._budget:
