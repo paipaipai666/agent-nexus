@@ -95,9 +95,14 @@ class BudgetTracker:
         return round(self.used / self.total * 100, 1) if self.total else 0.0
 
     def credit_compact(self, tokens_saved: int):
-        """Record tokens freed by MemoryManager compaction (informational, not refund)."""
+        """Refund tokens freed by MemoryManager compaction back to remaining budget.
+
+        This allows the budget state to recover when compaction reduces prompt size,
+        preventing one-way degradation into BREAK even when context is well-managed.
+        """
         self.compact_savings += tokens_saved
         self.compact_count += 1
+        self.remaining = min(self.total, self.remaining + tokens_saved)
 
     def summary(self) -> str:
         base = (

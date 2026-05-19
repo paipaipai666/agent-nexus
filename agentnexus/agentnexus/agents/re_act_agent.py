@@ -307,7 +307,9 @@ class ReActAgent:
 
                 self._output(f"观察: {observation}")
 
-            # Append to ReAct loop history and STM
+            # Append to ReAct loop history and STM (preserve thought for reasoning chain)
+            if thought:
+                history.append(f"Thought: {thought}")
             history.append(f"Action: {action}")
             history.append(f"Observation: {observation}")
             if memory_manager:
