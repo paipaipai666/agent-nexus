@@ -30,7 +30,6 @@ def _default_state(**overrides) -> AgentState:
         "exec_success": True,
         "exec_exception": "",
         "exec_diff": {},
-        "expected_output": "",
         "coder_truncated": False,
         "messages": [],
     }

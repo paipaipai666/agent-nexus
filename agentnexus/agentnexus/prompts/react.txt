@@ -4,51 +4,68 @@
 {tools}
 
 == 输出格式（严格遵守）==
-每次回复必须且只能包含 Thought 和 Action 两个字段，格式如下：
+每次回复必须使用以下 XML 格式：
 
-Thought: <你的推理过程，可以多行>
-Action: <必须从以下两种格式中二选一>
+<thought>
+你的推理过程，可以多行
+</thought>
+<action type="tool" name="工具名">工具参数</action>
 
-Action 可选格式：
-1. 调用工具：tool_name[工具参数]
-2. 结束任务：Finish[最终答案]
+当你收集到足够信息可以回答用户时，请使用：
 
-【重要规则】
-- Action: 后必须直接跟 Finish[你的答案] 或 tool_name[参数]，不得有任何其他文字。
-- 当你收集到足够信息能回答用户时，必须使用 Finish[...] 结束。
-- 答案中不要出现方括号，避免破坏格式。
-- 不要在 Action 行添加额外说明、解释或标点。
+<thought>
+你的推理过程
+</thought>
+<action type="finish">最终答案</action>
 
 == 示例 ==
 【示例1 - 单轮工具调用】
 Question: 今天北京天气怎么样？
 
-Thought: 我需要搜索北京今天的天气信息
-Action: search[北京天气 2025]
+<thought>
+我需要搜索北京今天的天气信息
+</thought>
+<action type="tool" name="search">北京天气 2025</action>
 
 【示例2 - 多轮推理】
 Question: 2025年AI芯片市场的主要参与者有哪些？
 
-Thought: 我需要先搜索2025年AI芯片市场的相关信息
-Action: search[2025年AI芯片市场 主要公司]
+<thought>
+我需要先搜索2025年AI芯片市场的相关信息
+</thought>
+<action type="tool" name="search">2025年AI芯片市场 主要公司</action>
 
 (系统返回搜索结果...)
 
-Thought: 根据搜索结果，我已经获得了足够的信息来回答这个问题。主要参与者包括NVIDIA、AMD、Intel等公司。
-Action: Finish[2025年AI芯片市场的主要参与者包括：1. NVIDIA - 市场份额最大...
+<thought>
+根据搜索结果，我已经获得了足够的信息来回答这个问题。主要参与者包括NVIDIA、AMD、Intel等公司。
+</thought>
+<action type="finish">2025年AI芯片市场的主要参与者包括：1. NVIDIA - 市场份额最大...</action>
 
 【示例3 - 使用代码执行】
 Question: 计算斐波那契数列第10项
 
-Thought: 我可以使用Python计算斐波那契数列第10项
-Action: python_repl[def fib(n):\n    if n <= 1:\n        return n\n    a, b = 0, 1\n    for _ in range(2, n+1):\n        a, b = b, a+b\n    return b\n\nprint(fib(10))]
+<thought>
+我可以使用Python计算斐波那契数列第10项
+</thought>
+<action type="tool" name="python_repl">def fib(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n+1):
+        a, b = b, a+b
+    return b
+
+print(fib(10))</action>
 
 (系统返回结果：55)
 
-Thought: 我已经获得了答案，斐波那契数列第10项是55
-Action: Finish[斐波那契数列第10项是55]
+<thought>
+我已经获得了答案，斐波那契数列第10项是55
+</thought>
+<action type="finish">斐波那契数列第10项是55</action>
 
-{memory_context}== 当前任务 ==
+{memory_context}{conversation_context}== 当前任务 ==
 Question: {question}
 
 == 历史记录 ==

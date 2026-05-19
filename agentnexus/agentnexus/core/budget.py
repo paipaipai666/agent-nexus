@@ -31,13 +31,24 @@ class BudgetTracker:
     consumed_output: int = 0
 
     @classmethod
-    def from_task(cls, task: str) -> BudgetTracker:
-        """Allocate budget based on task complexity heuristics."""
+    def from_task(cls, task: str, complexity: str = "") -> BudgetTracker:
+        """Allocate budget based on task complexity.
+
+        Uses explicit complexity from planner if available, else heuristic fallback.
+        """
         base = 20000  # 20K tokens base budget
-        if len(task) > 200:
-            base = int(base * 1.5)  # complex tasks get more
-        if "报告" in task or "分析" in task:
+        if complexity == "complex":
+            base = int(base * 1.8)
+        elif complexity == "medium":
             base = int(base * 1.3)
+        elif complexity == "simple":
+            base = int(base * 0.8)
+        else:
+            # Heuristic fallback if no planner complexity available
+            if len(task) > 200:
+                base = int(base * 1.5)
+            if "报告" in task or "分析" in task:
+                base = int(base * 1.3)
         return cls(total=base, remaining=base)
 
     def consume(self, agent: str, input_tokens: int = 0, output_tokens: int = 0,

@@ -31,7 +31,6 @@ class ResearchOutput(BaseModel):
 class CodeOutput(BaseModel):
     reasoning: str = Field(..., description="代码设计思路")
     code: str = Field(..., description="完整可执行 Python 代码")
-    expected_output: str = Field(default="", description="预期的运行输出描述")
 
 
 class ExecutionResult(BaseModel):

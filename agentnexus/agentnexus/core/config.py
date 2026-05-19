@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
+    # Compaction tuning
+    compact_token_threshold: int = Field(default=3000, ge=500, le=200000)
+    compact_buffer_tokens: int = Field(default=4000, ge=1000, le=50000)
+    large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)
+    offload_enabled: bool = Field(default=True)
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod

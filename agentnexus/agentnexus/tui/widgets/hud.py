@@ -8,6 +8,12 @@ from textual.widgets import Static
 class HUD(Widget):
     """Bottom status bar with segmented layout."""
 
+    DEFAULT_CSS = """
+    HUD {
+        height: auto;
+    }
+    """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model = "v4-flash"
@@ -47,7 +53,7 @@ class HUD(Widget):
 
         return (
             f" [#6ba5f2]{self.model}[/] "
-            f"[dim]│[/] ctx {ctx_k:.1f}k/{ctx_max_k:.0f}k {bar}"
+            f" [dim]│[/] ctx {ctx_k:.1f}k/{ctx_max_k:.0f}k {bar}"
             f" [dim]│[/] in:{self.tokens_in // 1000}k out:{self.tokens_out // 1000}k"
             f" [dim]│[/] bgt {bgt}"
         )

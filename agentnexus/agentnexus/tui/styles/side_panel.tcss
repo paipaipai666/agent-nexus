@@ -1,0 +1,41 @@
+/* Palette — sync with base.tcss if changing values */
+$bg: #1a1b20;
+$surface: #22242b;
+$elevated: #292b33;
+$text: #e2e3e7;
+$text-dim: #848893;
+$muted: #5d606b;
+$primary: #fab283;
+$secondary: #6ba5f2;
+$accent: #a78bfa;
+$success: #7fd88f;
+$error: #e06c75;
+$warning: #f5a742;
+$assistant: #6ba5f2;
+$user: #a78bfa;
+$tool: #f5a742;
+$border: #333640;
+
+/* ===== Side Panel ===== */
+#side-panel {
+  width: 28;
+  padding: 1;
+  background: $surface;
+  border-left: solid $border;
+  overflow-y: auto;
+}
+#side-panel .card {
+  padding: 1;
+  margin: 0 0 1 0;
+  background: $elevated;
+  border: solid $border;
+}
+#side-panel .card-title {
+  color: $primary;
+  text-style: bold;
+  padding: 0 0 1 0;
+  margin: 0 0 1 0;
+  border-bottom: solid $border;
+}
+#side-panel .card-text { color: $text-dim; }
+#side-panel .card-dim  { color: $muted; text-style: italic; }

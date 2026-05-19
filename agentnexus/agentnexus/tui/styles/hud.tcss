@@ -1,0 +1,21 @@
+/* Palette — sync with base.tcss if changing values */
+$bg: #1a1b20;
+$surface: #22242b;
+$elevated: #292b33;
+$text: #e2e3e7;
+$text-dim: #848893;
+$muted: #5d606b;
+$primary: #fab283;
+$secondary: #6ba5f2;
+$accent: #a78bfa;
+$success: #7fd88f;
+$error: #e06c75;
+$warning: #f5a742;
+$assistant: #6ba5f2;
+$user: #a78bfa;
+$tool: #f5a742;
+$border: #333640;
+
+/* ===== HUD ===== */
+#hud { height: 1; background: $surface; }
+#hud-text { width: 100%; color: $text-dim; }

@@ -37,7 +37,6 @@ class CoderAgent:
             self.last_output = CodeOutput(
                 reasoning=f"代码生成异常: {exc}",
                 code="",
-                expected_output="",
             )
             self.last_error = str(exc)
             return self.last_output
@@ -87,7 +86,6 @@ class CoderAgent:
                 return CodeOutput(
                     reasoning=reasoning,
                     code=code,
-                    expected_output=data.get("expected_output", ""),
                 )
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -98,7 +96,6 @@ class CoderAgent:
             return CodeOutput(
                 reasoning=data.get("reasoning", ""),
                 code=code,
-                expected_output=data.get("expected_output", ""),
             )
         except (json.JSONDecodeError, TypeError):
             pass
@@ -109,13 +106,11 @@ class CoderAgent:
             return CodeOutput(
                 reasoning=f"从非结构化输出中提取代码 (任务: {spec}){truncated}",
                 code=code,
-                expected_output="",
             )
 
         return CodeOutput(
             reasoning=raw if raw else "LLM 无输出",
             code="",
-            expected_output="",
         )
 
     @staticmethod

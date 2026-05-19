@@ -44,7 +44,8 @@ def run(
     import time as _time
     result = orchestrator_persistent.invoke(
         {"task": task, "trace_id": ctx.trace_id, "memory_session_id": session_id,
-         "started_at": _time.time(), "tool_call_count": 0},
+         "started_at": _time.time(), "tool_call_count": 0,
+         "plan_complexity": "", "plan_metadata": {}},
         config=config,
     )
 

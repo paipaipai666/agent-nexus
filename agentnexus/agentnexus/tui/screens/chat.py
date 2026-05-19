@@ -1,22 +1,31 @@
 """ChatScreen — main chat interface with real ReActAgent backend."""
 
 import asyncio
+from itertools import cycle
 
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Input, Static
+from textual.widgets import Input, Label, Static
 
+from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.tui.widgets.hud import HUD
+from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
 
 
 class ChatArea(Widget):
     """Scrollable message area."""
+
+    DEFAULT_CSS = """
+    ChatArea {
+        height: 100%;
+        overflow-y: auto;
+    }
+    """
 
     def add_message(self, role: str, content: str):
         self.mount(ChatMessage(role, content))
@@ -34,25 +43,6 @@ class ChatArea(Widget):
         self.remove_children()
 
 
-class ChatInput(Widget):
-    """Input widget with styled prompt and focus-aware input."""
-
-    class AppSubmit(Message):
-        """Custom message when user submits text."""
-        def __init__(self, text: str):
-            super().__init__()
-            self.text = text
-
-    def compose(self) -> ComposeResult:
-        self._inp = Input(placeholder="输入消息... (Enter 发送, /help 命令)", id="chat-input")
-        yield Static(">", id="input-prompt")
-        yield self._inp
-
-    def on_input_submitted(self, event: Input.Submitted):
-        if event.value.strip():
-            self.post_message(self.AppSubmit(event.value.strip()))
-
-
 class ChatScreen(Screen):
     """AgentNexus chat interface — OpenCode warm theme."""
 
@@ -68,37 +58,51 @@ class ChatScreen(Screen):
         self._memory = memory
         self._version = version
         self._running = False
+        self._spinner_timer = None
+        self._spinner_frames = None
+        self._current_tool_widget = None
 
     def compose(self) -> ComposeResult:
         yield Static(self._render_top_bar(), id="top-bar")
-        with Horizontal(id="main-area"):
-            self._chat_area = ChatArea(id="chat-area")
+        self._chat_area = ChatArea(id="chat-area")
+        self._side = SidePanel(id="side-panel")
+        with Horizontal(id="middle"):
             yield self._chat_area
-            self._side = SidePanel(id="side-panel")
             yield self._side
-        self._chat_input = ChatInput(id="input-area")
-        yield self._chat_input
         self._hud = HUD(id="hud")
+        self._chat_input = InputBar(id="input-area")
         yield self._hud
+        yield self._chat_input
+
 
     def _render_top_bar(self) -> str:
         model = getattr(self._agent, 'model_id', 'v4-flash') if self._agent else 'v4-flash'
         branch = self._version.status().get("branch", "main") if self._version else "main"
-        return (
-            f" [#fab283]●[/] [bold]AgentNexus[/]"
-            f"  [dim]│[/]  [dim]会话:[/] {branch}"
-            f"  [dim]│[/]  [#6ba5f2]{model}[/]"
-            f"  [dim]│[/]  [dim]^H 帮助  ^L 清屏  Esc 输入[/]"
-        )
+
+        left = "[#fab283]●[/] [bold]AgentNexus[/]"
+        center = f"[dim]会话:[/] {branch}  [dim]│[/]  [#6ba5f2]{model}[/]"
+        right = "[dim]^H 帮助  ^L 清屏  Esc 输入[/]"
+
+        return f"{left}  {center}  {right}"
 
     def on_mount(self):
+        logo = (
+            "[#fab283]"
+            "┌─────────────────────────────────┐\n"
+            "│  ⬡ AgentNexus                  │\n"
+            "│  Multi-Agent Task Orchestrator  │\n"
+            "└─────────────────────────────────┘"
+            "[/]"
+        )
+        self._chat_area.add_system(logo)
         self._chat_area.add_message("assistant",
             "欢迎使用 AgentNexus。输入问题开始，或 /help 查看命令。")
+        self._refresh_version_display()
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
 
     # ── custom submit ──────────────────────────────────────────
 
-    def on_chat_input_app_submit(self, event: ChatInput.AppSubmit):
+    def on_input_bar_app_submit(self, event: InputBar.AppSubmit):
         text = event.text
         inp = self.query_one("#chat-input", Input)
         inp.value = ""
@@ -116,8 +120,9 @@ class ChatScreen(Screen):
 
     def action_show_help(self):
         self._chat_area.add_system(
-            "/help  /undo  /redo  /log  /branch  /checkout\n"
-            "/clear  /stats  /status  /audit  /diff  /memory"
+            "[/]命令: [/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
+            "       /checkout <ref>  /diff [ref1] [ref2]  /status\n"
+            "       /clear [--all]  /stats"
         )
 
     def action_focus_input(self):
@@ -126,41 +131,161 @@ class ChatScreen(Screen):
         except Exception:
             pass
 
+    # ── version control helpers ──────────────────────────────────
+
+    def _restore_stm_from_version(self):
+        """Replace current STM with the version HEAD's snapshot."""
+        if not self._version:
+            return
+        snapshot = self._version.get_head_stm()
+        if snapshot and self._memory:
+            new_stm = ShortTermMemory.from_json(snapshot)
+            self._memory.short_term._messages = new_stm._messages
+            self._memory.short_term._summary = new_stm._summary
+
+    def _commit_if_answered(self, question: str, answer: str):
+        """Auto-commit after a successful answer."""
+        if not self._version or not self._memory:
+            return
+        stm_json = self._memory.short_term.to_json()
+        self._version.commit(stm_json, question=question, answer=answer, new_ltm_ids=[])
+        self._refresh_version_display()
+
+    def _refresh_version_display(self):
+        """Update top bar and side panel with current version state."""
+        if not self._version:
+            return
+        st = self._version.status()
+        self._side.update_version(
+            st.get("branch", "main"),
+            st.get("head", "---"),
+            st.get("can_undo", False),
+            st.get("can_redo", False),
+        )
+        # Refresh top bar
+        try:
+            tb = self.query_one("#top-bar", Static)
+            tb.update(self._render_top_bar())
+        except Exception:
+            pass
+
     # ── commands ──────────────────────────────────────────────
 
     def _handle_command(self, text: str):
         parts = text.split(maxsplit=1)
         cmd = parts[0]
+        arg = parts[1] if len(parts) > 1 else ""
 
         if cmd == "/help":
             self.action_show_help()
         elif cmd == "/clear":
-            self._chat_area.clear_all()
+            if arg.strip() == "--all" and self._version:
+                self._version.reset()
+                self._chat_area.clear_all()
+                self._chat_area.add_system("[dim]已清除所有检查点和对话。[/]")
+                self._refresh_version_display()
+            else:
+                self._chat_area.clear_all()
         elif cmd == "/undo" and self._version:
             prev = self._version.undo()
-            self._chat_area.add_system(f"[dim]回退 [{prev['id']}][/]" if prev else "[dim]无可回退[/]")
+            if prev:
+                self._restore_stm_from_version()
+                self._chat_area.add_system(f"[dim]已回退至 [{prev['id']}][/]")
+            else:
+                self._chat_area.add_system("[dim]无可回退[/]")
+            self._refresh_version_display()
         elif cmd == "/redo" and self._version:
             cp = self._version.redo()
-            self._chat_area.add_system(f"[dim]重做 [{cp['id']}][/]" if cp else "[dim]无可重做[/]")
+            if cp:
+                self._restore_stm_from_version()
+                self._chat_area.add_system(f"[dim]已重做至 [{cp['id']}][/]")
+            else:
+                self._chat_area.add_system("[dim]无可重做[/]")
+            self._refresh_version_display()
         elif cmd == "/log" and self._version:
-            entries = self._version.log()
+            show_all = arg.strip() == "--all"
+            entries = self._version.log(all_branches=show_all)
             if entries:
-                lines = ["Checkpoints:"]
-                for e in entries[:8]:
-                    m = "[green]HEAD[/]" if e.get("is_head") else ""
-                    lines.append(f"  [dim]{e['id']}[/] {e.get('question','')} {m}")
+                lines = ["[bold]Checkpoints:[/]" + (" (全部)" if show_all else "")]
+                for e in entries[:10]:
+                    m = "[green]● HEAD[/]" if e.get("is_head") else ""
+                    branch = f"[#a78bfa]{e.get('branch','')}[/]" if e.get("branch") else ""
+                    lines.append(
+                        f"  [dim]{e['id']}[/] "
+                        f"{e.get('question','')[:40]} {branch} {m}"
+                    )
                 self._chat_area.add_system("\n".join(lines))
             else:
-                self._chat_area.add_system("[dim]暂无[/]")
+                self._chat_area.add_system("[dim]暂无检查点[/]")
         elif cmd == "/status" and self._version:
             st = self._version.status()
+            lines = [
+                f"[bold]分支:[/] [#a78bfa]{st['branch']}[/]",
+                f"[dim]HEAD: {st['head']}[/]",
+                f"undo: {'[green]可用[/]' if st['can_undo'] else '[dim]不可用[/]'}  "
+                f"redo: {'[green]可用[/]' if st['can_redo'] else '[dim]不可用[/]'}",
+            ]
+            self._chat_area.add_system("\n".join(lines))
+            self._refresh_version_display()
+        elif cmd == "/branch" and self._version:
+            name = arg.strip()
+            if not name:
+                self._chat_area.add_system("[dim]用法: /branch <分支名>[/]")
+                return
+            cp = self._version.branch(name)
+            self._restore_stm_from_version()
             self._chat_area.add_system(
-                f"分支:{st['branch']} undo:{'y' if st['can_undo'] else 'n'} redo:{'y' if st['can_redo'] else 'n'}"
+                f"[green]已创建/切换至分支 [#a78bfa]{name}[/][/]"
             )
+            self._refresh_version_display()
+        elif cmd == "/checkout" and self._version:
+            ref = arg.strip()
+            if not ref:
+                self._chat_area.add_system("[dim]用法: /checkout <检查点ID | 分支名>[/]")
+                return
+            cp = self._version.checkout(ref)
+            if cp:
+                self._restore_stm_from_version()
+                self._chat_area.add_system(
+                    f"[green]已切换至 [{cp['id']}][/]"
+                )
+                self._refresh_version_display()
+            else:
+                self._chat_area.add_system(f"[dim]未找到: {ref}[/]")
+        elif cmd == "/diff" and self._version:
+            refs = arg.strip().split()
+            r1 = refs[0] if len(refs) > 0 else None
+            r2 = refs[1] if len(refs) > 1 else None
+            result = self._version.diff(r1, r2)
+            if result:
+                lines = ["[bold]Diff:[/]"]
+                for k, v in result.items():
+                    if isinstance(v, list):
+                        lines.append(f"  [dim]{k}:[/] {len(v)} 条变更")
+                    else:
+                        lines.append(f"  [dim]{k}:[/] {v}")
+                self._chat_area.add_system("\n".join(lines))
+            else:
+                self._chat_area.add_system("[dim]无法比较（可能缺参数或无可比检查点）[/]")
         elif cmd == "/stats":
             self._chat_area.add_system(self._hud._build_text())
         else:
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
+
+    # ── spinner animation ────────────────────────────────────
+
+    def _stop_spinner(self):
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
+        self._spinner_frames = None
+
+    def _tick_spinner(self):
+        if not self._current_tool_widget or not self._spinner_frames:
+            return
+        frame = next(self._spinner_frames)
+        label = self._current_tool_widget.query_one("#tool-name", Label)
+        label.update(f"{frame} {self._current_tool_widget.tool_name}")
 
     # ── agent execution ───────────────────────────────────────
 
@@ -168,22 +293,38 @@ class ChatScreen(Screen):
     async def _run_agent(self, text: str):
         self._agent._confirm = lambda _: True
 
+        # ── Mount loading indicator ──
+        loading = Static("[#fab283]● 思考中...[/]", id="loading-indicator")
+        self._chat_area.mount(loading)
+        self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+
         def _on_output(msg: str):
             self.app.call_from_thread(_apply_output, msg)
         def _apply_output(msg: str):
             if msg.startswith("思考:"):
                 self._chat_area.add_system(
-                    f"[#a78bfa]●[/] [italic dim]{msg.replace('思考:','').strip()}[/]"
+                    f"[#a78bfa]Thought:[/] [italic dim]{msg.replace('思考:','').strip()}[/]"
                 )
             elif msg.startswith("行动:"):
-                self._chat_area.add_system(
-                    f"[#f5a742]⚙ {msg.replace('行动:','').strip()}[/]"
-                )
+                self._stop_spinner()
+                tool_info = msg.replace("行动:", "").strip()
+                tool_name = tool_info.split("(")[0].strip() if "(" in tool_info else tool_info
+                widget = ToolCall(tool_name, result="执行中...")
+                self._chat_area.mount(widget)
+                self._current_tool_widget = widget
+                self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+                self._spinner_frames = cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                self._spinner_timer = self.set_interval(0.12, self._tick_spinner)
             elif msg.startswith("观察:"):
-                self._chat_area.add_system(
-                    f"[dim]{msg.replace('观察:','').strip()}[/]"
-                )
+                self._stop_spinner()
+                if self._current_tool_widget:
+                    self._current_tool_widget.update_result(
+                        msg.replace("观察:", "").strip()
+                    )
+                    self._current_tool_widget = None
             elif msg.startswith(("错误:", "警告:")):
+                self._stop_spinner()
+                self._current_tool_widget = None
                 self._chat_area.add_system(f"[#e06c75]{msg}[/]")
 
         self._agent._output = _on_output
@@ -191,13 +332,42 @@ class ChatScreen(Screen):
         try:
             answer = await asyncio.to_thread(self._agent.run, text, memory_manager=self._memory)
         except Exception as e:
+            self._stop_spinner()
+            self._current_tool_widget = None
+            try:
+                self._chat_area.query_one("#loading-indicator").remove()
+            except Exception:
+                pass
             self._chat_area.add_system(f"[#e06c75]错误: {e}[/]")
             self._running = False
             return
 
+        # ── Remove loading indicator ──
+        try:
+            self._chat_area.query_one("#loading-indicator").remove()
+        except Exception:
+            pass
+
         if answer:
-            self._chat_area.add_message("assistant", answer)
+            # ── Streaming typing effect ──
+            msg_widget = ChatMessage("assistant", "")
+            self._chat_area.mount(msg_widget)
+            self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+
+            msg_content = msg_widget.query_one("#msg-content", Static)
+
+            displayed = ""
+            for char in answer:
+                displayed += char
+                msg_content.update(displayed)
+                if char in ".!?。！？\n":
+                    await asyncio.sleep(0.15)
+                else:
+                    await asyncio.sleep(0.03)
+
             self._hud.update_tokens(len(text) // 2, len(answer) // 2)
+            # Auto-commit after successful answer
+            self._commit_if_answered(text, answer)
         else:
             self._chat_area.add_system("[dim]Agent 未能得出答案。[/]")
         self._running = False

@@ -36,6 +36,10 @@ class ShortTermMemory:
                 total += int(chinese_chars * 1.8 + other_chars * 0.3)
         return total
 
+    def get_summary(self) -> str:
+        """Return the current compressed summary, or empty string if none."""
+        return self._summary
+
     def clear(self):
         self._messages.clear()
         self._summary = ""

@@ -8,6 +8,13 @@ from textual.widgets import Label, Static
 class SidePanel(Widget):
     """Auxiliary info panel with elevated card design."""
 
+    DEFAULT_CSS = """
+    SidePanel {
+        height: 100%;
+        overflow-y: auto;
+    }
+    """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._version_info = ("main", "—", False, False)
@@ -62,16 +69,16 @@ class SidePanel(Widget):
 
     def compose(self) -> ComposeResult:
         with Static(classes="card"):
-            yield Label("版本控制", classes="card-title")
+            yield Label("📋 版本控制", classes="card-title")
             yield Static(self._render_version(), id="version-card", classes="card-text")
         with Static(classes="card"):
-            yield Label("长期记忆", classes="card-title")
+            yield Label("🧠 长期记忆", classes="card-title")
             yield Static(self._render_memory(), id="memory-card", classes="card-text")
         with Static(classes="card"):
-            yield Label("最近工具", classes="card-title")
+            yield Label("⚡ 最近工具", classes="card-title")
             yield Static(self._render_tools(), id="tool-card", classes="card-text")
         with Static(classes="card"):
-            yield Label("CLI 入口", classes="card-title")
+            yield Label("💻 CLI 入口", classes="card-title")
             yield Static(
                 "[dim]$[/] nexus eval run\n"
                 "[dim]$[/] nexus stats\n"

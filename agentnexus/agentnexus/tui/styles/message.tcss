@@ -1,0 +1,50 @@
+/* Palette — sync with base.tcss if changing values */
+$bg: #1a1b20;
+$surface: #22242b;
+$elevated: #292b33;
+$text: #e2e3e7;
+$text-dim: #848893;
+$muted: #5d606b;
+$primary: #fab283;
+$secondary: #6ba5f2;
+$accent: #a78bfa;
+$success: #7fd88f;
+$error: #e06c75;
+$warning: #f5a742;
+$assistant: #6ba5f2;
+$user: #a78bfa;
+$tool: #f5a742;
+$border: #333640;
+
+/* ===== Messages ===== */
+ChatMessage {
+  padding: 1 1 1 2;
+  height: auto;
+  overflow-y: auto;
+  margin-bottom: 1;
+}
+ChatMessage.assistant { border-left: solid $assistant; background: #1b1f26; }
+ChatMessage.user      { border-left: solid $user;      background: #1f1b26; }
+ChatMessage.system    { border-left: solid $muted; }
+
+#msg-content { color: $text; width: 1fr; }
+
+.msg-text { color: $text; width: 1fr; }
+.msg-code {
+  background: $elevated;
+  margin: 1 0;
+  padding: 1;
+  color: $text;
+  width: 1fr;
+}
+
+/* ===== Tool Call ===== */
+ToolCall {
+  padding: 0 1;
+  border-left: solid $tool;
+  height: auto;
+  background: $surface;
+}
+ToolCall #tool-name   { color: $tool; text-style: bold; }
+ToolCall #tool-result { color: $text-dim; width: 1fr; }
+ToolCall #tool-meta   { color: $muted; text-style: italic; }

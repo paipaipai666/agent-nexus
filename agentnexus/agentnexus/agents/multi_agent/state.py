@@ -11,6 +11,8 @@ class AgentState(TypedDict):
     started_at: float
     tool_call_count: int
     plan: list[str]
+    plan_complexity: str
+    plan_metadata: dict
     research_result: str
     research_status: Literal["ok", "error", ""]
     code_result: str
@@ -32,7 +34,6 @@ class AgentState(TypedDict):
     exec_success: bool
     exec_exception: str
     exec_diff: dict
-    expected_output: str
     coder_truncated: bool
     error_history: Annotated[list[dict], operator.add]
     messages: Annotated[list, operator.add]
@@ -45,7 +46,7 @@ class AgentState(TypedDict):
 NODE_CONTRACTS: dict[str, dict] = {
     "plan": {
         "inputs": ["task"],
-        "outputs": ["plan", "messages"],
+        "outputs": ["plan", "plan_complexity", "plan_metadata", "messages"],
         "doc": "Decompose task into research/code steps via LLM planner.",
     },
     "research": {
@@ -55,7 +56,7 @@ NODE_CONTRACTS: dict[str, dict] = {
     },
     "code": {
         "inputs": ["task", "plan", "retry_count", "messages"],
-        "outputs": ["code_result", "code_status", "expected_output", "messages", "coder_truncated"],
+        "outputs": ["code_result", "code_status", "messages", "coder_truncated"],
         "doc": "Generate executable Python code via LLM coder, apply schema validation.",
     },
     "execute": {

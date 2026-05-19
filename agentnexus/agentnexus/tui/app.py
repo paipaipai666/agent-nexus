@@ -9,13 +9,21 @@ from pathlib import Path
 
 from textual.app import App
 
-_CSS = str(Path(__file__).parent / "styles" / "catppuccin.tcss")
+_STYLES = Path(__file__).parent / "styles"
 
 
 class AgentNexusTUI(App):
     """AgentNexus terminal-native chat app."""
 
-    CSS_PATH = _CSS
+    CSS_PATH = [
+        str(_STYLES / "base.tcss"),
+        str(_STYLES / "top_bar.tcss"),
+        str(_STYLES / "layout.tcss"),
+        str(_STYLES / "message.tcss"),
+        str(_STYLES / "input_area.tcss"),
+        str(_STYLES / "side_panel.tcss"),
+        str(_STYLES / "hud.tcss"),
+    ]
     TITLE = "AgentNexus"
 
     def __init__(self, agent, memory, version):

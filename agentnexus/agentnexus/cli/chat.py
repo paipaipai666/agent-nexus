@@ -138,7 +138,7 @@ def chat(
     memory = MemoryManager(session_id, llm=llm, enable_long_term=not no_memory)
     version = ConversationVersionManager(session_id, get_settings().memory_db_path)
 
-    agent = ReActAgent(llm, executor, output=lambda msg: _show_step(console, msg))
+    agent = ReActAgent(llm, executor, output=lambda msg: _show_step(console, msg), conversation_mode=True)
 
     # ── helpers for version-aware STM restore ──────────────────────
 

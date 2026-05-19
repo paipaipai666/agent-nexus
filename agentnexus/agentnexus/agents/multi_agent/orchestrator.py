@@ -111,6 +111,49 @@ def _state_preview(state: dict, keys: list[str]) -> dict[str, str]:
     return {k: _trunc(str(state.get(k, ""))) for k in keys}
 
 
+def _parse_plan(response: str, task: str) -> tuple[list[str], str, dict]:
+    """Parse planner JSON response into: (plan_strings, complexity, metadata).
+
+    Tries JSON 'steps' array first, falls back to legacy colon-separated format.
+    """
+    import json as _json
+    stripped = response.strip()
+
+    # Try JSON format first
+    json_text = None
+    match = re.search(r"```json\s*\n?(.*?)```", stripped, re.DOTALL)
+    if match:
+        json_text = match.group(1).strip()
+    elif stripped.startswith("{"):
+        json_text = stripped
+
+    if json_text:
+        try:
+            data = _json.loads(json_text)
+            steps = data.get("steps", [])
+            if steps:
+                plan = []
+                for s in steps:
+                    t = s.get("type", "")
+                    if t == "research":
+                        plan.append(f"research: {s.get('query', task)}")
+                    elif t == "code":
+                        plan.append(f"code: {s.get('spec', task)}")
+                if not plan:
+                    plan = [f"research: {task}"]
+                complexity = data.get("complexity", "medium")
+                metadata = {k: data[k] for k in data if k != "steps"}
+                return plan, complexity, metadata
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    # Legacy format fallback
+    plan = [line.strip() for line in stripped.split("\n") if ":" in line.strip()]
+    if not plan:
+        plan = [f"research: {task}"]
+    return plan, "medium", {}
+
+
 def _trace_wrapper(fn, node_name: str, input_keys: list[str]):
     def wrapped(state: AgentState) -> dict:
         # Hard limit guard
@@ -234,17 +277,18 @@ def _get_analyst_llm() -> AgentLLM:
     return _instance_local.analyst_llm
 
 def _budget_aware_think(llm: AgentLLM, messages: list, task: str = "",
-                        silent: bool = False) -> str:
+                        silent: bool = False, complexity: str = "") -> str:
     """LLM call with model routing and context compression based on budget state.
 
+    Uses planner-provided complexity if available, else heuristic fallback.
     YELLOW: switch to fast model. RED: compress context + fast model.
     """
     from agentnexus.core.model_router import route_model
     budget = get_budget_tracker()
     state = budget.state.value if budget else "green"
 
-    # Model routing
-    model_id = route_model(task, state)
+    # Model routing — prefer planner-computed complexity
+    model_id = route_model(task, state, complexity_override=complexity)
     if model_id != getattr(llm, "model", ""):
         try:
             llm.model = model_id
@@ -310,17 +354,19 @@ def plan_node(state: AgentState) -> dict:
             response = _budget_aware_think(_get_planner_llm(), [{"role": "user", "content": prompt}],
                                             task=state.get("task", ""), silent=True)
 
-        plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
-        if not plan:
-            plan = [f"research: {state['task']}"]
+        plan, plan_complexity, plan_metadata = _parse_plan(response, state["task"])
 
         console.print("  [bold]执行计划:[/bold]")
         for i, step in enumerate(plan, 1):
             console.print(f"    {i}. {_e(step)}")
+        if plan_complexity:
+            console.print(f"  [dim]复杂度: {plan_complexity}[/dim]")
         console.print()
 
         return {
             "plan": plan,
+            "plan_complexity": plan_complexity,
+            "plan_metadata": plan_metadata,
             "messages": [("planner", response)],
         }
     except Exception as e:
@@ -332,6 +378,8 @@ def plan_node(state: AgentState) -> dict:
         console.print()
         return {
             "plan": plan,
+            "plan_complexity": "medium",
+            "plan_metadata": {},
             "messages": [("planner", f"ERROR: {e}")],
         }
 
@@ -545,7 +593,6 @@ def code_node(state: AgentState) -> dict:
                     return {
                         "code_result": output.reasoning,
                         "code_status": "cancelled",
-                        "expected_output": output.expected_output,
                         "coder_truncated": last_truncated,
                         "messages": [("coder", output.code)],
                     }
@@ -555,7 +602,6 @@ def code_node(state: AgentState) -> dict:
         return {
             "code_result": output.reasoning,
             "code_status": "ok",
-            "expected_output": output.expected_output,
             "coder_truncated": last_truncated,
             "messages": [("coder", output.code)],
         }
@@ -565,7 +611,6 @@ def code_node(state: AgentState) -> dict:
     return {
         "code_result": f"[{error_type.value}] {output.reasoning}",
         "code_status": "error",
-        "expected_output": "",
         "coder_truncated": last_truncated,
         "messages": [("coder", f"ERROR: {error_type.value}")],
     }
@@ -713,15 +758,14 @@ def _synthesize_answer(state: dict, exec_report: str, is_pure_research: bool,
             research=state.get("research_result", "无"),
             code=state.get("code_result", "无"),
             exec_output_raw=exec_out or "（无输出）",
-            exec_output=exec_out,
-            exec_error=exec_err,
-            exec_status="成功" if exec_success else ("无执行" if is_pure_research else "失败"),
             exec_report=exec_report,
             date=get_current_date(),
         )
         ana_llm = _get_analyst_llm()
+        plan_complexity = state.get("plan_complexity", "")
         analysis = _budget_aware_think(ana_llm, [{"role": "user", "content": prompt}],
-                                       task=state.get("task", ""), silent=True)
+                                       task=state.get("task", ""), silent=True,
+                                       complexity=plan_complexity)
         if ana_llm.last_truncated:
             console.print("  [yellow]⚠ Analyst 输出被 LLM 截断（max_tokens），最终答案可能不完整[/yellow]")
             analysis += (
