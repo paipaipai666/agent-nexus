@@ -1,6 +1,7 @@
 """ChatScreen — main chat interface with real ReActAgent backend."""
 
 import asyncio
+import re
 from itertools import cycle
 
 from textual import work
@@ -287,6 +288,17 @@ class ChatScreen(Screen):
         label = self._current_tool_widget.query_one("#tool-name", Label)
         label.update(f"{frame} {self._current_tool_widget.tool_name}")
 
+    @staticmethod
+    def _condense_search_result(text: str) -> str:
+        """Show only title/score/URL from web_search; skip full content."""
+        lines = text.split("\n")
+        out = []
+        for line in lines:
+            stripped = line.strip()
+            if re.match(r"^\[\d+\]", stripped) or stripped.startswith("URL:"):
+                out.append(line)
+        return "\n".join(out)
+
     # ── agent execution ───────────────────────────────────────
 
     @work(exclusive=True)
@@ -294,7 +306,7 @@ class ChatScreen(Screen):
         self._agent._confirm = lambda _: True
 
         # ── Mount loading indicator ──
-        loading = Static("[#fab283]● 思考中...[/]", id="loading-indicator")
+        loading = Static("[#fab283]● Working...[/]", id="loading-indicator")
         self._chat_area.mount(loading)
         self._chat_area.call_after_refresh(self._chat_area.scroll_end)
 
@@ -307,7 +319,7 @@ class ChatScreen(Screen):
                 )
             elif msg.startswith("行动:"):
                 self._stop_spinner()
-                tool_info = msg.replace("行动:", "").strip()
+                tool_info = msg.removeprefix("行动:").strip()
                 tool_name = tool_info.split("(")[0].strip() if "(" in tool_info else tool_info
                 widget = ToolCall(tool_name, result="执行中...")
                 self._chat_area.mount(widget)
@@ -315,13 +327,19 @@ class ChatScreen(Screen):
                 self._chat_area.call_after_refresh(self._chat_area.scroll_end)
                 self._spinner_frames = cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
                 self._spinner_timer = self.set_interval(0.12, self._tick_spinner)
+
             elif msg.startswith("观察:"):
                 self._stop_spinner()
+                result = msg.removeprefix("观察:").strip()
                 if self._current_tool_widget:
-                    self._current_tool_widget.update_result(
-                        msg.replace("观察:", "").strip()
-                    )
+                    # 使用 lower() 增强对 LLM 输出大小写波动的鲁棒性
+                    if self._current_tool_widget.tool_name.strip().lower() == "web_search":
+                        result = self._condense_search_result(result)
+                    self._current_tool_widget.update_result(result)
                     self._current_tool_widget = None
+                else:
+                    # 异常回退处理，防止信息丢失
+                    self._chat_area.add_system(f"[dim]观察: {result}[/]")
             elif msg.startswith(("错误:", "警告:")):
                 self._stop_spinner()
                 self._current_tool_widget = None
@@ -357,15 +375,26 @@ class ChatScreen(Screen):
             msg_content = msg_widget.query_one("#msg-content", Static)
 
             displayed = ""
-            for char in answer:
+            BATCH_SIZE = 25
+            for i, char in enumerate(answer):
                 displayed += char
-                msg_content.update(displayed)
-                if char in ".!?。！？\n":
-                    await asyncio.sleep(0.15)
-                else:
-                    await asyncio.sleep(0.03)
+                if (i + 1) % BATCH_SIZE == 0 or char in ".!?。！？\n":
+                    msg_content.update(displayed)
+                    await asyncio.sleep(0.03 if char not in ".!?。！？\n" else 0.12)
 
-            self._hud.update_tokens(len(text) // 2, len(answer) // 2)
+            remaining = len(answer) % BATCH_SIZE
+            if remaining:
+                msg_content.update(displayed)
+
+            from rich.markdown import Markdown
+            msg_content.update(Markdown(answer))
+
+            usage = getattr(self._agent, "total_usage", None)
+            if usage:
+                self._hud.update_tokens(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            budget = getattr(self._agent, "budget", None)
+            if budget:
+                self._hud.update_budget(budget)
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
         else:

@@ -241,7 +241,12 @@ class LongTermMemory:
             scored.append((score, dict(r)))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [s[1] for s in scored[:limit]]
+        results = []
+        for s in scored[:limit]:
+            d = s[1]
+            d["_score"] = round(s[0], 3)
+            results.append(d)
+        return results
 
     def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,
                                  limit: int, min_similarity: float) -> list[dict]:
@@ -298,7 +303,12 @@ class LongTermMemory:
             scored.append((score, dict(r)))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [s[1] for s in scored[:limit]]
+        results = []
+        for s in scored[:limit]:
+            d = s[1]
+            d["_score"] = round(s[0], 3)
+            results.append(d)
+        return results
 
     def list_recent(self, limit: int = 10) -> list[dict]:
         rows = self._conn.execute(

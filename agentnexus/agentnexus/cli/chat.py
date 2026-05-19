@@ -1,8 +1,9 @@
 """CLI chat command — git-like versioned conversation, Enter to submit"""
 import uuid
+import warnings
 
 import typer
-import warnings
+
 warnings.filterwarnings("ignore", message=".*pkg_resources.*")
 
 from . import app, console
@@ -47,19 +48,19 @@ def chat(
     """
     from prompt_toolkit import PromptSession
     from prompt_toolkit.styles import Style
+    from rich import box
     from rich.panel import Panel
     from rich.table import Table
-    from rich import box
 
     from agentnexus.agents.re_act_agent import ReActAgent
-    from agentnexus.tools.tool_executor import ToolExecutor
-    from agentnexus.tools.web_search import web_search
-    from agentnexus.tools.code_executor import python_execute
-    from agentnexus.core.llm import AgentLLM
     from agentnexus.core.config import get_settings
+    from agentnexus.core.llm import AgentLLM
     from agentnexus.memory.manager import MemoryManager
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.tools.code_executor import python_execute
+    from agentnexus.tools.tool_executor import ToolExecutor
+    from agentnexus.tools.web_search import web_search
 
     console.print(
         Panel(
@@ -85,9 +86,9 @@ def chat(
 
     llm = _SilentLLM()
 
-    from agentnexus.tools.memory_search import memory_search
-
     from agentnexus.cli.audit import _global_audit_log
+    from agentnexus.tools.memory_save import memory_save
+    from agentnexus.tools.memory_search import memory_search
 
     executor = ToolExecutor()
     executor.registry._audit_log = _global_audit_log  # share audit log with CLI
@@ -97,6 +98,19 @@ def chat(
                               "type": "object",
                               "properties": {"query": {"type": "string"}},
                               "required": ["query"],
+                          },
+                          risk_level="low",
+                          rate_limit_per_min=10)
+    executor.registerTool("memory_save", "主动保存重要信息到长期记忆。当用户明确分享个人信息(姓名/偏好/背景)或发现重要事实时使用",
+                          memory_save,
+                          param_schema={
+                              "type": "object",
+                              "properties": {
+                                  "content": {"type": "string"},
+                                  "category": {"type": "string", "default": "entity_fact"},
+                                  "importance": {"type": "number", "default": 0.7},
+                              },
+                              "required": ["content"],
                           },
                           risk_level="low",
                           rate_limit_per_min=10)

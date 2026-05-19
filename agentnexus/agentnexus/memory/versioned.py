@@ -241,7 +241,7 @@ class ConversationVersionManager:
         return {
             "session_id": self.session_id,
             "branch": self._current_branch(),
-            "head": dict(head) if head else None,
+            "head": head["id"] if head else None,
             "can_undo": head is not None and head.get("parent_id") is not None,
             "can_redo": len(self._redo_stack) > 0,
         }

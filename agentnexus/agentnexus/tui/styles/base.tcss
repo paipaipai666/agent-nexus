@@ -20,8 +20,8 @@ $border: #333640;
 Screen { background: $bg; color: $text; }
 
 /* ===== Scrollbar ===== */
-Scrollbar { background: transparent; color: $border; }
-Scrollbar:hover { color: $text-dim; }
+Scrollbar { background: transparent; color: $muted; }
+Scrollbar:hover { color: $secondary; }
 
 /* ===== Loading ===== */
 LoadingIndicator { color: $primary; }

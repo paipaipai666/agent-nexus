@@ -278,10 +278,11 @@ def _get_analyst_llm() -> AgentLLM:
 
 def _budget_aware_think(llm: AgentLLM, messages: list, task: str = "",
                         silent: bool = False, complexity: str = "") -> str:
-    """LLM call with model routing and context compression based on budget state.
+    """LLM call with model routing coordinated with MemoryManager.
 
-    Uses planner-provided complexity if available, else heuristic fallback.
-    YELLOW: switch to fast model. RED: compress context + fast model.
+    Model routing: YELLOW/RED/BREAK → fast model.
+    Context compression is delegated to MemoryManager (microcompact / LLM summary);
+    this function only does model routing, no longer duplicates truncation.
     """
     from agentnexus.core.model_router import route_model
     budget = get_budget_tracker()
@@ -295,9 +296,12 @@ def _budget_aware_think(llm: AgentLLM, messages: list, task: str = "",
         except Exception:
             pass
 
-    # Context compression for RED state
-    if state == "red" and messages:
-        messages = _compress_messages(messages)
+    # Coordinate MemoryManager with budget state (compression is its job)
+    memory = get_orchestrator_memory()
+    if memory and budget:
+        memory.set_budget_state(state)
+        if state == "break":
+            memory._skip_llm_compact = True
 
     return llm.think(messages, silent=silent) or ""
 

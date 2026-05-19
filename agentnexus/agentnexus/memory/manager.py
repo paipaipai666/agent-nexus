@@ -67,6 +67,15 @@ def _contains_pii(text: str) -> bool:
     return any(p.search(text) for p in _PII_PATTERNS)
 
 
+# Budget-aware thresholds: compact(non-LLM trigger tokens), LTM search limit/similarity
+_BUDGET_THRESHOLDS = {
+    "green":  dict(compact=3000, ltm_limit=5, ltm_similarity=0.50),
+    "yellow": dict(compact=2000, ltm_limit=3, ltm_similarity=0.55),
+    "red":    dict(compact=1000, ltm_limit=1, ltm_similarity=0.65),
+    "break":  dict(compact=500,  ltm_limit=0, ltm_similarity=0.75),
+}
+
+
 class MemoryManager:
     def __init__(self, session_id: str, llm=None, enable_long_term: bool = True):
         self.session_id = session_id
@@ -78,6 +87,8 @@ class MemoryManager:
         self._compact_failures: int = 0
         self._circuit_open: bool = False
         self._compacting: bool = False
+        self._budget_state: str = "green"
+        self._skip_llm_compact: bool = False
         settings = get_settings()
         if "/" in settings.chroma_persist_dir:
             base = settings.chroma_persist_dir.rsplit("/", 1)[0]
@@ -86,26 +97,52 @@ class MemoryManager:
         self._offload_dir = f"{base}/offload"
         self._settings = settings
 
+    def set_budget_state(self, state: str):
+        """Update budget state so compaction, LTM retrieval, and microcompact adapt.
+
+        Called by ReActAgent each loop iteration. State is one of:
+        green / yellow / red / break.
+        """
+        if state in _BUDGET_THRESHOLDS:
+            self._budget_state = state
+
+    def _budget_threshold(self, key: str) -> int | float:
+        state = getattr(self, '_budget_state', 'green')
+        t = _BUDGET_THRESHOLDS.get(state, _BUDGET_THRESHOLDS["green"])
+        return t.get(key, _BUDGET_THRESHOLDS["green"][key])
+
     def init_session(self, question: str) -> str:
         if not self.long_term:
             return ""
+        ltm_limit = int(self._budget_threshold("ltm_limit"))
+        if ltm_limit <= 0:
+            return ""  # BREAK: skip LTM retrieval entirely
+        ltm_similarity = float(self._budget_threshold("ltm_similarity"))
+        # Use the question directly — don't pollute embedding with noisy concatenation
         query_text = question
         if self.short_term:
             recent = self.short_term.get_all()
             if recent:
-                last_msgs = [m["content"] for m in recent if m["role"] in ("user", "assistant")][-3:]
-                if last_msgs:
-                    query_text = " ".join(last_msgs) + " " + question
+                summary = self.short_term.get_summary()
+                if summary:
+                    # Prepend summary for richer context when available
+                    query_text = f"{summary[:300]} {question}"
         query_vec = self._embed_model.encode(query_text, normalize_embeddings=True).tolist()
-        memories = self.long_term.search(query_embedding=query_vec, limit=3, min_similarity=0.4)
+        memories = self.long_term.search(
+            query_embedding=query_vec, limit=ltm_limit, min_similarity=ltm_similarity)
         if not memories:
             return ""
 
         parts = []
         for m in memories:
             label = CATEGORY_LABELS.get(m["category"], m["category"])
-            parts.append(f"- [{label}] {m['content']}")
-        return "相关历史记忆:\n" + "\n".join(parts) + "\n"
+            score = m.get("_score", 0)
+            star = "★★★" if score >= 0.7 else "★★☆" if score >= 0.5 else "★☆☆"
+            parts.append(f"- {star} [{label}] {m['content']}")
+        if not parts:
+            return ""
+        header = "相关历史记忆 (★越多越相关):\n" if any("★★★" in p for p in parts) else "相关历史记忆:\n"
+        return header + "\n".join(parts) + "\n[提示] 用户分享个人信息时，请主动使用 memory_save 保存]\n"
 
     def append(self, role: str, content: str):
         # Layer 1: offload large tool results to disk
@@ -131,50 +168,75 @@ class MemoryManager:
     def microcompact(self):
         """Layer 2: clear recoverable tool results, preserving non-recoverable ones.
 
-        Read/Grep/Glob/Bash results can be re-fetched — their content is cleared
-        and replaced with a metadata stub. Sub-agent output, user messages, and
-        error info are never stripped.
+        GREEN/YELLOW: only clean recoverable tool results (Read, Bash, Grep, etc.)
+        RED: also truncate old assistant messages to metadata stubs
+        BREAK: also clean ALL tool messages (even non-recoverable)
         """
         all_msgs = self.short_term.get_all()
         cleaned = False
         for i, m in enumerate(all_msgs):
-            if m["role"] != "tool":
-                continue
-            tool_name, _ = _parse_tool_message(m.get("content", ""))
-            if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
-                all_msgs[i] = {
-                    **m,
-                    "content": f"[工具结果已清理] 工具: {tool_name}",
-                }
-                cleaned = True
+            if m["role"] == "tool":
+                tool_name, _ = _parse_tool_message(m.get("content", ""))
+                if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
+                    all_msgs[i] = {
+                        **m,
+                        "content": f"[工具结果已清理] 工具: {tool_name}",
+                    }
+                    cleaned = True
+                elif getattr(self, '_budget_state', 'green') == "break":
+                    # BREAK: clean ALL tool messages
+                    all_msgs[i] = {
+                        **m,
+                        "content": "[工具结果已清理 — 预算耗尽]",
+                    }
+                    cleaned = True
+            elif m["role"] == "assistant" and getattr(self, '_budget_state', 'green') in ("red", "break"):
+                # RED/BREAK: truncate long assistant messages to save space
+                content = m.get("content", "")
+                if len(content) > 300:
+                    all_msgs[i] = {
+                        **m,
+                        "content": content[:150] + "\n...[预算限制，已截断]...\n" + content[-150:],
+                    }
+                    cleaned = True
         if cleaned:
             self.short_term._messages.clear()
             for m in all_msgs:
                 self.short_term._messages.append(m)
 
-    def maybe_compact(self, threshold: int | None = None):
+    def maybe_compact(self, threshold: int | None = None) -> int:
+        """Check STM token usage and compact if over threshold.
+
+        Returns tokens saved (positive = freed space), or 0 if no action taken.
+        Budget-aware: BREAK skips LLM summarization entirely.
+        """
         # Circuit breaker: skip LLM compaction if repeated failures
         if self._circuit_open:
             self.microcompact()
-            return
+            return 0
 
         if threshold is None:
-            threshold = self._settings.compact_token_threshold
+            threshold = int(self._budget_threshold("compact"))
 
-        tokens = self.short_term.estimate_tokens()
-        if tokens < threshold:
-            return
+        tokens_before = self.short_term.estimate_tokens()
+        if tokens_before < threshold:
+            return 0
 
         all_msgs = self.short_term.get_all()
         if len(all_msgs) <= 4:
-            return
+            return 0
 
         # Layer 2: microcompact before expensive LLM summarization
         self.microcompact()
 
+        # BREAK: no LLM calls — microcompact already did the job
+        if getattr(self, '_budget_state', 'green') == "break" or self._skip_llm_compact:
+            tokens_after = self.short_term.estimate_tokens()
+            return max(0, tokens_before - tokens_after)
+
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs[:-4])
         if not history_text.strip():
-            return
+            return 0
 
         self._compacting = True
         try:
@@ -185,7 +247,7 @@ class MemoryManager:
                 self._compact_failures += 1
                 if self._compact_failures >= 3:
                     self._circuit_open = True
-                return
+                return 0
 
             # Parse structured XML output: keep <summary>, discard <analysis>
             summary_content = _extract_xml_tag(response, "summary")
@@ -201,6 +263,8 @@ class MemoryManager:
                 self._circuit_open = True
         finally:
             self._compacting = False
+            tokens_after = self.short_term.estimate_tokens()
+            return max(0, tokens_before - tokens_after)
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True):
         try:

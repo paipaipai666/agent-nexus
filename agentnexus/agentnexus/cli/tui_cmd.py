@@ -9,14 +9,15 @@ from . import app
 def tui():
     """启动终端原生对话界面（Textual TUI + ReActAgent 后端）"""
     from agentnexus.agents.re_act_agent import ReActAgent
-    from agentnexus.tools.tool_executor import ToolExecutor
-    from agentnexus.tools.web_search import web_search
-    from agentnexus.tools.code_executor import python_execute
-    from agentnexus.tools.memory_search import memory_search
-    from agentnexus.core.llm import AgentLLM
     from agentnexus.core.config import get_settings
+    from agentnexus.core.llm import AgentLLM
     from agentnexus.memory.manager import MemoryManager
     from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.tools.code_executor import python_execute
+    from agentnexus.tools.memory_save import memory_save
+    from agentnexus.tools.memory_search import memory_search
+    from agentnexus.tools.tool_executor import ToolExecutor
+    from agentnexus.tools.web_search import web_search
     from agentnexus.tui.app import AgentNexusTUI
 
     # LLM
@@ -29,6 +30,22 @@ def tui():
         "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词",
         memory_search,
         param_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        risk_level="low",
+        rate_limit_per_min=10,
+    )
+    executor.registerTool(
+        "memory_save",
+        "主动保存重要信息到长期记忆。当用户明确分享个人信息(姓名/偏好/背景)或发现重要事实时使用",
+        memory_save,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "category": {"type": "string", "default": "entity_fact"},
+                "importance": {"type": "number", "default": 0.7},
+            },
+            "required": ["content"],
+        },
         risk_level="low",
         rate_limit_per_min=10,
     )

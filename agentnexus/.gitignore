@@ -12,3 +12,5 @@ build/
 .claude/
 blog.html
 test.txt
+**/docs/
+**/.trae/

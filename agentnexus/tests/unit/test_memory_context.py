@@ -6,10 +6,11 @@ from agentnexus.memory.short_term import ShortTermMemory
 
 class TestInitSessionWithContext:
 
-    def test_init_session_uses_enhanced_query_with_stm(self, temp_agentnexus_home):
+    def test_init_session_uses_question_with_summary(self, temp_agentnexus_home):
         stm = ShortTermMemory()
         stm.append("user", "用python实现一个快速排序算法")
         stm.append("assistant", "def quicksort(arr): ...")
+        stm.compact("用户要求实现快速排序")
 
         mock_embed = MagicMock()
         mock_embed.encode.return_value = MagicMock(tolists=MagicMock(return_value=[[0.1] * 384]))
@@ -31,8 +32,9 @@ class TestInitSessionWithContext:
 
             call_args = mock_embed.encode.call_args
             query_text = call_args[0][0]
-            assert "快速排序" in query_text
+            # Question is always in the query; summary is prepended when available
             assert "讲解一下" in query_text
+            assert "快速排序" in query_text
 
     def test_init_session_falls_back_to_question_without_stm(self, temp_agentnexus_home):
         stm = ShortTermMemory()

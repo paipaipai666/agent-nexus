@@ -34,10 +34,12 @@ Screen {
     width: 1fr;
     height: 100%;
     overflow-y: auto;
+    scrollbar-size-vertical: 1;
 }
 #side-panel {
     width: 28;
     height: 100%;
+    scrollbar-size-vertical: 1;
 }
 #hud {
     height: 1;

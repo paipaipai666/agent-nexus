@@ -33,6 +33,8 @@ class AgentLLM:
         self.timeout = timeout or settings.llm_timeout
         self.last_error: str = ""
         self.last_truncated: bool = False
+        self.last_usage: dict = {}
+        self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
 
     def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False) -> str:
         if not self.api_key or not self.base_url:
@@ -122,6 +124,10 @@ class AgentLLM:
                     usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
                 except Exception:
                     pass
+
+            self.last_usage = usage
+            self.total_usage["input_tokens"] += usage.get("input_tokens", 0)
+            self.total_usage["output_tokens"] += usage.get("output_tokens", 0)
 
             if ctx and span:
                 ctx.end_span(span,
