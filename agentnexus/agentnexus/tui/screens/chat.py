@@ -15,7 +15,9 @@ from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Input, Label, Static
 
+from agentnexus.core.config import get_settings
 from agentnexus.memory.short_term import ShortTermMemory
+from agentnexus.observability.tracer import trace_manager
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
@@ -440,8 +442,17 @@ class ChatScreen(Screen):
 
         self._agent._output = _on_output
 
+        def _run_with_trace():
+            """Run agent in a traced context — each user input is its own trace."""
+            trace_manager.configure(get_settings().traces_dir)
+            ctx = trace_manager.start_trace(text)
+            try:
+                return self._agent.run(text, memory_manager=self._memory)
+            finally:
+                trace_manager.end_trace()
+
         try:
-            answer = await asyncio.to_thread(self._agent.run, text, memory_manager=self._memory)
+            answer = await asyncio.to_thread(_run_with_trace)
         except Exception as e:
             self._stop_spinner()
             self._current_tool_widget = None

@@ -13,6 +13,7 @@ def tui():
     from agentnexus.core.llm import AgentLLM
     from agentnexus.memory.manager import MemoryManager
     from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.observability.tracer import trace_manager
     from agentnexus.tools import register_all_tools
     from agentnexus.tools.tool_executor import ToolExecutor
     from agentnexus.tui.app import AgentNexusTUI
@@ -38,6 +39,9 @@ def tui():
 
     # Agent
     agent = ReActAgent(llm, executor, conversation_mode=True)
+
+    # Initialize trace system (each user input creates its own trace)
+    trace_manager.configure(get_settings().traces_dir)
 
     # Launch TUI
     tui_app = AgentNexusTUI(agent=agent, memory=memory, version=version)

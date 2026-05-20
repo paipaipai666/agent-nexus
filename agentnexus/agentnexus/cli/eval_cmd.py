@@ -7,10 +7,65 @@ import typer
 from rich import box
 from rich.table import Table
 
-from agentnexus.rag.ingestion import ChunkStrategy
 from agentnexus.core.config import get_settings
+from agentnexus.rag.ingestion import ChunkStrategy
 
 from . import eval_app, console
+
+
+# ── Agent evaluation (current architecture) ──────────────────────
+
+
+@eval_app.command("agent")
+def eval_agent(
+    days: int = typer.Option(7, "--days", "-d", help="回溯天数"),
+):
+    """评估单 Agent 执行质量（从 JSONL trace 读取）"""
+    from agentnexus.evaluation.agent_eval import AgentEvaluator
+
+    traces_dir = get_settings().traces_dir
+    evaluator = AgentEvaluator()
+    report = evaluator.evaluate_all(traces_dir, days=days)
+
+    if report.total_traces == 0:
+        console.print("[dim]暂无可评估的 trace 数据。启动 nexus tui 执行一些对话后会生成 trace。[/dim]")
+        return
+
+    console.print(report.summary())
+
+    if not report.tool_breakdown:
+        console.print("\n[dim]无工具调用记录。[/dim]")
+    else:
+        tool_table = Table(title="工具调用明细", box=box.ROUNDED)
+        tool_table.add_column("工具", style="cyan")
+        tool_table.add_column("调用次数", justify="right")
+        tool_table.add_column("错误数", justify="right")
+        tool_table.add_column("成功率", justify="right")
+        for name, info in sorted(report.tool_breakdown.items()):
+            rate = info["success_rate"]
+            rate_str = f"[green]{rate:.1%}[/green]" if rate >= 0.85 else f"[red]{rate:.1%}[/red]"
+            tool_table.add_row(name, str(info["calls"]), str(info["errors"]), rate_str)
+        console.print(tool_table)
+
+    # Per-trace details
+    if report.failed_traces:
+        console.print("\n[bold yellow]异常 Trace:[/bold yellow]")
+        for r in report.failed_traces[:5]:
+            issues = []
+            if r.had_error:
+                issues.append("LLM 错误")
+            if r.had_truncation:
+                issues.append("上下文截断")
+            if not r.had_answer:
+                issues.append("未产出答案")
+            console.print(f"  [{r.trace_id}] {r.task_preview[:60]} — {', '.join(issues)}")
+
+    # CI gate
+    if not report.passed:
+        console.print("\n[bold yellow]⚠ 部分指标未达阈值[/bold yellow]")
+
+
+# ── RAG evaluation ────────────────────────────────────────────────
 
 
 @eval_app.command("list")
@@ -73,23 +128,30 @@ def eval_run():
         console.print("[red]所有评估组合均失败[/red]")
         return
 
+    def _fmt_ci(score: float, ci: tuple | None = None) -> str:
+        if ci and len(ci) == 2:
+            return f"{score:.3f} [{ci[0]:.2f}-{ci[1]:.2f}]"
+        return f"{score:.3f}"
+
     table = Table(title="RAG 评估结果", box=box.ROUNDED)
     table.add_column("配置", style="cyan")
     table.add_column("Faithfulness", justify="right")
     table.add_column("Relevancy", justify="right")
     table.add_column("Precision", justify="right")
     table.add_column("Recall", justify="right")
-    table.add_column("Relevancy", justify="right")
+    table.add_column("CtxRelevancy", justify="right")
+    table.add_column("RejectRate", justify="right")
     table.add_column("p95(ms)", justify="right")
 
     for r in sorted(results, key=lambda x: x.faithfulness, reverse=True):
         table.add_row(
             r.label,
-            f"{r.faithfulness:.3f}",
-            f"{r.answer_relevancy:.3f}",
-            f"{r.context_precision:.3f}",
-            f"{r.context_recall:.3f}",
-            f"{r.context_relevancy:.3f}",
+            _fmt_ci(r.faithfulness, getattr(r, "faithfulness_ci", None)),
+            _fmt_ci(r.answer_relevancy, getattr(r, "answer_relevancy_ci", None)),
+            _fmt_ci(r.context_precision, getattr(r, "context_precision_ci", None)),
+            _fmt_ci(r.context_recall, getattr(r, "context_recall_ci", None)),
+            _fmt_ci(r.context_relevancy, getattr(r, "context_relevancy_ci", None)),
+            f"{getattr(r, 'rejection_rate', 0.0):.1%}",
             f"{r.p95_latency_ms:.0f}",
         )
 
@@ -115,6 +177,7 @@ def eval_run():
             "context_precision": r.context_precision,
             "context_recall": r.context_recall,
             "avg_latency_ms": r.avg_latency_ms,
+            "rejection_rate": getattr(r, "rejection_rate", 0.0),
         }
         for r in results
     ]
@@ -177,26 +240,22 @@ def eval_trajectory(
 
 @eval_app.command("ci")
 def eval_ci(
-    days: int = typer.Option(1, "--days", "-d", help="Check traces from last N days"),
+    days: int = typer.Option(1, "--days", "-d", help="回溯天数"),
 ):
-    """CI 模式: 对所有 trace 跑轨迹评估，不达标则 exit(1)"""
-    from agentnexus.evaluation.trajectory import TrajectoryEvaluator
-    from agentnexus.core.config import get_settings
+    """CI 模式: 单 Agent 质量评估，不达标则 exit(1)"""
+    from agentnexus.evaluation.agent_eval import AgentEvaluator
 
-    evaluator = TrajectoryEvaluator()
-    reports = evaluator.evaluate_all(get_settings().traces_dir)
+    evaluator = AgentEvaluator()
+    report = evaluator.evaluate_all(get_settings().traces_dir, days=days)
 
-    if not reports:
+    if report.total_traces == 0:
         console.print("[dim]No traces to evaluate[/dim]")
         return
 
-    failed = [r for r in reports if not r.passed]
-    for r in failed:
-        for issue in r.issues:
-            console.print(f"[red]FAIL[/red] {r.trace_id}: {issue.check} — {issue.detail}")
-
-    console.print(f"\n[bold]{'[green]All passed' if not failed else f'[red]{len(failed)}/{len(reports)} failed'}")
-    if failed:
+    console.print(report.summary())
+    if report.failed_traces:
+        console.print(f"\n[red]{len(report.failed_traces)}/{report.total_traces} traces 异常[/red]")
+    if not report.passed:
         raise typer.Exit(code=1)
 
 
@@ -370,3 +429,216 @@ def eval_coherence(
         if not r.passed and r.issues:
             console.print(f"\n[bold red]FAIL {r.trace_id}[/bold red]")
             console.print(f"  [dim]{r.issues[:300]}[/dim]")
+
+
+@eval_app.command("calibrate")
+def eval_calibrate(
+    output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="输出文件路径"),
+    score_file: str = typer.Option("", "--score-file", "-s", help="人工评分 JSON 文件路径（含 human_precision/human_recall 字段）"),
+):
+    """Judge 校准：导出样本供人工打分，计算 Judge 与人工评分的一致性"""
+    from agentnexus.rag.evaluator import RAGEvaluator
+    from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES
+
+    from agentnexus.rag.chroma_client import (
+        get_embedding_model as _get_embedding_model,
+        insert_documents, delete_collection,
+    )
+    from agentnexus.rag.retriever import HybridRetriever
+
+    evaluator = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES)
+    strategy, chunk_size, overlap, use_hybrid = ChunkStrategy.FIXED, 256, 64, False
+
+    console.print(f"[bold]校准运行: {strategy.value}-{chunk_size}-dense[/bold]\n")
+
+    samples = []
+    chunks = evaluator._chunk_all(strategy, chunk_size, overlap)
+    model = _get_embedding_model()
+
+    delete_collection()
+    insert_documents(chunks)
+
+    retriever = HybridRetriever()
+    if use_hybrid:
+        retriever.build_bm25(chunks)
+
+    for idx, sample in enumerate(EVAL_SAMPLES):
+        retrieved = evaluator._retrieve(
+            sample.question, model, retriever, use_hybrid,
+            max_tokens=max(len(sample.question) * 5, 100),
+        )
+        if not retrieved:
+            samples.append({
+                "sample_idx": idx,
+                "question": sample.question,
+                "ground_truth": sample.ground_truth,
+                "is_negative": not sample.ground_truth,
+                "retrieved": [],
+                "judge_precision": 0.0,
+                "judge_recall": 0.0,
+                "judge_faithfulness": 0.0,
+                "judge_relevancy": 0.0,
+                "human_precision": None,
+                "human_recall": None,
+            })
+            continue
+
+        answer = evaluator._generate_answer(sample.question, retrieved)
+        judge_precision = evaluator._score_precision(sample, retrieved)
+        judge_recall = evaluator._score_recall(sample, retrieved)
+        judge_faithfulness = evaluator._score_faithfulness(answer, retrieved)
+        judge_relevancy = evaluator._score_relevancy(sample.question, answer, sample.ground_truth) if sample.ground_truth else 0.0
+
+        samples.append({
+            "sample_idx": idx,
+            "question": sample.question,
+            "ground_truth": sample.ground_truth,
+            "is_negative": not sample.ground_truth,
+            "retrieved": retrieved[:3],
+            "judge_precision": round(judge_precision, 4),
+            "judge_recall": round(judge_recall, 4),
+            "judge_faithfulness": round(judge_faithfulness, 4),
+            "judge_relevancy": round(judge_relevancy, 4),
+            "human_precision": None,
+            "human_recall": None,
+        })
+
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(samples, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if score_file:
+        _compute_calibration(samples, score_file)
+    else:
+        console.print(f"[green]已导出 {len(samples)} 个校准样本到: {output_path}[/green]")
+        console.print("\n填写每个样本的 [bold]human_precision[/bold] 和 [bold]human_recall[/bold] (0.0~1.0)，然后重新运行:")
+        console.print(f"  [dim]nexus eval calibrate --score-file {output_path}[/dim]")
+
+
+def _compute_calibration(samples: list[dict], score_file: str) -> None:
+    """Compute Spearman/Pearson correlation between Judge and human scores."""
+    score_path = Path(score_file)
+    if not score_path.exists():
+        console.print(f"[red]评分文件不存在: {score_file}[/red]")
+        return
+
+    try:
+        human_scores = json.loads(score_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]读取评分文件失败: {e}[/red]")
+        return
+
+    human_map = {}
+    for h in human_scores:
+        if h.get("human_precision") is not None or h.get("human_recall") is not None:
+            human_map[h["sample_idx"]] = h
+
+    judge_pre = []
+    judge_rec = []
+    human_pre = []
+    human_rec = []
+    labels = []
+
+    for s in samples:
+        idx = s["sample_idx"]
+        if idx not in human_map:
+            continue
+        h = human_map[idx]
+        jp, jr = s["judge_precision"], s["judge_recall"]
+        hp, hr = h.get("human_precision"), h.get("human_recall")
+        if jp is not None and hp is not None:
+            judge_pre.append(jp)
+            human_pre.append(hp)
+            labels.append(f"#{idx}")
+        if jr is not None and hr is not None:
+            judge_rec.append(jr)
+            human_rec.append(hr)
+
+    console.print(f"\n[bold]校准结果[/bold] ({len(labels)} 个样本)\n")
+
+    if len(judge_pre) >= 3:
+        sp, pp = _spearman(judge_pre, human_pre)
+        pr, _ = _pearson(judge_pre, human_pre)
+        console.print(f"[bold]Precision[/bold]  Spearman ρ={sp:.3f} (p={pp:.4f})  Pearson r={pr:.3f}")
+
+        console.print("  Judge → Human 散点 (Precision):")
+        for j, h, lbl in sorted(zip(judge_pre, human_pre, labels), key=lambda x: x[1]):
+            bar = "█" * max(1, int(h * 20))
+            console.print(f"    {lbl:>4s}  J={j:.2f}  H={h:.2f}  {bar}")
+    else:
+        console.print("[yellow]Precision: 样本太少 (<3)，无法计算相关性[/yellow]")
+
+    if len(judge_rec) >= 3:
+        sr, prr = _spearman(judge_rec, human_rec)
+        rr, _ = _pearson(judge_rec, human_rec)
+        console.print(f"[bold]Recall[/bold]     Spearman ρ={sr:.3f} (p={prr:.4f})  Pearson r={rr:.3f}")
+
+        console.print("  Judge → Human 散点 (Recall):")
+        for j, h, lbl in sorted(zip(judge_rec, human_rec, labels), key=lambda x: x[1]):
+            bar = "█" * max(1, int(h * 20))
+            console.print(f"    {lbl:>4s}  J={j:.2f}  H={h:.2f}  {bar}")
+
+    console.print("\n[dim]ρ > 0.7: 强相关 | ρ 0.4~0.7: 中等相关 | ρ < 0.4: 弱相关[/dim]")
+    console.print("[dim]Judge 评分一致性达标阈值: Spearman ρ > 0.7[/dim]")
+
+
+def _spearman(x: list[float], y: list[float]) -> tuple[float, float]:
+    """Compute Spearman rank correlation with p-value (manual implementation)."""
+    n = len(x)
+    if n < 3:
+        return (0.0, 1.0)
+    try:
+        from scipy.stats import spearmanr
+        res = spearmanr(x, y)
+        return (float(res.statistic), float(res.pvalue))
+    except ImportError:
+        pass
+
+    # Manual fallback
+    def _rank(vals):
+        sorted_vals = sorted(vals)
+        return [sorted_vals.index(v) + 1 for v in vals]
+
+    rx, ry = _rank(x), _rank(y)
+    d2 = sum((a - b) ** 2 for a, b in zip(rx, ry))
+    rho = 1.0 - (6.0 * d2) / (n * (n * n - 1))
+    # Approximate p-value via t-distribution
+    import math
+    try:
+        t_stat = rho * math.sqrt((n - 2) / (1 - rho * rho))
+        from scipy.stats import t as t_dist
+        p_val = 2.0 * t_dist.sf(abs(t_stat), df=n - 2)
+    except Exception:
+        p_val = 0.0
+    return (round(rho, 4), round(p_val, 4))
+
+
+def _pearson(x: list[float], y: list[float]) -> tuple[float, float]:
+    """Compute Pearson correlation coefficient (manual implementation)."""
+    n = len(x)
+    if n < 3:
+        return (0.0, 1.0)
+    try:
+        from scipy.stats import pearsonr
+        res = pearsonr(x, y)
+        return (float(res.statistic), float(res.pvalue))
+    except ImportError:
+        pass
+
+    mx, my = sum(x) / n, sum(y) / n
+    num = sum((a - mx) * (b - my) for a, b in zip(x, y))
+    den = (sum((a - mx) ** 2 for a in x) * sum((b - my) ** 2 for b in y)) ** 0.5
+    if den == 0:
+        return (0.0, 1.0)
+    r = num / den
+    import math
+    try:
+        t_stat = r * math.sqrt((n - 2) / (1 - r * r))
+        from scipy.stats import t as t_dist
+        p_val = 2.0 * t_dist.sf(abs(t_stat), df=n - 2)
+    except Exception:
+        p_val = 0.0
+    return (round(r, 4), round(p_val, 4))

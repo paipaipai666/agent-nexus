@@ -1,82 +1,97 @@
-"""Tests for ReAct action parsing with structured XML params."""
-from unittest.mock import MagicMock
+"""Tests for JSON response parsing and auto-fix."""
+
+import pytest
 from agentnexus.agents.re_act_agent import ReActAgent
 
 
-class TestStructuredActionParse:
-    def setup_method(self):
-        self.agent = ReActAgent(
-            llm_client=MagicMock(),
-            tool_executor=MagicMock(),
+class TestJsonResponseParsing:
+    def test_parse_tool_call(self):
+        """Valid JSON tool call"""
+        result = ReActAgent._parse_json_response(
+            '{"tool": "web_search", "params": {"query": "北京天气"}}'
         )
+        assert result["type"] == "tool_call"
+        assert result["tool"] == "web_search"
+        assert result["params"] == {"query": "北京天气"}
 
-    def test_parse_flat_text_xml(self):
-        """旧版扁平文本格式仍然兼容"""
-        action = '<action type="tool" name="web_search">北京天气</action>'
-        name, params = self.agent._parse_action(action)
-        assert name == "web_search"
-        assert params == "北京天气"
-
-    def test_parse_structured_xml_single_param(self):
-        """结构化格式：单个参数"""
-        action = (
-            '<action type="tool" name="web_search">'
-            '<query>北京天气</query>'
-            '</action>'
+    def test_parse_answer(self):
+        """Valid JSON answer"""
+        result = ReActAgent._parse_json_response(
+            '{"answer": "最终答案是42"}'
         )
-        name, params = self.agent._parse_action(action)
-        assert name == "web_search"
-        assert params == {"query": "北京天气"}
+        assert result["type"] == "answer"
+        assert result["text"] == "最终答案是42"
 
-    def test_parse_structured_xml_multi_params(self):
-        """结构化格式：多个参数"""
-        action = (
-            '<action type="tool" name="web_search">'
-            '<query>AI新闻</query>'
-            '<max_results>10</max_results>'
-            '<time_range>week</time_range>'
-            '<topic>news</topic>'
-            '</action>'
+    def test_parse_not_json(self):
+        """Plain text → error"""
+        result = ReActAgent._parse_json_response("这不是JSON")
+        assert result["type"] == "error"
+
+    def test_parse_missing_key(self):
+        """JSON object without tool or answer key"""
+        result = ReActAgent._parse_json_response('{"foo": "bar", "baz": 1}')
+        assert result["type"] == "error"
+
+    def test_parse_single_key_ambiguous(self):
+        """Single-key JSON without tool/answer → treated as answer"""
+        result = ReActAgent._parse_json_response('{"summary": "something"}')
+        assert result["type"] == "answer"
+
+    def test_parse_empty(self):
+        result = ReActAgent._parse_json_response("")
+        assert result["type"] == "error"
+
+    def test_parse_params_not_dict(self):
+        """params is not a dict → should default to empty dict"""
+        result = ReActAgent._parse_json_response(
+            '{"tool": "web_search", "params": "just a string"}'
         )
-        name, params = self.agent._parse_action(action)
-        assert name == "web_search"
-        assert params["query"] == "AI新闻"
-        assert params["max_results"] == 10
-        assert params["time_range"] == "week"
-        assert params["topic"] == "news"
+        assert result["type"] == "tool_call"
+        assert result["params"] == {}
 
-    def test_parse_structured_include_answer(self):
-        """include_answer 布尔值"""
-        action = (
-            '<action type="tool" name="web_search">'
-            '<query>北京天气</query>'
-            '<include_answer>true</include_answer>'
-            '</action>'
+
+class TestJsonAutoFix:
+    def test_fix_text_after_brace(self):
+        """Text after closing brace → truncated"""
+        result = ReActAgent._try_fix_json(
+            '{"tool": "search", "params": {}} some extra text'
         )
-        name, params = self.agent._parse_action(action)
-        assert params["include_answer"] is True
+        assert result == {"tool": "search", "params": {}}
 
-    def test_parse_legacy_text_format(self):
-        """旧版文本格式兼容"""
-        action = 'web_search[北京天气]'
-        name, params = self.agent._parse_action(action)
-        assert name == "web_search"
-        assert params == "北京天气"
-
-    def test_parse_finish_xml(self):
-        """Finish action 不受影响"""
-        action = '<action type="finish">答案是42</action>'
-        result = self.agent._parse_finish(action)
-        assert result == "答案是42"
-
-    def test_parse_structured_with_newlines(self):
-        """多行结构化"""
-        action = (
-            '<action type="tool" name="web_search">\n'
-            '  <query>北京天气</query>\n'
-            '  <max_results>10</max_results>\n'
-            '</action>'
+    def test_fix_trailing_comma(self):
+        """Trailing comma before closing brace → removed"""
+        result = ReActAgent._try_fix_json(
+            '{"tool": "search", "params": {"q": "test",}}'
         )
-        name, params = self.agent._parse_action(action)
-        assert params["query"] == "北京天气"
-        assert params["max_results"] == 10
+        assert result == {"tool": "search", "params": {"q": "test"}}
+
+    def test_fix_missing_closing_brace(self):
+        """Missing closing brace → appended"""
+        result = ReActAgent._try_fix_json(
+            '{"answer": "hello world"'
+        )
+        assert result == {"answer": "hello world"}
+
+    def test_fix_no_braces(self):
+        """No braces at all → None"""
+        result = ReActAgent._try_fix_json("no json here")
+        assert result is None
+
+    def test_fix_empty_string(self):
+        result = ReActAgent._try_fix_json("")
+        assert result is None
+
+    def test_fix_nested_trailing_comma(self):
+        """Trailing comma in nested object"""
+        result = ReActAgent._try_fix_json(
+            '{"tool": "search", "params": {"q": "test", "n": 1,}}'
+        )
+        assert result == {"tool": "search", "params": {"q": "test", "n": 1}}
+
+
+class TestJsonFormatPrompt:
+    def test_format_section_not_empty(self):
+        section = ReActAgent._build_json_format_section()
+        assert "tool" in section
+        assert "answer" in section
+        assert "JSON" in section
