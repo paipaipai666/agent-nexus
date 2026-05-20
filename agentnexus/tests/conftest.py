@@ -16,6 +16,8 @@ def temp_agentnexus_home():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         os.environ["AGENTNEXUS_HOME"] = tmpdir
         cfg._settings_cache = None
+        from agentnexus.memory.long_term import _reset_long_term_memory
+        _reset_long_term_memory()
         try:
             yield Path(tmpdir)
         finally:

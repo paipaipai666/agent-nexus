@@ -2,7 +2,7 @@
 import typer
 from rich.table import Table
 
-from agentnexus.memory.long_term import LongTermMemory
+from agentnexus.memory.long_term import get_long_term_memory
 
 from . import memory_app, console
 
@@ -10,7 +10,7 @@ from . import memory_app, console
 @memory_app.command("list")
 def memory_list(limit: int = typer.Option(10, help="显示条数")):
     """查看长期记忆"""
-    ltm = LongTermMemory()
+    ltm = get_long_term_memory()
     rows = ltm.list_recent(limit)
     if not rows:
         console.print("[dim]暂无记忆[/dim]")
@@ -28,6 +28,6 @@ def memory_list(limit: int = typer.Option(10, help="显示条数")):
 @memory_app.command("clear")
 def memory_clear():
     """清空长期记忆"""
-    ltm = LongTermMemory()
+    ltm = get_long_term_memory()
     ltm.clear_all()
     console.print("[green]+[/green] 记忆已清空")

@@ -6,9 +6,12 @@ via incremental references for efficient rollback.
 """
 
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversation_checkpoints (
@@ -241,7 +244,7 @@ class ConversationVersionManager:
         return {
             "session_id": self.session_id,
             "branch": self._current_branch(),
-            "head": head["id"] if head else None,
+            "head": head if head else None,
             "can_undo": head is not None and head.get("parent_id") is not None,
             "can_redo": len(self._redo_stack) > 0,
         }
@@ -331,10 +334,33 @@ class ConversationVersionManager:
         )
 
     def _delete_ltm_refs(self, cp_id: str):
-        """Delete LTM entries referenced by a checkpoint."""
-        ltm_ids = [r["ltm_memory_id"] for r in self._conn.execute(
+        """Delete LTM entries referenced by a checkpoint (both SQLite and ChromaDB)."""
+        rows = self._conn.execute(
             "SELECT ltm_memory_id FROM checkpoint_ltm_refs WHERE checkpoint_id = ?", (cp_id,)
-        ).fetchall()]
+        ).fetchall()
+        ltm_ids = [r["ltm_memory_id"] for r in rows]
+
+        if not ltm_ids:
+            self._conn.execute("DELETE FROM checkpoint_ltm_refs WHERE checkpoint_id = ?", (cp_id,))
+            return
+
+        # Fetch chroma_ids for ChromaDB cleanup
+        placeholders = ",".join("?" for _ in ltm_ids)
+        chroma_rows = self._conn.execute(
+            f"SELECT chroma_id FROM long_term_memories WHERE id IN ({placeholders})", ltm_ids
+        ).fetchall()
+        chroma_ids = [r["chroma_id"] for r in chroma_rows if r["chroma_id"]]
+
+        # Delete from ChromaDB first
+        if chroma_ids:
+            try:
+                from agentnexus.memory.long_term import _get_ltm_collection
+                col = _get_ltm_collection()
+                col.delete(ids=chroma_ids)
+            except Exception as e:
+                logger.warning("ChromaDB cleanup failed in _delete_ltm_refs: %s", e)
+
+        # Then delete from SQLite
         for ltm_id in ltm_ids:
             self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (ltm_id,))
         self._conn.execute("DELETE FROM checkpoint_ltm_refs WHERE checkpoint_id = ?", (cp_id,))

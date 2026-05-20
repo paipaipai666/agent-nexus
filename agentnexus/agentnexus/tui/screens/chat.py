@@ -7,6 +7,7 @@ import time
 from itertools import cycle
 
 from rich.markdown import Markdown
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -67,6 +68,9 @@ class ChatScreen(Screen):
         self._spinner_frames = None
         self._current_tool_name: str = ""
         self._current_tool_widget = None
+        # Hook compact events for TUI visibility
+        if self._memory:
+            self._memory._on_compact = self._on_compact_event
 
     def compose(self) -> ComposeResult:
         yield Static(self._render_top_bar(), id="top-bar")
@@ -80,9 +84,8 @@ class ChatScreen(Screen):
         yield self._hud
         yield self._chat_input
 
-
     def _render_top_bar(self) -> str:
-        model = getattr(self._agent, 'model_id', 'v4-flash') if self._agent else 'v4-flash'
+        model = getattr(self._agent, "model_id", "v4-flash") if self._agent else "v4-flash"
         branch = self._version.status().get("branch", "main") if self._version else "main"
 
         left = "[#fab283]●[/] [bold]AgentNexus[/]"
@@ -101,8 +104,7 @@ class ChatScreen(Screen):
             "[/]"
         )
         self._chat_area.add_system(logo)
-        self._chat_area.add_message("assistant",
-            "欢迎使用 AgentNexus。输入问题开始，或 /help 查看命令。")
+        self._chat_area.add_message("assistant", "欢迎使用 AgentNexus。输入问题开始，或 /help 查看命令。")
         self._refresh_version_display()
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
 
@@ -164,7 +166,7 @@ class ChatScreen(Screen):
         st = self._version.status()
         self._side.update_version(
             st.get("branch", "main"),
-            st.get("head", "---"),
+            st["head"]["id"] if st.get("head") else "---",
             st.get("can_undo", False),
             st.get("can_redo", False),
         )
@@ -215,11 +217,8 @@ class ChatScreen(Screen):
                 lines = ["[bold]Checkpoints:[/]" + (" (全部)" if show_all else "")]
                 for e in entries[:10]:
                     m = "[green]● HEAD[/]" if e.get("is_head") else ""
-                    branch = f"[#a78bfa]{e.get('branch','')}[/]" if e.get("branch") else ""
-                    lines.append(
-                        f"  [dim]{e['id']}[/] "
-                        f"{e.get('question','')[:40]} {branch} {m}"
-                    )
+                    branch = f"[#a78bfa]{e.get('branch', '')}[/]" if e.get("branch") else ""
+                    lines.append(f"  [dim]{e['id']}[/] {e.get('question', '')[:40]} {branch} {m}")
                 self._chat_area.add_system("\n".join(lines))
             else:
                 self._chat_area.add_system("[dim]暂无检查点[/]")
@@ -227,7 +226,7 @@ class ChatScreen(Screen):
             st = self._version.status()
             lines = [
                 f"[bold]分支:[/] [#a78bfa]{st['branch']}[/]",
-                f"[dim]HEAD: {st['head']}[/]",
+                f"[dim]HEAD: {st['head']['id'] if st['head'] else '---'}[/]",
                 f"undo: {'[green]可用[/]' if st['can_undo'] else '[dim]不可用[/]'}  "
                 f"redo: {'[green]可用[/]' if st['can_redo'] else '[dim]不可用[/]'}",
             ]
@@ -240,9 +239,7 @@ class ChatScreen(Screen):
                 return
             cp = self._version.branch(name)
             self._restore_stm_from_version()
-            self._chat_area.add_system(
-                f"[green]已创建/切换至分支 [#a78bfa]{name}[/][/]"
-            )
+            self._chat_area.add_system(f"[green]已创建/切换至分支 [#a78bfa]{name}[/][/]")
             self._refresh_version_display()
         elif cmd == "/checkout" and self._version:
             ref = arg.strip()
@@ -252,9 +249,7 @@ class ChatScreen(Screen):
             cp = self._version.checkout(ref)
             if cp:
                 self._restore_stm_from_version()
-                self._chat_area.add_system(
-                    f"[green]已切换至 [{cp['id']}][/]"
-                )
+                self._chat_area.add_system(f"[green]已切换至 [{cp['id']}][/]")
                 self._refresh_version_display()
             else:
                 self._chat_area.add_system(f"[dim]未找到: {ref}[/]")
@@ -326,6 +321,41 @@ class ChatScreen(Screen):
             return first_line
         return text[:200]
 
+    # ── compact event handling ───────────────────────────────
+
+    def _on_compact_event(self, event: dict):
+        """Called from agent thread — forward to main thread for UI update."""
+        self.app.call_from_thread(self._apply_compact_event, event)
+
+    def _apply_compact_event(self, event: dict):
+        e = event["event"]
+        if e == "start":
+            tokens = event.get("tokens_before", 0)
+            self._hud.set_compacting(True)
+            self._chat_area.add_system(f"[#fab283]上下文压缩[/] 当前 {tokens // 1000:,}k tokens...")
+        elif e == "complete":
+            self._hud.set_compacting(False)
+            before = event.get("tokens_before", 0)
+            after = event.get("tokens_after", 0)
+            saved = before - after
+            self._chat_area.add_system(
+                f"[green]✓ 压缩完成[/] {before // 1000}k → {after // 1000}k ([dim]-{saved // 1000:,}k tokens[/])"
+            )
+            self._hud.update_context(current_tokens=after)
+        elif e == "fail":
+            self._hud.set_compacting(False)
+            self._chat_area.add_system(f"[dim]压缩失败: {event.get('reason', '')}[/]")
+        elif e == "circuit_open":
+            self._hud.set_compacting(False)
+            self._chat_area.add_system("[#e06c75]⚠ 熔断器打开[/] 连续压缩失败，切换为仅 microcompact 模式")
+        elif e == "circuit_active":
+            self._hud.set_compacting(False)
+            tokens = event.get("tokens_after", 0)
+            self._chat_area.add_system(f"[dim]熔断中 — 仅清理工具结果 (当前 {tokens // 1000:,}k tokens)[/]")
+        elif e == "circuit_reset":
+            self._hud.set_compacting(False)
+            self._chat_area.add_system("[green]✓ 熔断器已重置[/] 恢复正常压缩能力")
+
     # ── agent execution ───────────────────────────────────────
 
     @work(exclusive=True)
@@ -363,11 +393,10 @@ class ChatScreen(Screen):
 
         def _on_output(msg: str):
             self.app.call_from_thread(_apply_output, msg)
+
         def _apply_output(msg: str):
             if msg.startswith("思考:"):
-                self._chat_area.add_system(
-                    f"[#a78bfa]Thought:[/] [italic dim]{msg.replace('思考:','').strip()}[/]"
-                )
+                self._chat_area.add_system(f"[#a78bfa]Thought:[/] [italic dim]{msg.replace('思考:', '').strip()}[/]")
             elif msg.startswith("行动:"):
                 self._stop_spinner()
                 tool_info = msg.removeprefix("行动:").strip()
@@ -400,8 +429,10 @@ class ChatScreen(Screen):
                     self._current_tool_widget.update_result(result)
                     self._current_tool_widget = None
                 else:
-                    # 异常回退处理，防止信息丢失
                     self._chat_area.add_system(f"[dim]观察: {result}[/]")
+                if self._memory:
+                    stm_tokens = self._memory.estimate_stm_tokens()
+                    self._hud.update_context(current_tokens=stm_tokens)
             elif msg.startswith(("错误:", "警告:")):
                 self._stop_spinner()
                 self._current_tool_widget = None
@@ -444,21 +475,26 @@ class ChatScreen(Screen):
                 displayed += char
                 now = time.monotonic()
                 if now - last_update >= THROTTLE_MS and char in ".!?。！？\n":
-                    msg_content.update(displayed)
+                    msg_content.update(Text(displayed))
                     last_update = now
                     await asyncio.sleep(0.01)
             # Final flush
             if displayed:
-                msg_content.update(displayed)
+                msg_content.update(Text(displayed))
 
             # Rich Markdown final render — parse off-thread to keep UI responsive
             loop = asyncio.get_running_loop()
             rendered = await loop.run_in_executor(None, Markdown, answer)
             msg_content.update(rendered)
 
+            stm_tokens = self._memory.estimate_stm_tokens() if self._memory else 0
             usage = getattr(self._agent, "total_usage", None)
             if usage:
-                self._hud.update_tokens(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+                self._hud.update_context(
+                    current_tokens=stm_tokens,
+                    total_input=usage.get("input_tokens", 0),
+                    total_output=usage.get("output_tokens", 0),
+                )
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
         else:

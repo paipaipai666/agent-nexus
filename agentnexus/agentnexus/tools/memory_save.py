@@ -1,6 +1,6 @@
 """memory_save tool — allows agents to proactively save facts to long-term memory."""
 
-from agentnexus.memory.long_term import LongTermMemory
+from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.rag.chroma_client import get_embedding_model
 
 _VALID_CATEGORIES = {
@@ -32,7 +32,7 @@ def memory_save(content: str, category: str = "entity_fact", importance: float =
 
     importance = max(0.0, min(1.0, importance))
 
-    ltm = LongTermMemory()
+    ltm = get_long_term_memory()
     model = get_embedding_model()
 
     try:

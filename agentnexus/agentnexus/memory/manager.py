@@ -1,12 +1,16 @@
 import json
+import logging
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.judge_llm import get_judge_llm
 from agentnexus.core.llm import AgentLLM
-from agentnexus.memory.long_term import LongTermMemory
+from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.prompts import load_prompt
 from agentnexus.rag.chroma_client import get_embedding_model
@@ -73,12 +77,13 @@ class MemoryManager:
     def __init__(self, session_id: str, llm=None, enable_long_term: bool = True):
         self.session_id = session_id
         self.short_term = ShortTermMemory()
-        self.long_term = LongTermMemory() if enable_long_term else None
+        self.long_term = get_long_term_memory() if enable_long_term else None
         self._llm = llm or AgentLLM()
         self._embed_model = get_embedding_model()
         self._enable_long_term = enable_long_term
         self._compact_failures: int = 0
         self._circuit_open: bool = False
+        self._microcompacts_since_open: int = 0
         self._compacting: bool = False
         settings = get_settings()
         if "/" in settings.chroma_persist_dir:
@@ -90,7 +95,21 @@ class MemoryManager:
         # Compact threshold: 40% of model context, floor 128k tokens
         ctx_max = self._resolve_ctx_max()
         self._compact_threshold = max(128000, int(ctx_max * 0.8)) if ctx_max else 128000
-        self._last_ltm_max_id: int = 0
+        self._last_write_count: int = 0
+        # Callback for compact events (TUI visibility, etc.)
+        self._on_compact: Callable[[dict], None] | None = None
+
+    def estimate_stm_tokens(self) -> int:
+        """Return current STM token estimate."""
+        return self.short_term.estimate_tokens()
+
+    def _fire_compact(self, event_type: str, **kwargs):
+        """Fire compact event callback if set."""
+        if self._on_compact:
+            try:
+                self._on_compact({"event": event_type, **kwargs})
+            except Exception:
+                pass
 
     @staticmethod
     def _resolve_ctx_max() -> int | None:
@@ -140,16 +159,10 @@ class MemoryManager:
         return header + "\n".join(parts) + "\n[提示] 用户分享个人信息时，请主动使用 memory_save 保存]\n"
 
     def _update_ltm_snapshot(self):
-        """Record the current max LTM id as baseline for change detection."""
+        """Record the current LTM write counter as baseline for change detection."""
         if not self.long_term:
             return
-        try:
-            row = self.long_term._conn.execute(
-                "SELECT MAX(id) as mx FROM long_term_memories"
-            ).fetchone()
-            self._last_ltm_max_id = row["mx"] or 0
-        except Exception:
-            pass
+        self._last_write_count = self.long_term.write_counter
 
     def has_new_memories(self) -> bool:
         """Check if new LTM entries exist since last init_session() / refresh.
@@ -157,21 +170,12 @@ class MemoryManager:
         Pure query — does not mutate state. Snapshot is updated by
         init_session() / refresh_ltm_context() when context is actually reloaded.
 
-        Uses SQL polling because memory_save tool writes directly to LTM
-        (bypassing MemoryManager), so an internal dirty flag would miss it.
-        If memory_save is ever refactored to go through MemoryManager,
-        this can be replaced with a lightweight dirty flag.
+        Uses write_counter since all LTM writes go through the singleton
+        LongTermMemory instance (including memory_save tool).
         """
         if not self.long_term:
             return False
-        try:
-            row = self.long_term._conn.execute(
-                "SELECT MAX(id) as mx FROM long_term_memories"
-            ).fetchone()
-            current_max = row["mx"] or 0
-            return current_max > self._last_ltm_max_id
-        except Exception:
-            return False
+        return self.long_term.write_counter > self._last_write_count
 
     def refresh_ltm_context(self, question: str) -> str:
         """Reload LTM context after new memories are detected."""
@@ -237,6 +241,17 @@ class MemoryManager:
         """
         if self._circuit_open:
             self.microcompact()
+            self._microcompacts_since_open += 1
+            if self._microcompacts_since_open >= 5:
+                logger.info("Circuit breaker reset after %d successful microcompacts",
+                            self._microcompacts_since_open)
+                self._circuit_open = False
+                self._compact_failures = 0
+                self._microcompacts_since_open = 0
+                self._fire_compact("circuit_reset")
+            else:
+                tokens_after = self.short_term.estimate_tokens()
+                self._fire_compact("circuit_active", tokens_after=tokens_after)
             return 0
 
         if threshold is None:
@@ -257,6 +272,8 @@ class MemoryManager:
         if not history_text.strip():
             return 0
 
+        self._fire_compact("start", tokens_before=tokens_before)
+
         self._compacting = True
         try:
             judge_llm = get_judge_llm()
@@ -266,6 +283,8 @@ class MemoryManager:
                 self._compact_failures += 1
                 if self._compact_failures >= 3:
                     self._circuit_open = True
+                    self._microcompacts_since_open = 0
+                    self._fire_compact("circuit_open")
                 return 0
 
             # Parse structured XML output: keep <summary>, discard <analysis>
@@ -276,14 +295,19 @@ class MemoryManager:
                 # Fallback: use the raw response as summary
                 self.short_term.compact(response.strip())
             self._compact_failures = 0
+            self._microcompacts_since_open = 0
+            tokens_after = self.short_term.estimate_tokens()
+            self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
+            return max(0, tokens_before - tokens_after)
         except Exception:
             self._compact_failures += 1
             if self._compact_failures >= 3:
                 self._circuit_open = True
+                self._microcompacts_since_open = 0
+                self._fire_compact("circuit_open")
+            return 0
         finally:
             self._compacting = False
-            tokens_after = self.short_term.estimate_tokens()
-            return max(0, tokens_before - tokens_after)
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True):
         try:

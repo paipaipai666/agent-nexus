@@ -63,7 +63,7 @@ class ToolCall(Widget):
         self.duration_ms = duration_ms
 
     def compose(self) -> ComposeResult:
-        yield Label(f"⚙ {self.tool_name}", id="tool-name")
+        yield Label(f"{self.tool_name}", id="tool-name")
         yield Static(_safe(str(self.result) if self.result else ""), id="tool-result")
         if self.duration_ms:
             yield Label(f"→ {self.duration_ms:.0f}ms", id="tool-meta")

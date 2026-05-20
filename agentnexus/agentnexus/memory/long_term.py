@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 from agentnexus.core.config import get_settings
@@ -38,6 +39,28 @@ def _get_ltm_collection():
     return _ltm_collection
 
 
+_ltm_instances: dict[str, "LongTermMemory"] = {}
+
+
+def get_long_term_memory():
+    """Return a singleton LongTermMemory instance keyed by db_path."""
+    settings = get_settings()
+    db_path = settings.memory_db_path
+    if db_path not in _ltm_instances:
+        _ltm_instances[db_path] = LongTermMemory()
+    return _ltm_instances[db_path]
+
+
+def _reset_long_term_memory():
+    """Close connections and clear the singleton cache. Used by tests."""
+    for inst in _ltm_instances.values():
+        try:
+            inst._conn.close()
+        except Exception:
+            pass
+    _ltm_instances.clear()
+
+
 class LongTermMemory:
     def __init__(self):
         settings = get_settings()
@@ -52,6 +75,8 @@ class LongTermMemory:
         self._migrate()
         self._conn.commit()
         self._chroma_col = None
+        self._write_counter: int = 0
+        self._lock = threading.RLock()
 
     def _migrate(self):
         cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
@@ -62,6 +87,10 @@ class LongTermMemory:
         if "metadata_json" not in cols:
             self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN metadata_json TEXT DEFAULT '{}'")
 
+    @property
+    def write_counter(self) -> int:
+        return self._write_counter
+
     def _ensure_chroma(self):
         if self._chroma_col is None:
             self._chroma_col = _get_ltm_collection()
@@ -69,7 +98,8 @@ class LongTermMemory:
     def save(self, session_id: str, content: str, category: str = "general",
              importance: float = 0.5, metadata: dict | None = None,
              embedding: list[float] | None = None):
-        cur = self._conn.execute(
+        with self._lock:
+            cur = self._conn.execute(
             "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
             (content, category)
         )
@@ -87,6 +117,7 @@ class LongTermMemory:
                 "INSERT INTO long_term_memories (session_id, category, content, importance, metadata_json, chroma_id) VALUES (?, ?, ?, ?, ?, ?)",
                 (session_id, category, content, importance, json.dumps(metadata or {}, ensure_ascii=False), chroma_id)
             )
+            self._write_counter += 1
 
         self._conn.commit()
 
@@ -106,28 +137,40 @@ class LongTermMemory:
 
     def _evict_if_needed(self):
         """Evict oldest/lowest-importance memories when over max_memories."""
-        # First, try to compact medium-importance memories
-        self._compact_low_score()
+        with self._lock:
+            self._compact_low_score()
 
-        count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
-        current = count_row["cnt"]
-        if current <= self._max_memories:
-            return
+            count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            current = count_row["cnt"]
+            if current <= self._max_memories:
+                return
 
-        excess = current - self._max_memories
-        # Delete by lowest importance first, then oldest
-        self._conn.execute(
-            "DELETE FROM long_term_memories WHERE id IN ("
-            "  SELECT id FROM long_term_memories ORDER BY importance ASC, created_at ASC LIMIT ?"
-            ")",
-            (excess,)
-        )
-        deleted = self._conn.total_changes
-        self._conn.commit()
-        logger.info("Evicted %d memories (limit: %d)", deleted, self._max_memories)
+            excess = current - self._max_memories
+            # Fetch chroma_ids for evicted rows before deleting
+            to_evict = self._conn.execute(
+                "SELECT id, chroma_id FROM long_term_memories ORDER BY importance ASC, created_at ASC LIMIT ?",
+                (excess,)
+            ).fetchall()
+            chroma_ids = [r["chroma_id"] for r in to_evict if r["chroma_id"]]
+            ids_to_delete = [r["id"] for r in to_evict]
 
-        # Also clean up expired memories opportunistically
-        self._cleanup_expired()
+            # Delete from ChromaDB first
+            if chroma_ids:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=chroma_ids)
+                except Exception as e:
+                    logger.warning("ChromaDB eviction failed: %s", e)
+
+            # Then delete from SQLite
+            placeholders = ",".join("?" for _ in ids_to_delete)
+            self._conn.execute(
+                f"DELETE FROM long_term_memories WHERE id IN ({placeholders})", ids_to_delete
+            )
+            self._conn.commit()
+            logger.info("Evicted %d memories (limit: %d)", len(ids_to_delete), self._max_memories)
+
+            self._cleanup_expired()
 
     def _compact_low_score(self):
         """Compress medium-importance memories: merge same-category entries >5 into one.
@@ -173,7 +216,21 @@ class LongTermMemory:
             logger.info("Compacted %d medium-score '%s' memories into one", len(to_merge), category)
 
     def _cleanup_expired(self):
-        """Delete memories older than memory_ttl_days."""
+        """Delete memories older than memory_ttl_days (both SQLite and ChromaDB)."""
+        expired = self._conn.execute(
+            "SELECT chroma_id FROM long_term_memories WHERE "
+            "datetime(created_at) < datetime('now', ?)",
+            (f"-{self._ttl_days} days",)
+        ).fetchall()
+        chroma_ids = [r["chroma_id"] for r in expired if r["chroma_id"]]
+
+        if chroma_ids:
+            try:
+                self._ensure_chroma()
+                self._chroma_col.delete(ids=chroma_ids)
+            except Exception as e:
+                logger.warning("ChromaDB cleanup of expired memories failed: %s", e)
+
         self._conn.execute(
             "DELETE FROM long_term_memories WHERE "
             "datetime(created_at) < datetime('now', ?)",
@@ -318,26 +375,29 @@ class LongTermMemory:
         return [{"id": r["id"], "category": r["category"], "content": r["content"], "importance": r["importance"], "created_at": r["created_at"]} for r in rows]
 
     def delete(self, memory_id: int):
-        row = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE id = ?", (memory_id,)).fetchone()
-        if row and row["chroma_id"]:
-            try:
-                self._ensure_chroma()
-                self._chroma_col.delete(ids=[row["chroma_id"]])
-            except Exception as e:
-                logger.warning("ChromaDB delete failed for memory %s: %s", memory_id, e)
-        self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))
-        self._conn.commit()
+        with self._lock:
+            row = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE id = ?", (memory_id,)).fetchone()
+            if row and row["chroma_id"]:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=[row["chroma_id"]])
+                except Exception as e:
+                    logger.warning("ChromaDB delete failed for memory %s: %s", memory_id, e)
+            self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))
+            self._conn.commit()
 
     def clear_all(self):
         """Delete all LTM entries from both SQLite and ChromaDB."""
-        rows = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE chroma_id IS NOT NULL").fetchall()
-        chroma_ids = [r["chroma_id"] for r in rows]
-        if chroma_ids:
-            try:
-                self._ensure_chroma()
-                self._chroma_col.delete(ids=chroma_ids)
-            except Exception as e:
-                logger.warning("ChromaDB batch delete failed in clear_all: %s", e)
-        self._conn.execute("DELETE FROM long_term_memories")
-        self._conn.commit()
-        logger.info("Cleared all long-term memories")
+        with self._lock:
+            rows = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE chroma_id IS NOT NULL").fetchall()
+            chroma_ids = [r["chroma_id"] for r in rows]
+            if chroma_ids:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=chroma_ids)
+                except Exception as e:
+                    logger.warning("ChromaDB batch delete failed in clear_all: %s", e)
+            self._conn.execute("DELETE FROM long_term_memories")
+            self._conn.commit()
+            self._write_counter = 0
+            logger.info("Cleared all long-term memories")

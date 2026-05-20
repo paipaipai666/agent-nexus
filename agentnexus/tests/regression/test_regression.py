@@ -29,9 +29,9 @@ def test_short_term_memory():
 
 
 def test_long_term_memory(temp_agentnexus_home):
-    from agentnexus.memory.long_term import LongTermMemory
+    from agentnexus.memory.long_term import get_long_term_memory
 
-    ltm = LongTermMemory()
+    ltm = get_long_term_memory()
     ltm.save("test", "用户喜欢简洁回答", category="user_preference", importance=0.9)
 
     assert len(ltm.list_recent(3)) >= 1

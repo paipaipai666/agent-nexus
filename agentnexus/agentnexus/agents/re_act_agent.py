@@ -1,3 +1,4 @@
+import json
 import re
 
 from agentnexus.core.config import get_settings
@@ -30,141 +31,84 @@ class ReActAgent:
     def model_id(self) -> str:
         return self.llm_client.model
 
-    def _parse_output(self, text: str):
-        """Three-layer fallback: strict XML → diagnose failure → legacy text format.
-
-        Returns (thought, action, failure_reason). failure_reason is None on success.
-        """
-        # ── Layer 1: strict XML ──
-        thought_match = re.search(r"<thought>\s*(.*?)\s*</thought>", text, re.DOTALL)
-        action_match = re.search(r"(<action\s+[^>]*>.*?</action>)", text, re.DOTALL)
-        if action_match:
-            return (
-                thought_match.group(1).strip() if thought_match else None,
-                action_match.group(1).strip(),
-                None,
-            )
-
-        # ── Layer 2: diagnose WHY XML failed ──
-        has_action_open = "<action" in text
-        has_action_close = "</action>" in text
-        if has_action_open and not has_action_close:
-            reason = "XML截断: 缺少 </action> 闭合标签，LLM输出可能被截断"
-        elif has_action_open and has_action_close:
-            # Tag present but didn't match strict regex — likely missing space after <action
-            if "<actiontype=" in text or "<action " not in text:
-                reason = "XML格式错误: <action 后缺少空格"
-            else:
-                reason = "XML格式错误: action标签不规范"
-        elif thought_match:
-            reason = "XML格式错误: 有 <thought> 但无有效 <action>"
-        else:
-            reason = "XML缺失: LLM未输出 <action> 标签"
-
-        # ── Layer 3: fallback to legacy text format ──
-        t_match = re.search(r"Thought:\s*(.*?)(?=\nAction:|$)", text, re.DOTALL)
-        a_match = re.search(r"Action:\s*(.*?)$", text, re.DOTALL)
-        if a_match:
-            return (
-                t_match.group(1).strip() if t_match else None,
-                a_match.group(1).strip(),
-                reason,  # succeeded via fallback — reason is informational
-            )
-
-        return (None, None, reason)
-
-    def _parse_finish(self, action_text: str):
-        """Parse Finish — XML or legacy text format."""
-        # XML format
-        match = re.search(r'<action\s+type="finish">\s*(.*?)\s*</action>', action_text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        # Legacy format: Finish[answer] or Finish: answer or Finish answer
-        m = re.match(r"Finish\s*\[\s*(.*)\s*\]", action_text, re.DOTALL)
-        if m:
-            return m.group(1).strip()
-        m = re.match(r"Finish\s*[:：]\s*(.*)", action_text, re.DOTALL)
-        if m:
-            return m.group(1).strip()
-        if action_text.strip() == "Finish":
-            return ""
-        remaining = re.sub(r"^Finish\s+", "", action_text, count=1)
-        if remaining and remaining != action_text:
-            return remaining.strip()
-        return None
-
-    def _parse_action(self, action_text: str) -> tuple[str | None, str | dict | None]:
-        """Parse tool action — XML or legacy text format.
-
-        Returns (tool_name, params). params is:
-        - str: legacy flat text format (backward compatible)
-        - dict: structured XML child-element format
-        - None: parse failure
-        """
-        # XML format: <action type="tool" name="web_search">...</action>
-        match = re.search(
-            r'<action\s+type="tool"\s+name="([^"]*)">\s*(.*?)\s*</action>',
-            action_text, re.DOTALL,
-        )
-        if match:
-            tool_name = match.group(1)
-            inner = match.group(2).strip()
-            # Detect structured format: inner starts with < → XML child elements
-            if inner.startswith("<"):
-                params = self._parse_structured_params(inner)
-                if params is not None:
-                    return tool_name, params
-            # Unstructured → return raw string (backward compatible)
-            return tool_name, inner
-
-        # Legacy format: tool_name[params]
-        m = re.match(r"([\w-]+)\[(.*)\]", action_text, re.DOTALL)
-        if m:
-            return m.group(1), m.group(2)
-        return None, None
-
-    def _normalize_params(self, tool_name: str, params) -> dict:
-        """Convert string params to dict using the tool's param schema.
-
-        When LLM outputs raw string params (legacy format), wrap them
-        into a dict keyed by the first required field, or the first
-        property if no required fields are declared.
-        """
-        if isinstance(params, dict):
-            return params
-        entry = self.tool_executor.registry._tools.get(tool_name)
-        if entry:
-            meta, _ = entry
-            required = meta.param_schema.get("required", [])
-            if required:
-                return {required[0]: params}
-            props = meta.param_schema.get("properties", {})
-            if props:
-                first_key = next(iter(props))
-                return {first_key: params}
-        return {"input": params}
+    # ── JSON response parsing (Tier 2-3 fallback) ──────────────────
 
     @staticmethod
-    def _parse_structured_params(inner: str) -> dict | None:
-        """Parse XML child elements inside <action> into a dict.
+    def _try_fix_json(text: str) -> dict | None:
+        """Attempt to repair common LLM JSON errors.
 
-        Input: "<query>北京天气</query><max_results>10</max_results>"
-        Output: {"query": "北京天气", "max_results": 10}
+        Fixes: text after closing brace, trailing commas, missing closing brace.
+        Returns parsed dict or None.
         """
-        pattern = r"<(\w+)>(.*?)</\1>"
-        matches = re.findall(pattern, inner, re.DOTALL)
-        if not matches:
+        if not text:
             return None
-        params: dict = {}
-        for key, value in matches:
-            value = value.strip()
-            if value.isdigit():
-                params[key] = int(value)
-            elif value.lower() in ("true", "false"):
-                params[key] = value.lower() == "true"
-            else:
-                params[key] = value
-        return params
+        s = text.strip()
+        # Find the outermost JSON object
+        start = s.find("{")
+        if start == -1:
+            return None
+        # Find matching closing brace by counting nesting
+        depth = 0
+        end = -1
+        for i in range(start, len(s)):
+            if s[i] == "{":
+                depth += 1
+            elif s[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end == -1:
+            # No closing brace — try appending one
+            s = s + "}"
+            end = len(s) - 1
+        candidate = s[start:end + 1]
+        # Remove trailing commas before } or ]
+        candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_json_response(text: str) -> dict:
+        """Parse LLM text as JSON. Returns unified response dict.
+
+        Success: {"type": "tool_call", "tool": "grep_search", "params": {...}}
+              or {"type": "answer", "text": "final answer"}
+        Failure: {"type": "error", "reason": "..."}
+        """
+        if not text or not text.strip():
+            return {"type": "error", "reason": "empty response"}
+        data = ReActAgent._try_fix_json(text)
+        if not data:
+            return {"type": "error", "reason": "not valid JSON"}
+        if not isinstance(data, dict):
+            return {"type": "error", "reason": "JSON is not an object"}
+        if "tool" in data and "params" in data:
+            tool = str(data["tool"])
+            params = data["params"] if isinstance(data["params"], dict) else {}
+            return {"type": "tool_call", "tool": tool, "params": params}
+        if "answer" in data:
+            return {"type": "answer", "text": str(data["answer"])}
+        # Ambiguous JSON — treat as answer if only one key
+        if len(data) == 1:
+            key = next(iter(data))
+            return {"type": "answer", "text": str(data[key])}
+        return {"type": "error", "reason": "JSON missing 'tool' or 'answer' key"}
+
+    @staticmethod
+    def _build_json_format_section() -> str:
+        """Return prompt section instructing JSON output format."""
+        return (
+            "== 输出格式（严格遵守）==\n"
+            "你必须在每次回复中输出合法的 JSON 对象。\n\n"
+            "调用工具时:\n"
+            '{"tool": "工具名", "params": {"参数名": "值", ...}}\n\n'
+            "给出最终答案时:\n"
+            '{"answer": "你的完整回答"}\n\n'
+            "答案中的换行用 \\n 表示，双引号用 \\\" 转义。"
+        )
 
     def _default_confirm(self, code: str) -> bool:
         self._output(f"[警告] 即将执行代码 (预览): {code}")
@@ -220,108 +164,187 @@ class ReActAgent:
 
     def run(self, question: str, memory_manager=None):
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
-
-        history = []
         current_step = 0
+        json_retries = 0
+        MAX_JSON_RETRIES = 2
+        use_tool_calling = True  # Tier 1: native tool calling
 
         memory_context = ""
-        conversation_context = ""
         if memory_manager:
             memory_context = memory_manager.init_session(question)
             memory_manager.append("user", question)
-            if self.conversation_mode:
-                conversation_context = self._build_conversation_context(memory_manager, per_msg_limit=800)
+
+        # Build tool definitions
+        tools = self.tool_executor.registry.to_openai_tools()
+        tools_desc = self.tool_executor.getAvailableTools()
+
+        # Build conversation history context ONCE before the loop (fix: avoid
+        # injecting system messages mid-conversation, which confuses many LLMs)
+        conv_ctx = ""
+        if self.conversation_mode and memory_manager:
+            conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
+
+        system_content = self._build_prompt(
+            tools_desc, question, "", memory_context, conv_ctx)
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": question},
+        ]
 
         while current_step < self.max_steps:
             current_step += 1
             self._output(f"--- 第 {current_step} 步 ---")
 
-            # Build prompt
-            tools_desc = self.tool_executor.getAvailableTools()
-            history_str = "\n".join(history)
-            prompt = self._build_prompt(
-                tools_desc, question, history_str,
-                memory_context, conversation_context,
-            )
+            # ── Tier 1: Native tool calling ──
+            think_tools = tools if use_tool_calling else None
+            think_rfmt = {"type": "json_object"} if not use_tool_calling else None
+            response_text = self.llm_client.think(
+                messages=messages, tools=think_tools, response_format=think_rfmt)
 
-            messages = [{"role": "user", "content": prompt}]
-            response_text = self.llm_client.think(messages=messages)
             cur = getattr(self.llm_client, "last_usage", {})
             if not isinstance(cur, dict):
                 cur = {}
             self._total_usage["input_tokens"] += cur.get("input_tokens", 0)
             self._total_usage["output_tokens"] += cur.get("output_tokens", 0)
 
-            if not response_text:
-                self._output("错误:LLM未能返回有效响应。")
-                break
+            # Check for native tool_calls
+            tool_calls = self.llm_client.last_tool_calls
+            if not isinstance(tool_calls, list):
+                tool_calls = []
 
-            thought, action, parse_reason = self._parse_output(response_text)
-
-            if thought:
-                self._output(f"思考: {thought}")
-
-            if memory_manager:
-                memory_manager.append("assistant", response_text)
-                if self.conversation_mode:
-                    conversation_context = self._build_conversation_context(memory_manager, per_msg_limit=800)
-
-            if not action:
-                reason_detail = f": {parse_reason}" if parse_reason else ""
-                self._output(f"警告:未能解析出有效的Action{reason_detail}，流程终止。")
-                break
-
-            if 'type="finish"' in action:
-                final_answer = self._parse_finish(action)
-                if final_answer is None:
-                    self._output(f"警告: Finish指令格式无法解析，原始Action为: {action}")
-                    self._output("流程终止，请检查LLM输出格式。")
-                    return None
-                self._output(f"最终答案: {final_answer}")
+            if tool_calls:
+                # ── Tier 1 success: native tool calls ──
+                if response_text:
+                    self._output(f"思考: {response_text.strip()[:500]}")
                 if memory_manager:
-                    memory_manager.append("system", f"[最终答案] {final_answer}")
-                    memory_manager.conclude(question, final_answer)
-                return final_answer
+                    memory_manager.append("assistant", response_text)
 
-            tool_name, tool_params = self._parse_action(action)
-            if not tool_name or tool_params is None:
+                assistant_msg = {"role": "assistant", "content": response_text}
+                assistant_tool_calls = []
+                for tc in tool_calls:
+                    assistant_tool_calls.append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["arguments"], ensure_ascii=False),
+                        },
+                    })
+                if assistant_tool_calls:
+                    assistant_msg["tool_calls"] = assistant_tool_calls
+                messages.append(assistant_msg)
+
+                for tc in tool_calls:
+                    self._output(f"行动: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['arguments'].items())})")
+                    observation = self._execute_tool(tc["name"], tc["arguments"])
+                    self._output(f"观察: {observation}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": str(observation),
+                    })
+                    if memory_manager:
+                        memory_manager.append("tool",
+                            f"Action: {tc['name']}[{json.dumps(tc['arguments'], ensure_ascii=False)}]\n"
+                            f"Observation: {observation}")
+                        if memory_manager.has_new_memories():
+                            memory_context = memory_manager.refresh_ltm_context(question)
+
+                json_retries = 0
                 continue
 
-            if isinstance(tool_params, dict):
-                display = f"{tool_name}({', '.join(f'{k}={v}' for k, v in tool_params.items())})"
-            else:
-                display = f"{tool_name}[{tool_params}]"
-            self._output(f"行动: {display}")
+            # No tool_calls — try JSON text parsing
+            if not response_text:
+                if use_tool_calling and json_retries < MAX_JSON_RETRIES:
+                    json_retries += 1
+                    err_hint = f" (LLM last_error: {self.llm_client.last_error[:200]})" if self.llm_client.last_error else ""
+                    self._output(f"[重试 {json_retries}/{MAX_JSON_RETRIES}] LLM 返回空响应{err_hint}。提示给出答案...")
+                    messages.append({"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
+                    continue
+                err_hint = f" (LLM last_error: {self.llm_client.last_error[:200]})" if self.llm_client.last_error else ""
+                self._output(f"错误: LLM 未能返回有效响应。{err_hint}")
+                break
 
-            tool_function = self.tool_executor.getTool(tool_name)
-            if not tool_function:
-                observation = f"错误:未找到名为 '{tool_name}' 的工具。"
-            else:
-                params_dict = self._normalize_params(tool_name, tool_params)
-                need_hitl = tool_name in self._HITL_TOOLS
+            # ── No tool_calls. If Tier 1 was active, text is final answer ──
+            if use_tool_calling:
+                self._output(f"最终答案: {response_text}")
+                if memory_manager:
+                    memory_manager.append("system", f"[最终答案] {response_text}")
+                    memory_manager.conclude(question, response_text)
+                return response_text
 
-                try:
-                    observation = self.tool_executor.registry.invoke(
-                        name=tool_name,
-                        params=params_dict,
-                        caller="react_agent",
-                        hitl_approver=self._confirm if need_hitl else None,
-                    )
-                except Exception as e:
-                    observation = f"错误: 工具 '{tool_name}' 执行失败: {e}"
+            # ── Text mode: try JSON parse ──
+            parsed = self._parse_json_response(response_text)
 
-            self._output(f"观察: {observation}")
+            # ── Tier 3: auto-fix ──
+            if parsed["type"] == "error":
+                self._output(f"[JSON 解析失败] {parsed['reason']}，尝试修复...")
+                fixed = self._try_fix_json(response_text)
+                if fixed:
+                    parsed = self._parse_json_response(json.dumps(fixed, ensure_ascii=False))
 
-            if thought:
-                history.append(f"Thought: {thought}")
-            history.append(f"Action: {action}")
-            history.append(f"Observation: {observation}")
+            # ── Tier 4: retry with error feedback ──
+            if parsed["type"] == "error" and json_retries < MAX_JSON_RETRIES:
+                json_retries += 1
+                self._output(f"[JSON 重试 {json_retries}/{MAX_JSON_RETRIES}] {parsed['reason']}")
+                messages.append({"role": "assistant", "content": response_text})
+                messages.append({"role": "user", "content":
+                    f"你的上一次回复不是合法的 JSON。错误: {parsed['reason']}。\n"
+                    f"{self._build_json_format_section()}"})
+                if memory_manager:
+                    memory_manager.append("assistant", response_text)
+                # Disable tool calling on retry — force JSON text mode
+                use_tool_calling = False
+                continue
+
+            # ── Execute or return ──
+            if parsed["type"] == "tool_call":
+                self._output(f"行动: {parsed['tool']}({', '.join(f'{k}={v}' for k, v in parsed['params'].items())})")
+                observation = self._execute_tool(parsed["tool"], parsed["params"])
+                self._output(f"观察: {observation}")
+                messages.append({"role": "assistant", "content": response_text})
+                messages.append({"role": "user", "content":
+                    f"工具执行结果:\n{observation}\n\n请根据结果继续。如果信息充分，输出最终答案。\n"
+                    f"格式: {{\"answer\": \"你的回答\"}}"})
+                if memory_manager:
+                    memory_manager.append("assistant", response_text)
+                    memory_manager.append("tool",
+                        f"Action: {parsed['tool']}[{json.dumps(parsed['params'], ensure_ascii=False)}]\n"
+                        f"Observation: {observation}")
+                    if memory_manager.has_new_memories():
+                        memory_context = memory_manager.refresh_ltm_context(question)
+                json_retries = 0
+                use_tool_calling = True  # restore Tier 1 for next iteration
+                continue
+
+            if parsed["type"] == "answer":
+                answer = parsed["text"]
+                self._output(f"最终答案: {answer}")
+                if memory_manager:
+                    memory_manager.append("system", f"[最终答案] {answer}")
+                    memory_manager.conclude(question, answer)
+                return answer
+
+            # ── Tier 5: plain text fallback ──
+            self._output(f"最终答案: {response_text}")
             if memory_manager:
-                memory_manager.append("tool", f"Action: {action}\nObservation: {observation}")
-                # Event-driven LTM refresh: reload context if new memories
-                # were written (e.g. by memory_save tool during this step)
-                if memory_manager.has_new_memories():
-                    memory_context = memory_manager.refresh_ltm_context(question)
+                memory_manager.append("system", f"[最终答案] {response_text}")
+                memory_manager.conclude(question, response_text)
+            return response_text
 
         self._output("已达到最大步数，流程终止。")
         return None
+
+    def _execute_tool(self, name: str, arguments: dict) -> str:
+        """Execute a single tool call via the registry."""
+        need_hitl = name in self._HITL_TOOLS
+        try:
+            return str(self.tool_executor.registry.invoke(
+                name=name,
+                params=arguments,
+                caller="react_agent",
+                hitl_approver=self._confirm if need_hitl else None,
+            ))
+        except Exception as e:
+            return f"错误: 工具 '{name}' 执行失败: {e}"

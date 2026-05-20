@@ -155,6 +155,32 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
 
+    def to_openai_tools(self) -> list[dict]:
+        """Convert registered tools to OpenAI function-calling format."""
+        tools = []
+        for name, (meta, _) in self._tools.items():
+            # Strip default values from properties — OpenAI doesn't use them
+            schema = {"type": "object", "properties": {}, "required": meta.param_schema.get("required", [])}
+            props = meta.param_schema.get("properties", {})
+            if props:
+                for prop_name, prop_schema in props.items():
+                    cleaned = {k: v for k, v in prop_schema.items() if k != "default"}
+                    schema["properties"][prop_name] = cleaned
+            else:
+                # No declared properties → empty schema (tool takes no args)
+                schema["properties"] = {}
+                schema.pop("required", None)
+
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": meta.description,
+                    "parameters": schema,
+                },
+            })
+        return tools
+
     def get_audit_log(self) -> list[AuditEntry]:
         return list(self._audit_log)
 

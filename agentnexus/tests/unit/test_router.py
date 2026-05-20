@@ -1,19 +1,22 @@
-"""Tests for query router"""
-from agentnexus.rag.router import is_code_query
+"""Tests for grep_search tool"""
+import pytest
+from agentnexus.tools.grep_search import grep_search, grep_available
 
 
-class TestCodeQueryDetection:
-    def test_code_keyword(self):
-        assert is_code_query("def parse function") == True
-        assert is_code_query("import os and run") == True
+class TestGrepSearch:
+    def test_rejects_short_pattern(self):
+        result = grep_search("x")
+        assert "至少需要2个字符" in result
 
-    def test_chinese_code_keyword(self):
-        assert is_code_query("这段代码怎么改") == True
-        assert is_code_query("帮我写个函数") == True
+    def test_rejects_empty_pattern(self):
+        result = grep_search("")
+        assert "至少需要2个字符" in result
 
-    def test_natural_language(self):
-        assert is_code_query("什么是向量数据库") == False
-        assert is_code_query("如何配置LLM") == False
+    def test_reports_unavailable_when_rg_missing(self, mocker):
+        mocker.patch("agentnexus.tools.grep_search.grep_available", return_value=False)
+        result = grep_search("some_function")
+        assert "未安装" in result
 
-    def test_empty_query(self):
-        assert is_code_query("") == False
+    def test_grep_available_returns_bool(self):
+        result = grep_available()
+        assert isinstance(result, bool)

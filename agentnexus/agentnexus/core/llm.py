@@ -1,3 +1,4 @@
+import json
 import time
 from typing import Dict, List
 
@@ -35,13 +36,20 @@ class AgentLLM:
         self.last_truncated: bool = False
         self.last_usage: dict = {}
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+        self.last_tool_calls: list[dict] = []
+        self._tool_call_mode: bool = False
 
-    def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False) -> str:
+    def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False,
+              tools: list[dict] | None = None,
+              response_format: dict | None = None) -> str:
         if not self.api_key or not self.base_url:
             return ""
 
+        self.last_tool_calls = []
+        self._tool_call_mode = tools is not None and len(tools) > 0
+
         for attempt in range(LLM_MAX_RETRIES):
-            result = self._call(messages, temperature, silent, attempt)
+            result = self._call(messages, temperature, silent, attempt, tools, response_format)
             if result:
                 return result
             if attempt < LLM_MAX_RETRIES - 1:
@@ -49,7 +57,7 @@ class AgentLLM:
                 time.sleep(delay)
         return ""
 
-    def _call(self, messages, temperature, silent, attempt) -> str:
+    def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None) -> str:
         import litellm
         model = self.model
         if "/" not in model:
@@ -66,6 +74,7 @@ class AgentLLM:
             span = ctx.start_span("llm", {
                 "model": model,
                 "messages_count": len(messages),
+                "tool_count": len(tools) if tools else 0,
                 "input_preview": _preview(messages[-1]["content"]) if messages else "",
             })
 
@@ -79,6 +88,11 @@ class AgentLLM:
                 "api_base": self.base_url,
                 "timeout": self.timeout,
             }
+            if tools:
+                completion_kwargs["tools"] = tools
+                completion_kwargs["tool_choice"] = "auto"
+            if response_format:
+                completion_kwargs["response_format"] = response_format
             if "openai.com" in (self.base_url or ""):
                 completion_kwargs["stream_options"] = {"include_usage": True}
             response = litellm.completion(**completion_kwargs)
@@ -86,6 +100,8 @@ class AgentLLM:
             collected = []
             usage = {}
             finish_reason = ""
+            # Accumulate tool_calls across streaming chunks
+            tool_call_bufs: dict[int, dict] = {}
             text = Text()
             live = None
             if not silent:
@@ -93,11 +109,35 @@ class AgentLLM:
                 live.__enter__()
             try:
                 for chunk in response:
-                    content = chunk.choices[0].delta.content or ""
+                    delta = chunk.choices[0].delta
+                    content = delta.content or ""
                     collected.append(content)
                     text.append(content)
                     if live:
                         live.update(text)
+
+                    # Accumulate streaming tool_calls deltas
+                    tc_list = getattr(delta, "tool_calls", None) or []
+                    for tc in tc_list:
+                        idx = tc.get("index", 0) if isinstance(tc, dict) else getattr(tc, "index", 0)
+                        if idx not in tool_call_bufs:
+                            tool_call_bufs[idx] = {
+                                "id": "",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        buf = tool_call_bufs[idx]
+                        tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                        if tc_id:
+                            buf["id"] = tc_id
+                        fn = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
+                        if fn:
+                            name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
+                            args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
+                            if name:
+                                buf["function"]["name"] += name
+                            if args:
+                                buf["function"]["arguments"] += args
+
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage = {
                             "input_tokens": chunk.usage.prompt_tokens or 0,
@@ -113,6 +153,20 @@ class AgentLLM:
 
             result = "".join(collected)
             self.last_truncated = finish_reason in ("length", "max_tokens")
+
+            # Store parsed tool_calls
+            self.last_tool_calls = []
+            for buf in tool_call_bufs.values():
+                if buf["function"]["name"]:
+                    try:
+                        args = json.loads(buf["function"]["arguments"]) if buf["function"]["arguments"] else {}
+                    except (json.JSONDecodeError, ValueError):
+                        args = {}
+                    self.last_tool_calls.append({
+                        "id": buf["id"],
+                        "name": buf["function"]["name"],
+                        "arguments": args,
+                    })
 
             if not usage:
                 try:
@@ -130,9 +184,12 @@ class AgentLLM:
             self.total_usage["output_tokens"] += usage.get("output_tokens", 0)
 
             if ctx and span:
+                meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **usage}
+                if self.last_tool_calls:
+                    meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
                 ctx.end_span(span,
                     output_data={"output_preview": _preview(result), "output_length": len(result)},
-                    metadata={"model": model, "status": "ok", "truncated": self.last_truncated, **usage},
+                    metadata=meta,
                 )
 
             return result

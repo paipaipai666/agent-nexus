@@ -1,7 +1,7 @@
 """memory_search tool — allows agents to actively query long-term memory."""
 
 from agentnexus.core.llm import AgentLLM
-from agentnexus.memory.long_term import LongTermMemory
+from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.rag.chroma_client import get_embedding_model
 
 _QUERY_REWRITE_PROMPT = """\
@@ -35,7 +35,7 @@ def memory_search(query: str, category: str = "") -> str:
     Returns:
         Formatted search results with similarity scores, or a message if nothing found.
     """
-    ltm = LongTermMemory()
+    ltm = get_long_term_memory()
     model = get_embedding_model()
 
     # Rewrite query for better embedding match

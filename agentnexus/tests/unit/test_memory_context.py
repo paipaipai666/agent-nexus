@@ -88,7 +88,7 @@ class TestReActAgentConversationMode:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.tools.tool_executor import ToolExecutor
         mock_llm = MagicMock()
-        mock_llm.think.return_value = "<thought>test</thought>\n<action type=\"finish\">done</action>"
+        mock_llm.think.return_value = "done"
         executor = ToolExecutor()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         # Should not raise — history is now local, not self.history

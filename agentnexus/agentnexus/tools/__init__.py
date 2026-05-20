@@ -15,6 +15,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False):
     """
     from agentnexus.tools.code_executor import python_execute
     from agentnexus.tools.file_ops import file_list, file_read, file_write
+    from agentnexus.tools.grep_search import grep_search
     from agentnexus.tools.memory_save import memory_save
     from agentnexus.tools.memory_search import memory_search
     from agentnexus.tools.shell import get_os_info, shell_exec
@@ -51,6 +52,31 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False):
         },
         risk_level="low",
         rate_limit_per_min=10,
+    )
+
+    executor.registerTool(
+        "grep_search",
+        "使用 ripgrep 在项目中搜索文本。默认字面量匹配（非正则），"
+        "直接搜函数名、类名、导入、错误消息等即可，无需转义。"
+        "参数: pattern(搜索文本,必填), "
+        "path(搜索目录,默认当前目录), "
+        "glob(文件过滤,如 '*.py'), "
+        "max_results(最大结果数,1-50,默认10), "
+        "literal(字面量匹配,默认true; 设为false启用正则)",
+        grep_search,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "搜索文本（默认字面量匹配）"},
+                "path": {"type": "string", "description": "搜索目录", "default": "."},
+                "glob": {"type": "string", "description": "文件过滤模式 (如 *.py, *.yaml)", "default": "*"},
+                "max_results": {"type": "integer", "description": "最大结果数 (1-50)", "default": 10},
+                "literal": {"type": "boolean", "description": "字面量匹配 (默认true)。设为false启用正则", "default": True},
+            },
+            "required": ["pattern"],
+        },
+        risk_level="low",
+        rate_limit_per_min=20,
     )
 
     executor.registerTool(

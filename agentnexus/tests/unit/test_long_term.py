@@ -1,12 +1,10 @@
 import pytest
-from agentnexus.memory.long_term import LongTermMemory, SCHEMA
+from agentnexus.memory.long_term import get_long_term_memory
 
 
 @pytest.fixture
 def ltm(temp_agentnexus_home):
-    mem = LongTermMemory()
-    yield mem
-    mem._conn.close()
+    yield get_long_term_memory()
 
 
 class TestLongTermMemory:
