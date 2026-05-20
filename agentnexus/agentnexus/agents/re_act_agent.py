@@ -236,10 +236,6 @@ class ReActAgent:
             current_step += 1
             self._output(f"--- 第 {current_step} 步 ---")
 
-            # Periodic LTM context refresh
-            if memory_manager and current_step % 3 == 0:
-                memory_context = memory_manager.init_session(question)
-
             # Build prompt
             tools_desc = self.tool_executor.getAvailableTools()
             history_str = "\n".join(history)
@@ -322,6 +318,10 @@ class ReActAgent:
             history.append(f"Observation: {observation}")
             if memory_manager:
                 memory_manager.append("tool", f"Action: {action}\nObservation: {observation}")
+                # Event-driven LTM refresh: reload context if new memories
+                # were written (e.g. by memory_save tool during this step)
+                if memory_manager.has_new_memories():
+                    memory_context = memory_manager.refresh_ltm_context(question)
 
         self._output("已达到最大步数，流程终止。")
         return None

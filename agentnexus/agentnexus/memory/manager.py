@@ -90,6 +90,7 @@ class MemoryManager:
         # Compact threshold: 40% of model context, floor 128k tokens
         ctx_max = self._resolve_ctx_max()
         self._compact_threshold = max(128000, int(ctx_max * 0.8)) if ctx_max else 128000
+        self._last_ltm_max_id: int = 0
 
     @staticmethod
     def _resolve_ctx_max() -> int | None:
@@ -119,6 +120,11 @@ class MemoryManager:
         query_vec = self._embed_model.encode(query_text, normalize_embeddings=True).tolist()
         memories = self.long_term.search(
             query_embedding=query_vec, limit=ltm_limit, min_similarity=ltm_similarity)
+
+        # Always update snapshot — even if no memories match this query,
+        # we need the baseline for future has_new_memories() checks.
+        self._update_ltm_snapshot()
+
         if not memories:
             return ""
 
@@ -132,6 +138,44 @@ class MemoryManager:
             return ""
         header = "相关历史记忆 (★越多越相关):\n" if any("★★★" in p for p in parts) else "相关历史记忆:\n"
         return header + "\n".join(parts) + "\n[提示] 用户分享个人信息时，请主动使用 memory_save 保存]\n"
+
+    def _update_ltm_snapshot(self):
+        """Record the current max LTM id as baseline for change detection."""
+        if not self.long_term:
+            return
+        try:
+            row = self.long_term._conn.execute(
+                "SELECT MAX(id) as mx FROM long_term_memories"
+            ).fetchone()
+            self._last_ltm_max_id = row["mx"] or 0
+        except Exception:
+            pass
+
+    def has_new_memories(self) -> bool:
+        """Check if new LTM entries exist since last init_session() / refresh.
+
+        Pure query — does not mutate state. Snapshot is updated by
+        init_session() / refresh_ltm_context() when context is actually reloaded.
+
+        Uses SQL polling because memory_save tool writes directly to LTM
+        (bypassing MemoryManager), so an internal dirty flag would miss it.
+        If memory_save is ever refactored to go through MemoryManager,
+        this can be replaced with a lightweight dirty flag.
+        """
+        if not self.long_term:
+            return False
+        try:
+            row = self.long_term._conn.execute(
+                "SELECT MAX(id) as mx FROM long_term_memories"
+            ).fetchone()
+            current_max = row["mx"] or 0
+            return current_max > self._last_ltm_max_id
+        except Exception:
+            return False
+
+    def refresh_ltm_context(self, question: str) -> str:
+        """Reload LTM context after new memories are detected."""
+        return self.init_session(question)
 
     def append(self, role: str, content: str):
         # Layer 1: offload large tool results to disk
