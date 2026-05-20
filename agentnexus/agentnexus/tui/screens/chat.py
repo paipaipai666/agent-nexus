@@ -2,8 +2,11 @@
 
 import asyncio
 import re
+import threading
+import time
 from itertools import cycle
 
+from rich.markdown import Markdown
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -12,6 +15,7 @@ from textual.widget import Widget
 from textual.widgets import Input, Label, Static
 
 from agentnexus.memory.short_term import ShortTermMemory
+from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall
@@ -33,7 +37,7 @@ class ChatArea(Widget):
         self.call_after_refresh(self.scroll_end)
 
     def add_system(self, text: str):
-        self.mount(ChatMessage("system", text))
+        self.mount(ChatMessage("system", text, markup=True))
         self.call_after_refresh(self.scroll_end)
 
     def add_tool_call(self, name: str, result: str = "", duration_ms: float = 0):
@@ -61,6 +65,7 @@ class ChatScreen(Screen):
         self._running = False
         self._spinner_timer = None
         self._spinner_frames = None
+        self._current_tool_name: str = ""
         self._current_tool_widget = None
 
     def compose(self) -> ComposeResult:
@@ -91,7 +96,7 @@ class ChatScreen(Screen):
             "[#fab283]"
             "┌─────────────────────────────────┐\n"
             "│  ⬡ AgentNexus                  │\n"
-            "│  Multi-Agent Task Orchestrator  │\n"
+            "│  Task Orchestrator  │\n"
             "└─────────────────────────────────┘"
             "[/]"
         )
@@ -290,20 +295,66 @@ class ChatScreen(Screen):
 
     @staticmethod
     def _condense_search_result(text: str) -> str:
-        """Show only title/score/URL from web_search; skip full content."""
+        """Show only title/score/URL from web_search; skip full content body.
+
+        Input format (from web_search.py):
+          [N] Title (date) [相关度: X.XX]
+          URL: https://...
+          <multi-line content body>
+        """
         lines = text.split("\n")
         out = []
         for line in lines:
             stripped = line.strip()
+            if not stripped:
+                continue
             if re.match(r"^\[\d+\]", stripped) or stripped.startswith("URL:"):
                 out.append(line)
-        return "\n".join(out)
+        return "\n".join(out) if out else text[:500]
+
+    @staticmethod
+    def _condense_file_result(text: str) -> str:
+        """Show only file metadata line from file_read; skip full file content.
+
+        Input format (from file_ops.py):
+          [文件] path (N 行, 共 X 字节)
+          1 | line content...
+          2 | line content...
+        """
+        first_line = text.split("\n")[0] if text else ""
+        if first_line.startswith("[文件]"):
+            return first_line
+        return text[:200]
 
     # ── agent execution ───────────────────────────────────────
 
     @work(exclusive=True)
     async def _run_agent(self, text: str):
-        self._agent._confirm = lambda _: True
+        # ── Thread-safe confirmation bridge ──
+        # agent thread calls _confirm(params) → this sets up a
+        # threading.Event, pushes ConfirmDialog on the main Textual
+        # thread, blocks until user responds, then returns True/False.
+        def _tui_confirm(params_summary: str) -> bool:
+            event = threading.Event()
+            result_holder = [False]
+
+            def _show_dialog():
+                dialog = ConfirmDialog(
+                    self._current_tool_name,
+                    params_summary,
+                    risk_level="high",
+                )
+                self.app.push_screen(dialog, callback=lambda confirmed: _on_result(confirmed))
+
+            def _on_result(confirmed: bool):
+                result_holder[0] = bool(confirmed)
+                event.set()
+
+            self.app.call_from_thread(_show_dialog)
+            event.wait()  # block agent thread until user responds
+            return result_holder[0]
+
+        self._agent._confirm = _tui_confirm
 
         # ── Mount loading indicator ──
         loading = Static("[#fab283]● Working...[/]", id="loading-indicator")
@@ -320,7 +371,16 @@ class ChatScreen(Screen):
             elif msg.startswith("行动:"):
                 self._stop_spinner()
                 tool_info = msg.removeprefix("行动:").strip()
-                tool_name = tool_info.split("(")[0].strip() if "(" in tool_info else tool_info
+                # Parse format: tool_name[params] or tool_name(params) (fallback)
+                bracket = tool_info.find("[")
+                paren = tool_info.find("(")
+                if bracket >= 0:
+                    tool_name = tool_info[:bracket].strip()
+                elif paren >= 0:
+                    tool_name = tool_info[:paren].strip()
+                else:
+                    tool_name = tool_info.strip()
+                self._current_tool_name = tool_name
                 widget = ToolCall(tool_name, result="执行中...")
                 self._chat_area.mount(widget)
                 self._current_tool_widget = widget
@@ -332,9 +392,11 @@ class ChatScreen(Screen):
                 self._stop_spinner()
                 result = msg.removeprefix("观察:").strip()
                 if self._current_tool_widget:
-                    # 使用 lower() 增强对 LLM 输出大小写波动的鲁棒性
-                    if self._current_tool_widget.tool_name.strip().lower() == "web_search":
+                    tool_lower = self._current_tool_widget.tool_name.strip().lower()
+                    if tool_lower == "web_search":
                         result = self._condense_search_result(result)
+                    elif tool_lower == "file_read":
+                        result = self._condense_file_result(result)
                     self._current_tool_widget.update_result(result)
                     self._current_tool_widget = None
                 else:
@@ -374,27 +436,29 @@ class ChatScreen(Screen):
 
             msg_content = msg_widget.query_one("#msg-content", Static)
 
+            # Time-throttled streaming: 20fps cap, update at sentence boundaries
+            THROTTLE_MS = 0.05
             displayed = ""
-            BATCH_SIZE = 25
-            for i, char in enumerate(answer):
+            last_update = 0.0
+            for char in answer:
                 displayed += char
-                if (i + 1) % BATCH_SIZE == 0 or char in ".!?。！？\n":
+                now = time.monotonic()
+                if now - last_update >= THROTTLE_MS and char in ".!?。！？\n":
                     msg_content.update(displayed)
-                    await asyncio.sleep(0.03 if char not in ".!?。！？\n" else 0.12)
-
-            remaining = len(answer) % BATCH_SIZE
-            if remaining:
+                    last_update = now
+                    await asyncio.sleep(0.01)
+            # Final flush
+            if displayed:
                 msg_content.update(displayed)
 
-            from rich.markdown import Markdown
-            msg_content.update(Markdown(answer))
+            # Rich Markdown final render — parse off-thread to keep UI responsive
+            loop = asyncio.get_running_loop()
+            rendered = await loop.run_in_executor(None, Markdown, answer)
+            msg_content.update(rendered)
 
             usage = getattr(self._agent, "total_usage", None)
             if usage:
                 self._hud.update_tokens(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            budget = getattr(self._agent, "budget", None)
-            if budget:
-                self._hud.update_budget(budget)
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
         else:

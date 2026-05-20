@@ -1,11 +1,48 @@
+import ast
 import os
+import re
 import subprocess
 import sys
 
 from agentnexus.core.config import get_settings
 
 
+_HAS_MAIN_RE = re.compile(r'^if\s+__name__\s*==\s*["\']__main__["\']', re.MULTILINE)
+
+
+def _ensure_main_block(code: str) -> str:
+    """If code has no `if __name__ == '__main__':` block, auto-append module-level calls."""
+    if _HAS_MAIN_RE.search(code):
+        return code
+
+    try:
+        tree = ast.parse(code)
+        funcs = [
+            node.name for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and not node.name.startswith('_')
+            and not node.args.args
+        ]
+        if not funcs:
+            funcs = [
+                node.name for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef)
+                and not node.name.startswith('_')
+            ]
+        if funcs:
+            main_block = '\n\n# Auto-appended entry point\n'
+            for name in funcs[:10]:
+                main_block += f'print(f"\\n=== {name} ====")\n'
+                main_block += f'{name}()\n'
+            return code + main_block
+    except SyntaxError:
+        pass
+
+    return code + '\n\nprint("Auto-executed")\n'
+
+
 def python_execute(code: str) -> str:
+    code = _ensure_main_block(code)
     api_key = get_settings().e2b_api_key.get_secret_value()
 
     if not api_key:

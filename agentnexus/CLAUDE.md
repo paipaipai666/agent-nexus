@@ -20,26 +20,11 @@ pyinstaller agentnexus.spec --noconfirm
 
 ## Architecture
 
-**LangGraph FSM** (`agents/multi_agent/orchestrator.py`) — 5 nodes, 4 conditional routers:
-
-```
-START → plan → research → code → execute(+HITL) → analyst → END
-         ↑        │          │        │               │
-         └─ analyst score < 7.0   └─ failure → code   │
-                                    ModuleNotFoundError → research
-```
-
-HITL: first code gen asks user confirmation before execute; retries skip confirmation.
-
-**AgentState** (`agents/multi_agent/state.py`) — TypedDict with 34 fields. `messages` uses `Annotated[list, operator.add]` (LangGraph append reducer). Fields accessed defensively via `state.get()`.
+**ReActAgent** (`agents/re_act_agent.py`) — Thought→Action→Observation loop. Used by both `nexus run` and `nexus chat`. Max steps configurable via `max_agent_steps`. Three-layer XML parsing with legacy text fallback.
 
 **LLM calls** (`core/llm.py`) — litellm streaming with 3x exponential backoff. Auto-detects `finish_reason=="length"` → `self.last_truncated = True`. Transient errors retried; non-transient return empty.
 
 **Prompts** — `prompts/*.txt`, rendered with `str.format()` (NOT Jinja2). `format_prompt(name, **kwargs)` auto-injects `{date}`.
-
-**Error handling** — 9 ErrorTypes in `agents/schema.py`: `MISSING_CODE`, `RUNTIME_ERROR`, `HALLUCINATION`, `TOOL_FAILURE`, `SCHEMA_VIOLATION`, `NO_OUTPUT`, `EMPTY_RESULT`, `LOGIC_ERROR`, `TRUNCATION`. Each maps to a retry strategy. Max 3 retries.
-
-**`__main__` auto-append** — `_ensure_main_block()` AST-parses generated code and appends `if __name__ == '__main__':` calling top-level functions if missing.
 
 **Config priority**: YAML (`~/.agentnexus/config.yaml`) → env (`AGENTNEXUS_*`) → Pydantic defaults. Key envs: `AGENTNEXUS_HOME`, `AGENTNEXUS_LLM_API_KEY`, `AGENTNEXUS_LLM_MODEL_ID`.
 
@@ -64,6 +49,6 @@ Thread-safe `TraceManager` singleton (`observability/tracer.py`). Each `nexus ru
 
 New dynamic imports must be added to `agentnexus.spec` `hiddenimports` list, or the bundled binary will miss dependencies.
 
-## Deprecated
+## Removed
 
-`agents/retry_manager.py` — truly deprecated, no runtime imports. `critic_agent.py` and `critic_rules.py` are still active.
+Multi-agent LangGraph orchestrator (`agents/multi_agent/`) and its sub-agents (`coder_agent.py`, `research_agent.py`, `executor_agent.py`, `critic_agent.py`, `critic_rules.py`, `analyst_agent.py`, `schema.py`) were removed in a cleanup. `nexus run` now uses ReActAgent directly.

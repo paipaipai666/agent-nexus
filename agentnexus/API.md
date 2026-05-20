@@ -1,6 +1,6 @@
 # AgentNexus API 文档
 
-> 企业级多智能体任务协同 CLI — 每一条命令的实现原理、执行链路与核心代码。
+> 企业级单智能体任务协同 CLI — 每一条命令的实现原理、执行链路与核心代码。
 
 ---
 
@@ -17,16 +17,7 @@ graph TB
         llm["llm.py<br/>AgentLLM + litellm"]
     end
 
-    subgraph FSM["nexus run — Multi-Agent FSM (LangGraph)"]
-        direction TB
-        plan["plan_node<br/>任务分解"]
-        research["research_node<br/>RAG + Web 检索"]
-        code["code_node<br/>代码生成"]
-        execute["execute_node<br/>沙箱执行"]
-        analyst["analyst_node<br/>综合分析 + Critic"]
-    end
-
-    subgraph Chat["nexus chat — ReAct Agent"]
+    subgraph Run["nexus run & chat — ReAct Agent"]
         react["ReActAgent<br/>Thought→Action→Observe 循环"]
     end
 
@@ -38,27 +29,8 @@ graph TB
 
     nexus --> config
     nexus --> llm
-    nexus -->|"run"| FSM
-    nexus -->|"chat"| Chat
+    nexus -->|"run / chat"| Run
     nexus -->|"kb / memory / logs / eval / stats"| Infra
-
-    plan --> research
-    plan --> code
-    research --> code
-    research --> analyst
-    code --> execute
-    execute --> analyst
-    execute -->|"failure"| code
-    execute -->|"ModuleNotFoundError"| research
-    analyst -->|"crit < 7.0"| plan
-    analyst -->|"passed"| END
-
-    style plan fill:#4fc3f7,color:#000
-    style research fill:#81c784,color:#000
-    style code fill:#ffb74d,color:#000
-    style execute fill:#e57373,color:#000
-    style analyst fill:#ce93d8,color:#000
-    style END fill:#78909c,color:#fff
 ```
 
 ## 二、CLI 入口与初始化
@@ -86,7 +58,7 @@ agentnexus/__main__.py (python -m 模式 / PyInstaller)
 **核心代码** (`cli/__init__.py`):
 
 ```python
-app = typer.Typer(name="nexus", help="AgentNexus - 多智能体任务协同 CLI")
+app = typer.Typer(name="nexus", help="AgentNexus - 单智能体任务协同 CLI")
 console = Console()
 
 # 四个子命令组
@@ -124,11 +96,11 @@ class Settings(BaseSettings):
 
 ---
 
-## 三、`nexus run` — 多智能体编排
+## 三、`nexus run` — ReAct 单 Agent 执行
 
 ### 3.1 概述
 
-`nexus run "<任务描述>"` 是系统核心命令，启动完整的 LangGraph 有限状态机。
+`nexus run "<任务描述>"` 是系统核心命令，启动 ReActAgent (Thought→Action→Observe) 循环执行任务。
 
 **调用方式**: `nexus run "搜索 AI 趋势并写分析报告"`
 
@@ -139,412 +111,36 @@ sequenceDiagram
     participant User as 用户
     participant CLI as cli/run.py
     participant Trace as TraceManager
-    participant Orc as orchestrator_persistent
-    participant LLM as AgentLLM (Plan)
-    participant R as ResearchAgent
-    participant C as CoderAgent
-    participant E as ExecutorAgent
-    participant LLM2 as AgentLLM (Analyst)
-    participant Critic as CriticAgent
+    participant ReAct as ReActAgent
+    participant LLM as AgentLLM
+    participant Tool as ToolExecutor
+    participant Mem as MemoryManager
 
     User->>CLI: nexus run "任务"
     CLI->>Trace: start_trace(task)
     Trace-->>CLI: TraceContext
-    CLI->>Orc: invoke({task, trace_id})
+    CLI->>ReAct: run(task, memory_manager)
 
-    rect rgb(200,230,255)
-        Note over Orc,LLM: plan 阶段
-        Orc->>LLM: 加载 planner.txt 提示词
-        LLM-->>Orc: "research: ... \n code: ..."
-        Orc-->>Orc: 路由判断
-    end
+    loop ReAct 循环 (max 5 步)
+        ReAct->>Mem: init_session → 获取记忆上下文
+        ReAct->>LLM: react.txt 提示词
+        LLM-->>ReAct: "Thought: ... Action: ..."
+        ReAct->>ReAct: 解析 Thought / Action
 
-    rect rgb(200,255,200)
-        Note over Orc,R: research 阶段
-        Orc->>R: search(query)
-        R->>R: retrieve() 双路由
-        R->>LLM: 加载 research.txt
-        LLM-->>R: ResearchOutput (JSON)
-        R-->>Orc: summary + claims[]
-    end
-
-    rect rgb(255,240,200)
-        Note over Orc,C: code 阶段
-        Orc->>C: generate(spec)
-        C->>LLM: 加载 coder.txt
-        LLM-->>C: CodeOutput (JSON)
-        C-->>Orc: code + expected_output
-        Orc->>Orc: AST __main__ 自动追加
-    end
-
-    rect rgb(255,210,210)
-        Note over Orc,E: execute 阶段
-        Orc->>User: HITL 确认 (首次)
-        User-->>Orc: y/n
-        Orc->>E: execute(code)
-        E->>E: fork 子进程执行
-        E-->>Orc: ExecutionResult
-        alt 执行失败
-            Orc->>Orc: 错误分类 → 路由回 code/research
+        alt Action = Finish[答案]
+            ReAct-->>CLI: 最终答案
+        else Action = tool_name[input]
+            ReAct->>Tool: 执行工具
+            Tool-->>ReAct: Observation
+            ReAct->>ReAct: 追加到历史
         end
     end
 
-    rect rgb(230,200,255)
-        Note over Orc,Critic: analyst 阶段
-        Orc->>LLM2: 加载 analyst.txt
-        LLM2-->>Orc: 综合分析
-        Orc->>Critic: evaluate()
-        Critic->>Critic: HardRuleChecker + LLM 评分
-        Critic-->>Orc: score, feedback
-        alt score < 7.0
-            Orc->>Orc: 路由回 plan 重规划
-        end
-    end
-
-    Orc-->>CLI: 最终结果
     CLI->>User: Rich Panel 渲染
     CLI->>Trace: end_trace() → flush JSONL
 ```
 
-### 3.3 LangGraph 状态机核心实现
-
-**状态定义** (`multi_agent/state.py`):
-
-```python
-class AgentState(TypedDict):
-    task: str                            # 原始任务
-    trace_id: str                        # Trace ID
-    plan: list[str]                      # Planner 输出的步骤列表
-    research_result: str                 # 检索摘要
-    research_status: Literal["ok", "error", ""]
-    code_result: str                     # 代码推理
-    code_status: Literal["ok", "error", ""]
-    analysis: str                        # 最终答案
-    critique_score: float                # Critic 评分 0-10
-    critique_feedback: str
-    hard_verdict: Optional[dict]         # 硬规则失败详情
-    error_type: str
-    retry_count: int                     # 当前重试次数
-    retry_instruction: str               # 重试指引
-    research_query: str
-    code_spec: str
-    exec_stdout: str                     # 执行标准输出
-    exec_stderr: str
-    exec_success: bool
-    exec_exception: str
-    coder_truncated: bool                # LLM 输出是否被截断
-    messages: Annotated[list, operator.add]  # 追加式消息历史
-    # ... 共 34 个字段
-```
-
-**状态机构建** (`multi_agent/orchestrator.py`):
-
-```python
-def build_orchestrator(checkpointer=None):
-    builder = StateGraph(AgentState)
-
-    # 5 个节点 — 每个都有 trace wrapper
-    builder.add_node("plan",     _trace_wrapper(plan_node, ...))
-    builder.add_node("research", _trace_wrapper(research_node, ...))
-    builder.add_node("code",     _trace_wrapper(code_node, ...))
-    builder.add_node("execute",  _trace_wrapper(execute_node, ...))
-    builder.add_node("analyst",  _trace_wrapper(analyst_node, ...))
-
-    # 边 + 条件路由
-    builder.add_edge(START, "plan")
-    builder.add_conditional_edges("plan", route_after_plan, {
-        "research": "research", "code": "code", "analyst": "analyst",
-    })
-    builder.add_conditional_edges("research", route_after_research, {
-        "code": "code", "analyst": "analyst",
-    })
-    builder.add_edge("code", "execute")
-    builder.add_conditional_edges("execute", route_after_execute, {
-        "analyst": "analyst", "code": "code", "research": "research",
-    })
-    builder.add_conditional_edges("analyst", route_after_analyst, {
-        "plan": "plan", "__end__": END,
-    })
-
-    return builder.compile(checkpointer=checkpointer)
-```
-
-> FSM 通过 `LangGraph SQLite Checkpointer` 实现状态持久化，支持任务中断后恢复。
-
-### 3.4 各节点详解
-
-#### 3.4.1 plan_node — 任务规划
-
-`planner.txt` 提示词要求 LLM 将任务分解为 `research:` / `code:` 行。
-
-```python
-def plan_node(state: AgentState) -> dict:
-    prompt = PLANNER_PROMPT.format(task=safe_task + feedback, date=get_current_date())
-    response = _get_planner_llm().think([{"role": "user", "content": prompt}], silent=True)
-
-    # 解析输出: "research: 搜索 OpenAI 最新动态"
-    #           "code: 生成数据分析脚本"
-    plan = [line.strip() for line in response.split("\n") if ":" in line.strip()]
-    return {"plan": plan, "messages": [("planner", response)]}
-```
-
-**路由逻辑** (`route_after_plan`):
-- 计划中包含 `research` → 进入 `research_node`
-- 计划中包含 `code` → 进入 `code_node`
-- 都不包含 → 直接进 `analyst_node`
-
-#### 3.4.2 research_node — 双路由检索
-
-```python
-def research_node(state: AgentState) -> dict:
-    result = _research.search(query)   # → ResearchAgent.search()
-    return {
-        "research_result": result.summary,
-        "research_status": "ok",
-        "research_claims": [c.model_dump() for c in result.claims],
-    }
-```
-
-**ResearchAgent.search() 核心流程**:
-
-```mermaid
-graph TD
-    Q["用户查询"] --> R["rag/router.py::retrieve()"]
-    R -->|"is_code_query?"| G["grep_search<br/>ripgrep 精确匹配"]
-    R -->|"自然语言"| V["chroma_client.search()<br/>语义向量检索"]
-    G -->|"命中率 < 阈值"| V
-    V --> BM["rank-bm25<br/>稀疏检索"]
-    BM --> F["Reciprocal Rank Fusion (RRF)<br/>稠密+稀疏 融合"]
-    F --> RK["BGE Reranker<br/>CrossEncoder 精排"]
-    RK --> T["返回 top-k SearchResult[]"]
-    T --> LLM["LLM 综合 + 来源引用"]
-    LLM --> O["ResearchOutput<br/>(summary + claims + gaps)"]
-```
-
-**双路由判断逻辑** (`rag/router.py`):
-
-```python
-def is_code_query(query: str) -> bool:
-    """检测查询是否为代码/配置相关"""
-    code_keywords = {"def ", "class ", "import ", "config", "yaml", "yml",
-                     "dockerfile", "makefile", "function", "模块", "函数",
-                     "代码", "配置", "参数", "接口", "API", "报错", "异常"}
-    return any(kw in query.lower() for kw in code_keywords)
-```
-
-#### 3.4.3 code_node — 代码生成 + 校验
-
-```python
-def code_node(state: AgentState) -> dict:
-    spec = _extract_code_spec(state)
-    # 注入 research 结果作为上下文
-    if research_text:
-        spec = f"{spec}\n\n[研究结果供参考]:\n{research_text[:1500]}"
-
-    output = _coder.generate(spec)  # → CoderAgent.generate()
-
-    # ⚠ 关键: 自动追加 __main__ 块
-    if output.code:
-        output.code = _ensure_main_block(output.code)
-
-    # 首次 HITL 确认，重试自动跳过
-    if retry_count == 0:
-        resp = input("即将执行代码，是否继续？(y/n)").strip()
-        if resp != 'y':
-            return {"code_status": "cancelled"}
-
-    return {"code_result": output.reasoning, "code_status": "ok",
-            "messages": [("coder", output.code)]}
-```
-
-**CoderAgent.generate() 解析流程**:
-
-```mermaid
-graph TD
-    RAW["LLM 原始输出"] --> J{"包含 ```json```?"}
-    J -->|"是"| P1["json.loads() → CodeOutput"]
-    J -->|"否"| T{"整段是 JSON?"}
-    T -->|"是"| P2["json.loads() → CodeOutput"]
-    T -->|"否"| C{"包含 ```python```?"}
-    C -->|"是"| P3["提取代码块 → CodeOutput<br/>+ AST 截断检测"]
-    C -->|"否"| P4["CodeOutput(code='') → MISSING_CODE"]
-```
-
-**`__main__` 自动追加** (`_ensure_main_block`):
-
-```python
-def _ensure_main_block(code: str) -> str:
-    if re.search(r'^if\s+__name__\s*==\s*["\']__main__["\']', code, re.MULTILINE):
-        return code  # 已有，不改
-
-    # AST 解析 + 追加顶层函数调用
-    tree = ast.parse(code)
-    funcs = [node.name for node in ast.walk(tree)
-             if isinstance(node, ast.FunctionDef) and not node.name.startswith('_')]
-    if funcs:
-        main_block = '\n\nif __name__ == "__main__":\n'
-        for name in funcs[:10]:
-            main_block += f'    print(f"\\n=== {name} ====")\n'
-            main_block += f'    {name}()\n'
-        return code + main_block
-```
-
-#### 3.4.4 execute_node — 隔离执行
-
-```python
-def execute_node(state: AgentState) -> dict:
-    code = _extract_code_from_messages(state)
-    result = _executor_agent.execute(code)   # 30s 超时子进程执行
-    validated = _executor_agent.validate(result)
-
-    return {
-        "exec_success": result.success,
-        "exec_stdout": result.stdout,
-        "exec_stderr": result.stderr,
-        "exec_exception": result.exception,
-        "retry_count": state["retry_count"] + (0 if result.success else 1),
-    }
-```
-
-**ExecutorAgent 执行流程**:
-
-```mermaid
-graph TD
-    CODE["Python 代码"] --> THREAD["ThreadPoolExecutor<br/>timeout=30s"]
-    THREAD -->|"成功"| OUT{"stdout 非空?"}
-    THREAD -->|"超时"| TO["ExecutionResult<br/>success=False"]
-    THREAD -->|"异常"| E{"ModuleNotFoundError?"}
-
-    E -->|"是"| PIP["pip install 缺包"]
-    PIP -->|"成功"| RETRY["重新执行"]
-    PIP -->|"失败"| FAIL["返回错误"]
-    RETRY --> OUT
-
-    E -->|"否"| FAIL
-    OUT -->|"是"| OK["success=True"]
-    OUT -->|"否"| NO["NO_OUTPUT 错误"]
-```
-
-**错误分类逻辑** (`_classify_exception`):
-
-```python
-def _classify_exception(exception: str) -> ErrorType:
-    if "NO_OUTPUT" in exception:
-        return ErrorType.NO_OUTPUT
-    if "ModuleNotFoundError" in exception or "ImportError" in exception:
-        return ErrorType.TOOL_FAILURE
-    if "SyntaxError" in exception:
-        return ErrorType.RUNTIME_ERROR
-    return ErrorType.RUNTIME_ERROR
-```
-
-#### 3.4.5 execute → 重试路由
-
-```python
-def route_after_execute(state: AgentState) -> str:
-    if state.get("exec_success", False):
-        return "analyst"     # 成功 → 最终分析
-
-    if retry_count > MAX_RETRIES:       # 上限 3
-        return "analyst"     # 耗尽 → 强制分析
-
-    exc = state.get("exec_exception", "")
-    if "ModuleNotFoundError" in exc or (retry_count >= 2 and "NO_OUTPUT" in exc):
-        return "research"    # 缺库 → 研究新 API
-
-    return "code"            # 默认 → 修复重试
-```
-
-#### 3.4.6 analyst_node — 综合分析 + Critic
-
-```python
-def analyst_node(state: AgentState) -> dict:
-    # 1. 构建执行报告（确定性，不由 LLM 生成）
-    if exec_success:
-        exec_report = "**状态**: ✅ 执行成功\n**输出**:\n```\n{stdout}\n```"
-    else:
-        exec_report = "**状态**: ❌ 执行失败\n**错误**: {exception}"
-
-    # 2. LLM 综合分析
-    prompt = ANALYST_PROMPT.format(task=task, research=research, ..., exec_report=exec_report)
-    analysis = _get_analyst_llm().think([{"role": "user", "content": prompt}])
-
-    # 3. 正则修正 — 防止 LLM 篡改执行状态
-    if exec_success:
-        analysis = re.sub(r'\*\*状态\*\*[：:]\s*❌.*', '**状态**: ✅ 执行成功', analysis)
-
-    # 4. Critic 评分
-    critic_score, critic_feedback, hard_fail = _critic.evaluate(...)
-
-    if critic_score < 7.0:
-        retry_instruction = f"Critic 评分 {critic_score}/10 低于阈值 7.0。请改进。"
-        next_retry_count += 1
-
-    return {"analysis": analysis, "critique_score": critic_score, ...}
-```
-
-**CriticAgent 两阶段评估**:
-
-```mermaid
-graph TD
-    E["evaluate(task, answer, code, sources, exec_result)"]
-    E --> HARD["HardRuleChecker.run_hard_checks()"]
-    HARD -->|"硬规则失败"| FAIL["return (0, fail_reason, hard_verdict)"]
-    HARD -->|"通过"| LLM["LLM 质量评分<br/>critic.txt 提示词"]
-    LLM -->|"score >= 7.0"| PASS["return (score, feedback, None)"]
-    LLM -->|"score < 7.0"| LOW["return (score, feedback, None)<br/>orchestrator 判断重试"]
-```
-
----
-
-## 四、`nexus chat` — 交互式 ReAct 对话
-
-### 4.1 概述
-
-`nexus chat` 进入交互式 ReAct (Reasoning + Acting) 单 Agent 循环。支持两种工具：`web_search` 和 `python_execute`。
-
-### 4.2 执行链路
-
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant Chat as cli/chat.py
-    participant Session as PromptSession
-    participant ReAct as ReActAgent
-    participant LLM as AgentLLM (silent)
-    participant Tool as ToolExecutor
-    participant Mem as MemoryManager
-
-    User->>Chat: nexus chat
-    Chat->>Session: 创建交互会话
-    Chat->>Tool: 注册 web_search / python_execute
-    Chat->>Mem: MemoryManager(session_id)
-
-    loop 对话循环
-        User->>Session: 输入问题
-        Session->>Chat: 文本
-        Chat->>ReAct: run(question, memory_manager)
-
-        loop ReAct 循环 (max 5 步)
-            ReAct->>Mem: init_session → 获取记忆上下文
-            ReAct->>LLM: react.txt 提示词
-            LLM-->>ReAct: "Thought: ... Action: ..."
-            ReAct->>ReAct: 解析 Thought / Action
-
-            alt Action = Finish[答案]
-                ReAct-->>Chat: 最终答案
-            else Action = tool_name[input]
-                ReAct->>Tool: 执行工具
-                Tool-->>ReAct: Observation
-                ReAct->>ReAct: 追加到历史
-            end
-        end
-
-        Chat->>User: Rich Panel 渲染
-    end
-```
-
-### 4.3 核心代码
+### 3.3 ReActAgent 核心实现
 
 **ReAct 循环** (`re_act_agent.py`):
 
@@ -583,17 +179,46 @@ class ReActAgent:
             self.history.append(f"Observation: {observation}")
 ```
 
-**工具注册**:
+### 3.4 ReActAgent 解析
+
+**`_parse_output` — 三层解析**:
 
 ```python
-executor = ToolExecutor()
-executor.registerTool("web_search",
-    "搜索互联网获取实时信息，参数为搜索关键词",
-    web_search)
-executor.registerTool("python_execute",
-    "在安全沙箱中执行Python代码，参数为代码字符串",
-    python_execute)
+def _parse_output(self, text: str):
+    """Three-layer fallback: strict XML → diagnose failure → legacy text format."""
+    # Layer 1: strict XML (<thought> + <action>)
+    thought_match = re.search(r"<thought>\s*(.*?)\s*</thought>", text, re.DOTALL)
+    action_match = re.search(r"(<action\s+[^>]*>.*?</action>)", text, re.DOTALL)
+
+    # Layer 2: diagnose WHY XML failed (truncation? formatting?)
+    # Layer 3: fallback to "Thought:" / "Action:" text format
+
+    return (thought, action, failure_reason)
 ```
+
+**工具注册** — `nexus run` 注册 4 个工具:
+
+```python
+executor.registerTool("memory_search", ...)
+executor.registerTool("memory_save", ...)
+executor.registerTool("web_search", ...)
+executor.registerTool("python_execute", risk_level="high", require_hitl=True)
+```
+
+---
+
+## 四、`nexus chat` — 交互式 ReAct 对话
+
+### 4.1 概述
+
+`nexus chat` 进入交互式 ReAct (Reasoning + Acting) 单 Agent 循环。支持工具：`web_search`、`python_execute`、`memory_save`、`memory_search`。
+
+### 4.2 执行链路
+
+nexus chat 执行链路与 nexus run 共享同一 ReActAgent 实现。差异点：
+- 使用 PromptSession 交互循环，而非一次性任务
+- 注册的工具有 web_search、python_execute、memory_save、memory_search
+- 支持 Git 式对话版本控制 (`/undo`, `/redo`, `/checkout` 等)
 
 ---
 
@@ -756,7 +381,7 @@ def memory_clear():
 ```mermaid
 graph LR
     subgraph Runtime["运行时"]
-        ORC["orchestrator"] -->|"_trace_wrapper"| SPAN["TraceSpan<br/>name, span_id, parent_span_id<br/>start_time, end_time, latency_ms<br/>input/output (截断 1000 字符)<br/>metadata (model, tokens, status, error)"]
+        AGENT["ReActAgent"] -->|"trace_wrapper"| SPAN["TraceSpan<br/>name, span_id, parent_span_id<br/>start_time, end_time, latency_ms<br/>input/output (截断 1000 字符)<br/>metadata (model, tokens, status, error)"]
         SPAN --> CTX["TraceContext._span_stack<br/>LIFO 嵌套结构"]
     end
 
@@ -898,83 +523,11 @@ sequenceDiagram
 - Token 计数: 优先取 API 返回的 usage，fallback 到 litellm.token_counter
 - model ID 自动推断 provider 前缀: `deepseek.com` → `deepseek/<model>`, `openai.com` → `openai/<model>`
 
-### 11.2 ErrorType 完整定义 (agents/schema.py)
-
-```python
-class ErrorType(str, Enum):
-    MISSING_CODE = "missing_code"       # LLM 未生成代码
-    RUNTIME_ERROR = "runtime_error"     # 运行时报错
-    HALLUCINATION = "hallucination"     # 编造数据
-    TOOL_FAILURE = "tool_failure"       # 工具调用失败
-    SCHEMA_VIOLATION = "schema_violation" # 输出格式不符
-    NO_OUTPUT = "no_output"             # 执行无输出
-    EMPTY_RESULT = "empty_result"       # 结果为空
-    LOGIC_ERROR = "logic_error"         # 逻辑错误
-    TRUNCATION = "truncation"           # 输出被截断
-```
-
-**重试策略映射**:
-
-| ErrorType | 策略 | 最大重试 | 典型场景 |
-|-----------|------|---------|---------|
-| MISSING_CODE | force_code_only | 2 | LLM 返回空或非代码内容 |
-| RUNTIME_ERROR | feed_error_back | 3 | SyntaxError, NameError 等 |
-| HALLUCINATION | force_retrieval | 2 | 检测到编造的数据 |
-| TOOL_FAILURE | fallback | 1 | API 调用失败 |
-| SCHEMA_VIOLATION | retry_with_schema | 2 | JSON 格式不符合 Pydantic Schema |
-| NO_OUTPUT | force_execution | 2 | 代码运行但无任何输出 |
-| EMPTY_RESULT | force_execution | 2 | 输出为空字符串 |
-| LOGIC_ERROR | fix_logic | 3 | 输出与预期不符 |
-| TRUNCATION | simplify | 2 | 输出被截断 (需压缩到 800 字符) |
-
-### 11.3 Pydantic Schema 模型
-
-```
-SourceClaim
-├── claim: str           ─ 具体事实声明
-├── source: str          ─ 来源 (URL / 文件路径 / 工具名)
-└── confidence: float    ─ 置信度 0-1
-
-ResearchOutput
-├── summary: str         ─ 检索综合摘要
-├── claims: list[SourceClaim]  ─ 每条声明带来源
-└── gaps: str            ─ 信息缺口说明
-
-CodeOutput
-├── reasoning: str       ─ 代码设计思路
-├── code: str            ─ 完整可执行 Python 代码
-└── expected_output: str ─ 预期输出描述
-
-ExecutionResult
-├── success: bool        ─ 是否成功运行
-├── stdout: str          ─ 标准输出
-├── stderr: str          ─ 标准错误
-├── exception: str       ─ 异常信息
-└── exit_code: int       ─ 退出码
-
-CriticVerdict
-├── passed: bool         ─ 是否通过
-├── score: float         ─ 0-10 评分
-├── feedback: str        ─ 改进建议
-└── fail_reason: str     ─ 硬规则失败原因
-
-OutputDiff
-├── matched: bool        ─ 输出是否匹配预期
-├── expected: str        ─ 预期输出
-├── actual: str          ─ 实际输出
-└── detail: str          ─ 详细差异说明
-```
-
-### 11.4 提示词系统
+### 11.2 提示词系统
 
 | 提示词文件 | 用途 | 使用位置 |
 |-----------|------|---------|
-| `planner.txt` | 任务分解 → `research:` / `code:` 行 | plan_node |
-| `research.txt` | RAG + Web 检索综合，来源强制引用 | ResearchAgent |
-| `coder.txt` | 代码生成，JSON 输出格式，`__main__` 强制 | CoderAgent |
-| `analyst.txt` | 综合分析，确定性执行报告 | analyst_node |
-| `critic.txt` | 质量评分 (completeness/compliance/sources/correctness/practicality) | CriticAgent |
-| `react.txt` | ReAct 循环: Thought→Action→Observation | ReActAgent (chat 模式) |
+| `react.txt` | ReAct 循环: Thought→Action→Observation | ReActAgent |
 | `contextual.txt` | Chunk 上下文定位 (1-2 句描述) | RAG ingestion |
 | `memory_extract.txt` | 从对话中提取结构化记忆 | MemoryManager |
 | `memory_summarize.txt` | 会话摘要压缩 | MemoryManager |
@@ -990,7 +543,7 @@ OutputDiff
 
 | 命令 | 描述 | 核心文件 |
 |------|------|---------|
-| `nexus run <task>` | 多 Agent LangGraph FSM 编排执行 | `cli/run.py` |
+| `nexus run <task>` | ReAct 单 Agent 执行 | `cli/run.py` |
 | `nexus chat` | 交互式 ReAct 对话 (web_search + python_execute) | `cli/chat.py` |
 | `nexus init` | 首次初始化配置向导 | `cli/config.py` |
 | `nexus config` | 查看所有配置 (含来源) | `cli/config.py` |
@@ -1020,6 +573,5 @@ OutputDiff
 ├── traces/             ← JSONL Trace 文件
 │   ├── 2025-05-04.jsonl
 │   └── evals/          ← 评估报告
-└── checkpoints/        ← LangGraph 状态持久化
-    └── checkpoints.db
+└── evals/              ← 评估报告
 ```

@@ -67,13 +67,6 @@ def _contains_pii(text: str) -> bool:
     return any(p.search(text) for p in _PII_PATTERNS)
 
 
-# Budget-aware thresholds: compact(non-LLM trigger tokens), LTM search limit/similarity
-_BUDGET_THRESHOLDS = {
-    "green":  dict(compact=3000, ltm_limit=5, ltm_similarity=0.50),
-    "yellow": dict(compact=2000, ltm_limit=3, ltm_similarity=0.55),
-    "red":    dict(compact=1000, ltm_limit=1, ltm_similarity=0.65),
-    "break":  dict(compact=500,  ltm_limit=0, ltm_similarity=0.75),
-}
 
 
 class MemoryManager:
@@ -87,8 +80,6 @@ class MemoryManager:
         self._compact_failures: int = 0
         self._circuit_open: bool = False
         self._compacting: bool = False
-        self._budget_state: str = "green"
-        self._skip_llm_compact: bool = False
         settings = get_settings()
         if "/" in settings.chroma_persist_dir:
             base = settings.chroma_persist_dir.rsplit("/", 1)[0]
@@ -96,28 +87,26 @@ class MemoryManager:
             base = str(Path(settings.chroma_persist_dir).parent)
         self._offload_dir = f"{base}/offload"
         self._settings = settings
+        # Compact threshold: 40% of model context, floor 3000 tokens
+        ctx_max = self._resolve_ctx_max()
+        self._compact_threshold = max(3000, int(ctx_max * 0.8)) if ctx_max else 3000
 
-    def set_budget_state(self, state: str):
-        """Update budget state so compaction, LTM retrieval, and microcompact adapt.
-
-        Called by ReActAgent each loop iteration. State is one of:
-        green / yellow / red / break.
-        """
-        if state in _BUDGET_THRESHOLDS:
-            self._budget_state = state
-
-    def _budget_threshold(self, key: str) -> int | float:
-        state = getattr(self, '_budget_state', 'green')
-        t = _BUDGET_THRESHOLDS.get(state, _BUDGET_THRESHOLDS["green"])
-        return t.get(key, _BUDGET_THRESHOLDS["green"][key])
+    @staticmethod
+    def _resolve_ctx_max() -> int | None:
+        """Query LiteLLM for the current model's max input tokens."""
+        try:
+            from litellm import get_model_info
+            model_id = get_settings().llm_model_id
+            info = get_model_info(model_id)
+            return info.get("max_input_tokens") or None
+        except Exception:
+            return None
 
     def init_session(self, question: str) -> str:
         if not self.long_term:
             return ""
-        ltm_limit = int(self._budget_threshold("ltm_limit"))
-        if ltm_limit <= 0:
-            return ""  # BREAK: skip LTM retrieval entirely
-        ltm_similarity = float(self._budget_threshold("ltm_similarity"))
+        ltm_limit = 5
+        ltm_similarity = 0.5
         # Use the question directly — don't pollute embedding with noisy concatenation
         query_text = question
         if self.short_term:
@@ -183,20 +172,13 @@ class MemoryManager:
                         "content": f"[工具结果已清理] 工具: {tool_name}",
                     }
                     cleaned = True
-                elif getattr(self, '_budget_state', 'green') == "break":
-                    # BREAK: clean ALL tool messages
-                    all_msgs[i] = {
-                        **m,
-                        "content": "[工具结果已清理 — 预算耗尽]",
-                    }
-                    cleaned = True
-            elif m["role"] == "assistant" and getattr(self, '_budget_state', 'green') in ("red", "break"):
-                # RED/BREAK: truncate long assistant messages to save space
+            elif m["role"] == "assistant":
+                # Truncate long assistant messages to save space
                 content = m.get("content", "")
-                if len(content) > 300:
+                if len(content) > 2000:
                     all_msgs[i] = {
                         **m,
-                        "content": content[:150] + "\n...[预算限制，已截断]...\n" + content[-150:],
+                        "content": content[:500] + "\n...[截断]...\n" + content[-500:],
                     }
                     cleaned = True
         if cleaned:
@@ -208,15 +190,13 @@ class MemoryManager:
         """Check STM token usage and compact if over threshold.
 
         Returns tokens saved (positive = freed space), or 0 if no action taken.
-        Budget-aware: BREAK skips LLM summarization entirely.
         """
-        # Circuit breaker: skip LLM compaction if repeated failures
         if self._circuit_open:
             self.microcompact()
             return 0
 
         if threshold is None:
-            threshold = int(self._budget_threshold("compact"))
+            threshold = self._compact_threshold
 
         tokens_before = self.short_term.estimate_tokens()
         if tokens_before < threshold:
@@ -228,11 +208,6 @@ class MemoryManager:
 
         # Layer 2: microcompact before expensive LLM summarization
         self.microcompact()
-
-        # BREAK: no LLM calls — microcompact already did the job
-        if getattr(self, '_budget_state', 'green') == "break" or self._skip_llm_compact:
-            tokens_after = self.short_term.estimate_tokens()
-            return max(0, tokens_before - tokens_after)
 
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs[:-4])
         if not history_text.strip():

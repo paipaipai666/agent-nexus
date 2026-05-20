@@ -1,9 +1,9 @@
-# AgentNexus — 多智能体任务协同 CLI
+# AgentNexus — 单智能体任务协同 CLI
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-**AgentNexus** 是一个生产级 Multi-Agent Harness — 通过 LangGraph 状态机编排 + 统一工具治理 + 硬约束质量门禁 + 四层评估体系 + Token 预算控制 + Git 式对话版本控制，将 Agent 从 Demo 推向生产。遵循「Agent 负责局部智能，Harness 负责全局控制」原则。全部本地运行，`pip install` 即可使用。
+**AgentNexus** 是一个生产级 ReAct 单智能体任务协同 CLI 工具 — 统一工具治理 + 四层评估体系 + Token 预算控制 + Git 式对话版本控制。全部本地运行，`pip install` 即可使用。
 
 ---
 
@@ -20,46 +20,26 @@
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────┐
-│              Orchestrator（LangGraph FSM）                │
+│              ReActAgent（Thought→Action→Observe）        │
 │                                                          │
-│  START → plan → research → code → execute → analyst → END │
-│              ↑        │          │     ↓     ↑              │
-│              │        │          │  success   │              │
-│              │        │          │     │      │              │
-│              │        │          │     │   crit < 7.0        │
-│              │        │          │     │      │              │
-│              │        │          │  failure → code (重试)    │
-│              │        │          │  ModuleNotFoundError       │
-│              │        │          └──→ research (查文档)      │
-│              │        │                                      │
-│              └─ plan ← crit < 7.0 / hard_verdict             │
+│  ┌──────────────────┐    ┌──────────────────┐           │
+│  │    Thought       │ →  │     Action       │           │
+│  │  LLM 推理/规划   │    │  工具调用/代码    │           │
+│  └──────────────────┘    └────────┬─────────┘           │
+│                                   │                      │
+│                                   ▼                      │
+│  ┌──────────────────┐    ┌──────────────────┐           │
+│  │   Observation    │ ←  │   ToolExecutor   │           │
+│  │ 工具执行结果      │    │  web_search /     │           │
+│  │                  │    │  python_execute / │           │
+│  │                  │    │  memory_save /    │           │
+│  │                  │    │  memory_search    │           │
+│  └──────────────────┘    └──────────────────┘           │
 │                                                          │
-│  硬终止: max_duration(180s) / max_tool_calls(20) / max_retries(5) │
-│  Token Budget: GREEN → YELLOW → RED → BREAK 四级降级      │
-│  模型路由: 简单任务→fast 模型 / 复杂任务→strong 模型      │
+│  硬终止: max_steps, max_duration(180s)                   │
+│  Token Budget: GREEN → YELLOW → RED → BREAK 四级降级     │
 │                                                          │
-│  ┌──────────┐   ┌──────┐   ┌──────────┐                 │
-│  │ Research │   │ Coder│   │ Executor │                 │
-│  │ 搜索+来源│   │ Schema│  │ 执行+验证│                 │
-│  │ 引用强制 │   │ 门禁  │   │ 缺库安装 │                 │
-│  └──────────┘   └──────┘   └──────────┘                 │
-│       │              │            │                      │
-│       ▼              ▼            │                      │
-│   检索综合     代码生成 +         │                      │
-│   + LLM 摘要   __main__ 自动追加   │                      │
-│                          ┌────────┘                      │
-│                          ▼                               │
-│                   ┌──────────┐                           │
-│                   │ Analyst  │                           │
-│                   │ 综合分析 │                           │
-│                   │ +确定性  │ ← 执行报告由系统硬生成    │
-│                   │ 执行报告 │   LLM 只负责分析补充      │
-│                   └──────────┘                           │
-│                                                          │
-│  HITL 机制: 首次 code → 确认 → execute                   │
-│             重试 code → 自动 execute（不再询问）          │
-│                                                          │
-│  跨会话记忆: MemoryManager 注入 plan 节点，               │
+│  跨会话记忆: MemoryManager 注入会话上下文，                │
 │             任务结束自动 conclude 到 LTM                  │
 └───────────────────────┬──────────────────────────────────┘
                         │
@@ -84,21 +64,15 @@
 | 特性 | 说明 |
 |------|------|
 | **统一工具治理** | Tool Registry 作为唯一网关，每个工具登记 9 项元信息：名称/描述/参数 Schema/RBAC/风险等级/HITL/超时/速率限制/审计策略。调用时强制校验 |
-| **硬终止条件** | `max_duration`(180s)、`max_tool_calls`(20)、`max_retries`(5) 三道硬闸，每节点入口检查 |
+| **硬终止条件** | `max_steps`、`max_duration`(180s) 两道硬闸 |
 | **Token 预算控制** | BudgetTracker 四级降级（GREEN→YELLOW→RED→BREAK），按任务复杂度分配预算，超标强制收束 |
-| **模型路由** | 按任务复杂度 + 预算状态自动切换模型：复杂任务→strong，简单任务→fast，RED 状态降级 |
 
-### 编排与执行
+### 执行与工具
 
 | 特性 | 说明 |
 |------|------|
-| **声明式计划** | Planner 输出声明式 `{intent, agent, input}`，Orchestrator 独占裁决权 |
-| **升级式智能重试** | 9 类 ErrorType + 差异化重试上限 + 渐进升级策略 |
-| **强 Schema 门禁** | 所有 Agent 输出通过 Pydantic 校验，不通过不进入后续阶段 |
 | **独立执行验证** | fork 子进程隔离，缺库自动 `pip install` |
 | **__main__ 自动追加** | AST 解析检测入口块，缺失时自动追加 |
-| **确定性 fallback** | Critic/Analyst/Research 均有基于硬证据的降级策略 |
-| **显式 AgentIO 契约** | `NODE_CONTRACTS` + `validate_state()` 入口完整性检查 |
 
 ### 记忆系统
 
@@ -143,7 +117,7 @@ pip install -e .
 
 ```bash
 nexus init                                    # 配置 API Key
-nexus run "搜索 AI 趋势并写分析报告"           # 多 Agent 编排
+nexus run "搜索 AI 趋势并写分析报告"           # ReAct 单 Agent 执行
 nexus chat                                     # 交互对话模式
 nexus kb add ./docs/                           # 添加知识库
 nexus logs list                                # 查看 trace 历史
@@ -155,7 +129,7 @@ nexus logs list                                # 查看 trace 历史
 
 | 命令 | 描述 |
 |------|------|
-| `nexus run <task> [-n]` | 多 Agent 编排执行复杂任务，`-n` 跳过交互确认 |
+| `nexus run <task> [-n]` | ReAct 单 Agent 执行任务，`-n` 跳过交互确认 |
 | `nexus tui` | 终端原生对话界面（Textual TUI，Catppuccin 主题） |
 | `nexus chat [--no-memory]` | 交互式对话（ReAct + 联网搜索 + 记忆检索 + 版本控制） |
 | `nexus init` | 首次初始化（配置 API Key） |
@@ -213,7 +187,7 @@ agentnexus/
 ├── agentnexus/
 │   ├── cli/
 │   │   ├── __init__.py           # Typer app 定义 + 子应用注册
-│   │   ├── run.py                # nexus run（多 Agent 编排入口 + Budget 注入）
+│   │   ├── run.py                # nexus run（ReAct 单 Agent 执行入口 + Budget 注入）
 │   │   ├── chat.py               # nexus chat（交互对话 + 版本控制 + 3 工具注册）
 │   │   ├── config.py             # nexus config（配置管理）
 │   │   ├── kb.py                 # nexus kb（知识库增删）
@@ -223,16 +197,8 @@ agentnexus/
 │   │   ├── audit.py              # nexus audit（工具调用审计日志）
 │   │   └── memory_cmd.py         # nexus memory（记忆管理）
 │   ├── agents/
-│   │   ├── schema.py             # TaskOutput / CodeOutput / ExecutionResult / ErrorType（9 类）
-│   │   ├── coder_agent.py        # 代码生成 + Schema 校验 + AST 完整性检查
-│   │   ├── executor_agent.py     # fork 子进程隔离执行 + 缺库自动安装
-│   │   ├── research_agent.py     # RAG + Web 搜索 + 来源强制引用
-│   │   ├── critic_agent.py       # 质量评分 + 硬规则检查 + 确定性 fallback
-│   │   ├── critic_rules.py       # 硬规则检查器
-│   │   ├── re_act_agent.py       # ReAct 循环 Agent（chat 模式使用）
-│   │   └── multi_agent/
-│   │       ├── orchestrator.py   # LangGraph FSM + 硬终止 + Budget 检查 + 模型路由
-│   │       └── state.py          # AgentState(38 字段) + NODE_CONTRACTS + validate_state
+│   │   ├── re_act_agent.py       # ReAct 循环 Agent（Thought→Action→Observe）
+│   │   └── exceptions.py         # 自定义异常
 │   ├── memory/
 │   │   ├── manager.py            # MemoryManager（STM + LTM 协调器 + PII 过滤）
 │   │   ├── short_term.py         # ShortTermMemory（deque + JSON 序列化）
@@ -268,7 +234,6 @@ agentnexus/
 │       ├── llm.py                # LLM 流式调用 + 指数退避重试 + 截断检测
 │       ├── judge_llm.py          # 独立 Judge LLM（GLM-4.7-Flash，不同模型家族）
 │       ├── budget.py             # BudgetTracker（四级降级 + 按复杂度分配）
-│       └── model_router.py       # 模型路由（复杂度分类 + 预算状态联动）
 ├── tests/
 │   ├── unit/
 │   │   ├── test_long_term.py     # LTM 单元测试
@@ -313,9 +278,8 @@ python -m pytest tests/ -v
 
 | 类别 | 技术 |
 |------|------|
-| Agent 编排 | LangGraph（FSM + SQLite Checkpointer） |
-| LLM 接口 | OpenAI SDK（兼容 DeepSeek / 通义千问 / GPT-4o）+ 模型路由 + 指数退避重试 |
-| 数据模型 | Pydantic v2（强 Schema 校验） |
+| Agent 编排 | ReActAgent（Thought→Action→Observe 循环） |
+| LLM 接口 | litellm（兼容 DeepSeek / 通义千问 / GPT-4o）+ 指数退避重试 |
 | 向量数据库 | ChromaDB（纯本地 PersistentClient） |
 | CLI 框架 | Typer + Rich + prompt_toolkit |
 | 检索 | Sentence Transformers + rank-bm25 + BGE-Reranker |

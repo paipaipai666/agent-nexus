@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     compact_buffer_tokens: int = Field(default=4000, ge=1000, le=50000)
     large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)
     offload_enabled: bool = Field(default=True)
+    # Shell execution
+    shell_enabled: bool = Field(default=True)
+    shell_confirm: bool = Field(default=True)
+    shell_timeout: int = Field(default=30, ge=1, le=300)
+    # File operations
+    file_read_max_mb: float = Field(default=10.0, ge=1, le=100)
+    # Shell blacklist (regex patterns, checked case-insensitive)
+    shell_blacklist: list[str] = Field(default_factory=list)
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod

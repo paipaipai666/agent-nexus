@@ -1,10 +1,9 @@
-"""HUD — bottom status bar: model, context, tokens, budget."""
+"""HUD — bottom status bar: model, context, tokens."""
 
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 
-from agentnexus.core.budget import BudgetTracker
 from agentnexus.core.config import get_settings
 
 
@@ -19,7 +18,7 @@ def _resolve_ctx_max(model_id: str) -> int | None:
 
 
 class HUD(Widget):
-    """Bottom status bar with segmented layout — real data from config + agent."""
+    """Bottom status bar — model, context window, token usage."""
 
     DEFAULT_CSS = """
     HUD {
@@ -36,23 +35,10 @@ class HUD(Widget):
         self.ctx_max = _resolve_ctx_max(full_id)
         self.input_tokens = 0
         self.output_tokens = 0
-        self.budget_pct = 100.0
-        self.budget_state = "green"
-        self.compact_savings = 0
 
     def update_tokens(self, input_tokens: int, output_tokens: int):
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-        self._refresh()
-
-    def update_budget(self, budget: BudgetTracker):
-        self.budget_pct = budget.used_pct if budget.total > 0 else 100.0
-        self.budget_state = budget.state.value
-        self.compact_savings = budget.compact_savings
-        self._refresh()
-
-    def update_compact(self, savings: int):
-        self.compact_savings = savings
         self._refresh()
 
     def _refresh(self):
@@ -77,19 +63,9 @@ class HUD(Widget):
         else:
             ctx_seg = f"ctx {ctx_k:.1f}k/[dim]?[/]"
 
-        if self.budget_pct > 50:
-            bgt = f"[#7fd88f]{self.budget_pct:.0f}%[/]"
-        elif self.budget_pct > 20:
-            bgt = f"[#f5a742]{self.budget_pct:.0f}%[/]"
-        else:
-            bgt = f"[#e06c75]{self.budget_pct:.0f}%[/]"
-
         parts = [
             f" [#6ba5f2]{self._display_model}[/]",
             f" [dim]│[/] {ctx_seg}",
             f" [dim]│[/] in:{self.input_tokens // 1000}k out:{self.output_tokens // 1000}k",
-            f" [dim]│[/] bgt {bgt}",
         ]
-        if self.compact_savings > 0:
-            parts.append(f" [dim]│[/] saved [#7fd88f]{self.compact_savings // 1000}k[/]")
         return "".join(parts)

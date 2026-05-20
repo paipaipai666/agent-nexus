@@ -1,6 +1,6 @@
 # AGENTS.md — AgentNexus
 
-LangGraph 编排的多智能体任务协同 CLI 工具。Python 3.11+, 纯本地运行 (ChromaDB + SQLite + JSONL)。
+ReAct 单智能体任务协同 CLI 工具。Python 3.11+, 纯本地运行 (ChromaDB + SQLite + JSONL)。
 
 ## 项目结构
 
@@ -10,8 +10,7 @@ agentnexus/                    ← 仓库根目录
     ├── agentnexus/            ← 源码包
     │   ├── __main__.py        ← python -m 入口
     │   ├── cli/               ← Typer CLI 层 (run, chat, kb, logs, …)
-    │   ├── agents/            ← Agent 实现 + LangGraph FSM
-    │   │   └── multi_agent/   ← orchestrator.py (状态机核心) + state.py (AgentState)
+    │   ├── agents/            ← Agent 实现 (ReActAgent)
     │   ├── core/              ← config.py (Pydantic Settings) + llm.py (AgentLLM)
     │   ├── prompts/           ← .txt 提示词模板 (str.format, 非 Jinja2)
     │   ├── rag/               ← ChromaDB + BM25 + Reranker + Grep 双路由检索
@@ -55,41 +54,17 @@ pyinstaller agentnexus.spec --noconfirm
 ### 执行入口链
 
 ```
-nexus run <task> → cli/run.py → orchestrator_persistent.invoke()
-nexus chat       → cli/chat.py → ReActAgent (单 Agent 循环)
+nexus run <task> → cli/run.py → ReActAgent
+nexus chat       → cli/chat.py → ReActAgent
 nexus init       → cli/config.py
 ```
-
-### LangGraph 状态机 (orchestrator.py)
-
-```
-START → plan → research → code → execute(+HITL) → analyst → END
-         ↑        │          │        │               │
-         │        │          │        ├─ failure → code (重试)
-         │        │          │        └─ ModuleNotFoundError → research
-         │        │          │
-         │        └─ no code step → analyst
-         │
-         └─── analyst crit < 7.0 or hard_verdict → plan (重规划)
-```
-
-- FSM 有 5 个节点: plan, research, code, execute, analyst
-- 4 个条件路由器: `route_after_plan`, `route_after_research`, `route_after_execute`, `route_after_analyst`
-- 最大重试次数: `MAX_RETRIES = 3`
-- Critic 评分阈值: 7.0/10，低于阈值回 plan 重规划
-
-### AgentState (TypedDict, 无运行时校验)
-
-`multi_agent/state.py` — 34 个字段。`validate_state()` 在关键节点入口做防御性类型检查。
-- `messages` 字段用了 `Annotated[list, operator.add]` (LangGraph reducer: 追加式)
-- code/critic/excution 相关字段通过 `state.get()` 安全访问
 
 ### 提示词管理
 
 - 所有提示词在 `prompts/*.txt`，用 `str.format()` 注入变量 (非 Jinja2)
 - `load_prompt(name)` → 读取 `{name}.txt` 原始字符串
 - `format_prompt(name, **kwargs)` → 自动注入 `{date}` (UTC 日期)
-- 共 12 个提示词文件: planner, analyst, coder, critic, research, react, contextual, memory_extract, memory_summarize, eval_* (3个)
+- 共 7 个提示词文件: react, contextual, memory_extract, memory_summarize, eval_* (3个)
 
 ### ChromaDB 双客户端 ⚠
 
@@ -99,41 +74,17 @@ RAG 和长期记忆各自创建独立的 `chromadb.PersistentClient`，指向同
 
 BM25 索引仅在内存中，不持久化，每次会话重建。
 
-### 弃用文件
+### 已移除
 
-- `retry_manager.py`: **真正废弃** (无运行时导入)。`critic_agent.py` 和 `critic_rules.py` 仍在正常运行。
+多 Agent LangGraph 编排器 (`agents/multi_agent/`) 及子 Agent (`coder_agent.py`, `research_agent.py`, `executor_agent.py`, `critic_agent.py`, `critic_rules.py`, `analyst_agent.py`, `schema.py`) 已在清理中移除。`nexus run` 现直接使用 ReActAgent。
 
 新增功能时，如果新增了动态导入的依赖，必须同步更新 `agentnexus.spec` 中的 `hiddenimports`，否则 PyInstaller 打包会缺少依赖。
 
-## 错误处理
-
-### ErrorType (9 类)
-
-`agents/schema.py` 定义：
-- `MISSING_CODE`, `RUNTIME_ERROR`, `HALLUCINATION`, `TOOL_FAILURE`
-- `SCHEMA_VIOLATION`, `NO_OUTPUT`, `EMPTY_RESULT`, `LOGIC_ERROR`, `TRUNCATION`
-
-每种错误有对应的 `RETRY_STRATEGIES[ErrorType]`（策略 + 最大重试次数 + 提示指令）。
-
-代码执行失败时 `route_after_execute` 的路由逻辑:
-- 成功 → analyst
-- `ModuleNotFoundError` or (retry≥2 and NO_OUTPUT) → research (查 API 文档)
-- 其他 → code (修复重试)
-- 超过 MAX_RETRIES → 强制 analyst
-
-### `__main__` 自动追加
+## `__main__` 自动追加
 
 `_ensure_main_block()` 用 AST 解析代码，检测缺失的 `if __name__ == '__main__':` 块，自动追加顶层函数调用。不修改已有 `__main__` 块的代码。
 
-## Pydantic Schema
-
-核心输出模型 (`agents/schema.py`):
-- `SourceClaim` — claim + source + confidence [0-1]
-- `ResearchOutput` — summary + claims + gaps
-- `CodeOutput` — reasoning + code + expected_output
-- `ExecutionResult` — success + stdout + stderr + exception + exit_code
-- `CriticVerdict` — passed + score [0-10] + feedback + fail_reason
-- `OutputDiff` — matched + expected + actual + detail
+(该功能原为多 Agent 编排器的 coder_agent 实现，现保留为共享工具方法。)
 
 ## 配置系统
 

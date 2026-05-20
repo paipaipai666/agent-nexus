@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"git show HEAD:agentnexus/agents/multi_agent/orchestrator.py 2>/dev/null | findstr /n \\\"def analyst_node\\\"\",\"description\":\"Find analyst_node in HEAD commit to check original size\"}",
-  "error": "Exit code 1\nFINDSTR: �޷��� def analyst_node",
-  "timestamp": "2026-05-05T09:11:28.756Z",
+  "tool_input_preview": "{\"command\":\"cd D:/code/AgentNexus/agentnexus && D:/python3.13/python.exe -m pytest tests/unit/ -q --tb=short 2>&1\",\"timeout\":120000,\"description\":\"Run tests after file_read condens fix\"}",
+  "error": "Exit code 1\n........................................................................ [ 75%]\r\n.F.......F.............                                                  [100%]\r\n================================== FAILURES ===================================\r\n______________ TestConversationVersionManager.test_undo_and_redo ______________\r\ntests\\unit\\test_versioned.py:76: in test_undo_and_redo\r\n    assert status[\"head\"][\"id\"] == cp1\r\n           ^^^^^^^^^^^^^^^^^^^^\r\nE   TypeError: string indices must ...",
+  "timestamp": "2026-05-20T01:55:05.840Z",
   "retry_count": 1
 }
