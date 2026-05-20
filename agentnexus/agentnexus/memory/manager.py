@@ -87,9 +87,9 @@ class MemoryManager:
             base = str(Path(settings.chroma_persist_dir).parent)
         self._offload_dir = f"{base}/offload"
         self._settings = settings
-        # Compact threshold: 40% of model context, floor 3000 tokens
+        # Compact threshold: 40% of model context, floor 128k tokens
         ctx_max = self._resolve_ctx_max()
-        self._compact_threshold = max(3000, int(ctx_max * 0.8)) if ctx_max else 3000
+        self._compact_threshold = max(128000, int(ctx_max * 0.8)) if ctx_max else 128000
 
     @staticmethod
     def _resolve_ctx_max() -> int | None:

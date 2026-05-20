@@ -35,3 +35,7 @@ Thumbs.db
 
 # ChromaDB
 chroma_data/
+
+
+**/.omc/
+**/blog/

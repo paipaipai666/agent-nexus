@@ -61,7 +61,7 @@ class HUD(Widget):
             bar = f"[#fab283]{'█' * filled}[/][dim]{'░' * (bar_len - filled)}[/]"
             ctx_seg = f"ctx {ctx_k:.1f}k/{self.ctx_max / 1000:.0f}k {bar}"
         else:
-            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]?[/]"
+            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]128k[/]"
 
         parts = [
             f" [#6ba5f2]{self._display_model}[/]",
