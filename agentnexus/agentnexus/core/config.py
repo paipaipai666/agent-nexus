@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_timeout: int = Field(default=60, ge=1)
+    # Model capability overrides (None = auto-detect)
+    model_tool_calling: bool | None = Field(default=None)
+    model_json_mode: bool | None = Field(default=None)
+    model_thinking: bool | None = Field(default=None)
+    model_thinking_budget: int = Field(default=4000, ge=1024, le=32000)
     judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
     judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
@@ -29,10 +34,18 @@ class Settings(BaseSettings):
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
     # Compaction tuning
-    compact_token_threshold: int = Field(default=3000, ge=500, le=200000)
-    compact_buffer_tokens: int = Field(default=4000, ge=1000, le=50000)
+    autocompact_buffer_tokens: int = Field(default=8000, ge=1000, le=100000)
     large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)
     offload_enabled: bool = Field(default=True)
+    # Snip & time-based microcompact
+    snip_enabled: bool = Field(default=True)
+    time_microcompact_interval: int = Field(default=300, ge=60, le=3600)
+    # Post-compact file recovery
+    post_compact_max_files: int = Field(default=5, ge=1, le=100)
+    post_compact_token_per_file: int = Field(default=5000, ge=500, le=50000)
+    post_compact_token_budget: int = Field(default=50000, ge=1000, le=200000)
+    # Kairos transcript backup
+    transcript_enabled: bool = Field(default=True)
     # Shell execution
     shell_enabled: bool = Field(default=True)
     shell_confirm: bool = Field(default=True)
