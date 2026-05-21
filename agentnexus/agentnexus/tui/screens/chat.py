@@ -108,6 +108,16 @@ class ChatScreen(Screen):
         self._chat_area.add_system(logo)
         self._chat_area.add_message("assistant", "欢迎使用 AgentNexus。输入问题开始，或 /help 查看命令。")
         self._refresh_version_display()
+        if hasattr(self, '_hud') and self._agent:
+            try:
+                caps = self._agent.llm_client.capabilities
+                strategy = "原生工具" if caps.supports_tool_calling else "JSON模式"
+                self._hud.update_capabilities(
+                    supports_thinking=caps.supports_thinking,
+                    strategy=strategy,
+                )
+            except Exception:
+                pass
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
 
     # ── custom submit ──────────────────────────────────────────
@@ -130,9 +140,9 @@ class ChatScreen(Screen):
 
     def action_show_help(self):
         self._chat_area.add_system(
-            "[/]命令: [/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
+            "[dim]命令:[/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
             "       /checkout <ref>  /diff [ref1] [ref2]  /status\n"
-            "       /clear [--all]  /stats"
+            "       /clear [--all]  /compact [指令]  /stats"
         )
 
     def action_focus_input(self):
@@ -270,6 +280,13 @@ class ChatScreen(Screen):
                 self._chat_area.add_system("\n".join(lines))
             else:
                 self._chat_area.add_system("[dim]无法比较（可能缺参数或无可比检查点）[/]")
+        elif cmd == "/compact" and self._memory:
+            tokens_before = self._memory.estimate_stm_tokens()
+            saved = self._memory.maybe_compact(custom_instructions=arg, is_auto=False)
+            if saved > 0:
+                self._chat_area.add_system(f"[dim]已压缩对话上下文 (释放 {saved} tokens, 压缩前 {tokens_before} tokens)[/]")
+            else:
+                self._chat_area.add_system("[dim]当前上下文未达到压缩阈值[/]")
         elif cmd == "/stats":
             self._chat_area.add_system(self._hud._build_text())
         else:

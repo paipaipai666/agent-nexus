@@ -8,11 +8,10 @@ from agentnexus.core.config import get_settings
 
 
 def _resolve_ctx_max(model_id: str) -> int | None:
-    """Query LiteLLM's model registry for the model's max input tokens."""
     try:
         from litellm import get_model_info
         info = get_model_info(model_id)
-        return info.get("max_input_tokens") or info.get("max_output_tokens") or None
+        return info.get("max_input_tokens") or None
     except Exception:
         return None
 
@@ -40,6 +39,14 @@ class HUD(Widget):
         self.total_output = 0
         # Compression indicator
         self._compacting = False
+        # Capability indicators
+        self._supports_thinking = False
+        self._strategy = ""
+
+    def update_capabilities(self, supports_thinking: bool, strategy: str = ""):
+        self._supports_thinking = supports_thinking
+        self._strategy = strategy
+        self._refresh()
 
     def update_context(self, current_tokens: int, total_input: int = 0, total_output: int = 0):
         """Update HUD with current context size and cumulative totals."""
@@ -78,15 +85,21 @@ class HUD(Widget):
             bar = f"[#fab283]{'█' * filled}[/][dim]{'░' * (bar_len - filled)}[/]"
             ctx_seg = f"ctx {ctx_k:.1f}k/{self.ctx_max / 1000:.0f}k {bar}"
         else:
-            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]128k[/]"
+            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]?[/]"
+
+        # Capability indicators
+        thinking_indicator = " [#a78bfa]\U0001f9e0[/]" if self._supports_thinking else ""
+        strategy_str = f" [dim]\u2502[/] {self._strategy}" if self._strategy else ""
 
         # Compression indicator
-        compact_indicator = " [#fab283]⚙[/]" if self._compacting else ""
+        compact_indicator = " [#fab283]\u2699[/]" if self._compacting else ""
 
         parts = [
             f" [#6ba5f2]{self._display_model}[/]",
-            f" [dim]│[/] {ctx_seg}",
-            f" [dim]│[/] in:{self.total_input // 1000}k out:{self.total_output // 1000}k",
+            thinking_indicator,
+            strategy_str,
+            f" [dim]\u2502[/] {ctx_seg}",
+            f" [dim]\u2502[/] in:{self.total_input // 1000}k out:{self.total_output // 1000}k",
             compact_indicator,
         ]
         return "".join(parts)
