@@ -1,5 +1,6 @@
 import json
 import time
+from collections.abc import Callable
 from typing import Dict, List
 
 from rich.console import Console
@@ -7,6 +8,11 @@ from rich.live import Live
 from rich.markup import escape as _e
 from rich.text import Text
 
+from agentnexus.core.capabilities import (
+    ModelCapabilities,
+    detect_capabilities,
+    SessionCapabilityTracker,
+)
 from agentnexus.core.config import get_settings
 from agentnexus.observability.tracer import trace_manager
 
@@ -38,18 +44,40 @@ class AgentLLM:
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
         self.last_tool_calls: list[dict] = []
         self._tool_call_mode: bool = False
+        self._capabilities: ModelCapabilities | None = None
+        self._session_tracker: SessionCapabilityTracker | None = None
+        self.last_reasoning_content: str = ""
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        if self._capabilities is None:
+            self._capabilities = detect_capabilities(self.model, self.base_url)
+        return self._capabilities
+
+    @property
+    def session_tracker(self) -> SessionCapabilityTracker:
+        if self._session_tracker is None:
+            self._session_tracker = SessionCapabilityTracker()
+        return self._session_tracker
+
+    def reset_session_capabilities(self):
+        self._session_tracker = SessionCapabilityTracker()
 
     def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False,
               tools: list[dict] | None = None,
-              response_format: dict | None = None) -> str:
+              response_format: dict | None = None,
+              projection_fn: Callable | None = None,
+              thinking: bool | None = None) -> str:
         if not self.api_key or not self.base_url:
             return ""
 
         self.last_tool_calls = []
         self._tool_call_mode = tools is not None and len(tools) > 0
 
+        effective_messages = projection_fn(messages) if projection_fn else messages
+
         for attempt in range(LLM_MAX_RETRIES):
-            result = self._call(messages, temperature, silent, attempt, tools, response_format)
+            result = self._call(effective_messages, temperature, silent, attempt, tools, response_format, thinking)
             if result:
                 return result
             if attempt < LLM_MAX_RETRIES - 1:
@@ -57,7 +85,7 @@ class AgentLLM:
                 time.sleep(delay)
         return ""
 
-    def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None) -> str:
+    def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None) -> str:
         import litellm
         model = self.model
         if "/" not in model:
@@ -78,7 +106,13 @@ class AgentLLM:
                 "input_preview": _preview(messages[-1]["content"]) if messages else "",
             })
 
+        self._reasoning_buf = ""
+        self.last_reasoning_content = ""
+
         try:
+            caps = self.capabilities
+            tracker = self.session_tracker
+
             completion_kwargs = {
                 "model": model,
                 "messages": messages,
@@ -88,11 +122,30 @@ class AgentLLM:
                 "api_base": self.base_url,
                 "timeout": self.timeout,
             }
-            if tools:
+
+            # ── Tool calling ──
+            if tools and tracker.is_available("tool_calling", caps.supports_tool_calling):
                 completion_kwargs["tools"] = tools
                 completion_kwargs["tool_choice"] = "auto"
+                if caps.supports_parallel_tool_calls:
+                    completion_kwargs["parallel_tool_calls"] = True
+            else:
+                completion_kwargs["drop_params"] = True
+
+            # ── JSON mode ──
             if response_format:
-                completion_kwargs["response_format"] = response_format
+                if tracker.is_available("json_mode", caps.supports_json_mode):
+                    completion_kwargs["response_format"] = response_format
+                elif isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                    if tracker.is_available("json_schema", caps.supports_json_schema):
+                        completion_kwargs["response_format"] = response_format
+
+            # ── Thinking / reasoning ──
+            should_think = thinking if thinking is not None else caps.supports_thinking
+            if should_think and tracker.is_available("thinking", caps.supports_thinking):
+                if caps.thinking_effort != "none":
+                    completion_kwargs["reasoning_effort"] = caps.thinking_effort
+
             if "openai.com" in (self.base_url or ""):
                 completion_kwargs["stream_options"] = {"include_usage": True}
             response = litellm.completion(**completion_kwargs)
@@ -115,6 +168,11 @@ class AgentLLM:
                     text.append(content)
                     if live:
                         live.update(text)
+
+                    # Capture reasoning/thinking content (DeepSeek, Claude, o-series)
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        self._reasoning_buf += rc
 
                     # Accumulate streaming tool_calls deltas
                     tc_list = getattr(delta, "tool_calls", None) or []
@@ -153,6 +211,7 @@ class AgentLLM:
 
             result = "".join(collected)
             self.last_truncated = finish_reason in ("length", "max_tokens")
+            self.last_reasoning_content = getattr(self, "_reasoning_buf", "")
 
             # Store parsed tool_calls
             self.last_tool_calls = []
@@ -197,6 +256,17 @@ class AgentLLM:
         except Exception as e:
             error_msg = str(e)
             self.last_error = error_msg
+
+            # ── Capability degradation on "unsupported" errors ──
+            error_lower = error_msg.lower()
+            if any(kw in error_lower for kw in ("tool", "function_call", "function calling")) and \
+               any(kw in error_lower for kw in ("not support", "unsupported", "invalid", "unknown parameter")):
+                self.session_tracker.mark_failed("tool_calling")
+            if "response_format" in error_lower and \
+               any(kw in error_lower for kw in ("not support", "unsupported", "invalid", "unknown parameter")):
+                self.session_tracker.mark_failed("json_mode")
+            if "reasoning_effort" in error_lower or "thinking" in error_lower:
+                self.session_tracker.mark_failed("thinking")
 
             is_transient = any(
                 k in str(type(e).__name__).lower() or k in error_msg.lower()
