@@ -46,7 +46,9 @@
       "Bash(awk \"length>120 {print NR\\\\\": \\\\\"\\\\$0}\" agentnexus/memory/manager.py)",
       "Bash(D:/python3.13/python.exe *)",
       "Bash(awk \"length>120 {print NR\\\\\": \\(E501\\) \\\\\"substr\\(\\\\$0,1,120\\)\\\\\"...\\\\\"}\" agentnexus/memory/long_term.py)",
-      "Bash(rtk wc *)"
+      "Bash(rtk wc *)",
+      "Bash(rtk proxy *)",
+      "WebFetch(domain:api-docs.deepseek.com)"
     ]
   }
 }

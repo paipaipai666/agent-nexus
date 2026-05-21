@@ -93,3 +93,55 @@ class TestShortTermMemory:
         assert msgs[0]["role"] == "system"
         stm.clear()
         assert len(stm.get_all()) == 0
+
+    def test_snip_normal(self):
+        stm = ShortTermMemory()
+        for i in range(20):
+            stm.append("user", f"msg{i}")
+        removed = stm.snip(keep_recent=5)
+        assert removed == 15
+        msgs = stm.get_all()
+        assert len(msgs) == 6  # 1 boundary marker + 5 recent
+        assert msgs[0]["role"] == "system"
+        assert "上下文已裁剪" in msgs[0]["content"]
+        assert "15" in msgs[0]["content"]
+        assert msgs[1]["content"] == "msg15"
+        assert msgs[5]["content"] == "msg19"
+
+    def test_snip_noop_when_few_messages(self):
+        stm = ShortTermMemory()
+        for i in range(5):
+            stm.append("user", f"msg{i}")
+        removed = stm.snip(keep_recent=10)
+        assert removed == 0
+        msgs = stm.get_all()
+        assert len(msgs) == 5
+        # no boundary marker inserted
+        assert msgs[0]["content"] == "msg0"
+
+    def test_get_last_ts(self):
+        stm = ShortTermMemory()
+        assert stm.get_last_ts() == 0.0
+        stm.append("user", "msg0")
+        ts0 = stm.get_last_ts()
+        assert ts0 > 0
+        time.sleep(0.01)
+        stm.append("user", "msg1")
+        ts1 = stm.get_last_ts()
+        assert ts1 > ts0
+
+    def test_snip_mixed_roles(self):
+        stm = ShortTermMemory()
+        stm.append("system", "welcome")
+        stm.append("user", "question")
+        stm.append("assistant", "answer")
+        stm.append("tool", "result1")
+        stm.append("tool", "result2")
+        stm.append("assistant", "final")
+        removed = stm.snip(keep_recent=3)
+        assert removed == 3
+        msgs = stm.get_all()
+        assert len(msgs) == 4  # 1 boundary + 3 recent
+        assert msgs[1]["content"] == "result1"
+        assert msgs[2]["content"] == "result2"
+        assert msgs[3]["content"] == "final"

@@ -8,7 +8,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
-from agentnexus.core.judge_llm import get_judge_llm
 from agentnexus.core.llm import AgentLLM
 from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.memory.short_term import ShortTermMemory
@@ -85,19 +84,27 @@ class MemoryManager:
         self._circuit_open: bool = False
         self._microcompacts_since_open: int = 0
         self._compacting: bool = False
+        self._last_api_call_ts: float = 0.0
+        self._recent_reads: list[tuple[str, str, float]] = []  # (filepath, preview, ts)
+        self._snip_freed_tokens: int = 0
         settings = get_settings()
         if "/" in settings.chroma_persist_dir:
             base = settings.chroma_persist_dir.rsplit("/", 1)[0]
         else:
             base = str(Path(settings.chroma_persist_dir).parent)
         self._offload_dir = f"{base}/offload"
+        self._transcript_dir = f"{base}/transcripts"
         self._settings = settings
-        # Compact threshold: 40% of model context, floor 128k tokens
         ctx_max = self._resolve_ctx_max()
-        self._compact_threshold = max(128000, int(ctx_max * 0.8)) if ctx_max else 128000
+        if ctx_max:
+            self._ctx_max = ctx_max
+            self._compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
+        else:
+            self._ctx_max = 128000
+            self._compact_threshold = 120000
         self._last_write_count: int = 0
-        # Callback for compact events (TUI visibility, etc.)
         self._on_compact: Callable[[dict], None] | None = None
+        self._on_after_compact: Callable[[], None] | None = None
 
     def estimate_stm_tokens(self) -> int:
         """Return current STM token estimate."""
@@ -202,26 +209,195 @@ class MemoryManager:
         preview = content[:500]
         return f"[工具结果已缓存] 文件: {fpath}\n预览(前500字符): {preview}"
 
-    def microcompact(self):
-        """Layer 2: clear recoverable tool results, preserving non-recoverable ones.
+    def bridge_read(self, filepath: str, content_preview: str = ""):
+        self._recent_reads.append((filepath, content_preview[:5000], time.time()))
+        if len(self._recent_reads) > 20:
+            self._recent_reads = self._recent_reads[-20:]
 
-        GREEN/YELLOW: only clean recoverable tool results (Read, Bash, Grep, etc.)
-        RED: also truncate old assistant messages to metadata stubs
-        BREAK: also clean ALL tool messages (even non-recoverable)
+    def _restore_files(self):
+        max_files = self._settings.post_compact_max_files
+        per_file = self._settings.post_compact_token_per_file
+        budget = self._settings.post_compact_token_budget
+        if max_files <= 0 or not self._recent_reads:
+            return
+        seen: set[str] = set()
+        recent: list[tuple[str, str]] = []
+        for fp, preview, _ts in reversed(self._recent_reads):
+            if fp not in seen:
+                seen.add(fp)
+                recent.insert(0, (fp, preview))
+            if len(recent) >= max_files:
+                break
+        total_tokens = 0
+        restored = 0
+        for fp, preview in recent:
+            if total_tokens + per_file > budget:
+                break
+            try:
+                raw = Path(fp).read_text(encoding="utf-8")
+                content = raw[:per_file * 4]
+            except Exception:
+                content = preview or f"[无法读取文件] {fp}"
+            self.short_term.append("system", f"[恢复文件] {fp}\n{content}")
+            total_tokens += per_file
+            restored += 1
+        if restored:
+            self._fire_compact("file_restore", restored=restored, files=[fp for fp, _ in recent[:restored]])
+
+    def _write_transcript(self):
+        if not self._settings.transcript_enabled:
+            return
+        Path(self._transcript_dir).mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        fname = f"{self.session_id}_compact_{ts}.jsonl"
+        fpath = Path(self._transcript_dir) / fname
+        messages = self.short_term.get_all()
+        lines = [json.dumps(m, ensure_ascii=False) for m in messages]
+        fpath.write_text("\n".join(lines), encoding="utf-8")
+        self._fire_compact("transcript_saved", path=str(fpath), message_count=len(messages))
+
+    def mark_api_call(self):
+        """Record that an API call just happened for time-based microcompact tracking."""
+        self._last_api_call_ts = time.time()
+
+    def snip(self, keep_recent: int = 10) -> int:
+        if not self._settings.snip_enabled:
+            return 0
+        all_msgs = self.short_term.get_all()
+        if len(all_msgs) <= keep_recent + 4:
+            return 0
+        tokens_before = self.short_term.estimate_tokens()
+        removed = self.short_term.snip(keep_recent)
+        if removed:
+            tokens_after = self.short_term.estimate_tokens()
+            freed = max(0, tokens_before - tokens_after)
+            self._snip_freed_tokens += freed
+            self._fire_compact("snip", removed=removed, freed_tokens=freed)
+        return removed
+
+    def microcompact_time_based(self, interval: int | None = None) -> bool:
+        """Layer 3: time-decay based microcompact. Clears recoverable tool results
+        when the last API call was more than `interval` seconds ago.
+
+        Returns True if microcompact was performed.
         """
+        if interval is None:
+            interval = self._settings.time_microcompact_interval
+        if self._last_api_call_ts <= 0:
+            return False
+        elapsed = time.time() - self._last_api_call_ts
+        if elapsed < interval:
+            return False
+        tokens_before = self.short_term.estimate_tokens()
+        self.microcompact()
+        tokens_after = self.short_term.estimate_tokens()
+        self._fire_compact("time_microcompact", tokens_before=tokens_before, elapsed=elapsed)
+        return tokens_before != tokens_after
+
+    def build_projection(self, messages: list[dict]) -> list[dict]:
+        """Layer 4: non-destructive read-time projection. Returns a compressed view
+        of messages without modifying STM. Called before every LLM API call.
+
+        90% ctx used → mild compression. 95% → aggressive compression.
+        """
+        tokens = self.short_term.estimate_tokens()
+        ratio = tokens / max(self._ctx_max, 1)
+
+        if ratio < 0.90:
+            return messages
+        if ratio < 0.95:
+            return self._project_mild(messages)
+        return self._project_aggressive(messages)
+
+    def _project_mild(self, messages: list[dict]) -> list[dict]:
+        """90% threshold: truncate long messages, keep last 4 intact."""
+        projected = []
+        keep_recent = min(4, len(messages))
+        for i, m in enumerate(messages):
+            is_recent = i >= len(messages) - keep_recent
+            content = m.get("content", "")
+            if is_recent:
+                projected.append(dict(m))
+                continue
+            if m["role"] in ("assistant", "tool") and len(content) > 1000:
+                projected.append({
+                    **m,
+                    "content": content[:500] + "\n...[投影截断]...\n" + content[-500:],
+                })
+            else:
+                projected.append(dict(m))
+        return projected
+
+    def _project_aggressive(self, messages: list[dict]) -> list[dict]:
+        """95% threshold: clear recoverable tool results, truncate all assistants,
+        insert boundary marker, keep last 3 intact."""
+        projected = []
+        keep_recent = min(3, len(messages))
+        boundary_inserted = False
+
+        for i, m in enumerate(messages):
+            is_recent = i >= len(messages) - keep_recent
+            role = m.get("role", "")
+
+            if is_recent:
+                if not boundary_inserted and len(projected) > 0:
+                    projected.append({
+                        "role": "system",
+                        "content": "[上下文投影] 此标记之前的对话已被投影压缩。",
+                    })
+                    boundary_inserted = True
+                projected.append(dict(m))
+                continue
+
+            if role == "tool":
+                tool_name, _ = _parse_tool_message(m.get("content", ""))
+                if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
+                    projected.append({
+                        **m,
+                        "content": f"[工具结果已投影清除] 工具: {tool_name}",
+                    })
+                else:
+                    projected.append(dict(m))
+            elif role == "assistant":
+                content = m.get("content", "")
+                projected.append({
+                    **m,
+                    "content": content[:500] + "\n...[投影压缩]...\n" + content[-500:] if len(content) > 1000
+                    else content,
+                })
+            else:
+                projected.append(dict(m))
+
+        if not boundary_inserted:
+            projected.insert(0, {
+                "role": "system",
+                "content": "[上下文投影] 对话上下文已通过读时投影压缩。",
+            })
+        return projected
+
+    def microcompact(self):
         all_msgs = self.short_term.get_all()
         cleaned = False
+        recoverable_indices = []
         for i, m in enumerate(all_msgs):
             if m["role"] == "tool":
                 tool_name, _ = _parse_tool_message(m.get("content", ""))
                 if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
-                    all_msgs[i] = {
-                        **m,
-                        "content": f"[工具结果已清理] 工具: {tool_name}",
-                    }
-                    cleaned = True
-            elif m["role"] == "assistant":
-                # Truncate long assistant messages to save space
+                    recoverable_indices.append(i)
+        keep_last = 5
+        skip_indices = set(recoverable_indices[-keep_last:]) if len(recoverable_indices) > keep_last else set(recoverable_indices)
+        for i in recoverable_indices:
+            if i in skip_indices:
+                continue
+            m = all_msgs[i]
+            tool_name, _ = _parse_tool_message(m.get("content", ""))
+            all_msgs[i] = {
+                **m,
+                "content": f"[工具结果已清理] 工具: {tool_name}",
+            }
+            cleaned = True
+        for i, m in enumerate(all_msgs):
+            if m["role"] == "assistant":
                 content = m.get("content", "")
                 if len(content) > 2000:
                     all_msgs[i] = {
@@ -234,10 +410,12 @@ class MemoryManager:
             for m in all_msgs:
                 self.short_term._messages.append(m)
 
-    def maybe_compact(self, threshold: int | None = None) -> int:
-        """Check STM token usage and compact if over threshold.
+    def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
+                       is_auto: bool = True) -> int:
+        """5-layer compaction pyramid. Returns tokens saved, or 0.
 
-        Returns tokens saved (positive = freed space), or 0 if no action taken.
+        is_auto=False enables manual /compact mode (accepts custom_instructions,
+        does not suppress follow-up questions).
         """
         if self._circuit_open:
             self.microcompact()
@@ -256,29 +434,48 @@ class MemoryManager:
 
         if threshold is None:
             threshold = self._compact_threshold
+            if self._snip_freed_tokens > 0:
+                threshold = max(threshold - self._snip_freed_tokens, threshold // 2)
 
         tokens_before = self.short_term.estimate_tokens()
         if tokens_before < threshold:
+            if self._settings.time_microcompact_interval > 0:
+                self.microcompact_time_based()
             return 0
 
         all_msgs = self.short_term.get_all()
         if len(all_msgs) <= 4:
             return 0
 
-        # Layer 2: microcompact before expensive LLM summarization
+        # Layer 2: Snip
+        self.snip()
+
+        # Layer 3: Time-based microcompact
+        if self._settings.time_microcompact_interval > 0:
+            self.microcompact_time_based()
+
+        # Layer 3b: MicroCompact before LLM summarization
         self.microcompact()
 
-        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs[:-4])
+        # Full rewrite: send ALL messages to summarizer
+        all_msgs_after = self.short_term.get_all()
+        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs_after)
         if not history_text.strip():
             return 0
+
+        # Layer 5: Kairos transcript backup before destructive compact
+        self._write_transcript()
+
+        augmented = history_text
+        if custom_instructions:
+            augmented = f"[压缩指令] {custom_instructions}\n\n{augmented}"
 
         self._fire_compact("start", tokens_before=tokens_before)
 
         self._compacting = True
         try:
-            judge_llm = get_judge_llm()
-            prompt = SUMMARIZE_PROMPT.format(history=history_text)
-            response = judge_llm.think([{"role": "user", "content": prompt}]) or ""
+            prompt = SUMMARIZE_PROMPT.format(history=augmented)
+            response = self._llm.think([{"role": "user", "content": prompt}]) or ""
             if not response:
                 self._compact_failures += 1
                 if self._compact_failures >= 3:
@@ -287,15 +484,25 @@ class MemoryManager:
                     self._fire_compact("circuit_open")
                 return 0
 
-            # Parse structured XML output: keep <summary>, discard <analysis>
             summary_content = _extract_xml_tag(response, "summary")
-            if summary_content:
-                self.short_term.compact(summary_content.strip())
-            else:
-                # Fallback: use the raw response as summary
-                self.short_term.compact(response.strip())
+            final_summary = (summary_content or response).strip()
+            self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
+                                         is_auto=is_auto)
             self._compact_failures = 0
             self._microcompacts_since_open = 0
+            self._snip_freed_tokens = 0
+            self._recent_reads.clear()
+
+            # A3: File recovery after compact
+            self._restore_files()
+
+            # A6: System prompt rebuild hook
+            if self._on_after_compact:
+                try:
+                    self._on_after_compact()
+                except Exception:
+                    pass
+
             tokens_after = self.short_term.estimate_tokens()
             self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
             return max(0, tokens_before - tokens_after)

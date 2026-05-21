@@ -22,6 +22,41 @@ class ShortTermMemory:
             self._messages.append(e)
         self._summary = summary
 
+    def compact_full(self, summary: str, message_count: int = 0, is_auto: bool = True):
+        self._messages.clear()
+        boundary = (
+            "本会话是从之前一次因上下文耗尽而中断的对话延续过来的。"
+            "以下摘要概述了之前的对话内容：\n\n"
+        ) if is_auto else (
+            "对话已被手动压缩。以下是压缩后的摘要：\n\n"
+        )
+        self._messages.append({
+            "role": "system",
+            "content": boundary + summary,
+            "ts": time.time(),
+        })
+        self._summary = summary
+
+    def snip(self, keep_recent: int = 10) -> int:
+        if len(self._messages) <= keep_recent:
+            return 0
+        removed = len(self._messages) - keep_recent
+        recent = list(self._messages)[-keep_recent:]
+        self._messages.clear()
+        self._messages.append({
+            "role": "system",
+            "content": "[上下文已裁剪] 此标记之前的对话历史已被移除，共移除 {} 条消息。".format(removed),
+            "ts": time.time(),
+        })
+        for msg in recent:
+            self._messages.append(msg)
+        return removed
+
+    def get_last_ts(self) -> float:
+        if self._messages:
+            return self._messages[-1]["ts"]
+        return 0.0
+
     def estimate_tokens(self) -> int:
         total = 0
         for m in self._messages:
