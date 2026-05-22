@@ -1,6 +1,6 @@
 import os
 
-from agentnexus.core.config import Settings, get_settings, _config_dir, _default_paths
+from agentnexus.core.config import Settings, _config_dir, _default_paths, get_settings
 
 
 class TestConfigSettings:
@@ -18,6 +18,14 @@ class TestConfigSettings:
         assert s.max_agent_steps == 5
         assert s.embedding_model == "BAAI/bge-small-zh-v1.5"
         assert s.reranker_model == "BAAI/bge-reranker-v2-m3"
+        assert s.rag_default_namespace == "default"
+        assert s.rag_collection_prefix == "kb_"
+
+    def test_default_rag_storage_paths(self, temp_agentnexus_home):
+        s = get_settings()
+        assert s.rag_catalog_db_path.startswith(str(temp_agentnexus_home))
+        assert s.rag_default_namespace == "default"
+        assert s.rag_collection_prefix == "kb_"
 
     def test_llm_base_url_must_have_scheme(self):
         s = Settings(llm_base_url="https://api.example.com")
@@ -67,3 +75,4 @@ class TestTempAgentnexusHome:
         assert paths["memory_db_path"].startswith(base)
         assert paths["traces_dir"].startswith(base)
         assert paths["chroma_persist_dir"].startswith(base)
+        assert paths["rag_catalog_db_path"].startswith(base)

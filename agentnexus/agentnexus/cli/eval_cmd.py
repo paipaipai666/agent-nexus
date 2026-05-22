@@ -8,10 +8,10 @@ from rich import box
 from rich.table import Table
 
 from agentnexus.core.config import get_settings
+from agentnexus.rag.evaluator import RAGEvaluator
 from agentnexus.rag.ingestion import ChunkStrategy
 
-from . import eval_app, console
-
+from . import console, eval_app
 
 # ── Agent evaluation (current architecture) ──────────────────────
 
@@ -71,7 +71,7 @@ def eval_agent(
 @eval_app.command("list")
 def eval_list():
     """列出可用的评估数据集"""
-    from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES
+    from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
 
     console.print(f"[bold]知识库文档:[/bold] {len(KNOWLEDGE_BASE)} 篇")
     console.print(f"[bold]评估样本:[/bold] {len(EVAL_SAMPLES)} 个\n")
@@ -91,8 +91,7 @@ def eval_list():
 @eval_app.command("run")
 def eval_run():
     """运行 RAG 评估并输出指标报告"""
-    from agentnexus.rag.evaluator import RAGEvaluator
-    from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES
+    from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
 
     console.print("[bold]正在运行 RAG 评估...[/bold]\n")
 
@@ -191,8 +190,8 @@ def eval_trajectory(
     days: int = typer.Option(7, "--days", "-d", help="Look back N days"),
 ):
     """运行轨迹质量评估（确定性规则，无 LLM-as-Judge）"""
-    from agentnexus.evaluation.trajectory import TrajectoryEvaluator
     from agentnexus.core.config import get_settings
+    from agentnexus.evaluation.trajectory import TrajectoryEvaluator
 
     traces_dir = get_settings().traces_dir
     evaluator = TrajectoryEvaluator()
@@ -262,8 +261,8 @@ def eval_ci(
 @eval_app.command("component")
 def eval_component():
     """运行组件级评估（单 Agent 质量检查：Coder/Researcher/Executor/Analyst）"""
-    from agentnexus.evaluation.component import ComponentEvaluator
     from agentnexus.core.config import get_settings
+    from agentnexus.evaluation.component import ComponentEvaluator
 
     evaluator = ComponentEvaluator()
     report = evaluator.evaluate_all(get_settings().traces_dir)
@@ -305,8 +304,8 @@ def eval_hallucination(
     trace_id: str = typer.Option("", "--trace-id", "-t", help="Trace ID to evaluate (omit for all)"),
 ):
     """幻觉率检测：提取答案中的声明，验证是否在上下文中"""
-    from agentnexus.evaluation.hallucination import HallucinationDetector
     from agentnexus.core.config import get_settings
+    from agentnexus.evaluation.hallucination import HallucinationDetector
 
     detector = HallucinationDetector()
     traces_dir = get_settings().traces_dir
@@ -354,8 +353,8 @@ def eval_hallucination(
 @eval_app.command("tool-selection")
 def eval_tool_selection():
     """工具选择准确率：对比 Agent 实际选择的工具与预期工具"""
-    from agentnexus.evaluation.tool_selection import ToolSelectionEvaluator
     from agentnexus.core.config import get_settings
+    from agentnexus.evaluation.tool_selection import ToolSelectionEvaluator
 
     evaluator = ToolSelectionEvaluator()
     report = evaluator.evaluate_from_traces(get_settings().traces_dir)
@@ -389,8 +388,8 @@ def eval_coherence(
     trace_id: str = typer.Option("", "--trace-id", "-t", help="Trace ID to evaluate (omit for all)"),
 ):
     """多步推理连贯性评估（使用独立的 Judge 模型，不同模型家族）"""
-    from agentnexus.evaluation.coherence import CoherenceEvaluator
     from agentnexus.core.config import get_settings
+    from agentnexus.evaluation.coherence import CoherenceEvaluator
 
     evaluator = CoherenceEvaluator()
     traces_dir = get_settings().traces_dir
@@ -434,17 +433,18 @@ def eval_coherence(
 @eval_app.command("calibrate")
 def eval_calibrate(
     output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="输出文件路径"),
-    score_file: str = typer.Option("", "--score-file", "-s", help="人工评分 JSON 文件路径（含 human_precision/human_recall 字段）"),
+    score_file: str = typer.Option(
+        "",
+        "--score-file",
+        "-s",
+        help="人工评分 JSON 文件路径（含 human_precision/human_recall 字段）",
+    ),
 ):
     """Judge 校准：导出样本供人工打分，计算 Judge 与人工评分的一致性"""
+    from agentnexus.rag.chroma_client import delete_collection
+    from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.evaluator import RAGEvaluator
-    from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES
-
-    from agentnexus.rag.chroma_client import (
-        get_embedding_model as _get_embedding_model,
-        insert_documents, delete_collection,
-    )
-    from agentnexus.rag.retriever import HybridRetriever
+    from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
 
     evaluator = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES)
     strategy, chunk_size, overlap, use_hybrid = ChunkStrategy.FIXED, 256, 64, False
@@ -453,18 +453,18 @@ def eval_calibrate(
 
     samples = []
     chunks = evaluator._chunk_all(strategy, chunk_size, overlap)
-    model = _get_embedding_model()
 
-    delete_collection()
-    insert_documents(chunks)
+    delete_collection(namespace="eval")
+    build_knowledge_base(chunks, load_reranker=False, namespace="eval")
 
-    retriever = HybridRetriever()
-    if use_hybrid:
-        retriever.build_bm25(chunks)
+    retriever = HybridRetriever(namespace="eval")
+    retriever.rebuild_from_catalog()
 
     for idx, sample in enumerate(EVAL_SAMPLES):
         retrieved = evaluator._retrieve(
-            sample.question, model, retriever, use_hybrid,
+            sample.question,
+            retriever,
+            use_hybrid,
             max_tokens=max(len(sample.question) * 5, 100),
         )
         if not retrieved:
@@ -487,7 +487,11 @@ def eval_calibrate(
         judge_precision = evaluator._score_precision(sample, retrieved)
         judge_recall = evaluator._score_recall(sample, retrieved)
         judge_faithfulness = evaluator._score_faithfulness(answer, retrieved)
-        judge_relevancy = evaluator._score_relevancy(sample.question, answer, sample.ground_truth) if sample.ground_truth else 0.0
+        judge_relevancy = (
+            evaluator._score_relevancy(sample.question, answer, sample.ground_truth)
+            if sample.ground_truth
+            else 0.0
+        )
 
         samples.append({
             "sample_idx": idx,
@@ -513,8 +517,13 @@ def eval_calibrate(
     if score_file:
         _compute_calibration(samples, score_file)
     else:
-        console.print(f"[green]已导出 {len(samples)} 个校准样本到: {output_path}[/green]")
-        console.print("\n填写每个样本的 [bold]human_precision[/bold] 和 [bold]human_recall[/bold] (0.0~1.0)，然后重新运行:")
+        console.print(
+            f"[green]已导出 {len(samples)} 个校准样本到: {output_path}[/green]"
+        )
+        console.print(
+            "\n填写每个样本的 [bold]human_precision[/bold] 和 "
+            "[bold]human_recall[/bold] (0.0~1.0)，然后重新运行:"
+        )
         console.print(f"  [dim]nexus eval calibrate --score-file {output_path}[/dim]")
 
 
