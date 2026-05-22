@@ -83,6 +83,36 @@ class TestRobustJsonParse:
         assert result["text"] == "yes"
 
 
+class TestVisibleThoughtSelection:
+    def test_prefers_reasoning_content_over_plain_text(self):
+        result = ReActAgent._select_visible_thought(
+            response_text="先搜索官方文档",
+            reasoning_text="I should search the official docs before answering.",
+        )
+        assert result == "I should search the official docs before answering."
+
+    def test_falls_back_to_plain_text_when_reasoning_missing(self):
+        result = ReActAgent._select_visible_thought(
+            response_text="先搜索官方文档",
+            reasoning_text="",
+        )
+        assert result == "先搜索官方文档"
+
+    def test_extracts_thought_from_json_when_reasoning_missing(self):
+        result = ReActAgent._select_visible_thought(
+            response_text='{"thought": "Need latest info first.", "tool": "web_search", "params": {"query": "test"}}',
+            reasoning_text="",
+        )
+        assert result == "Need latest info first."
+
+    def test_does_not_surface_raw_json_without_thought(self):
+        result = ReActAgent._select_visible_thought(
+            response_text='{"tool": "web_search", "params": {"query": "test"}}',
+            reasoning_text="",
+        )
+        assert result == ""
+
+
 class TestClassifyParsed:
     def test_tool_call(self):
         result = ReActAgent._classify_parsed({"tool": "search", "params": {"q": "x"}})

@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from agentnexus.memory.manager import MemoryManager
@@ -93,7 +94,7 @@ class TestReActAgentConversationMode:
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         # Should not raise — history is now local, not self.history
         result = agent.run("test question")
-        assert result == "done"
+        assert result.answer == "done"
 
     def test_build_conversation_context_empty_stm(self):
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -197,12 +198,254 @@ class TestReActAgentConversationMode:
         assert "近期对话" in result
         assert "对话历史摘要" not in result
 
+    def test_run_routes_side_channel_events_through_three_arg_observer(self, monkeypatch):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        def fake_run_loop(self, initial_event, ctx, handlers):
+            ctx.emit(ReActEventType.TOOL_START, name="read", arguments={"file_path": "x.py"})
+            return ("done", [])
+
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.StateMachine.run_loop", fake_run_loop)
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = False
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        calls = []
+
+        def observer(event, from_state, to_state):
+            calls.append((event.type, from_state, to_state, event.payload["name"]))
+
+        agent._on_event = observer
+
+        result = agent.run("test question")
+
+        assert result.answer == "done"
+        assert calls == [(ReActEventType.TOOL_START, None, None, "read")]
+
+    def test_classified_tool_emits_thought_event_from_reasoning(self, monkeypatch):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = True
+        mock_llm.last_reasoning_content = "Need fresh information before answering"
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
+
+        emitted = []
+        ctx = ExecutionContext(question="latest news")
+        ctx.steps.append(AgentStep(step_id=0))
+        ctx.last_reasoning = "Need fresh information before answering"
+        ctx.last_response_text = '{"tool": "web_search", "params": {"query": "latest news"}}'
+        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+
+        agent._on_classified_tool(
+            ctx,
+            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
+                "parsed": {"tool": "web_search", "params": {"query": "latest news"}}
+            }),
+        )
+
+        assert emitted[0] == (
+            ReActEventType.TOOLS_FOUND,
+            {
+                "thought": "Need fresh information before answering",
+                "tool_calls": [{"name": "web_search", "arguments": {"query": "latest news"}}],
+            },
+        )
+
+    def test_classified_tool_falls_back_to_json_thought_without_reasoning(self, monkeypatch):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = False
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
+
+        emitted = []
+        ctx = ExecutionContext(question="latest news")
+        ctx.steps.append(AgentStep(step_id=0))
+        ctx.last_reasoning = ""
+        ctx.last_response_text = '{"thought": "Need latest info first.", "tool": "web_search", "params": {"query": "latest news"}}'
+        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+
+        agent._on_classified_tool(
+            ctx,
+            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
+                "parsed": {"tool": "web_search", "params": {"query": "latest news"}}
+            }),
+        )
+
+        assert emitted[0] == (
+            ReActEventType.TOOLS_FOUND,
+            {
+                "thought": "Need latest info first.",
+                "tool_calls": [{"name": "web_search", "arguments": {"query": "latest news"}}],
+            },
+        )
+
+    def test_classified_tool_emits_tool_done_side_channel_for_ui(self, monkeypatch):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = False
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        observation = "[1] Tavily result\nURL: https://example.com\nSnippet"
+        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: observation)
+
+        emitted = []
+        ctx = ExecutionContext(question="search")
+        ctx.steps.append(AgentStep(step_id=0))
+        ctx.last_response_text = '{"tool": "web_search", "params": {"query": "search"}}'
+        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+
+        returned = agent._on_classified_tool(
+            ctx,
+            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
+                "parsed": {"tool": "web_search", "params": {"query": "search"}}
+            }),
+        )
+
+        assert [event_type for event_type, _payload in emitted] == [
+            ReActEventType.TOOL_START,
+            ReActEventType.TOOL_DONE,
+        ]
+        assert emitted[1] == (
+            ReActEventType.TOOL_DONE,
+            {
+                "name": "web_search",
+                "arguments": {"query": "search"},
+                "result": observation,
+                "id": "",
+            },
+        )
+        assert [event.type for event in returned] == [ReActEventType.ALL_TOOLS_DONE]
+
     def test_get_summary_method(self):
         """ShortTermMemory.get_summary() should return the compacted summary."""
         stm = ShortTermMemory()
         assert stm.get_summary() == ""
         stm.compact("这是测试摘要")
         assert stm.get_summary() == "这是测试摘要"
+
+
+class TestChatScreenAnswerRender:
+
+    def test_answer_render_waits_until_msg_content_exists(self):
+        from agentnexus.tui.app import AgentNexusTUI
+        from agentnexus.tui.widgets.input_bar import InputBar
+        from agentnexus.tui.widgets.message import ChatMessage, ToolCall
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
+
+        class FakeCaps:
+            supports_thinking = True
+            supports_tool_calling = False
+
+        class FakeLLM:
+            capabilities = FakeCaps()
+            model = "fake-model"
+
+        class FakeAgent:
+            def __init__(self):
+                self.llm_client = FakeLLM()
+                self.total_usage = {"input_tokens": 1, "output_tokens": 1}
+                self._on_event = None
+                self._confirm = None
+
+            @property
+            def model_id(self):
+                return "fake-model"
+
+            def run(self, text, memory_manager=None):
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.TOOLS_FOUND,
+                        {
+                            "thought": "Need fresh information before answering",
+                            "tool_calls": [{"name": "web_search", "arguments": {"query": text}}],
+                        },
+                    ),
+                    None,
+                    None,
+                )
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.TOOL_START,
+                        {"name": "web_search", "arguments": {"query": text}},
+                    ),
+                    None,
+                    None,
+                )
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.TOOL_DONE,
+                        {
+                            "name": "web_search",
+                            "arguments": {"query": text},
+                            "result": "[1] Example title\nURL: https://example.com\nBody snippet that should be hidden",
+                            "id": "",
+                        },
+                    ),
+                    None,
+                    None,
+                )
+                return type("Result", (), {"answer": "Final answer"})()
+
+        class FakeMemory:
+            def __init__(self):
+                self.short_term = ShortTermMemory()
+                self._on_compact = None
+
+            def estimate_stm_tokens(self):
+                return 123
+
+        class FakeVersion:
+            def status(self):
+                return {"branch": "main", "head": None, "can_undo": False, "can_redo": False}
+
+            def commit(self, *args, **kwargs):
+                return None
+
+        async def scenario():
+            app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=FakeVersion())
+            async with app.run_test() as pilot:
+                await asyncio.sleep(0.2)
+                screen = app.screen
+                screen.on_input_bar_app_submit(InputBar.AppSubmit("latest ai news"))
+
+                for _ in range(100):
+                    if not screen._running:
+                        break
+                    await asyncio.sleep(0.05)
+
+                chat_area = screen.query_one("#chat-area")
+                messages = [w for w in chat_area.walk_children() if isinstance(w, ChatMessage)]
+                tools = [w for w in chat_area.walk_children() if isinstance(w, ToolCall)]
+
+                thought_messages = [m for m in messages if "Thought:" in getattr(m, "content", "")]
+                assert thought_messages
+                assert tools
+                assert "Need fresh information before answering" in thought_messages[-1].content
+                assert "[1] Example title" in tools[-1].result
+                assert "Body snippet that should be hidden" not in tools[-1].result
+                assert any(getattr(m, "content", "") == "" for m in messages)
+
+        asyncio.run(scenario())
 
 
 class TestBuildProjection:

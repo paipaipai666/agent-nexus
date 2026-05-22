@@ -92,6 +92,7 @@ class TestJsonAutoFix:
 class TestJsonFormatPrompt:
     def test_format_section_not_empty(self):
         section = ReActAgent._build_json_format_section()
+        assert "thought" in section
         assert "tool" in section
         assert "answer" in section
         assert "JSON" in section

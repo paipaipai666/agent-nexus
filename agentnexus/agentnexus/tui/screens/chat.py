@@ -410,35 +410,49 @@ class ChatScreen(Screen):
         self._chat_area.mount(loading)
         self._chat_area.call_after_refresh(self._chat_area.scroll_end)
 
-        def _on_output(msg: str):
-            self.app.call_from_thread(_apply_output, msg)
+        def _on_agent_event(event, from_state, to_state):
+            """Structured FSM event → TUI dispatch (non-blocking)."""
+            self.app.call_from_thread(_apply_event, event, from_state, to_state)
 
-        def _apply_output(msg: str):
-            if msg.startswith("思考:"):
-                self._chat_area.add_system(f"[#a78bfa]Thought:[/] [italic dim]{msg.replace('思考:', '').strip()}[/]")
-            elif msg.startswith("行动:"):
+        STRATEGY_LABELS = {
+            "NATIVE_TOOLS": "原生工具",
+            "JSON_MODE": "JSON模式",
+            "PROMPT_JSON": "提示词JSON",
+            "PLAIN_TEXT": "纯文本",
+        }
+
+        def _apply_event(event, from_state, to_state):
+            from agentnexus.agents.react_types import ReActEventType as E
+            etype = event.type
+            strategy = event.payload.get("strategy")
+            if strategy:
+                try:
+                    caps = self._agent.llm_client.capabilities
+                    self._hud.update_capabilities(
+                        supports_thinking=caps.supports_thinking,
+                        strategy=STRATEGY_LABELS.get(strategy, strategy),
+                    )
+                except Exception:
+                    pass
+            if etype == E.TOOLS_FOUND:
+                thought = event.payload.get("thought")
+                if thought:
+                    self._chat_area.add_system(
+                        f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
+            elif etype == E.TOOL_START:
                 self._stop_spinner()
-                tool_info = msg.removeprefix("行动:").strip()
-                # Parse format: tool_name[params] or tool_name(params) (fallback)
-                bracket = tool_info.find("[")
-                paren = tool_info.find("(")
-                if bracket >= 0:
-                    tool_name = tool_info[:bracket].strip()
-                elif paren >= 0:
-                    tool_name = tool_info[:paren].strip()
-                else:
-                    tool_name = tool_info.strip()
+                tool_name = event.payload.get("name", "")
                 self._current_tool_name = tool_name
-                widget = ToolCall(tool_name, result="执行中...")
+                widget = ToolCall(tool_name, result="executing...")
                 self._chat_area.mount(widget)
                 self._current_tool_widget = widget
                 self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-                self._spinner_frames = cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                self._spinner_frames = cycle(
+                    ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
                 self._spinner_timer = self.set_interval(0.12, self._tick_spinner)
-
-            elif msg.startswith("观察:"):
+            elif etype == E.TOOL_DONE:
                 self._stop_spinner()
-                result = msg.removeprefix("观察:").strip()
+                result = event.payload.get("result", "")
                 if self._current_tool_widget:
                     tool_lower = self._current_tool_widget.tool_name.strip().lower()
                     if tool_lower == "web_search":
@@ -447,24 +461,30 @@ class ChatScreen(Screen):
                         result = self._condense_file_result(result)
                     self._current_tool_widget.update_result(result)
                     self._current_tool_widget = None
-                else:
-                    self._chat_area.add_system(f"[dim]观察: {result}[/]")
                 if self._memory:
                     stm_tokens = self._memory.estimate_stm_tokens()
                     self._hud.update_context(current_tokens=stm_tokens)
-            elif msg.startswith(("错误:", "警告:")):
+            elif etype == E.THOUGHT_MISSING:
+                self._chat_area.add_system(
+                    "[#e5c07b][!] 模型未输出 Thought，要求重新思考…[/]")
+            elif etype == E.RETRIES_LEFT:
+                self._chat_area.add_system(
+                    f"[#e5c07b][重试] {event.payload.get('reason', '')}[/]")
+            elif etype == E.DEGRADED:
                 self._stop_spinner()
                 self._current_tool_widget = None
-                self._chat_area.add_system(f"[#e06c75]{msg}[/]")
+                label = STRATEGY_LABELS.get(strategy, strategy or "?")
+                self._chat_area.add_system(f"[#e5c07b][策略降级] → {label}[/]")
 
-        self._agent._output = _on_output
+        self._agent._on_event = _on_agent_event
 
         def _run_with_trace():
             """Run agent in a traced context — each user input is its own trace."""
             trace_manager.configure(get_settings().traces_dir)
             ctx = trace_manager.start_trace(text)
             try:
-                return self._agent.run(text, memory_manager=self._memory)
+                result = self._agent.run(text, memory_manager=self._memory)
+                return result.answer
             finally:
                 trace_manager.end_trace()
 
@@ -490,7 +510,7 @@ class ChatScreen(Screen):
         if answer:
             # ── Streaming typing effect ──
             msg_widget = ChatMessage("assistant", "")
-            self._chat_area.mount(msg_widget)
+            await self._chat_area.mount(msg_widget)
             self._chat_area.call_after_refresh(self._chat_area.scroll_end)
 
             msg_content = msg_widget.query_one("#msg-content", Static)
