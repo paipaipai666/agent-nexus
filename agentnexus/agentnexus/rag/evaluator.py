@@ -1,15 +1,13 @@
-import time
 import random
+import time
 from dataclasses import dataclass, field
 
-from agentnexus.core.llm import AgentLLM
 from agentnexus.core.judge_llm import get_judge_llm
+from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
-from agentnexus.rag.ingestion import chunk_text, ChunkStrategy
-from agentnexus.rag.chroma_client import (
-    get_embedding_model, insert_documents, search, delete_collection,
-)
-from agentnexus.rag.retriever import HybridRetriever
+from agentnexus.rag.chroma_client import delete_collection, search
+from agentnexus.rag.ingestion import ChunkStrategy, chunk_text
+from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
 
 
 @dataclass
@@ -77,14 +75,12 @@ class RAGEvaluator:
         run = EvalRun(label=label, strategy=strategy, chunk_size=chunk_size, use_hybrid=use_hybrid)
 
         chunks = self._chunk_all(strategy, chunk_size, chunk_overlap)
-        model = get_embedding_model()
 
-        delete_collection()
-        insert_documents(chunks)
+        delete_collection(namespace="eval")
+        build_knowledge_base(chunks, load_reranker=False, namespace="eval")
 
-        retriever = HybridRetriever()
-        if use_hybrid:
-            retriever.build_bm25(chunks)
+        retriever = HybridRetriever(namespace="eval")
+        retriever.rebuild_from_catalog()
 
         # ── Change 4: Split positive / negative samples ──
         positive_samples = [
@@ -112,7 +108,7 @@ class RAGEvaluator:
                 max_tokens = max(len(sample.question) * 5, 100)
 
             t0 = time.perf_counter()
-            retrieved = self._retrieve(sample.question, model, retriever, use_hybrid, max_tokens=max_tokens)
+            retrieved = self._retrieve(sample.question, retriever, use_hybrid, max_tokens=max_tokens)
             latencies.append((time.perf_counter() - t0) * 1000)
 
             if not retrieved:
@@ -134,7 +130,7 @@ class RAGEvaluator:
             else:
                 max_tokens = max(len(sample.question) * 5, 100)
 
-            retrieved = self._retrieve(sample.question, model, retriever, use_hybrid, max_tokens=max_tokens)
+            retrieved = self._retrieve(sample.question, retriever, use_hybrid, max_tokens=max_tokens)
             if not retrieved:
                 # No chunks retrieved → treat as correct refusal (nothing to answer from)
                 correct_refusals += 1
@@ -177,7 +173,7 @@ class RAGEvaluator:
             return self._docs
         return chunks
 
-    def _retrieve(self, query, model, retriever, use_hybrid, max_tokens: int, min_score: float = 0.3):
+    def _retrieve(self, query, retriever, use_hybrid, max_tokens: int, min_score: float = 0.3):
         """Retrieve chunks with dynamic token budget (Change 2).
 
         Fetches up to 10 candidates, then accumulates until token budget is reached.
@@ -185,9 +181,8 @@ class RAGEvaluator:
         if not use_hybrid:
             candidates = [r["text"] for r in search(query, limit=10)]
             return _fit_token_budget(candidates, max_tokens)
-        vec = model.encode(query, normalize_embeddings=True).tolist()
         dense_results = search(query, limit=20)
-        dense = [(i, r["score"]) for i, r in enumerate(dense_results)]
+        dense = [(r["id"], r["score"]) for r in dense_results]
         results = retriever.search(query, dense, top_k=10, min_score=min_score)
         return _fit_token_budget([r.text for r in results], max_tokens)
 

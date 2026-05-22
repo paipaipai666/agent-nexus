@@ -16,6 +16,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False):
     from agentnexus.tools.code_executor import python_execute
     from agentnexus.tools.file_ops import file_list, file_read, file_write
     from agentnexus.tools.grep_search import grep_search
+    from agentnexus.tools.kb_search import kb_search
     from agentnexus.tools.memory_save import memory_save
     from agentnexus.tools.memory_search import memory_search
     from agentnexus.tools.shell import get_os_info, shell_exec
@@ -71,7 +72,11 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False):
                 "path": {"type": "string", "description": "搜索目录", "default": "."},
                 "glob": {"type": "string", "description": "文件过滤模式 (如 *.py, *.yaml)", "default": "*"},
                 "max_results": {"type": "integer", "description": "最大结果数 (1-50)", "default": 10},
-                "literal": {"type": "boolean", "description": "字面量匹配 (默认true)。设为false启用正则", "default": True},
+                "literal": {
+                    "type": "boolean",
+                    "description": "字面量匹配 (默认true)。设为false启用正则",
+                    "default": True,
+                },
             },
             "required": ["pattern"],
         },
@@ -109,6 +114,30 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False):
         },
         risk_level="low",
         rate_limit_per_min=10,
+    )
+
+    executor.registerTool(
+        "kb_search",
+        "检索结构化知识库，返回带来源与分数的结果。"
+        "参数: query(搜索词,必填), "
+        "namespace(知识库命名空间,默认default), "
+        "top_k(返回条数,默认5)",
+        kb_search,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词（必填）"},
+                "namespace": {
+                    "type": "string",
+                    "description": "知识库命名空间",
+                    "default": "default",
+                },
+                "top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
+            },
+            "required": ["query"],
+        },
+        risk_level="low",
+        rate_limit_per_min=20,
     )
 
     executor.registerTool(

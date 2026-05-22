@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     chroma_persist_dir: str = Field(default="")
     memory_db_path: str = Field(default="")
     traces_dir: str = Field(default="")
+    rag_catalog_db_path: str = Field(default="")
+    rag_default_namespace: str = Field(default="default")
+    rag_collection_prefix: str = Field(default="kb_")
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
@@ -75,6 +78,7 @@ def _default_paths() -> dict:
         "chroma_persist_dir": str(d / "chroma"),
         "memory_db_path": str(d / "memory.db"),
         "traces_dir": str(d / "traces"),
+        "rag_catalog_db_path": str(d / "rag_catalog.db"),
     }
 
 
