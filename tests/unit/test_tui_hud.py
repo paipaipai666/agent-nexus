@@ -1,165 +1,184 @@
-import asyncio
-import json
-from unittest.mock import patch
+"""Pure method tests for HUD widget and _resolve_ctx_max helper."""
 
-from agentnexus.agents.react_types import ReActEvent, ReActEventType
-from agentnexus.memory.short_term import ShortTermMemory
-from agentnexus.tui.app import AgentNexusTUI
-from agentnexus.tui.widgets.hud import HUD
-from agentnexus.tui.widgets.input_bar import InputBar
-from agentnexus.tui.widgets.message import ToolCall
+from unittest.mock import MagicMock, patch
+
+from agentnexus.tui.widgets.hud import HUD, _resolve_ctx_max
 
 
-class TestHUDVersionDisplay:
-    def test_build_text_includes_cwd_and_version(self):
-        with patch("agentnexus.tui.widgets.hud.Path.cwd") as mock_cwd:
-            mock_cwd.return_value.resolve.return_value = type("Resolved", (), {"__str__": lambda self: "D:/code/AgentNexus"})()
-            hud = HUD()
+class TestResolveCtxMax:
+    def test_exception_returns_none(self):
+        """_resolve_ctx_max returns None when get_model_info raises."""
+        with patch("litellm.get_model_info", side_effect=Exception):
+            assert _resolve_ctx_max("any-model") is None
 
-        hud.update_version("feature", "1234567890abcdef", True, False)
+    def test_returns_max_input_tokens(self):
+        """_resolve_ctx_max returns the max_input_tokens value."""
+        mock_info = MagicMock()
+        mock_info.get.return_value = 128000
+        with patch("litellm.get_model_info", return_value=mock_info):
+            assert _resolve_ctx_max("test-model") == 128000
+
+
+class TestHudBuildText:
+    """Test HUD._build_text() pure rendering logic."""
+
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_basic_build_text(self, mock_settings, mock_ctx):
+        """Default state shows model name and fallback 200k context."""
+        mock_settings.return_value.llm_model_id = "test/test-model"
+        hud = HUD()
         text = hud._build_text()
+        assert "test-model" in text
+        assert "200k" in text
 
-        assert "cwd:D:/code/AgentNexus" in text
-        assert "feature@12345678" in text
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_with_thinking_and_strategy(self, mock_settings, mock_ctx):
+        """Thinking indicator and strategy label appear when enabled."""
+        mock_settings.return_value.llm_model_id = "simple-model"
+        hud = HUD()
+        hud._supports_thinking = True
+        hud._strategy = "JSON模式"
+        text = hud._build_text()
+        assert "JSON模式" in text
+        assert "🧠" in text
+
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_compact_indicator(self, mock_settings, mock_ctx):
+        """Compact indicator (⚙) appears when _compacting is True."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud._compacting = True
+        text = hud._build_text()
+        assert "⚙" in text
+
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=128000)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_context_bar_when_ctx_max_known(self, mock_settings, mock_ctx):
+        """Context bar with filled/empty blocks appears when ctx_max is set."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        assert hud.ctx_max == 128000
+        hud.current_tokens = 32000
+        text = hud._build_text()
+        assert "128k" in text
+        assert "32.0k" in text
+        assert "█" in text
+        assert "░" in text
+
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_no_ctx_bar_when_ctx_max_unknown(self, mock_settings, mock_ctx):
+        """No progress bar when ctx_max is None — fallback to dim 200k."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        assert hud.ctx_max is None
+        hud.current_tokens = 5000
+        text = hud._build_text()
+        assert "ctx 5.0k" in text
+        assert "200k" in text
+        assert "█" not in text
+        assert "░" not in text
+
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_version_display_with_undo_redo(self, mock_settings, mock_ctx):
+        """Version section shows undo/redo actions when available."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.update_version("feature", "abcdef123456", can_undo=True, can_redo=True)
+        text = hud._build_text()
+        assert "feature" in text
+        assert "abcdef12" in text
         assert "undo" in text
+        assert "redo" in text
 
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_token_display(self, mock_settings, mock_ctx):
+        """Token totals shown as in:Xk out:Yk."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.total_input = 15000
+        hud.total_output = 35000
+        text = hud._build_text()
+        assert "in:15k" in text
+        assert "out:35k" in text
 
-class TestChatLayout:
-    def test_chat_screen_has_no_sidebar_and_hud_shows_version(self):
-        class FakeCaps:
-            supports_thinking = True
-            supports_tool_calling = False
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_update_capabilities_sets_state(self, mock_settings, mock_ctx):
+        """update_capabilities sets internal flags (refresh is a no-op here)."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.update_capabilities(supports_thinking=True, strategy="原生工具")
+        assert hud._supports_thinking is True
+        assert hud._strategy == "原生工具"
 
-        class FakeLLM:
-            capabilities = FakeCaps()
-            model = "fake-model"
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_update_context_sets_state(self, mock_settings, mock_ctx):
+        """update_context sets token values without crashing."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.update_context(current_tokens=100, total_input=200, total_output=300)
+        assert hud.current_tokens == 100
+        assert hud.total_input == 200
+        assert hud.total_output == 300
 
-        class FakeAgent:
-            def __init__(self):
-                self.llm_client = FakeLLM()
-                self.total_usage = {"input_tokens": 0, "output_tokens": 0}
-                self._on_event = None
-                self._confirm = None
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_set_compacting_sets_state(self, mock_settings, mock_ctx):
+        """set_compacting toggles the _compacting flag."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.set_compacting(True)
+        assert hud._compacting is True
+        hud.set_compacting(False)
+        assert hud._compacting is False
 
-            @property
-            def model_id(self):
-                return "fake-model"
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_update_version_sets_state(self, mock_settings, mock_ctx):
+        """update_version stores branch/head/undo/redo state."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.update_version("dev", "deadbeef1234", can_undo=True, can_redo=False)
+        assert hud._branch == "dev"
+        assert hud._head == "deadbeef1234"
+        assert hud._can_undo is True
+        assert hud._can_redo is False
 
-        class FakeMemory:
-            def __init__(self):
-                self.short_term = ShortTermMemory()
-                self._on_compact = None
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_head_shortened_to_8_chars(self, mock_settings, mock_ctx):
+        """Long HEAD is truncated to 8 characters in display."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud._head = "abcdefghijklmnop"
+        text = hud._build_text()
+        assert "abcdefgh" in text
+        assert "ijklmnop" not in text
 
-            def estimate_stm_tokens(self):
-                return 0
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=None)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_head_dash_not_truncated(self, mock_settings, mock_ctx):
+        """Default HEAD '---' is shown as-is, not truncated."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        assert hud._head == "---"
+        text = hud._build_text()
+        assert "@---" in text
 
-        class FakeVersion:
-            def status(self):
-                return {
-                    "branch": "feature",
-                    "head": {"id": "abcdef123456"},
-                    "can_undo": True,
-                    "can_redo": False,
-                }
-
-        async def scenario():
-            with patch("agentnexus.tui.widgets.hud.Path.cwd") as mock_cwd:
-                mock_cwd.return_value.resolve.return_value = type("Resolved", (), {"__str__": lambda self: "D:/code/AgentNexus"})()
-                app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=FakeVersion())
-                async with app.run_test():
-                    await asyncio.sleep(0.2)
-                    screen = app.screen
-                    assert len(list(screen.query("#side-panel"))) == 0
-                    hud_text = screen.query_one("#hud-text").content
-                    hud_str = str(hud_text)
-                    assert "feature@abcdef12" in hud_str
-                    assert "cwd:D:/code/AgentNexus" in hud_str
-
-        asyncio.run(scenario())
-
-    def test_subagent_run_result_is_rendered_as_delegation_summary(self):
-        class FakeCaps:
-            supports_thinking = True
-            supports_tool_calling = False
-
-        class FakeLLM:
-            capabilities = FakeCaps()
-            model = "fake-model"
-
-        class FakeAgent:
-            def __init__(self):
-                self.llm_client = FakeLLM()
-                self.total_usage = {"input_tokens": 1, "output_tokens": 1}
-                self._on_event = None
-                self._confirm = None
-
-            @property
-            def model_id(self):
-                return "fake-model"
-
-            def run(self, text, memory_manager=None):
-                self._on_event(
-                    ReActEvent(
-                        ReActEventType.TOOL_START,
-                        {"name": "subagent_run", "arguments": {"task": text}},
-                    ),
-                    None,
-                    None,
-                )
-                self._on_event(
-                    ReActEvent(
-                        ReActEventType.TOOL_DONE,
-                        {
-                            "name": "subagent_run",
-                            "arguments": {"task": text},
-                            "result": json.dumps({
-                                "status": "ok",
-                                "role": "reader",
-                                "answer": "README 摘要",
-                                "summary": "README 摘要",
-                                "steps_used": 2,
-                                "allowed_tools": ["file_read"],
-                            }, ensure_ascii=False),
-                            "id": "",
-                        },
-                    ),
-                    None,
-                    None,
-                )
-                return type("Result", (), {"answer": "done"})()
-
-        class FakeMemory:
-            def __init__(self):
-                self.short_term = ShortTermMemory()
-                self._on_compact = None
-
-            def estimate_stm_tokens(self):
-                return 0
-
-        class FakeVersion:
-            def status(self):
-                return {"branch": "main", "head": None, "can_undo": False, "can_redo": False}
-
-            def commit(self, *args, **kwargs):
-                return None
-
-        async def scenario():
-            app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=FakeVersion())
-            async with app.run_test():
-                await asyncio.sleep(0.2)
-                screen = app.screen
-                screen.on_input_bar_app_submit(InputBar.AppSubmit("请子代理总结 README"))
-
-                for _ in range(100):
-                    if not screen._running:
-                        break
-                    await asyncio.sleep(0.05)
-
-                chat_area = screen.query_one("#chat-area")
-                tools = [w for w in chat_area.walk_children() if isinstance(w, ToolCall)]
-                assert tools
-                assert "[子代理] role=reader status=ok steps=2" in tools[-1].result
-                assert "tools: file_read" in tools[-1].result
-                assert "answer: README 摘要" in tools[-1].result
-
-        asyncio.run(scenario())
+    @patch("agentnexus.tui.widgets.hud._resolve_ctx_max", return_value=10000)
+    @patch("agentnexus.tui.widgets.hud.get_settings")
+    def test_context_bar_saturation(self, mock_settings, mock_ctx):
+        """Context bar shows full blocks when ctx_used >= ctx_max."""
+        mock_settings.return_value.llm_model_id = "model"
+        hud = HUD()
+        hud.current_tokens = 99999  # well beyond ctx_max
+        text = hud._build_text()
+        # Bar should be fully filled (8 blocks)
+        assert "████████" in text

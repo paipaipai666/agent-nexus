@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from enum import Enum
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from .models import ChunkRecord, DocumentSection, SourceDocument
 
 
@@ -108,6 +106,8 @@ def _fixed_window_split(text: str, chunk_size: int, overlap: int) -> list[str]:
 
 
 def _recursive_split(text: str, chunk_size: int, overlap: int) -> list[str]:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     splitter = RecursiveCharacterTextSplitter(
         separators=_SEPARATORS,
         chunk_size=chunk_size,

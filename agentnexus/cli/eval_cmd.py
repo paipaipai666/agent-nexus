@@ -88,6 +88,12 @@ def eval_list():
     console.print(table)
 
 
+def _fmt_ci(score: float, ci: tuple | None = None) -> str:
+    if ci and len(ci) == 2:
+        return f"{score:.3f} [{ci[0]:.2f}-{ci[1]:.2f}]"
+    return f"{score:.3f}"
+
+
 @eval_app.command("run")
 def eval_run():
     """运行 RAG 评估并输出指标报告"""
@@ -126,11 +132,6 @@ def eval_run():
     if not results:
         console.print("[red]所有评估组合均失败[/red]")
         return
-
-    def _fmt_ci(score: float, ci: tuple | None = None) -> str:
-        if ci and len(ci) == 2:
-            return f"{score:.3f} [{ci[0]:.2f}-{ci[1]:.2f}]"
-        return f"{score:.3f}"
 
     table = Table(title="RAG 评估结果", box=box.ROUNDED)
     table.add_column("配置", style="cyan")
@@ -629,6 +630,8 @@ def _pearson(x: list[float], y: list[float]) -> tuple[float, float]:
     """Compute Pearson correlation coefficient (manual implementation)."""
     n = len(x)
     if n < 3:
+        return (0.0, 1.0)
+    if all(v == x[0] for v in x) or all(v == y[0] for v in y):
         return (0.0, 1.0)
     try:
         from scipy.stats import pearsonr
