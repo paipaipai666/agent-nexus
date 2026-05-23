@@ -155,10 +155,12 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
 
-    def to_openai_tools(self) -> list[dict]:
+    def to_openai_tools(self, agent: str = "*") -> list[dict]:
         """Convert registered tools to OpenAI function-calling format."""
         tools = []
         for name, (meta, _) in self._tools.items():
+            if "*" not in meta.allowed_agents and agent not in meta.allowed_agents:
+                continue
             # Strip default values from properties — OpenAI doesn't use them
             schema = {"type": "object", "properties": {}, "required": meta.param_schema.get("required", [])}
             props = meta.param_schema.get("properties", {})

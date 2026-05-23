@@ -44,7 +44,8 @@ class ReActAgent:
     def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor,
                  max_steps: int | None = None,
                  output=None, confirm_fn=None, async_confirm=None,
-                 conversation_mode: bool = False):
+                 conversation_mode: bool = False,
+                 agent_id: str = "react_agent"):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
         self.max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
@@ -52,6 +53,7 @@ class ReActAgent:
         self._confirm = confirm_fn or self._default_confirm
         self._async_confirm = async_confirm
         self.conversation_mode = conversation_mode
+        self.agent_id = agent_id
         self._total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
         self._on_event: Callable | None = None
 
@@ -143,8 +145,8 @@ class ReActAgent:
             ctx.memory_context = memory_manager.init_session(ctx.question)
             memory_manager.append("user", ctx.question)
 
-        ctx.tools = self.tool_executor.registry.to_openai_tools()
-        ctx.tools_desc = self.tool_executor.getAvailableTools()
+        ctx.tools = self.tool_executor.registry.to_openai_tools(self.agent_id)
+        ctx.tools_desc = self.tool_executor.getAvailableTools(self.agent_id)
 
         if self.conversation_mode and memory_manager:
             ctx.conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
@@ -159,7 +161,7 @@ class ReActAgent:
 
         if memory_manager:
             def rebuild():
-                new_tools_desc = self.tool_executor.getAvailableTools()
+                new_tools_desc = self.tool_executor.getAvailableTools(self.agent_id)
                 new_conv = ""
                 if self.conversation_mode:
                     new_conv = self._build_conversation_context(memory_manager, per_msg_limit=800)
@@ -794,7 +796,7 @@ class ReActAgent:
             return str(self.tool_executor.registry.invoke(
                 name=name,
                 params=arguments,
-                caller="react_agent",
+                caller=self.agent_id,
                 hitl_approver=self._confirm if need_hitl else None,
             ))
         except Exception as e:

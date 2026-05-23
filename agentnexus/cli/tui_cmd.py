@@ -23,7 +23,7 @@ def tui():
 
     # Tool executor with metadata
     executor = ToolExecutor()
-    register_all_tools(executor)
+    register_all_tools(executor, llm_client=llm)
 
     # Share audit log with CLI
     try:
