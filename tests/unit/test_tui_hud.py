@@ -1,9 +1,13 @@
 import asyncio
+import json
 from unittest.mock import patch
 
+from agentnexus.agents.react_types import ReActEvent, ReActEventType
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.tui.app import AgentNexusTUI
 from agentnexus.tui.widgets.hud import HUD
+from agentnexus.tui.widgets.input_bar import InputBar
+from agentnexus.tui.widgets.message import ToolCall
 
 
 class TestHUDVersionDisplay:
@@ -70,5 +74,92 @@ class TestChatLayout:
                     hud_str = str(hud_text)
                     assert "feature@abcdef12" in hud_str
                     assert "cwd:D:/code/AgentNexus" in hud_str
+
+        asyncio.run(scenario())
+
+    def test_subagent_run_result_is_rendered_as_delegation_summary(self):
+        class FakeCaps:
+            supports_thinking = True
+            supports_tool_calling = False
+
+        class FakeLLM:
+            capabilities = FakeCaps()
+            model = "fake-model"
+
+        class FakeAgent:
+            def __init__(self):
+                self.llm_client = FakeLLM()
+                self.total_usage = {"input_tokens": 1, "output_tokens": 1}
+                self._on_event = None
+                self._confirm = None
+
+            @property
+            def model_id(self):
+                return "fake-model"
+
+            def run(self, text, memory_manager=None):
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.TOOL_START,
+                        {"name": "subagent_run", "arguments": {"task": text}},
+                    ),
+                    None,
+                    None,
+                )
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.TOOL_DONE,
+                        {
+                            "name": "subagent_run",
+                            "arguments": {"task": text},
+                            "result": json.dumps({
+                                "status": "ok",
+                                "role": "reader",
+                                "answer": "README 摘要",
+                                "summary": "README 摘要",
+                                "steps_used": 2,
+                                "allowed_tools": ["file_read"],
+                            }, ensure_ascii=False),
+                            "id": "",
+                        },
+                    ),
+                    None,
+                    None,
+                )
+                return type("Result", (), {"answer": "done"})()
+
+        class FakeMemory:
+            def __init__(self):
+                self.short_term = ShortTermMemory()
+                self._on_compact = None
+
+            def estimate_stm_tokens(self):
+                return 0
+
+        class FakeVersion:
+            def status(self):
+                return {"branch": "main", "head": None, "can_undo": False, "can_redo": False}
+
+            def commit(self, *args, **kwargs):
+                return None
+
+        async def scenario():
+            app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=FakeVersion())
+            async with app.run_test():
+                await asyncio.sleep(0.2)
+                screen = app.screen
+                screen.on_input_bar_app_submit(InputBar.AppSubmit("请子代理总结 README"))
+
+                for _ in range(100):
+                    if not screen._running:
+                        break
+                    await asyncio.sleep(0.05)
+
+                chat_area = screen.query_one("#chat-area")
+                tools = [w for w in chat_area.walk_children() if isinstance(w, ToolCall)]
+                assert tools
+                assert "[子代理] role=reader status=ok steps=2" in tools[-1].result
+                assert "tools: file_read" in tools[-1].result
+                assert "answer: README 摘要" in tools[-1].result
 
         asyncio.run(scenario())

@@ -9,6 +9,7 @@ import re
 from typing import Callable
 
 from agentnexus.agents.fsm import StateMachine
+from agentnexus.observability.tracer import trace_manager
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
     AgentStep,
@@ -324,6 +325,11 @@ class ReActAgent:
             "tool": tc.get("name", ""),
             "output": tc.get("result", ""),
         })
+        if tc.get("name") == "subagent_run":
+            try:
+                ctx.last_subagent_payload = json.loads(tc.get("result", ""))
+            except Exception:
+                ctx.last_subagent_payload = None
 
         if ctx.memory_manager:
             ctx.memory_manager.append("tool",
@@ -441,6 +447,11 @@ class ReActAgent:
                  result=observation, id="")
 
         step.tool_outputs.append({"tool": parsed["tool"], "output": observation})
+        if parsed["tool"] == "subagent_run":
+            try:
+                ctx.last_subagent_payload = json.loads(observation)
+            except Exception:
+                ctx.last_subagent_payload = None
 
         ctx.messages.append({"role": "assistant", "content": ctx.last_response_text})
         ctx.messages.append({"role": "user", "content":
@@ -545,10 +556,25 @@ class ReActAgent:
     def _on_emit_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EMIT_ANSWER → output answer, save memory, conclude."""
         answer = ctx.last_answer
-        self._output(f"最终答案: {answer}")
-        if ctx.memory_manager:
-            ctx.memory_manager.append("system", f"[最终答案] {answer}")
-            ctx.memory_manager.conclude(ctx.question, answer)
+        with trace_manager.span("final_answer", {
+            "question": ctx.question[:200],
+            "used_subagent": bool(ctx.last_subagent_payload),
+        }) as span:
+            self._output(f"最终答案: {answer}")
+            if ctx.memory_manager:
+                ctx.memory_manager.append("system", f"[最终答案] {answer}")
+                ctx.memory_manager.conclude(ctx.question, answer)
+            span.output = {
+                "answer": str(answer)[:500],
+                "subagent_answer": str((ctx.last_subagent_payload or {}).get("answer", ""))[:500],
+            }
+            span.metadata = {
+                "status": "ok",
+                "used_subagent": bool(ctx.last_subagent_payload),
+                "subagent_status": (ctx.last_subagent_payload or {}).get("status", ""),
+                "subagent_role": (ctx.last_subagent_payload or {}).get("role", ""),
+                "subagent_recovery": (ctx.last_subagent_payload or {}).get("recovery", None),
+            }
         return []
 
     # ================================================================
@@ -751,7 +777,7 @@ class ReActAgent:
             response = input("确认执行? [y/N] ").strip().lower()
             return response == "y"
         except (EOFError, OSError):
-            return True
+            return False
 
     def _build_prompt(self, tools_desc: str, question: str, history_str: str,
                        memory_context: str, conversation_context: str) -> str:

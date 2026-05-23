@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from agentnexus.observability.tracer import trace_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,30 +93,47 @@ class ToolRegistry:
 
         # 4. HITL gate
         hitl_triggered = False
-        if meta.require_hitl and hitl_approver:
+        if meta.require_hitl:
             hitl_triggered = True
-            if not hitl_approver(str(params)[:200]):
+            if hitl_approver is None:
+                return "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
+            confirm_summary = (
+                f"调用者: {caller}\n"
+                f"工具: {name}\n"
+                f"风险: {meta.risk_level.value}\n"
+                f"参数: {json.dumps(params, ensure_ascii=False, default=str)[:500]}"
+            )
+            if not hitl_approver(confirm_summary):
                 return "[blocked] 用户取消了该工具调用"
 
         # 5. Execute with timeout enforcement
         start = time.time()
         error = None
         result_str = ""
+        span_input = {
+            "tool_name": name,
+            "caller": caller,
+            "params": params,
+            "risk_level": meta.risk_level.value,
+        }
         try:
-            from concurrent.futures import ThreadPoolExecutor
-            from concurrent.futures import TimeoutError as FutureTimeout
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(func, **params)
-                try:
-                    result = future.result(timeout=meta.timeout_sec)
-                except FutureTimeout:
-                    error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
-                    raise TimeoutError(error)
-            result_str = str(result)[:500]
-            # 6. Output schema validation
-            if meta.output_schema:
-                self._validate_output(name, result, meta.output_schema)
-            return result
+            with trace_manager.span("tool", span_input) as span:
+                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import TimeoutError as FutureTimeout
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(func, **params)
+                    try:
+                        result = future.result(timeout=meta.timeout_sec)
+                    except FutureTimeout:
+                        error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
+                        raise TimeoutError(error)
+                result_str = str(result)[:500]
+                # 6. Output schema validation
+                if meta.output_schema:
+                    self._validate_output(name, result, meta.output_schema)
+                span.output = {"result_summary": result_str}
+                span.metadata = {"status": "ok", "caller": caller}
+                return result
         except TimeoutError:
             raise
         except Exception as e:

@@ -150,6 +150,7 @@ class ExecutionContext:
     pending_tool_calls: list[dict] = field(default_factory=list)
     last_answer: Optional[str] = None
     thinking_enabled: bool = False
+    last_subagent_payload: Optional[dict] = None
 
     # -- TUI event side-channel (bypasses FSM queue) --
     _on_emit: Any = None  # Callable[[ReActEvent, Optional[ReActState], Optional[ReActState]], None]

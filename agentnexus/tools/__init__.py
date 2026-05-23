@@ -7,7 +7,8 @@ from agentnexus.tools.tool_executor import ToolExecutor
 
 def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
                        llm_client=None, include_tools: set[str] | None = None,
-                       enable_subagent: bool = True):
+                       enable_subagent: bool = True,
+                       subagent_confirm=None):
     """Register all available tools on the given executor.
 
     Call this once per CLI/TUI entry point instead of duplicating
@@ -19,6 +20,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
         llm_client: Optional parent LLM used to clone subagent settings.
         include_tools: Optional allowlist of tool names to register.
         enable_subagent: Whether to register the subagent delegation tool.
+        subagent_confirm: Optional confirmation callback forwarded to executor subagents.
     """
     from agentnexus.tools.code_executor import python_execute
     from agentnexus.tools.file_ops import file_list, file_read, file_write
@@ -231,6 +233,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
                 "properties": {"code": {"type": "string"}},
                 "required": ["code"],
             },
+            allowed_agents=["react_agent", "subagent_executor"],
             risk_level="high",
             require_hitl=not non_interactive,
             timeout_sec=60,
@@ -262,16 +265,16 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
 
         executor.registerTool(
             "subagent_run",
-            "将一个明确、可独立完成、输入充分的子任务委派给受限子代理执行。适合阅读、检索、归纳等局部任务；返回结构化结果供父代理继续综合。参数: task(必填), role(可选), allowed_tools(可选白名单), max_steps(默认4)",
-            make_subagent_run(parent_llm=llm_client, non_interactive=non_interactive),
+            "将一个明确、可独立完成、输入充分的子任务委派给子代理执行。默认是 Explorer（阅读、检索、归纳）；使用 executor 时可在受控条件下运行 Python 片段验证结果。优先通过 task 和 allowed_tools 约束子代理范围。旧 role 值 reader/researcher/analyst 会映射到 explorer。返回结构化结果供父代理继续综合。参数: task(必填), role(兼容字段,可选), allowed_tools(可选白名单), max_steps(默认4)",
+            make_subagent_run(parent_llm=llm_client, non_interactive=non_interactive, subagent_confirm=subagent_confirm),
             param_schema={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "子任务描述"},
                     "role": {
                         "type": "string",
-                        "enum": ["general", "researcher", "reader", "analyst"],
-                        "default": "general",
+                        "enum": ["explorer", "executor", "general", "researcher", "reader", "analyst"],
+                        "default": "explorer",
                     },
                     "allowed_tools": {
                         "type": "array",

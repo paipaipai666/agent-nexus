@@ -339,6 +339,36 @@ class ChatScreen(Screen):
             return first_line
         return text[:200]
 
+    @staticmethod
+    def _format_subagent_result(text: str) -> str:
+        """Format subagent_run JSON output into a readable delegation summary."""
+        import json
+
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return text[:500]
+
+        if not isinstance(payload, dict):
+            return text[:500]
+
+        role = payload.get("role", "general")
+        status = payload.get("status", "unknown")
+        steps_used = payload.get("steps_used", 0)
+        allowed_tools = payload.get("allowed_tools", []) or []
+        answer = str(payload.get("answer", "") or "").strip()
+        summary = str(payload.get("summary", "") or "").strip()
+
+        lines = [
+            f"[子代理] role={role} status={status} steps={steps_used}",
+            f"tools: {', '.join(allowed_tools) if allowed_tools else '-'}",
+        ]
+        if answer:
+            lines.append(f"answer: {answer[:400]}")
+        elif summary:
+            lines.append(f"summary: {summary[:400]}")
+        return "\n".join(lines)
+
     # ── compact event handling ───────────────────────────────
 
     def _on_compact_event(self, event: dict):
@@ -403,6 +433,9 @@ class ChatScreen(Screen):
             return result_holder[0]
 
         self._agent._confirm = _tui_confirm
+        bridge = getattr(self.app, "_subagent_confirm", None)
+        if bridge is not None:
+            bridge.set_target(_tui_confirm)
 
         # ── Mount loading indicator ──
         loading = Static("[#fab283]● Working...[/]", id="loading-indicator")
@@ -463,6 +496,8 @@ class ChatScreen(Screen):
                         result = self._condense_search_result(result)
                     elif tool_lower == "file_read":
                         result = self._condense_file_result(result)
+                    elif tool_lower == "subagent_run":
+                        result = self._format_subagent_result(result)
                     self._current_tool_widget.update_result(result)
                     self._current_tool_widget = None
                 if self._memory:

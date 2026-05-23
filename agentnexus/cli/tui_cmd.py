@@ -15,6 +15,7 @@ def tui():
     from agentnexus.memory.versioned import ConversationVersionManager
     from agentnexus.observability.tracer import trace_manager
     from agentnexus.tools import register_all_tools
+    from agentnexus.tools.confirm_bridge import ConfirmBridge
     from agentnexus.tools.tool_executor import ToolExecutor
     from agentnexus.tui.app import AgentNexusTUI
 
@@ -23,7 +24,8 @@ def tui():
 
     # Tool executor with metadata
     executor = ToolExecutor()
-    register_all_tools(executor, llm_client=llm)
+    subagent_confirm = ConfirmBridge()
+    register_all_tools(executor, llm_client=llm, subagent_confirm=subagent_confirm)
 
     # Share audit log with CLI
     try:
@@ -45,4 +47,5 @@ def tui():
 
     # Launch TUI
     tui_app = AgentNexusTUI(agent=agent, memory=memory, version=version)
+    tui_app._subagent_confirm = subagent_confirm
     tui_app.run()

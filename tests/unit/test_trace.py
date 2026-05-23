@@ -1,10 +1,14 @@
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from agentnexus.observability.tracer import (
     TraceContext,
     TraceManager,
     TraceSpan,
     trace_manager,
 )
+from agentnexus.tools.subagent import make_subagent_run
 
 
 class TestTraceContext:
@@ -134,3 +138,73 @@ class TestTraceManager:
         first_idx = content.index("first")
         second_idx = content.index("second")
         assert first_idx < second_idx
+
+    def test_subagent_trace_contains_parent_and_attempt_spans(self, tmp_path, monkeypatch):
+        tm = TraceManager()
+        tm.configure(str(tmp_path))
+        tm.start_trace("subagent trace test")
+
+        monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
+
+        def fake_run(self, question, memory_manager=None):
+            ctx = trace_manager.active
+            llm_span = ctx.start_span("llm", {"messages_count": 1})
+            ctx.end_span(llm_span, metadata={"status": "ok"})
+            return SimpleNamespace(answer="child answer", steps=[])
+
+        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+
+        tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
+        payload = tool(task="请总结 README", role="explorer", max_steps=2)
+        assert "child answer" in payload
+
+        tm.end_trace()
+        jsonl_files = list(tmp_path.glob("*.jsonl"))
+        content = jsonl_files[0].read_text(encoding="utf-8")
+        assert '"name": "subagent"' in content
+        assert '"name": "subagent_attempt"' in content
+        assert '"name": "llm"' in content
+
+    def test_subagent_trace_records_recovery_metadata(self, tmp_path, monkeypatch):
+        tm = TraceManager()
+        tm.configure(str(tmp_path))
+        tm.start_trace("subagent recovery trace")
+
+        monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
+        monkeypatch.setattr(
+            "agentnexus.tools.subagent.ReActAgent.run",
+            lambda self, question, memory_manager=None: SimpleNamespace(answer="fallback answer", steps=[]),
+        )
+
+        tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
+        payload = tool(task="请总结 README", role="reader", allowed_tools=["python_execute"], max_steps=2)
+        assert "fallback answer" in payload
+
+        tm.end_trace()
+        jsonl_files = list(tmp_path.glob("*.jsonl"))
+        content = jsonl_files[0].read_text(encoding="utf-8")
+        assert 'requested_tools_filtered' in content
+
+    def test_tool_and_final_answer_spans_capture_subagent_adoption(self, tmp_path, monkeypatch):
+        from agentnexus.agents.react_types import ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.agents.re_act_agent import ReActAgent
+
+        tm = TraceManager()
+        tm.configure(str(tmp_path))
+        tm.start_trace("parent adoption trace")
+
+        mock_llm = MagicMock()
+        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        ctx = ExecutionContext(question="请总结 README")
+        ctx.steps.append(SimpleNamespace(tool_outputs=[]))
+        ctx.last_answer = "最终答案"
+        ctx.last_subagent_payload = {"answer": "child answer", "status": "fallback", "role": "explorer", "recovery": {"attempted": True}}
+
+        agent._on_emit_answer(ctx, ReActEvent(ReActEventType.NO_TOOLS))
+        tm.end_trace()
+        jsonl_files = list(tmp_path.glob("*.jsonl"))
+        content = jsonl_files[0].read_text(encoding="utf-8")
+        assert '"name": "final_answer"' in content
+        assert '"used_subagent": true' in content
+        assert 'child answer' in content

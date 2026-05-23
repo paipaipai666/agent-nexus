@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from typing import Callable, Iterable
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.llm import AgentLLM
+from agentnexus.observability.tracer import trace_manager
 from agentnexus.tools.tool_executor import ToolExecutor
 
 _SAFE_SUBAGENT_TOOLS = {
@@ -16,20 +17,26 @@ _SAFE_SUBAGENT_TOOLS = {
     "file_read",
     "file_list",
     "memory_search",
+    "python_execute",
 }
 
 _ROLE_TOOL_PRESETS = {
-    "general": ["grep_search", "web_search", "kb_search", "file_read", "file_list"],
-    "researcher": ["web_search", "kb_search", "file_read", "file_list", "grep_search"],
-    "reader": ["file_read", "file_list", "grep_search"],
-    "analyst": ["grep_search", "web_search", "kb_search", "file_read", "file_list", "memory_search"],
+    "explorer": ["grep_search", "web_search", "kb_search", "file_read", "file_list", "memory_search"],
+    "executor": ["python_execute", "file_read", "file_list", "grep_search"],
 }
 
 _ROLE_DESCRIPTIONS = {
-    "general": "通用分析型子代理",
-    "researcher": "信息检索与事实核查子代理",
-    "reader": "代码与文档阅读子代理",
-    "analyst": "分析归纳子代理",
+    "explorer": "Explorer 子代理，适合阅读、检索、归纳和信息收集",
+    "executor": "Executor 子代理，适合在受控环境中执行 Python 片段并验证结果",
+}
+
+_LEGACY_ROLE_ALIASES = {
+    "explorer": "explorer",
+    "general": "explorer",
+    "reader": "explorer",
+    "researcher": "explorer",
+    "analyst": "explorer",
+    "executor": "executor",
 }
 
 
@@ -44,26 +51,46 @@ def _clone_llm(parent_llm: AgentLLM | None) -> AgentLLM:
     )
 
 
-def _resolve_allowed_tools(role: str, allowed_tools: Iterable[str] | None) -> list[str]:
-    if allowed_tools:
-        resolved = [name for name in allowed_tools if name in _SAFE_SUBAGENT_TOOLS]
-        return resolved
-    preset = _ROLE_TOOL_PRESETS.get(role, _ROLE_TOOL_PRESETS["general"])
-    return [name for name in preset if name in _SAFE_SUBAGENT_TOOLS]
+
+def _normalize_role(role: str | None) -> str:
+    normalized = (role or "explorer").strip().lower()
+    return _LEGACY_ROLE_ALIASES.get(normalized, "explorer")
 
 
-def _build_subagent_prompt(task: str, role: str) -> str:
-    role_desc = _ROLE_DESCRIPTIONS.get(role, role or _ROLE_DESCRIPTIONS["general"])
+
+def _resolve_allowed_tools(role: str, allowed_tools: Iterable[str] | None) -> tuple[list[str], str | None]:
+    preset = [name for name in _ROLE_TOOL_PRESETS.get(role, _ROLE_TOOL_PRESETS["explorer"]) if name in _SAFE_SUBAGENT_TOOLS]
+    if allowed_tools is None:
+        return preset, None
+
+    requested = [name for name in allowed_tools if name in preset]
+    if requested:
+        return requested, None
+    return preset, "requested_tools_filtered"
+
+
+
+def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None) -> str:
+    role_desc = _ROLE_DESCRIPTIONS.get(role, _ROLE_DESCRIPTIONS["explorer"])
+    retry_block = ""
+    if retry_reason:
+        retry_block = (
+            f"\n重试要求：上一次子代理执行未产出可用结论，原因：{retry_reason}。"
+            "请更保守地使用已有工具和观察，优先给出清晰结论。\n"
+        )
     return (
-        f"你是由父代理委派的子代理，当前角色：{role_desc}。\n"
+        f"你是由父代理委派的 {role_desc}。\n"
         "只完成当前子任务，不要假装你拥有未执行过的观察。"
-        "如果信息不足，明确指出缺口。完成后直接给出结论。\n\n"
+        "如果信息不足，明确指出缺口。完成后直接给出结论。"
+        f"{retry_block}\n"
         f"子任务：{task}"
     )
 
 
+
 def _register_child_tools(executor: ToolExecutor, parent_llm: AgentLLM | None,
-                          non_interactive: bool, include_tools: list[str]) -> None:
+                          non_interactive: bool, include_tools: list[str],
+                          subagent_confirm: Callable[[str], bool] | None = None) -> None:
     from agentnexus.tools import register_all_tools
 
     register_all_tools(
@@ -72,58 +99,217 @@ def _register_child_tools(executor: ToolExecutor, parent_llm: AgentLLM | None,
         llm_client=parent_llm,
         include_tools=set(include_tools),
         enable_subagent=False,
+        subagent_confirm=subagent_confirm,
     )
 
 
 
-def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False):
-    def subagent_run(task: str, role: str = "general",
+def _extract_step_summary(result) -> str:
+    steps = getattr(result, "steps", []) or []
+    for step in reversed(steps):
+        for candidate in (getattr(step, "content", ""), getattr(step, "reasoning_content", "")):
+            text = (candidate or "").strip()
+            if not text:
+                continue
+            extracted = ReActAgent._extract_answer_from_text(text).strip()
+            if extracted:
+                return extracted[:1000]
+    return ""
+
+
+
+def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
+                          task: str, role: str, tool_names: list[str], max_steps: int,
+                          retry_reason: str | None = None,
+                          subagent_confirm: Callable[[str], bool] | None = None) -> tuple[dict | None, Exception | None]:
+    child_llm = _clone_llm(parent_llm)
+    child_executor = ToolExecutor()
+    _register_child_tools(child_executor, parent_llm, non_interactive, tool_names, subagent_confirm)
+    child_agent = ReActAgent(
+        child_llm,
+        child_executor,
+        max_steps=max(1, min(int(max_steps), 8)),
+        output=lambda *_args, **_kwargs: None,
+        confirm_fn=subagent_confirm,
+        conversation_mode=False,
+        agent_id=f"subagent_{role}",
+    )
+
+    try:
+        with trace_manager.span("subagent_attempt", {
+            "role": role,
+            "tool_names": tool_names,
+            "max_steps": max_steps,
+            "retry_reason": retry_reason or "",
+            "task_preview": task[:200],
+        }) as span:
+            result = child_agent.run(_build_subagent_prompt(task, role, retry_reason), memory_manager=None)
+            answer = (result.answer or "").strip()
+            salvaged = _extract_step_summary(result)
+            span.output = {
+                "answer": answer[:500],
+                "salvaged": salvaged[:500],
+                "steps_used": len(getattr(result, "steps", []) or []),
+            }
+            span.metadata = {
+                "status": "ok",
+                "agent_id": f"subagent_{role}",
+            }
+            return {
+                "role": role,
+                "tool_names": tool_names,
+                "answer": answer,
+                "salvaged": salvaged,
+                "steps_used": len(getattr(result, "steps", []) or []),
+                "result": result,
+            }, None
+    except Exception as exc:
+        return None, exc
+
+
+
+def _build_payload(status: str, role: str, answer: str, summary: str,
+                   steps_used: int, allowed_tools: list[str], recovery: dict | None = None) -> str:
+    payload = {
+        "status": status,
+        "role": role,
+        "answer": answer,
+        "summary": summary,
+        "steps_used": steps_used,
+        "allowed_tools": allowed_tools,
+    }
+    if recovery:
+        payload["recovery"] = recovery
+    return json.dumps(payload, ensure_ascii=False)
+
+
+
+def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False,
+                      subagent_confirm: Callable[[str], bool] | None = None):
+    def subagent_run(task: str, role: str = "explorer",
                      allowed_tools: list[str] | None = None,
                      max_steps: int = 4) -> str:
-        tool_names = _resolve_allowed_tools(role, allowed_tools)
-        if not tool_names:
-            return json.dumps({
-                "status": "error",
-                "role": role,
-                "answer": "",
-                "summary": "没有可用的安全工具可分配给子代理。",
-                "steps_used": 0,
-                "allowed_tools": [],
-            }, ensure_ascii=False)
+        effective_role = _normalize_role(role)
+        tool_names, tool_recovery = _resolve_allowed_tools(effective_role, allowed_tools)
+        with trace_manager.span("subagent", {
+            "requested_role": role,
+            "effective_role": effective_role,
+            "allowed_tools": tool_names,
+            "max_steps": max_steps,
+            "task_preview": (task or "")[:200],
+        }) as span:
+            if not tool_names:
+                payload = _build_payload(
+                    status="error",
+                    role=effective_role,
+                    answer="",
+                    summary="没有可用的安全工具可分配给子代理。",
+                    steps_used=0,
+                    allowed_tools=[],
+                    recovery={"attempted": False, "reason": tool_recovery or "no_safe_tools"},
+                )
+                span.output = {"payload": payload[:500]}
+                span.metadata = {"status": "error", "agent_id": f"subagent_{effective_role}"}
+                return payload
 
-        child_llm = _clone_llm(parent_llm)
-        child_executor = ToolExecutor()
-        _register_child_tools(child_executor, parent_llm, non_interactive, tool_names)
-        child_agent = ReActAgent(
-            child_llm,
-            child_executor,
-            max_steps=max(1, min(int(max_steps), 8)),
-            output=lambda *_args, **_kwargs: None,
-            conversation_mode=False,
-            agent_id=f"subagent_{role}",
-        )
-
-        try:
-            result = child_agent.run(_build_subagent_prompt(task, role), memory_manager=None)
-            answer = (result.answer or "").strip()
-            payload = {
-                "status": "ok" if answer else "empty",
-                "role": role,
-                "answer": answer,
-                "summary": answer[:500],
-                "steps_used": len(result.steps),
-                "allowed_tools": tool_names,
+            attempt, error = _run_subagent_attempt(
+                parent_llm, non_interactive, task, effective_role, tool_names, max_steps, subagent_confirm=subagent_confirm
+            )
+            recovery = {
+                "attempted": False,
+                "reason": tool_recovery,
+                "attempts": 1,
             }
-        except Exception as exc:
-            payload = {
-                "status": "error",
-                "role": role,
-                "answer": "",
-                "summary": f"子代理执行失败: {exc}",
-                "steps_used": 0,
-                "allowed_tools": tool_names,
-            }
+            if tool_recovery:
+                recovery["attempted"] = True
 
-        return json.dumps(payload, ensure_ascii=False)
+            if error is None and attempt is not None:
+                direct_answer = attempt["answer"]
+                answer = direct_answer or attempt["salvaged"]
+                if answer:
+                    if not direct_answer:
+                        recovery.update({
+                            "attempted": True,
+                            "reason": recovery["reason"] or "salvaged_step_content",
+                            "attempts": max(recovery["attempts"], 1),
+                        })
+                    payload = _build_payload(
+                        status="ok" if not recovery["attempted"] else "fallback",
+                        role=attempt["role"],
+                        answer=answer,
+                        summary=answer[:500],
+                        steps_used=attempt["steps_used"],
+                        allowed_tools=attempt["tool_names"],
+                        recovery=recovery if recovery["attempted"] else None,
+                    )
+                    span.output = {"payload": payload[:500]}
+                    span.metadata = {"status": "ok" if not recovery["attempted"] else "fallback", "agent_id": f"subagent_{effective_role}", "recovery": recovery if recovery["attempted"] else None}
+                    return payload
+
+            fallback_role = "explorer"
+            fallback_tools = [name for name in _ROLE_TOOL_PRESETS["explorer"] if name in _SAFE_SUBAGENT_TOOLS]
+            fallback_reason = tool_recovery or (str(error) if error else "empty_answer")
+
+            recovery.update({
+                "attempted": True,
+                "reason": fallback_reason,
+                "attempts": 2,
+            })
+
+            fallback_attempt, fallback_error = _run_subagent_attempt(
+                parent_llm,
+                non_interactive,
+                task,
+                fallback_role,
+                fallback_tools,
+                min(max_steps + 1, 8),
+                retry_reason=fallback_reason,
+                subagent_confirm=subagent_confirm,
+            )
+
+            if fallback_error is None and fallback_attempt is not None:
+                answer = fallback_attempt["answer"] or fallback_attempt["salvaged"]
+                if answer:
+                    payload = _build_payload(
+                        status="fallback",
+                        role=fallback_attempt["role"],
+                        answer=answer,
+                        summary=answer[:500],
+                        steps_used=fallback_attempt["steps_used"],
+                        allowed_tools=fallback_attempt["tool_names"],
+                        recovery=recovery,
+                    )
+                    span.output = {"payload": payload[:500]}
+                    span.metadata = {"status": "fallback", "agent_id": f"subagent_{fallback_role}", "recovery": recovery}
+                    return payload
+
+            if attempt is not None and attempt.get("salvaged"):
+                salvaged = attempt["salvaged"]
+                payload = _build_payload(
+                    status="fallback",
+                    role=attempt["role"],
+                    answer=salvaged,
+                    summary=salvaged[:500],
+                    steps_used=attempt["steps_used"],
+                    allowed_tools=attempt["tool_names"],
+                    recovery=recovery,
+                )
+                span.output = {"payload": payload[:500]}
+                span.metadata = {"status": "fallback", "agent_id": f"subagent_{effective_role}", "recovery": recovery}
+                return payload
+
+            error_summary = str(fallback_error or error or "子代理未产出有效答案")
+            payload = _build_payload(
+                status="error",
+                role=effective_role,
+                answer="",
+                summary=f"子代理执行失败: {error_summary}",
+                steps_used=(fallback_attempt or attempt or {}).get("steps_used", 0),
+                allowed_tools=(fallback_attempt or attempt or {}).get("tool_names", fallback_tools),
+                recovery=recovery,
+            )
+            span.output = {"payload": payload[:500]}
+            span.metadata = {"status": "error", "agent_id": f"subagent_{effective_role}", "recovery": recovery}
+            return payload
 
     return subagent_run
