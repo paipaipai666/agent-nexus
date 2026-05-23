@@ -10,12 +10,12 @@
 ## 系统架构
 
 ```
-用户在终端输入 nexus run "任务描述"
+用户在终端输入 nexus <command>
               │
               ▼
 ┌──────────────────────────────────────────────────────────┐
 │                    CLI 层（Typer + Rich）                 │
-│    nexus run / chat / tui / kb / eval / stats / audit    │
+│  nexus kb / memory / logs / eval / stats / config / ...  │
 └───────────────────────┬──────────────────────────────────┘
                         │
                         ▼
@@ -126,39 +126,36 @@ pip install -e ".[dev,eval]"
 
 ```bash
 nexus init                                    # 配置 API Key
-nexus run "搜索 AI 趋势并写分析报告"           # 执行任务
-nexus chat                                     # 交互对话模式
 nexus tui                                      # TUI 终端界面
-nexus kb add ./docs/                           # 添加知识库
+nexus kb add <path-to-docs>                    # 添加知识库
 nexus stats                                    # 查看 Token 统计
 ```
 
 ## 命令参考
 
-### 任务执行
+### 命令总览
 
 | 命令 | 描述 |
 |------|------|
-| `nexus run <task> [-n]` | ReAct 单 Agent 执行任务，`-n` 跳过交互确认 |
-| `nexus chat [--no-memory]` | 交互式对话（ReAct + 联网搜索 + 记忆检索 + 版本控制） |
-| `nexus tui` | 终端原生对话界面（Textual TUI，Catppuccin 主题） |
 | `nexus init` | 首次初始化（配置 API Key） |
 | `nexus config [--set KEY --value VAL]` | 查看或修改配置 |
+| `nexus tui` | 终端原生界面（Textual TUI，Catppuccin 主题） |
 | `nexus version` | 显示版本 |
-
-### Chat 版本控制（在 chat 中使用）
-
-| 命令 | 描述 |
-|------|------|
-| `/undo` | 回退到上一轮对话（STM + LTM 同步恢复） |
-| `/redo` | 重做被撤销的对话 |
-| `/log [--all]` | 查看对话历史 checkpoint 树 |
-| `/branch <name>` | 从当前位置创建分支并切换 |
-| `/checkout <ref>` | 切换到 checkpoint ID 或分支名 |
-| `/diff [ref1] [ref2]` | 对比两个 checkpoint 的 STM/LTM 差异 |
-| `/status` | 显示当前分支、HEAD、可回退/可重做状态 |
-| `/clear` | 重置短期记忆和版本历史 |
-| `/clear --all` | 清除所有记忆（STM + LTM + 版本历史） |
+| `nexus kb add <path>` | 添加文档到知识库 |
+| `nexus kb list` | 查看知识库状态 |
+| `nexus memory list [--limit N]` | 查看长期记忆 |
+| `nexus memory clear` | 清空长期记忆 |
+| `nexus logs list [--days N]` | 列出历史 Trace |
+| `nexus logs view --trace-id <id>` | 查看 Trace Span 树 |
+| `nexus stats [--days N]` | Token 成本统计 |
+| `nexus audit [-n N] [-t tool]` | 查看工具调用审计日志 |
+| `nexus eval run` | RAG 质量评估（含 context_relevancy） |
+| `nexus eval trajectory [-t ID] [-d N]` | 轨迹质量评估（5 项规则检查） |
+| `nexus eval component` | 组件级评估 |
+| `nexus eval hallucination [-t ID]` | 幻觉率检测 |
+| `nexus eval tool-selection` | 工具选择准确率 |
+| `nexus eval coherence [-t ID]` | 多步推理连贯性 |
+| `nexus eval ci [-d N]` | CI 模式：全量评估，不达标 exit(1) |
 
 ### 知识库 & 记忆
 
@@ -197,16 +194,14 @@ agentnexus/
 ├── agentnexus/                    ← 源码包
 │   ├── __main__.py                ← python -m agentnexus / PyInstaller 入口
 │   ├── cli/                       ← Typer CLI 层
-│   │   ├── __init__.py            # Typer app + 子应用注册（kb/logs/eval/memory）
-│   │   ├── run.py                 # nexus run
-│   │   ├── chat.py                # nexus chat（版本控制 + 3 工具注册）
+│   │   ├── __init__.py            # Typer app + 子应用注册（kb / memory / logs / eval / stats / config / audit / tui）
 │   │   ├── config.py              # nexus init / config
 │   │   ├── kb.py                  # nexus kb
+│   │   ├── memory_cmd.py          # nexus memory
 │   │   ├── logs.py                # nexus logs
 │   │   ├── stats.py               # nexus stats
 │   │   ├── eval_cmd.py            # nexus eval
 │   │   ├── audit.py               # nexus audit
-│   │   ├── memory_cmd.py          # nexus memory
 │   │   └── tui_cmd.py             # nexus tui
 │   ├── agents/
 │   │   ├── re_act_agent.py        # ReAct 循环（Thought→Action→Observe）

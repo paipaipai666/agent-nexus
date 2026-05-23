@@ -25,11 +25,13 @@ class TestCliStats:
         with runner.isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
+            cfg._settings_cache = None
             try:
                 result = runner.invoke(app, ["stats", "--days", "30"])
                 assert result.exit_code == 0
                 assert "暂无" in result.stdout or "0" in result.stdout
             finally:
+                cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_stats_with_trace_data(self):

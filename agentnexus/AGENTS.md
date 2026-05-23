@@ -9,7 +9,7 @@ agentnexus/                    ← 仓库根目录
 └── agentnexus/                ← pip 包根目录 (pyproject.toml 所在)
     ├── agentnexus/            ← 源码包
     │   ├── __main__.py        ← python -m 入口
-    │   ├── cli/               ← Typer CLI 层 (run, chat, kb, logs, …)
+    │   ├── cli/               ← Typer CLI 层 (kb, memory, logs, eval, stats, config, init, audit, tui)
     │   ├── agents/            ← Agent 实现 (ReActAgent)
     │   ├── core/              ← config.py (Pydantic Settings) + llm.py (AgentLLM)
     │   ├── prompts/           ← .txt 提示词模板 (str.format, 非 Jinja2)
@@ -51,12 +51,18 @@ pyinstaller agentnexus.spec --noconfirm
 
 ## 架构关键点
 
-### 执行入口链
+### 执行入口
 
 ```
-nexus run <task> → cli/run.py → ReActAgent
-nexus chat       → cli/chat.py → ReActAgent
 nexus init       → cli/config.py
+nexus config     → cli/config.py
+nexus kb         → cli/kb.py
+nexus memory     → cli/memory_cmd.py
+nexus logs       → cli/logs.py
+nexus stats      → cli/stats.py
+nexus eval       → cli/eval_cmd.py
+nexus audit      → cli/audit.py
+nexus tui        → cli/tui_cmd.py
 ```
 
 ### 提示词管理
@@ -119,7 +125,7 @@ BM25 索引仅在内存中，不持久化，每次会话重建。
 
 `observability/tracer.py`:
 - 线程安全的 TraceManager 单例
-- 每次 `nexus run` 创建 TraceContext → 各节点通过 `_trace_wrapper` 自动记录 span
+- 每次 CLI 执行创建 TraceContext → 各节点通过 `_trace_wrapper` 自动记录 span
 - 输出: `~/.agentnexus/traces/{YYYY-MM-DD}.jsonl`
 - ⚠ span 只在 `end_trace()` 时 flush，crash 丢未 flush 数据
 - 输入输出截断 1000 字符
