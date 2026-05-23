@@ -82,6 +82,16 @@ class TestRobustJsonParse:
         assert result["type"] == "answer"
         assert result["text"] == "yes"
 
+    def test_full_width_colon_answer(self):
+        result = ReActAgent._robust_json_parse('{"answer"： "hello"}')
+        assert result["type"] == "answer"
+        assert result["text"] == "hello"
+
+    def test_full_width_punctuation_tool_call(self):
+        result = ReActAgent._robust_json_parse('{"tool"： "web_search"， "params"： {"query"： "test"}}')
+        assert result["type"] == "tool_call"
+        assert result["tool"] == "web_search"
+
 
 class TestVisibleThoughtSelection:
     def test_prefers_reasoning_content_over_plain_text(self):

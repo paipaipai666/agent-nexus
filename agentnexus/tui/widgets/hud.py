@@ -1,5 +1,7 @@
 """HUD — bottom status bar: model, context, tokens."""
 
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
@@ -42,6 +44,12 @@ class HUD(Widget):
         # Capability indicators
         self._supports_thinking = False
         self._strategy = ""
+        # Version / workspace indicators
+        self._branch = "main"
+        self._head = "---"
+        self._can_undo = False
+        self._can_redo = False
+        self._cwd_display = str(Path.cwd().resolve())
 
     def update_capabilities(self, supports_thinking: bool, strategy: str = ""):
         self._supports_thinking = supports_thinking
@@ -63,6 +71,13 @@ class HUD(Widget):
 
     def set_compacting(self, active: bool):
         self._compacting = active
+        self._refresh()
+
+    def update_version(self, branch: str, head: str, can_undo: bool, can_redo: bool):
+        self._branch = branch
+        self._head = head
+        self._can_undo = can_undo
+        self._can_redo = can_redo
         self._refresh()
 
     def _refresh(self):
@@ -94,12 +109,22 @@ class HUD(Widget):
         # Compression indicator
         compact_indicator = " [#fab283]\u2699[/]" if self._compacting else ""
 
+        head_short = self._head[:8] if self._head and self._head != "---" else self._head
+        version_actions = []
+        if self._can_undo:
+            version_actions.append("undo")
+        if self._can_redo:
+            version_actions.append("redo")
+        actions_seg = f" ({'/'.join(version_actions)})" if version_actions else ""
+        version_seg = f"cwd:{self._cwd_display} [dim]\u2502[/] {self._branch}@{head_short}{actions_seg}"
+
         parts = [
             f" [#6ba5f2]{self._display_model}[/]",
             thinking_indicator,
             strategy_str,
             f" [dim]\u2502[/] {ctx_seg}",
             f" [dim]\u2502[/] in:{self.total_input // 1000}k out:{self.total_output // 1000}k",
+            f" [dim]\u2502[/] {version_seg}",
             compact_indicator,
         ]
         return "".join(parts)

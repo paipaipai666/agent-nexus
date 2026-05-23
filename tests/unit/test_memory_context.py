@@ -393,6 +393,57 @@ class TestReActAgentConversationMode:
         assert returned == []
         assert ctx.last_answer == "Final answer"
 
+    def test_fallback_text_extracts_answer_from_malformed_json(self):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        ctx = ExecutionContext(question="readme")
+        ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "file_read", "output": "result"}]))
+        ctx.last_response_text = '{"answer"："最终答案"}'
+
+        returned = agent._on_fallback_text(
+            ctx,
+            ReActEvent(ReActEventType.FALLBACK_TEXT, {"reason": "JSON parse failed"}),
+        )
+
+        assert returned == []
+        assert ctx.last_answer == "最终答案"
+
+    def test_prompt_json_tool_followup_does_not_append_duplicate_thought_prompt(self, monkeypatch):
+        from agentnexus.agents.re_act_agent import CallingStrategy, ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = False
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "README content")
+
+        ctx = ExecutionContext(question="readme")
+        ctx.strategy = CallingStrategy.PROMPT_JSON
+        ctx.steps.append(AgentStep(step_id=0))
+        ctx.last_response_text = '{"tool": "file_read", "params": {"file_path": "README.md"}}'
+
+        returned = agent._on_classified_tool(
+            ctx,
+            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
+                "parsed": {"tool": "file_read", "params": {"file_path": "README.md"}}
+            }),
+        )
+        assert [event.type for event in returned] == [ReActEventType.ALL_TOOLS_DONE]
+
+        followup_before = len(ctx.messages)
+        returned = agent._on_all_tools_done(ctx, ReActEvent(ReActEventType.ALL_TOOLS_DONE))
+        assert [event.type for event in returned] == [ReActEventType.LLM_PARAMS_READY]
+        assert len(ctx.messages) == followup_before
+
     def test_get_summary_method(self):
         """ShortTermMemory.get_summary() should return the compacted summary."""
         stm = ShortTermMemory()

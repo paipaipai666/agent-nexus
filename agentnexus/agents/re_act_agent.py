@@ -409,9 +409,10 @@ class ReActAgent:
 
     def _on_all_tools_done(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + ALL_TOOLS_DONE → inject observation analysis then continue."""
-        ctx.messages.append(
-            {"role": "user",
-             "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
+        if ctx.strategy == CallingStrategy.NATIVE_TOOLS:
+            ctx.messages.append(
+                {"role": "user",
+                 "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
         return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
 
     def _on_classified_tool(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
@@ -512,10 +513,10 @@ class ReActAgent:
         return [ReActEvent(ReActEventType.DEGRADED)]
 
     def _on_fallback_text(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """RETRY_GATE + FALLBACK_TEXT → use raw text as final answer (PROMPT_JSON exhausted)."""
+        """RETRY_GATE + FALLBACK_TEXT → salvage answer text before falling back to raw output."""
         step = ctx.steps[-1]
         step.error_message = f"JSON parse failed: {event.payload.get('reason', 'unknown')}"
-        ctx.last_answer = ctx.last_response_text
+        ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
         return []  # EMIT_ANSWER reads ctx.last_answer
 
     # ── DEGRADE ──
@@ -580,7 +581,14 @@ class ReActAgent:
             return ReActAgent._classify_parsed(data)
         except (json.JSONDecodeError, ValueError):
             pass
-        data = ReActAgent._try_fix_json(clean)
+        normalized = ReActAgent._normalize_jsonish_text(clean)
+        if normalized != clean:
+            try:
+                data = json.loads(normalized)
+                return ReActAgent._classify_parsed(data)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        data = ReActAgent._try_fix_json(normalized)
         if data:
             return ReActAgent._classify_parsed(data)
         return {"type": "error", "reason": "JSON parse failed after all repair attempts",
@@ -605,7 +613,7 @@ class ReActAgent:
     def _try_fix_json(text: str) -> dict | None:
         if not text:
             return None
-        s = text.strip()
+        s = ReActAgent._normalize_jsonish_text(text.strip())
         start = s.find("{")
         if start == -1:
             return None
@@ -628,6 +636,46 @@ class ReActAgent:
             return json.loads(candidate)
         except (json.JSONDecodeError, ValueError):
             return None
+
+    @staticmethod
+    def _normalize_jsonish_text(text: str) -> str:
+        if not text:
+            return text
+        translation = str.maketrans({
+            "：": ":",
+            "，": ",",
+            "｛": "{",
+            "｝": "}",
+            "［": "[",
+            "］": "]",
+            "（": "(",
+            "）": ")",
+            "“": '"',
+            "”": '"',
+            "‘": "'",
+            "’": "'",
+        })
+        return text.translate(translation)
+
+    @staticmethod
+    def _extract_answer_from_text(text: str) -> str:
+        if not text:
+            return ""
+        normalized = ReActAgent._normalize_jsonish_text(text.strip())
+        parsed = ReActAgent._try_fix_json(normalized)
+        if isinstance(parsed, dict):
+            if "answer" in parsed:
+                return str(parsed["answer"])
+            if len(parsed) == 1:
+                key = next(iter(parsed))
+                return str(parsed[key])
+        match = re.search(r'"answer"\s*:\s*"((?:\\.|[^"\\])*)"\s*(?:,|})', normalized)
+        if match:
+            try:
+                return json.loads(f'"{match.group(1)}"')
+            except json.JSONDecodeError:
+                return match.group(1).replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
+        return text.strip()
 
     @staticmethod
     def _parse_json_response(text: str) -> dict:

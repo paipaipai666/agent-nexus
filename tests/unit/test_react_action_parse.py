@@ -87,6 +87,10 @@ class TestJsonAutoFix:
         )
         assert result == {"tool": "search", "params": {"q": "test", "n": 1}}
 
+    def test_fix_full_width_punctuation(self):
+        result = ReActAgent._try_fix_json('{"answer"： "最终答案"， "note"： "ok"}')
+        assert result == {"answer": "最终答案", "note": "ok"}
+
 
 class TestJsonFormatPrompt:
     def test_format_section_not_empty(self):

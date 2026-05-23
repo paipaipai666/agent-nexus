@@ -22,7 +22,6 @@ from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall
-from agentnexus.tui.widgets.side_panel import SidePanel
 
 
 class ChatArea(Widget):
@@ -77,10 +76,8 @@ class ChatScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Static(self._render_top_bar(), id="top-bar")
         self._chat_area = ChatArea(id="chat-area")
-        self._side = SidePanel(id="side-panel")
         with Horizontal(id="middle"):
             yield self._chat_area
-            yield self._side
         self._hud = HUD(id="hud")
         self._chat_input = InputBar(id="input-area")
         yield self._hud
@@ -176,7 +173,7 @@ class ChatScreen(Screen):
         if not self._version:
             return
         st = self._version.status()
-        self._side.update_version(
+        self._hud.update_version(
             st.get("branch", "main"),
             st["head"]["id"] if st.get("head") else "---",
             st.get("can_undo", False),
