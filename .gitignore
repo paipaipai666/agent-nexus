@@ -1,11 +1,19 @@
 # Python
 __pycache__/
 *.py[cod]
+.agentnexus_checkpoints/
+.ruff_cache/
+.pytest_cache/
+.test_agentnexus/
 *.egg-info/
 dist/
 build/
+.cache/
+*.db
+*-journal
+*.log
 
-# 虚拟环境
+# Virtual environments
 venv/
 .venv/
 
@@ -14,29 +22,22 @@ venv/
 .idea/
 *.swp
 
-# 密钥 & 配置
+# Secrets & local config
 .env
 *.local
 
-# 运行时生成的数据
-.agentnexus_checkpoints/
-*.db
-*-journal
+# Claude / OMC local state
+.omc/
+.claude/
+**/.omc/
+**/.claude/
 
-# 缓存 & 测试
-.ruff_cache/
-.pytest_cache/
-.cache/
-*.log
-
-# OS
+# Local-only artifacts
+blog.html
+/blog/
+test.txt
+chroma_data/
 .DS_Store
 Thumbs.db
-
-# ChromaDB
-chroma_data/
-
-
-**/.omc/
-**/blog/
-**/.claude/
+**/.trae/
+**/.sisyphus/
