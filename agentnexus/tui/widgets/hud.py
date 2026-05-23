@@ -100,7 +100,7 @@ class HUD(Widget):
             bar = f"[#fab283]{'█' * filled}[/][dim]{'░' * (bar_len - filled)}[/]"
             ctx_seg = f"ctx {ctx_k:.1f}k/{self.ctx_max / 1000:.0f}k {bar}"
         else:
-            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]?[/]"
+            ctx_seg = f"ctx {ctx_k:.1f}k/[dim]200k[/]"
 
         # Capability indicators
         thinking_indicator = " [#a78bfa]\U0001f9e0[/]" if self._supports_thinking else ""
