@@ -441,6 +441,11 @@ class ChatScreen(Screen):
                 if thought:
                     self._chat_area.add_system(
                         f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
+            elif etype == E.ANSWER_THOUGHT:
+                thought = event.payload.get("thought")
+                if thought:
+                    self._chat_area.add_system(
+                        f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
             elif etype == E.TOOL_START:
                 self._stop_spinner()
                 tool_name = event.payload.get("name", "")

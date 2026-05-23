@@ -271,6 +271,7 @@ class ReActAgent:
 
         text = ctx.last_response_text or ctx.last_reasoning
         if text:
+            self._emit_answer_thought(ctx)
             ctx.last_answer = text
             return [ReActEvent(ReActEventType.NO_TOOLS,
                                {"text": text})]
@@ -456,6 +457,7 @@ class ReActAgent:
 
     def _on_classified_answer(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """CLASSIFY + CLASSIFIED_ANSWER → set final answer."""
+        self._emit_answer_thought(ctx)
         ctx.last_answer = event.payload["parsed"]["text"]
         return []  # EMIT_ANSWER reads ctx.last_answer
 
@@ -646,6 +648,20 @@ class ReActAgent:
             key = next(iter(data))
             return {"type": "answer", "text": str(data[key])}
         return {"type": "error", "reason": "JSON missing 'tool' or 'answer' key"}
+
+    def _emit_answer_thought(self, ctx: ExecutionContext) -> None:
+        if not any(step.tool_outputs for step in ctx.steps):
+            return
+
+        raw_text = (ctx.last_response_text or "").strip()
+        if not raw_text:
+            return
+
+        thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning).strip()
+        if not thought or thought == raw_text:
+            return
+
+        ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=thought)
 
     @staticmethod
     def _select_visible_thought(response_text: str, reasoning_text: str) -> str:

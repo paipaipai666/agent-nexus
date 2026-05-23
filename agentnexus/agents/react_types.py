@@ -85,6 +85,7 @@ class ReActEventType(Enum):
     FALLBACK_TEXT = auto()     # internal: PROMPT_JSON exhausted → use raw text as answer
     THOUGHT_MISSING = auto()   # NATIVE: model returned tool_calls without Thought text
     TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
+    ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
 
 
 # ============================================================

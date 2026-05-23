@@ -33,6 +33,10 @@ nexus = "agentnexus.cli:app"
 dev = ["pytest>=8", "pytest-mock>=3", "ruff>=0.3"]
 eval = ["pytest>=8", "ruff>=0.3", "pyinstaller>=6"]
 
+[tool.setuptools.packages.find]
+include = ["agentnexus*"]
+exclude = ["blog*"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

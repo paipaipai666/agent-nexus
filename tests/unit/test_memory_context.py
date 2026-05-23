@@ -339,6 +339,60 @@ class TestReActAgentConversationMode:
         )
         assert [event.type for event in returned] == [ReActEventType.ALL_TOOLS_DONE]
 
+    def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = True
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        emitted = []
+        ctx = ExecutionContext(question="latest news")
+        ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "web_search", "output": "result"}]))
+        ctx.last_reasoning = "The tool result is sufficient to answer now."
+        ctx.last_response_text = "Final answer"
+        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+
+        returned = agent._on_receive_native(ctx, ReActEvent(ReActEventType.ROUTE_NATIVE))
+
+        assert emitted == [
+            (ReActEventType.ANSWER_THOUGHT, {"thought": "The tool result is sufficient to answer now."})
+        ]
+        assert [event.type for event in returned] == [ReActEventType.NO_TOOLS]
+        assert returned[0].payload["text"] == "Final answer"
+        assert ctx.last_answer == "Final answer"
+
+    def test_classified_answer_emits_answer_thought_after_tool_use(self):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.tools.tool_executor import ToolExecutor
+
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = True
+        executor = ToolExecutor()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+
+        emitted = []
+        ctx = ExecutionContext(question="latest news")
+        ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "web_search", "output": "result"}]))
+        ctx.last_reasoning = "The search result is enough to answer now."
+        ctx.last_response_text = '{"answer": "Final answer"}'
+        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+
+        returned = agent._on_classified_answer(
+            ctx,
+            ReActEvent(ReActEventType.CLASSIFIED_ANSWER, {"parsed": {"text": "Final answer"}}),
+        )
+
+        assert emitted == [
+            (ReActEventType.ANSWER_THOUGHT, {"thought": "The search result is enough to answer now."})
+        ]
+        assert returned == []
+        assert ctx.last_answer == "Final answer"
+
     def test_get_summary_method(self):
         """ShortTermMemory.get_summary() should return the compacted summary."""
         stm = ShortTermMemory()
@@ -407,6 +461,14 @@ class TestChatScreenAnswerRender:
                     None,
                     None,
                 )
+                self._on_event(
+                    ReActEvent(
+                        ReActEventType.ANSWER_THOUGHT,
+                        {"thought": "The tool result is enough to answer now."},
+                    ),
+                    None,
+                    None,
+                )
                 return type("Result", (), {"answer": "Final answer"})()
 
         class FakeMemory:
@@ -443,7 +505,8 @@ class TestChatScreenAnswerRender:
                 thought_messages = [m for m in messages if "Thought:" in getattr(m, "content", "")]
                 assert thought_messages
                 assert tools
-                assert "Need fresh information before answering" in thought_messages[-1].content
+                assert any("Need fresh information before answering" in m.content for m in thought_messages)
+                assert any("The tool result is enough to answer now." in m.content for m in thought_messages)
                 assert "[1] Example title" in tools[-1].result
                 assert "Body snippet that should be hidden" not in tools[-1].result
                 assert any(getattr(m, "content", "") == "" for m in messages)
