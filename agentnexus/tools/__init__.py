@@ -160,7 +160,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
     if want("file_read"):
         executor.registerTool(
             "file_read",
-            "读取文件内容，返回带行号的内容。参数: path(文件路径,必填), "
+            "读取文件内容，返回带行号的内容以及当前 version 指纹。参数: path(文件路径,必填), "
             "offset(起始行号,0起,默认0), limit(返回行数,默认最多1000)",
             file_read,
             param_schema={
@@ -199,7 +199,8 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
         executor.registerTool(
             "file_write",
             "写入/创建文件。参数: path(文件路径), content(文件内容), "
-            "mode(create=创建新文件/overwrite=覆盖已有文件/append=追加)。"
+            "mode(create=创建新文件/overwrite=覆盖已有文件/append=追加), "
+            "expected_version(可选，来自 file_read 的 version，用于写前版本校验)。"
             "覆盖已有文件时需要确认",
             file_write,
             param_schema={
@@ -212,6 +213,11 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
                         "enum": ["create", "overwrite", "append"],
                         "description": "写入模式: create=新建, overwrite=覆盖, append=追加",
                         "default": "create",
+                    },
+                    "expected_version": {
+                        "type": "string",
+                        "description": "可选文件版本指纹，来自 file_read 的 version，用于写前冲突检测",
+                        "default": None,
                     },
                 },
                 "required": ["path", "content"],

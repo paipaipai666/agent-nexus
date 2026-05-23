@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 from datetime import datetime
 from pathlib import Path
+
 
 
 def _resolve_safe(path: str) -> Path:
@@ -24,6 +26,21 @@ def _resolve_safe(path: str) -> Path:
             " 不允许通过 ../ 访问上级目录。"
         )
     return p
+
+
+
+def _fingerprint_file(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return "missing"
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
 
 
 def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
@@ -51,8 +68,9 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
     total = len(lines)
     max_lines = min(limit or 1000, 1000)
     sliced = lines[offset:offset + max_lines]
+    version = _fingerprint_file(p)
 
-    parts = [f"[文件] {path} ({total} 行, 共 {p.stat().st_size:,} 字节)"]
+    parts = [f"[文件] {path} ({total} 行, 共 {p.stat().st_size:,} 字节, version={version})"]
     for i, line in enumerate(sliced, start=offset + 1):
         parts.append(f"{i:>6} | {line.rstrip()}")
 
@@ -62,7 +80,8 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
     return "\n".join(parts)
 
 
-def file_write(path: str, content: str, mode: str = "create") -> str:
+
+def file_write(path: str, content: str, mode: str = "create", expected_version: str | None = None) -> str:
     """Write content to a file.
 
     Args:
@@ -70,6 +89,9 @@ def file_write(path: str, content: str, mode: str = "create") -> str:
         content: File content to write.
         mode: "create" (fail if exists), "overwrite" (replace if exists, needs HITL),
               "append" (add to end).
+        expected_version: Optional file fingerprint captured from an earlier read.
+                          If provided and the current on-disk fingerprint differs,
+                          the write is rejected to avoid blind overwrites.
 
     Returns confirmation or error message.
     """
@@ -78,6 +100,14 @@ def file_write(path: str, content: str, mode: str = "create") -> str:
 
     p = _resolve_safe(path)
     exists = p.exists()
+    current_version = _fingerprint_file(p)
+
+    if expected_version is not None and current_version != expected_version:
+        return (
+            f"错误: 文件版本冲突: {path}。"
+            f" 期望版本={expected_version}，当前版本={current_version}。"
+            " 请先重新读取文件再决定是否覆盖。"
+        )
 
     if mode == "create" and exists:
         return f"错误: 文件已存在: {path}。使用 mode='overwrite' 覆盖，或 mode='append' 追加。"
@@ -100,9 +130,11 @@ def file_write(path: str, content: str, mode: str = "create") -> str:
             "overwrite": "已覆盖",
             "append": "已追加",
         }[mode]
-        return f"[file_write] {action} {path} ({size:,} 字节)"
+        new_version = _fingerprint_file(p)
+        return f"[file_write] {action} {path} ({size:,} 字节, version={new_version})"
     except Exception as e:
         return f"错误: 写入失败: {e}"
+
 
 
 def file_list(path: str = ".", pattern: str | None = None) -> str:
@@ -148,6 +180,7 @@ def file_list(path: str = ".", pattern: str | None = None) -> str:
             parts.append(f"  [FILE] {entry.name}  ({size_str}, {mtime})")
 
     return "\n".join(parts)
+
 
 
 def _format_size(size: int) -> str:
