@@ -64,14 +64,14 @@ class TestComputeCalibration:
         captured = capsys.readouterr()
         assert "评分文件不存在" in captured.out
 
-    def test_parse_error(self, tmp_path, capsys):
-        score_file = tmp_path / "bad.json"
+    def test_parse_error(self, temp_agentnexus_home, capsys):
+        score_file = temp_agentnexus_home / "bad.json"
         score_file.write_text("not valid json", encoding="utf-8")
         _compute_calibration([], str(score_file))
         captured = capsys.readouterr()
         assert "读取评分文件失败" in captured.out
 
-    def test_normal(self, tmp_path, capsys):
+    def test_normal(self, temp_agentnexus_home, capsys):
         samples = [
             {"sample_idx": i, "judge_precision": jp, "judge_recall": jr}
             for i, (jp, jr) in enumerate(
@@ -95,7 +95,7 @@ class TestComputeCalibration:
             )
         ]
 
-        score_file = tmp_path / "scores.json"
+        score_file = temp_agentnexus_home / "scores.json"
         score_file.write_text(json.dumps(human_scores), encoding="utf-8")
 
         _compute_calibration(samples, str(score_file))
@@ -122,3 +122,4 @@ class TestEvalListCommand:
         assert result.exit_code == 0
         assert "What is Qdrant?" in result.output
         assert "What is BM25?" in result.output
+        assert "知识库类型" in result.output

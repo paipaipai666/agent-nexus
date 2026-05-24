@@ -41,7 +41,7 @@ class TestKbSearchTool:
 
         monkeypatch.setattr(
             "agentnexus.tools.kb_search.chroma_search",
-            lambda query, limit=10, name=None, namespace=None: [
+            lambda query, limit=10, name=None, namespace=None, where=None: [
                 {"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": chunk.metadata}
             ],
         )
@@ -51,3 +51,54 @@ class TestKbSearchTool:
         assert chunk.chunk_id in result
         assert "docs/support.md" in result
         assert "BM25" in result
+
+    def test_kb_search_uses_filters_and_reranker(self, monkeypatch):
+        captured = {}
+
+        class FakeRetriever:
+            def __init__(self, namespace="default"):
+                self.namespace = namespace
+                self._chunks = {"chunk_1": object()}
+                self._reranker = None
+
+            def rebuild_from_catalog(self):
+                return None
+
+            def load_reranker(self):
+                captured["reranker_loaded"] = True
+                self._reranker = object()
+
+            def search(self, query, dense, top_k=5, min_score=0.0):
+                return []
+
+        monkeypatch.setattr("agentnexus.tools.kb_search.HybridRetriever", FakeRetriever)
+
+        def fake_chroma_search(query, limit=10, name=None, namespace=None, where=None):
+            captured.setdefault("queries", []).append(query)
+            captured["where"] = where
+            return []
+
+        monkeypatch.setattr("agentnexus.tools.kb_search.chroma_search", fake_chroma_search)
+        monkeypatch.setattr(
+            "agentnexus.tools.kb_search.expand_queries",
+            lambda query: [query, "BM25 查询"],
+        )
+
+        result = kb_search(
+            "检索用什么",
+            namespace="support",
+            source="docs/support.md",
+            file_format="markdown",
+            section_title="检索",
+            page_number=2,
+        )
+
+        assert result == "[kb_search] 未找到相关知识"
+        assert captured["reranker_loaded"] is True
+        assert captured["where"] == {
+            "source_uri": "docs/support.md",
+            "format": "markdown",
+            "section_title": "检索",
+            "page_number": 2,
+        }
+        assert captured["queries"] == ["检索用什么", "BM25 查询"]

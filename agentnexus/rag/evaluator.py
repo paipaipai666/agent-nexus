@@ -1,12 +1,13 @@
 import random
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from agentnexus.core.judge_llm import get_judge_llm
 from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
 from agentnexus.rag.chroma_client import delete_collection, search
-from agentnexus.rag.ingestion import ChunkStrategy, chunk_text
+from agentnexus.rag.ingestion import ChunkStrategy, chunk_text, ingest_document
 from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
 
 
@@ -221,11 +222,28 @@ class RAGEvaluator:
         return run
 
     def _chunk_all(self, strategy: ChunkStrategy, size: int, overlap: int) -> list[str]:
+        if self._docs and all(self._looks_like_file_path(item) for item in self._docs):
+            chunks: list[str] = []
+            for path in self._docs:
+                artifacts = ingest_document(
+                    path,
+                    strategy=strategy,
+                    chunk_size=size,
+                    chunk_overlap=overlap,
+                )
+                chunks.extend(artifacts.legacy_chunks())
+            return chunks or self._docs
+
         full_text = "\n\n".join(self._docs)
         chunks = chunk_text(full_text, strategy=strategy, chunk_size=size, chunk_overlap=overlap)
         if not chunks:
             return self._docs
         return chunks
+
+    @staticmethod
+    def _looks_like_file_path(value: str) -> bool:
+        candidate = Path(value)
+        return candidate.suffix.lower() in {".pdf", ".md", ".txt"} and candidate.exists()
 
     def _retrieve(
         self, query, retriever, use_hybrid, max_tokens: int,

@@ -251,6 +251,29 @@ class KnowledgeBaseCatalog:
         self._conn.execute("DELETE FROM knowledge_bases WHERE kb_id = ?", (kb_id,))
         self._conn.commit()
 
+    def get_document(self, document_id: str) -> SourceDocument | None:
+        row = self._conn.execute(
+            "SELECT * FROM source_documents WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return SourceDocument(
+            document_id=row["document_id"],
+            kb_id=row["kb_id"],
+            source_id=row["source_id"],
+            source_uri=row["source_uri"],
+            document_version=row["document_version"],
+            content=row["content"],
+            metadata=_decode_metadata(row["metadata_json"]),
+            raw_text=row["raw_text"] or row["content"],
+            indexed_text=row["indexed_text"] or row["content"],
+            sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
+            sections=_decode_sections(row["sections_json"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def upsert_document(self, record: SourceDocument):
         self.upsert_documents([record])
 
@@ -310,6 +333,34 @@ class KnowledgeBaseCatalog:
             params.append(kb_id)
         sql += " ORDER BY source_uri ASC, created_at ASC"
         rows = self._conn.execute(sql, params).fetchall()
+        return [
+            SourceDocument(
+                document_id=row["document_id"],
+                kb_id=row["kb_id"],
+                source_id=row["source_id"],
+                source_uri=row["source_uri"],
+                document_version=row["document_version"],
+                content=row["content"],
+                metadata=_decode_metadata(row["metadata_json"]),
+                raw_text=row["raw_text"] or row["content"],
+                indexed_text=row["indexed_text"] or row["content"],
+                sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
+                sections=_decode_sections(row["sections_json"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def list_documents_by_source(self, kb_id: str, source_id: str) -> list[SourceDocument]:
+        rows = self._conn.execute(
+            """
+            SELECT * FROM source_documents
+            WHERE kb_id = ? AND source_id = ?
+            ORDER BY created_at ASC
+            """,
+            (kb_id, source_id),
+        ).fetchall()
         return [
             SourceDocument(
                 document_id=row["document_id"],
@@ -426,6 +477,10 @@ class KnowledgeBaseCatalog:
             )
             for row in rows
         ]
+
+    def delete_document(self, document_id: str):
+        self._conn.execute("DELETE FROM source_documents WHERE document_id = ?", (document_id,))
+        self._conn.commit()
 
     def upsert_ingestion_run(self, record: IngestionRunRecord):
         started_at = record.started_at or _utc_now()

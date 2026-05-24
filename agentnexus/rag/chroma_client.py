@@ -232,6 +232,7 @@ def search(
     limit: int = 5,
     name: str | None = None,
     namespace: str | None = None,
+    where: dict[str, Any] | None = None,
 ) -> list[dict]:
     col = get_collection(name=name, namespace=namespace)
     model = get_embedding_model()
@@ -240,6 +241,7 @@ def search(
         query_embeddings=[query_vec],
         n_results=limit,
         include=["documents", "distances", "metadatas"],
+        where=where,
     )
     if not results["ids"] or not results["ids"][0]:
         return []
@@ -269,6 +271,18 @@ def delete_collection(name: str | None = None, namespace: str | None = None):
 
         Console().print(f"[yellow]ChromaDB 删除集合异常: {e}[/yellow]")
     _collections.pop(collection_name, None)
+
+
+def delete_documents(
+    ids: list[str] | None = None,
+    where: dict[str, Any] | None = None,
+    name: str | None = None,
+    namespace: str | None = None,
+):
+    if not ids and not where:
+        return
+    col = get_collection(name=name, namespace=namespace)
+    col.delete(ids=ids, where=where)
 
 
 def _reset_chroma_client(reset_model: bool = False):

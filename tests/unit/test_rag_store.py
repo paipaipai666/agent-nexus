@@ -246,3 +246,38 @@ class TestKnowledgeBaseCatalog:
 
         chunks = catalog.list_chunks_by_kb("kb_support")
         assert [chunk.text for chunk in chunks] == ["alpha", "beta"]
+
+    def test_list_documents_by_source_and_delete_document(self, temp_agentnexus_home):
+        catalog = KnowledgeBaseCatalog()
+        catalog.upsert_knowledge_base(
+            KnowledgeBaseRecord(
+                kb_id="kb_support",
+                namespace="support",
+                display_name="Support KB",
+                collection_name="kb_support",
+            )
+        )
+        source_id = make_source_id("docs/a.md")
+        document_a = SourceDocument(
+            document_id="doc_a",
+            kb_id="kb_support",
+            source_id=source_id,
+            source_uri="docs/a.md",
+            document_version="v1",
+            content="alpha",
+        )
+        document_b = SourceDocument(
+            document_id="doc_b",
+            kb_id="kb_support",
+            source_id=source_id,
+            source_uri="docs/a.md",
+            document_version="v2",
+            content="beta",
+        )
+        catalog.upsert_documents([document_a, document_b])
+
+        matched = catalog.list_documents_by_source("kb_support", source_id)
+        assert [doc.document_id for doc in matched] == ["doc_a", "doc_b"]
+
+        catalog.delete_document("doc_a")
+        assert catalog.get_document("doc_a") is None

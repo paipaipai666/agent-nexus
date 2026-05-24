@@ -74,6 +74,8 @@ def eval_list():
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
 
     console.print(f"[bold]知识库文档:[/bold] {len(KNOWLEDGE_BASE)} 篇")
+    kb_mode = "文件型" if KNOWLEDGE_BASE and all(Path(item).exists() for item in KNOWLEDGE_BASE) else "内联文本"
+    console.print(f"[bold]知识库类型:[/bold] {kb_mode}")
     console.print(f"[bold]评估样本:[/bold] {len(EVAL_SAMPLES)} 个\n")
 
     table = Table(title="评估样本列表", box=box.ROUNDED)
@@ -110,7 +112,10 @@ def eval_run(
 
     if dataset:
         kb, samples, dataset_version = load_eval_dataset(dataset)
-        console.print(f"[bold]已加载外部数据集:[/bold] {dataset} ({len(samples)} 样本, version={dataset_version})")
+        kb_mode = "文件型" if kb and all(Path(item).exists() for item in kb) else "内联文本"
+        console.print(
+            f"[bold]已加载外部数据集:[/bold] {dataset} ({len(samples)} 样本, version={dataset_version}, {kb_mode})"
+        )
     else:
         kb, samples, dataset_version = KNOWLEDGE_BASE, EVAL_SAMPLES, DATASET_VERSION
 

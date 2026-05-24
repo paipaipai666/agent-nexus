@@ -1,6 +1,7 @@
 """Tests for CLI eval commands: agent, trajectory, ci, component,
 hallucination, tool-selection, coherence, and run (all-fail branch)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -451,3 +452,32 @@ class TestEvalRun:
             result = runner.invoke(app, ["eval", "run"])
             assert "所有评估组合均失败" in result.output
             assert result.exit_code == 0
+
+    def test_external_file_backed_dataset(self, temp_agentnexus_home):
+        doc = temp_agentnexus_home / "guide.md"
+        doc.write_text("# Guide\n\nBody text\n", encoding="utf-8")
+        dataset = temp_agentnexus_home / "eval.jsonl"
+        rows = [
+            {"dataset_version": "files-v1"},
+            {"knowledge_base": [{"path": "guide.md"}]},
+            {"question": "Q1", "ground_truth": "A1", "reference_contexts": ["Guide"]},
+        ]
+        dataset.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+
+        with patch("agentnexus.cli.eval_cmd.RAGEvaluator") as mock_cls:
+            mock_instance = mock_cls.return_value
+            mock_instance.run_combination.side_effect = ValueError("test failure")
+
+            result = runner.invoke(app, ["eval", "run", "--dataset", str(dataset)])
+
+            assert result.exit_code == 0
+            assert "已加载外部数据集" in result.output
+            assert "文件型" in result.output
+
+    def test_invalid_dataset_surfaces_error(self, temp_agentnexus_home):
+        dataset = temp_agentnexus_home / "bad.jsonl"
+        dataset.write_text(json.dumps({"knowledge_base": ["doc one"]}, ensure_ascii=False), encoding="utf-8")
+
+        result = runner.invoke(app, ["eval", "run", "--dataset", str(dataset)])
+
+        assert result.exit_code != 0

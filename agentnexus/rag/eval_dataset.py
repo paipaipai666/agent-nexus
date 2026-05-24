@@ -17,6 +17,30 @@ from pathlib import Path
 from agentnexus.rag.evaluator import EvalSample
 
 
+def _normalize_knowledge_base(entry: object, dataset_path: Path) -> list[str]:
+    if not isinstance(entry, list) or not entry:
+        raise ValueError("'knowledge_base' 必须是非空列表")
+
+    if all(isinstance(item, str) and item.strip() for item in entry):
+        return [item.strip() for item in entry]
+
+    if all(isinstance(item, dict) for item in entry):
+        resolved: list[str] = []
+        for item in entry:
+            source = item.get("path") if isinstance(item, dict) else None
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("文件型 knowledge_base 条目必须包含非空 'path'")
+            candidate = Path(source)
+            if not candidate.is_absolute():
+                candidate = (dataset_path.parent / candidate).resolve()
+            if not candidate.exists():
+                raise FileNotFoundError(f"知识库文件不存在: {candidate}")
+            resolved.append(str(candidate))
+        return resolved
+
+    raise ValueError("'knowledge_base' 只能是字符串列表或 {'path': ...} 对象列表")
+
+
 def load_eval_dataset(path: str | Path) -> tuple[list[str], list[EvalSample], str]:
     """Load a JSONL evaluation dataset.
 
@@ -48,12 +72,21 @@ def load_eval_dataset(path: str | Path) -> tuple[list[str], list[EvalSample], st
             if "dataset_version" in entry:
                 version = entry["dataset_version"]
             if "knowledge_base" in entry:
-                kb = entry["knowledge_base"]
+                kb = _normalize_knowledge_base(entry["knowledge_base"], path)
             if "question" in entry:
+                question = entry.get("question", "")
+                if not isinstance(question, str) or not question.strip():
+                    raise ValueError("评估样本的 'question' 必须是非空字符串")
+                reference_contexts = entry.get("reference_contexts", [])
+                if reference_contexts and (
+                    not isinstance(reference_contexts, list)
+                    or not all(isinstance(item, str) and item.strip() for item in reference_contexts)
+                ):
+                    raise ValueError("'reference_contexts' 必须是字符串列表")
                 samples.append(EvalSample(
-                    question=entry["question"],
+                    question=question,
                     ground_truth=entry.get("ground_truth", ""),
-                    reference_contexts=entry.get("reference_contexts", []),
+                    reference_contexts=reference_contexts,
                 ))
 
     if kb is None:
@@ -61,6 +94,8 @@ def load_eval_dataset(path: str | Path) -> tuple[list[str], list[EvalSample], st
             "JSONL must include a 'knowledge_base' entry (list of str) "
             "before the first sample, or pass knowledge_base separately."
         )
+    if not samples:
+        raise ValueError("JSONL 必须至少包含一个评估样本")
 
     return kb, samples, version
 

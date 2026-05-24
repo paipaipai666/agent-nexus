@@ -184,6 +184,16 @@ class TestRAGEvaluatorChunkAll:
         chunks = evaluator._chunk_all(ChunkStrategy.FIXED, 100, 0)
         assert chunks == ["  ", ""]
 
+    def test_file_paths_use_real_ingest_pipeline(self, temp_agentnexus_home):
+        path = temp_agentnexus_home / "guide.md"
+        path.write_text("# Guide\n\nBody text\n", encoding="utf-8")
+
+        evaluator = RAGEvaluator([str(path)], [])
+        chunks = evaluator._chunk_all(ChunkStrategy.FIXED, 100, 0)
+
+        assert chunks
+        assert any("Guide" in chunk for chunk in chunks)
+
 
 class TestCheckPassed:
     def test_all_above_threshold_passes(self):
