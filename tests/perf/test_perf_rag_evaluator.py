@@ -33,7 +33,7 @@ def test_retrieval_quality_keyword(perf_env):
     Hit rate measures whether any relevant doc was retrieved at all.
     MRR measures how early in the ranked list the first relevant doc appears.
     """
-    from agentnexus.rag.chroma_client import _reset_chroma_client, insert_documents, delete_collection
+    from agentnexus.rag.chroma_client import _reset_chroma_client, delete_collection
     from agentnexus.rag.chunking import ChunkStrategy, chunk_text
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base

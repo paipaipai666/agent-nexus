@@ -244,7 +244,7 @@ class TestCodeExecutorAdversarial:
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
         settings = mock_settings.return_value
         settings.shell_timeout = 30
-        from agentnexus.tools.code_executor import python_execute, subprocess
+        from agentnexus.tools.code_executor import python_execute
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "ok"

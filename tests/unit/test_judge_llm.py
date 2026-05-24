@@ -2,9 +2,7 @@
 
 from unittest.mock import patch
 
-import pytest
-
-from agentnexus.core.judge_llm import _judge_llm, get_judge_llm
+from agentnexus.core.judge_llm import get_judge_llm
 
 
 class TestGetJudgeLLM:

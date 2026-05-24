@@ -1,6 +1,7 @@
 """Tests for agentnexus.agents.exceptions."""
 
 import pytest
+
 from agentnexus.agents.exceptions import ToolExecutionError
 
 

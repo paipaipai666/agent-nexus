@@ -7,7 +7,6 @@ import pytest
 from agentnexus.rag.loaders import (
     _compose_indexed_text,
     _is_code_fence,
-    _load_text,
     _normalize_common,
     _split_markdown_sections,
     clean_text,

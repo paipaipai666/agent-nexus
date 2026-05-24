@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-
 def _resolve_safe(path: str) -> Path:
     """Resolve path and verify it stays within the workspace sandbox.
 

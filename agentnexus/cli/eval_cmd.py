@@ -230,7 +230,7 @@ def eval_run(
         if all_passed:
             console.print("\n[bold green]全部通过 ✓[/bold green]")
         else:
-            console.print(f"\n[bold red]部分组合未达标，阈值:[/bold red]")
+            console.print("\n[bold red]部分组合未达标，阈值:[/bold red]")
             for k, v in sorted(DEFAULT_RAG_THRESHOLDS.items()):
                 console.print(f"  {k}: {v}")
             raise typer.Exit(code=1)
@@ -239,7 +239,6 @@ def eval_run(
 @eval_app.command("history")
 def eval_history():
     """列出历史 RAG 评估报告"""
-    import glob as glob_module
 
     report_dir = Path(get_settings().traces_dir) / "evals"
     if not report_dir.exists():

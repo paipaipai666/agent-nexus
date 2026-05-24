@@ -1,8 +1,6 @@
 """Tests for agentnexus.core.llm."""
 
-from unittest.mock import MagicMock, PropertyMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from agentnexus.core.llm import AgentLLM, _preview, get_default_llm
 

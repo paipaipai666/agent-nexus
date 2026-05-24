@@ -1,9 +1,7 @@
 """Tests for agentnexus.evaluation.coherence — CoherenceEvaluator."""
 
 import json
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from agentnexus.evaluation.coherence import CoherenceEvaluator, CoherenceReport
 
@@ -149,7 +147,7 @@ class TestCoherenceEvaluatorFileMethods:
             {"trace_id": "t1", "name": "task"},
             {"trace_id": "t1", "name": "llm"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         with patch("agentnexus.core.judge_llm.get_judge_llm") as mock_get:
             mock_judge = mock_get.return_value
@@ -168,7 +166,7 @@ class TestCoherenceEvaluatorFileMethods:
             {"trace_id": "t1", "name": "analyst", "start_time": 3, "output": "c",
              "metadata": {"status": "ok"}},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         with patch("agentnexus.core.judge_llm.get_judge_llm") as mock_get:
             mock_judge = mock_get.return_value
@@ -188,7 +186,7 @@ class TestCoherenceEvaluatorFileMethods:
             {"trace_id": "t2", "name": "step2", "start_time": 2, "output": "second",
              "metadata": {"status": "ok"}},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         with patch("agentnexus.core.judge_llm.get_judge_llm") as mock_get:
             mock_judge = mock_get.return_value
@@ -204,7 +202,7 @@ class TestCoherenceEvaluatorFileMethods:
             {"trace_id": "t1", "name": "llm", "output": "a",
              "metadata": {"status": "ok"}},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         report = CoherenceEvaluator().evaluate_trace("nonexistent", str(tmp_path))
         assert report is None

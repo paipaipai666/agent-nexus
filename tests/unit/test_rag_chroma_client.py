@@ -92,7 +92,11 @@ class TestChromaClient:
         monkeypatch.setattr(chroma_client, "_configure_embedding_runtime", lambda device: None)
         monkeypatch.setattr(chroma_client, "_resolve_embedding_device", lambda: next(devices))
         monkeypatch.setattr(chroma_client, "get_settings", lambda: SimpleNamespace(embedding_model="test-model"))
-        monkeypatch.setitem(__import__("sys").modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=FakeSentenceTransformer))
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "sentence_transformers",
+            SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+        )
 
         devices = iter(["cpu", "cuda"])
         first = chroma_client.get_embedding_model()
@@ -116,7 +120,11 @@ class TestChromaClient:
         monkeypatch.setattr(chroma_client, "_configure_embedding_runtime", lambda device: None)
         monkeypatch.setattr(chroma_client, "_resolve_embedding_device", lambda: "cpu")
         monkeypatch.setattr(chroma_client, "get_settings", lambda: SimpleNamespace(embedding_model="test-model"))
-        monkeypatch.setitem(__import__("sys").modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=FakeSentenceTransformer))
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "sentence_transformers",
+            SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+        )
 
         first = chroma_client.get_embedding_model()
         second = chroma_client.get_embedding_model()

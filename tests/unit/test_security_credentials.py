@@ -147,7 +147,7 @@ class TestSubagentApiKeyLeakage:
                 None,
             )
             runner = make_subagent_run(parent, non_interactive=True)
-            result = runner("do something", role="explorer")
+            runner("do something", role="explorer")
         assert "sk-test" not in str(mock_span.metadata)
 
 

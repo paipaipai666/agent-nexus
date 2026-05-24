@@ -1,7 +1,8 @@
 """Pilot-based asyncio tests for TUI widgets using Textual's app.run_test()."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from textual.app import App
 from textual.widgets import Button, Label, Static
 
@@ -91,7 +92,7 @@ class TestConfirmDialogPilot:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             labels = app.screen.query(Label)
-            assert any("MEDIUM" in l.content for l in labels)
+            assert any("MEDIUM" in label.content for label in labels)
 
     async def test_shows_risk_level_low(self):
         """Risk level label displays LOW for low risk."""
@@ -99,7 +100,7 @@ class TestConfirmDialogPilot:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             labels = app.screen.query(Label)
-            assert any("LOW" in l.content for l in labels)
+            assert any("LOW" in label.content for label in labels)
 
     async def test_tool_name_visible(self):
         """Tool name appears in the dialog."""
@@ -107,7 +108,7 @@ class TestConfirmDialogPilot:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             labels = app.screen.query(Label)
-            assert any("deploy-tool" in l.content for l in labels)
+            assert any("deploy-tool" in label.content for label in labels)
 
     async def test_params_summary_visible(self):
         """Params summary appears in the preview Static."""

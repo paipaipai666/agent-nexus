@@ -436,7 +436,7 @@ class TestFileReadLimits:
                             mock_open.return_value.__enter__.return_value = mock_file
                             result = file_read("big_file.txt")
         lines = result.split("\n")
-        content_lines = [l for l in lines if "|" in l]
+        content_lines = [line for line in lines if "|" in line]
         assert len(content_lines) <= 1000
 
 

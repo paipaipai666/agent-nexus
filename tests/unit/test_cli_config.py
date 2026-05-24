@@ -1,11 +1,9 @@
-import os
 
 import yaml
-import pytest
 from typer.testing import CliRunner
 
-from agentnexus.cli import app
 import agentnexus.core.config as cfg
+from agentnexus.cli import app
 
 runner = CliRunner()
 

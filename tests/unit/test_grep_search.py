@@ -1,6 +1,6 @@
 """Tests for agentnexus.tools.grep_search."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from agentnexus.tools.grep_search import grep_available, grep_search
 

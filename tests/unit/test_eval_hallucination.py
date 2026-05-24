@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from agentnexus.evaluation.hallucination import HallucinationDetector, HallucinationReport
 
 
@@ -180,7 +178,7 @@ class TestHallucinationDetectorFileMethods:
             {"trace_id": "t3", "name": "code_node",
              "output": "not an analyst node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         detector = HallucinationDetector()
         reports = detector.evaluate_all(str(tmp_path))
@@ -194,7 +192,7 @@ class TestHallucinationDetectorFileMethods:
             {"trace_id": "t1", "name": "analyst_node", "output": ""},
             {"trace_id": "t2", "name": "analyst_node", "output": "  "},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         detector = HallucinationDetector()
         reports = detector.evaluate_all(str(tmp_path))
@@ -211,7 +209,7 @@ class TestHallucinationDetectorFileMethods:
             {"trace_id": "t2", "name": "analyst_node",
              "output": "Other result."},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         detector = HallucinationDetector()
         report = detector.evaluate_trace("t2", str(tmp_path))
@@ -223,7 +221,7 @@ class TestHallucinationDetectorFileMethods:
         lines = [
             {"trace_id": "t1", "name": "analyst_node", "output": "Some claims."},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         detector = HallucinationDetector()
         report = detector.evaluate_trace("nonexistent", str(tmp_path))

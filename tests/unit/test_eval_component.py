@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from agentnexus.evaluation.component import (
     ComponentEvaluator,
     ComponentIssue,
@@ -279,7 +277,7 @@ class TestComponentEvaluatorEvaluateAll:
             {"trace_id": "t1", "name": "execute_node", "input": "web_search",
              "output": "results", "metadata": {"status": "ok"}},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
 
         evaluator = ComponentEvaluator()
@@ -305,7 +303,7 @@ class TestComponentEvaluatorEvaluateAll:
             {"trace_id": "t1", "name": "execute_node", "input": "web_search",
              "output": "ok", "metadata": {"status": "ok"}},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ComponentEvaluator()
         report = evaluator.evaluate_all(str(tmp_path))

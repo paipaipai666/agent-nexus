@@ -1,6 +1,6 @@
 """Tests for agentnexus.tools.tool_wrapper."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -1,12 +1,9 @@
 """Tests for agentnexus.tools.registry."""
 
-import json
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentnexus.tools.registry import (
-    AuditEntry,
     RiskLevel,
     ToolMeta,
     ToolRegistry,
@@ -147,7 +144,8 @@ class TestQueryAPI:
 
     def test_get_tool_found(self):
         r = ToolRegistry()
-        fn = lambda: 42
+        def fn():
+            return 42
         r.register(_make_meta(), fn)
         assert r.get_tool("test_tool") is fn
 

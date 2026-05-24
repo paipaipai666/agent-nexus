@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.rag.evaluator import (
     EvalRun,
     EvalSample,

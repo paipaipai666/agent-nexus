@@ -6,8 +6,8 @@ from agentnexus.rag.chunking import (
     _prepend_prefix,
     _section_body,
     _section_prefix,
-    chunk_text,
     chunk_structured_document,
+    chunk_text,
 )
 from agentnexus.rag.models import ChunkRecord, DocumentSection, SourceDocument
 

@@ -3,8 +3,6 @@
 import subprocess
 from unittest.mock import patch
 
-import pytest
-
 from agentnexus.tools.shell import _check_blacklist, get_os_info, shell_exec
 
 

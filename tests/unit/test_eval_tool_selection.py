@@ -2,10 +2,7 @@
 
 import json
 
-import pytest
-
 from agentnexus.evaluation.tool_selection import (
-    LABELED_EVAL_SET,
     ToolSelectionEvaluator,
     ToolSelectionReport,
 )
@@ -95,7 +92,7 @@ class TestToolSelectionEvaluatorGetTaskFromTrace:
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
             {"trace_id": "t1", "name": "research_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         result = ToolSelectionEvaluator._get_task_from_trace(str(tmp_path), "t1")
         assert result == "搜索最新的AI新闻"
@@ -105,7 +102,7 @@ class TestToolSelectionEvaluatorGetTaskFromTrace:
         lines = [
             {"trace_id": "t1", "name": "research_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         result = ToolSelectionEvaluator._get_task_from_trace(str(tmp_path), "t1")
         assert result is None
@@ -128,7 +125,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
             {"trace_id": "t1", "name": "research_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
@@ -142,7 +139,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
             {"trace_id": "t1", "name": "execute_node"},  # should be research_node
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
@@ -161,7 +158,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t2", "name": "task", "input": {"task": "写代码排序"}},
             {"trace_id": "t2", "name": "execute_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
@@ -179,7 +176,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t1", "name": "research_node"},
             {"trace_id": "t1", "name": "execute_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
@@ -191,7 +188,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
             {"trace_id": "t1", "name": "analyst_node"},
         ]
-        trace_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
