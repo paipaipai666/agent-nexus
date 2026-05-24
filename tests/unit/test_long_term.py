@@ -85,3 +85,13 @@ class TestLongTermMemory:
         recent = ltm.list_recent(limit=1)
         assert len(recent) == 1
         assert len(recent[0]["content"]) == 200
+
+    def test_save_does_not_trigger_eviction_below_limit(self, ltm, monkeypatch):
+        calls = []
+
+        def fake_evict():
+            calls.append(True)
+
+        monkeypatch.setattr(ltm, "_evict_if_needed", fake_evict)
+        ltm.save("sess-1", "普通记忆", category="test")
+        assert calls == []

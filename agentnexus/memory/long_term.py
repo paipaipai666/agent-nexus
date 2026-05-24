@@ -144,7 +144,9 @@ class LongTermMemory:
             except Exception as e:
                 logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
 
-        self._evict_if_needed()
+        count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+        if count_row["cnt"] > self._max_memories:
+            self._evict_if_needed()
 
     def _evict_if_needed(self):
         """Evict oldest/lowest-importance memories when over max_memories."""
