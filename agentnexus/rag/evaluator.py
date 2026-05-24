@@ -8,7 +8,7 @@ from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
 from agentnexus.rag.chroma_client import delete_collection, search
 from agentnexus.rag.ingestion import ChunkStrategy, chunk_text, ingest_document
-from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
+from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base, result_display_text
 
 
 @dataclass
@@ -258,13 +258,15 @@ class RAGEvaluator:
             (used for generation + precision / recall)
         """
         if not use_hybrid:
-            candidates = [r["text"] for r in search(query, limit=top_k)]
+            candidates = [r["text"] for r in search(query, limit=top_k, namespace="eval")]
             return candidates, _fit_token_budget(candidates, max_tokens)
-        dense_results = search(query, limit=top_k * 2)
+        dense_results = search(query, limit=top_k * 2, namespace="eval")
         dense = [(r["id"], r["score"]) for r in dense_results]
         results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
         full_ranked = [r.text for r in results]
-        return full_ranked, _fit_token_budget(full_ranked, max_tokens)
+        expanded = retriever.expand_contexts(results) if hasattr(retriever, "expand_contexts") else results
+        expanded_contexts = [result_display_text(r) for r in expanded]
+        return full_ranked, _fit_token_budget(expanded_contexts, max_tokens)
 
     def _generate_answer(self, question: str, contexts: list[str]) -> str:
         ctx = "\n---\n".join(contexts)

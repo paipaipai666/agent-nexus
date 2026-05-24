@@ -140,7 +140,9 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
             "检索结构化知识库，返回带来源与分数的结果。"
             "参数: query(搜索词,必填), "
             "namespace(知识库命名空间,默认default), "
-            "top_k(返回条数,默认5)",
+            "top_k(返回条数,默认5), "
+            "view(section=去重章节视图/chunk=原始块视图), "
+            "source/format/section/page/block_type/has_code/has_list/heading_depth(可选过滤)",
             kb_search,
             param_schema={
                 "type": "object",
@@ -152,6 +154,49 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
                         "default": "default",
                     },
                     "top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
+                    "view": {
+                        "type": "string",
+                        "enum": ["section", "chunk"],
+                        "description": "结果视图: section=章节聚合, chunk=原始块",
+                        "default": "section",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "按 source_uri 过滤",
+                        "default": "",
+                    },
+                    "file_format": {
+                        "type": "string",
+                        "description": "按文档格式过滤，如 markdown/pdf/text",
+                        "default": "",
+                    },
+                    "section_title": {
+                        "type": "string",
+                        "description": "按章节标题过滤",
+                        "default": "",
+                    },
+                    "page_number": {
+                        "type": "integer",
+                        "description": "按页码过滤",
+                    },
+                    "block_type": {
+                        "type": "string",
+                        "enum": ["paragraph", "list", "heading", "code"],
+                        "description": "按块类型过滤",
+                        "default": "",
+                    },
+                    "has_code": {
+                        "type": "boolean",
+                        "description": "过滤是否包含代码块",
+                    },
+                    "has_list": {
+                        "type": "boolean",
+                        "description": "过滤是否包含列表块",
+                    },
+                    "heading_depth": {
+                        "type": "integer",
+                        "description": "按标题层级过滤",
+                    },
                 },
                 "required": ["query"],
             },

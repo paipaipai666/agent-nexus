@@ -478,6 +478,77 @@ class KnowledgeBaseCatalog:
             for row in rows
         ]
 
+    def list_neighbor_chunks(
+        self,
+        document_id: str,
+        chunk_index: int,
+        window: int = 1,
+    ) -> list[ChunkRecord]:
+        if window <= 0:
+            return self.list_chunks(document_id)
+        rows = self._conn.execute(
+            """
+            SELECT * FROM document_chunks
+            WHERE document_id = ?
+              AND chunk_index BETWEEN ? AND ?
+            ORDER BY chunk_index ASC
+            """,
+            (document_id, chunk_index - window, chunk_index + window),
+        ).fetchall()
+        return [
+            ChunkRecord(
+                chunk_id=row["chunk_id"],
+                kb_id=row["kb_id"],
+                document_id=row["document_id"],
+                document_version=row["document_version"],
+                chunk_index=row["chunk_index"],
+                text=row["text"],
+                metadata=_decode_metadata(row["metadata_json"]),
+                raw_text=row["raw_text"] or row["text"],
+                indexed_text=row["indexed_text"] or row["text"],
+                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
+                section_index=row["section_index"],
+                page_number=row["page_number"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def list_section_chunks(
+        self,
+        document_id: str,
+        section_index: int,
+    ) -> list[ChunkRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT * FROM document_chunks
+            WHERE document_id = ?
+              AND section_index = ?
+            ORDER BY chunk_index ASC
+            """,
+            (document_id, section_index),
+        ).fetchall()
+        return [
+            ChunkRecord(
+                chunk_id=row["chunk_id"],
+                kb_id=row["kb_id"],
+                document_id=row["document_id"],
+                document_version=row["document_version"],
+                chunk_index=row["chunk_index"],
+                text=row["text"],
+                metadata=_decode_metadata(row["metadata_json"]),
+                raw_text=row["raw_text"] or row["text"],
+                indexed_text=row["indexed_text"] or row["text"],
+                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
+                section_index=row["section_index"],
+                page_number=row["page_number"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
     def delete_document(self, document_id: str):
         self._conn.execute("DELETE FROM source_documents WHERE document_id = ?", (document_id,))
         self._conn.commit()

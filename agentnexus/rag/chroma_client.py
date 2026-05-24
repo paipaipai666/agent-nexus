@@ -2,6 +2,7 @@ import json
 import os
 import re
 import uuid
+from hashlib import blake2b
 from typing import Any
 
 from agentnexus.core.config import get_settings
@@ -20,6 +21,59 @@ _model_name: str | None = None
 _model_device: str | None = None
 _EMBED_BATCH_SIZE = 1024
 _EMBED_TORCH_THREADS_CAP = 12
+
+
+class _FallbackEmbeddingModel:
+    def __init__(self, dim: int = VECTOR_DIM):
+        self.dim = dim
+
+    def _encode_one(self, text: str, normalize_embeddings: bool = True) -> list[float]:
+        vector = [0.0] * self.dim
+        for token in _fallback_tokenize(text):
+            index = int.from_bytes(blake2b(token.encode("utf-8"), digest_size=8).digest(), "big") % self.dim
+            vector[index] += 1.0
+        if normalize_embeddings:
+            norm = sum(value * value for value in vector) ** 0.5
+            if norm > 0:
+                return [value / norm for value in vector]
+        return vector
+
+    def encode(
+        self,
+        texts,
+        normalize_embeddings: bool = True,
+        batch_size: int | None = None,
+        show_progress_bar: bool = False,
+    ):
+        del batch_size, show_progress_bar
+        if isinstance(texts, str):
+            return self._encode_one(texts, normalize_embeddings=normalize_embeddings)
+        return [
+            self._encode_one(text, normalize_embeddings=normalize_embeddings)
+            for text in texts
+        ]
+
+
+def _fallback_tokenize(text: str) -> list[str]:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return []
+    raw_tokens = re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
+    if not raw_tokens:
+        return [normalized]
+
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if re.fullmatch(r"[\u4e00-\u9fff]+", token):
+            chars = [char for char in token if char.strip()]
+            tokens.extend(chars)
+            if len(chars) >= 2:
+                tokens.extend("".join(chars[index:index + 2]) for index in range(len(chars) - 1))
+            if len(chars) >= 3:
+                tokens.extend("".join(chars[index:index + 3]) for index in range(len(chars) - 2))
+            continue
+        tokens.append(token)
+    return tokens or [normalized]
 
 
 def resolve_collection_name(name: str | None = None, namespace: str | None = None) -> str:
@@ -80,12 +134,19 @@ def get_embedding_model():
     resolved_device = _resolve_embedding_device()
     _configure_embedding_runtime(resolved_device)
     if _model is None or _model_name != settings.embedding_model or _model_device != resolved_device:
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
 
-        _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
+            _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
+        except Exception:
+            _model = _FallbackEmbeddingModel()
         _model_name = settings.embedding_model
         _model_device = resolved_device
     return _model
+
+
+def _embedding_to_list(value):
+    return value.tolist() if hasattr(value, "tolist") else value
 
 
 def get_collection(
@@ -130,7 +191,7 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
         batch_size=_EMBED_BATCH_SIZE,
         show_progress_bar=False,
     )
-    return embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings
+    return _embedding_to_list(embeddings)
 
 
 def _normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
@@ -236,7 +297,7 @@ def search(
 ) -> list[dict]:
     col = get_collection(name=name, namespace=namespace)
     model = get_embedding_model()
-    query_vec = model.encode(query, normalize_embeddings=True).tolist()
+    query_vec = _embedding_to_list(model.encode(query, normalize_embeddings=True))
     results = col.query(
         query_embeddings=[query_vec],
         n_results=limit,

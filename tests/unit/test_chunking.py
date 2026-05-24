@@ -3,7 +3,9 @@
 from agentnexus.rag.chunking import (
     ChunkStrategy,
     _fixed_window_split,
+    _detect_block_type,
     _prepend_prefix,
+    _split_semantic_blocks,
     _section_body,
     _section_prefix,
     chunk_structured_document,
@@ -39,6 +41,11 @@ class TestChunkText:
         assert len(result) >= 1
         assert all(isinstance(c, str) for c in result)
 
+    def test_semantic_strategy_preserves_code_block(self):
+        text = "# Title\n\nIntro text.\n\n```python\nprint('hello')\nprint('world')\n```\n\nTail text."
+        result = chunk_text(text, ChunkStrategy.SEMANTIC, 60, 0)
+        assert any("```python" in chunk and "print('world')" in chunk for chunk in result)
+
     def test_invalid_strategy_raises(self):
         try:
             chunk_text("text", "unknown", 100, 0)
@@ -64,6 +71,29 @@ class TestFixedWindowSplit:
         text = "a" * 300
         chunks = _fixed_window_split(text, 100, 20)
         assert len(chunks) == 4  # step=80, 300/80 = 3.75 -> 4
+
+
+class TestSemanticBlocks:
+    def test_heading_keeps_following_body(self):
+        text = "# Title\nLine 1\nLine 2\n\nNext paragraph"
+        blocks = _split_semantic_blocks(text)
+        assert blocks[0] == "# Title\nLine 1\nLine 2"
+
+    def test_list_items_grouped_together(self):
+        text = "- item one\n- item two\n  continuation\n\nParagraph"
+        blocks = _split_semantic_blocks(text)
+        assert blocks[0] == "- item one\n- item two\n  continuation"
+
+    def test_code_fence_becomes_single_block(self):
+        text = "```python\nprint('hello')\nprint('world')\n```\n\nAfter"
+        blocks = _split_semantic_blocks(text)
+        assert blocks[0] == "```python\nprint('hello')\nprint('world')\n```"
+
+    def test_detect_block_type(self):
+        assert _detect_block_type("```python\nprint('x')\n```") == "code"
+        assert _detect_block_type("- item one\n- item two") == "list"
+        assert _detect_block_type("# Title\nBody") == "heading"
+        assert _detect_block_type("plain paragraph") == "paragraph"
 
 
 class TestPrependPrefix:
@@ -198,6 +228,33 @@ class TestChunkStructuredDocument:
         chunks = chunk_structured_document(doc, ChunkStrategy.FIXED, 500, 0)
         assert len(chunks) >= 1
         assert all(isinstance(c, ChunkRecord) for c in chunks)
+        assert chunks[0].metadata["block_type"] == "paragraph"
+        assert chunks[0].metadata["heading_depth"] == 1
+        assert chunks[0].metadata["has_code"] is False
+        assert chunks[0].metadata["has_list"] is False
+
+    def test_semantic_chunks_emit_structure_flags(self):
+        doc = SourceDocument.create(
+            source_uri="test.md",
+            raw_text="# Guide\n\n```python\nprint('hi')\n```\n\n- item one",
+            metadata={"format": "markdown"},
+            indexed_text="# Guide\n\n```python\nprint('hi')\n```\n\n- item one",
+            sparse_text="# Guide\n\n```python\nprint('hi')\n```\n\n- item one",
+        )
+        doc.sections = [
+            DocumentSection.create(
+                "v1",
+                section_index=0,
+                raw_text="```python\nprint('hi')\n```\n\n- item one",
+                indexed_text="```python\nprint('hi')\n```\n\n- item one",
+                sparse_text="```python\nprint('hi')\n```\n\n- item one",
+                metadata={"format": "markdown", "heading_path": ["Guide"]},
+            )
+        ]
+        chunks = chunk_structured_document(doc, ChunkStrategy.SEMANTIC, 80, 0)
+
+        assert any(chunk.metadata["block_type"] == "code" and chunk.metadata["has_code"] is True for chunk in chunks)
+        assert any(chunk.metadata["has_list"] is True for chunk in chunks)
 
     def test_fallback_creates_section_from_document(self):
         doc = SourceDocument.create(

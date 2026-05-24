@@ -11,13 +11,16 @@ from agentnexus.rag.chroma_client import (
     delete_documents,
     get_collection,
     resolve_collection_name,
-    search as chroma_search,
     upsert_documents,
+)
+from agentnexus.rag.chroma_client import (
+    search as chroma_search,
 )
 from agentnexus.rag.ingestion import ingest_document
 from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
-from agentnexus.rag.retriever import HybridRetriever, expand_queries
+from agentnexus.rag.retriever import HybridRetriever, expand_queries, result_citation, result_display_text
 from agentnexus.rag.store import get_knowledge_base_catalog
+from agentnexus.tools.kb_search import _build_search_where
 
 from . import console, kb_app
 
@@ -66,7 +69,7 @@ def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> d
     catalog.upsert_chunks(artifacts.chunks)
 
     upsert_documents(
-        [chunk.text for chunk in artifacts.chunks],
+        [chunk.indexed_text or chunk.text for chunk in artifacts.chunks],
         metadatas=[chunk_metadata_to_chroma(chunk) for chunk in artifacts.chunks],
         ids=[chunk.chunk_id for chunk in artifacts.chunks],
         namespace=namespace,
@@ -105,24 +108,6 @@ def _finish_ingestion_run(
     run.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     catalog = get_knowledge_base_catalog()
     catalog.upsert_ingestion_run(run)
-
-
-def _build_search_where(
-    source: str | None = None,
-    file_format: str | None = None,
-    section_title: str | None = None,
-    page_number: int | None = None,
-) -> dict | None:
-    where: dict[str, object] = {}
-    if source:
-        where["source_uri"] = source
-    if file_format:
-        where["format"] = file_format
-    if section_title:
-        where["section_title"] = section_title
-    if page_number is not None:
-        where["page_number"] = page_number
-    return where or None
 
 
 @kb_app.command("add")
@@ -178,7 +163,7 @@ def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
     if os.path.isdir(path):
         for root, _, files in os.walk(path):
             for f in files:
-                if f.endswith((".pdf", ".md", ".txt")):
+                if f.endswith((".pdf", ".md", ".txt", ".html", ".htm", ".json", ".docx", ".xlsx")):
                     try:
                         artifacts = _ingest_one(os.path.join(root, f))
                         console.print(f"  [green]+[/green] {f} ({len(artifacts.chunks)} 块)")
@@ -213,10 +198,15 @@ def kb_list():
 def kb_search_command(
     query: str = typer.Argument(..., help="检索问题"),
     top_k: int = typer.Option(5, "--top-k", min=1, max=20, help="返回结果数量"),
+    view: str = typer.Option("section", "--view", help="结果视图: section 或 chunk"),
     source: str = typer.Option("", "--source", help="按 source_uri 过滤"),
     file_format: str = typer.Option("", "--format", help="按 format 过滤"),
     section_title: str = typer.Option("", "--section", help="按 section_title 过滤"),
     page_number: int | None = typer.Option(None, "--page", help="按页码过滤"),
+    block_type: str = typer.Option("", "--block-type", help="按块类型过滤: paragraph/list/heading/code"),
+    has_code: bool | None = typer.Option(None, "--has-code/--no-code", help="过滤是否包含代码"),
+    has_list: bool | None = typer.Option(None, "--has-list/--no-list", help="过滤是否包含列表"),
+    heading_depth: int | None = typer.Option(None, "--heading-depth", min=1, help="按标题层级过滤"),
 ):
     """搜索知识库"""
     settings = get_settings()
@@ -231,10 +221,14 @@ def kb_search_command(
         retriever.load_reranker()
 
     where = _build_search_where(
-        source=source or None,
-        file_format=file_format or None,
-        section_title=section_title or None,
+        source=source,
+        file_format=file_format,
+        section_title=section_title,
         page_number=page_number,
+        block_type=block_type,
+        has_code=has_code,
+        has_list=has_list,
+        heading_depth=heading_depth,
     )
     dense_fused: dict[str, float] = {}
     for search_query in expand_queries(query):
@@ -247,19 +241,18 @@ def kb_search_command(
         for rank, item in enumerate(dense_results):
             dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
     dense = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
-    results = retriever.search(query, dense, top_k=top_k, min_score=0.0)
+    results = retriever.search(
+        query,
+        dense,
+        top_k=top_k,
+        min_score=0.0,
+        metadata_filters=where,
+    )
     if not results:
         console.print("[yellow]未找到相关知识[/yellow]")
         raise typer.Exit(code=0)
+    results = retriever.expand_contexts(results, view=view)
 
     for index, item in enumerate(results, start=1):
-        metadata = item.metadata or {}
-        source_uri = metadata.get("source_uri", "")
-        labels: list[str] = []
-        if metadata.get("section_title"):
-            labels.append(str(metadata["section_title"]))
-        if metadata.get("page_number") is not None:
-            labels.append(f"Page {metadata['page_number']}")
-        suffix = f" [{' | '.join(labels)}]" if labels else ""
-        console.print(f"[{index}] {source_uri}{suffix} score={item.score:.2f}")
-        console.print(item.text)
+        console.print(f"[{index}] {result_citation(item)} score={item.score:.2f}")
+        console.print(result_display_text(item))

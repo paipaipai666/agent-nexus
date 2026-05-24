@@ -364,3 +364,38 @@ class TestRetrieveReturnsTuple:
             assert len(result) == 2
             assert isinstance(result[0], list)
             assert isinstance(result[1], list)
+
+    def test_hybrid_retrieve_uses_eval_namespace_and_expanded_contexts(self, monkeypatch):
+        evaluator = RAGEvaluator(["doc content"], [])
+
+        class FakeResult:
+            def __init__(self, text):
+                self.text = text
+                self.context_text = None
+
+        class FakeRetriever:
+            def search(self, query, dense, top_k=10, min_score=0.3, metadata_filters=None):
+                return [FakeResult("核心答案")]
+
+            def expand_contexts(self, results, window=None):
+                results[0].context_text = "前置说明\n\n>> 核心答案\n\n后续补充"
+                return results
+
+        captured = {}
+
+        def fake_search(query, limit=10, name=None, namespace=None):
+            captured["namespace"] = namespace
+            return [{"id": "chunk_1", "score": 0.9, "text": "核心答案", "metadata": {}}]
+
+        monkeypatch.setattr("agentnexus.rag.evaluator.search", fake_search)
+
+        full_ranked, truncated = evaluator._retrieve(
+            "query",
+            FakeRetriever(),
+            use_hybrid=True,
+            max_tokens=100,
+        )
+
+        assert captured["namespace"] == "eval"
+        assert full_ranked == ["核心答案"]
+        assert truncated == ["前置说明\n\n>> 核心答案\n\n后续补充"]

@@ -1,7 +1,9 @@
 """CLI eval list/run commands"""
 import json
 from datetime import datetime
+from importlib.util import find_spec
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 from rich import box
@@ -100,6 +102,67 @@ def _fmt_pct(score: float) -> str:
     return f"{score:.1%}"
 
 
+def _text_setting(value, default: str = "unknown") -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
+def _endpoint_mode(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").casefold()
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return "local"
+    if host:
+        return "remote"
+    return "unknown"
+
+
+def _detect_embedding_device() -> str:
+    try:
+        from agentnexus.rag.chroma_client import _resolve_embedding_device
+
+        return _resolve_embedding_device()
+    except Exception:
+        return "cpu"
+
+
+def _collect_eval_runtime_summary() -> list[str]:
+    settings = get_settings()
+    embedding_model = _text_setting(getattr(settings, "embedding_model", None))
+    reranker_model = _text_setting(getattr(settings, "reranker_model", None))
+    llm_model = _text_setting(getattr(settings, "llm_model_id", None))
+    llm_base = _text_setting(getattr(settings, "llm_base_url", None))
+    judge_model = _text_setting(getattr(settings, "judge_model_id", None))
+    judge_base = _text_setting(getattr(settings, "judge_base_url", None))
+
+    embedding_backend = "fallback-hash"
+    if find_spec("sentence_transformers") is not None:
+        embedding_backend = "sentence-transformers"
+
+    device = _detect_embedding_device()
+
+    gpu_enabled = embedding_backend == "sentence-transformers" and device in {"cuda", "mps"}
+    gpu_label = "yes" if gpu_enabled else "no"
+
+    return [
+        f"Embedding: {embedding_model} | backend={embedding_backend} | device={device} | GPU={gpu_label}",
+        "Dense retrieval: enabled",
+        "Hybrid retrieval: BM25 + dense embeddings",
+        f"Reranker: disabled in `nexus eval run` (configured model: {reranker_model})",
+        f"Generator LLM: {llm_model} | endpoint={_endpoint_mode(llm_base)} | base={llm_base}",
+        f"Judge LLM: {judge_model} | endpoint={_endpoint_mode(judge_base)} | base={judge_base}",
+        "Query rewrite / multi-query / HyDE: not used by current `eval run` path",
+    ]
+
+
+def _print_eval_runtime_summary() -> None:
+    console.print("[bold]评估运行信息:[/bold]")
+    for line in _collect_eval_runtime_summary():
+        console.print(f"  - {line}")
+    console.print()
+
+
 @eval_app.command("run")
 def eval_run(
     ci: bool = typer.Option(False, "--ci", "-c", help="CI 模式：不达标则 exit(1)"),
@@ -120,6 +183,7 @@ def eval_run(
         kb, samples, dataset_version = KNOWLEDGE_BASE, EVAL_SAMPLES, DATASET_VERSION
 
     console.print("[bold]正在运行 RAG 评估...[/bold]\n")
+    _print_eval_runtime_summary()
 
     evaluator = RAGEvaluator(kb, samples)
 

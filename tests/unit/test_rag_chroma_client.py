@@ -147,6 +147,59 @@ class TestChromaClient:
             show_progress_bar=False,
         )
 
+    def test_get_embedding_model_falls_back_without_sentence_transformers(self, monkeypatch):
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "sentence_transformers":
+                raise ModuleNotFoundError("missing sentence_transformers")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(chroma_client, "_model", None)
+        monkeypatch.setattr(chroma_client, "_model_name", None)
+        monkeypatch.setattr(chroma_client, "_model_device", None)
+        monkeypatch.setattr(chroma_client, "_configure_embedding_runtime", lambda device: None)
+        monkeypatch.setattr(chroma_client, "_resolve_embedding_device", lambda: "cpu")
+        monkeypatch.setattr(chroma_client, "get_settings", lambda: SimpleNamespace(embedding_model="test-model"))
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        model = chroma_client.get_embedding_model()
+        vectors = model.encode(["alpha beta"], normalize_embeddings=True)
+
+        assert isinstance(model, chroma_client._FallbackEmbeddingModel)
+        assert len(vectors) == 1
+        assert len(vectors[0]) == chroma_client.VECTOR_DIM
+
+    def test_search_supports_single_vector_without_tolist(self, monkeypatch):
+        class FakeModel:
+            def encode(self, text, normalize_embeddings=True):
+                assert normalize_embeddings is True
+                return [0.1, 0.2]
+
+        class FakeCollection:
+            def query(self, **kwargs):
+                assert kwargs["query_embeddings"] == [[0.1, 0.2]]
+                return {
+                    "ids": [["chunk_1"]],
+                    "distances": [[0.1]],
+                    "documents": [["hello"]],
+                    "metadatas": [[{"source_uri": "docs/test.md"}]],
+                }
+
+        monkeypatch.setattr(chroma_client, "get_embedding_model", lambda: FakeModel())
+        monkeypatch.setattr(
+            chroma_client,
+            "get_collection",
+            lambda name=None, namespace=None, metadata=None: FakeCollection(),
+        )
+
+        results = chroma_client.search("hello", namespace="support")
+
+        assert results[0]["id"] == "chunk_1"
+        assert results[0]["text"] == "hello"
+
     def test_chunk_metadata_is_normalized_for_chroma(self):
         document = SourceDocument.create(
             source_uri="docs/guide.md",
@@ -164,6 +217,9 @@ class TestChromaClient:
                 "heading_path": ["Guide", "Install"],
                 "section_index": 2,
                 "page_number": 5,
+                "block_type": "code",
+                "has_code": True,
+                "has_list": False,
             },
         )
 
@@ -173,4 +229,7 @@ class TestChromaClient:
         assert metadata["heading_depth"] == 2
         assert metadata["section_index"] == 2
         assert metadata["page_number"] == 5
+        assert metadata["block_type"] == "code"
+        assert metadata["has_code"] is True
+        assert metadata["has_list"] is False
         assert "heading_path" not in metadata

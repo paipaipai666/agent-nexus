@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore", message=".*pkg_resources.*")
 
 QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
 MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
+HYDE_PROMPT = load_prompt("rag_hyde")
 
 
 def _tokenize(text: str) -> list[str]:
@@ -35,26 +36,45 @@ class SearchResult:
     score: float
     source: str = ""
     metadata: dict | None = None
+    context_text: str | None = None
+    citation: str | None = None
 
 
 class BM25Index:
     def __init__(self):
         self._index: BM25Okapi | None = None
         self._chunk_map: dict[str, ChunkRecord] = {}
+        self._chunk_ids: list[str] = []
 
     def build(self, chunks: list[ChunkRecord]):
         self._chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
+        self._chunk_ids = [chunk.chunk_id for chunk in chunks]
         tokenized = [_tokenize(chunk.sparse_text or chunk.indexed_text or chunk.text) for chunk in chunks]
         self._index = BM25Okapi(tokenized) if tokenized else None
 
-    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        metadata_filters: dict[str, object] | None = None,
+    ) -> list[tuple[str, float]]:
         if self._index is None:
             return []
-        chunk_ids = list(self._chunk_map.keys())
         tokenized_query = _tokenize(query)
         scores = self._index.get_scores(tokenized_query)
         ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
-        return [(chunk_ids[idx], float(score)) for idx, score in ranked[:top_k] if score > 0]
+        results: list[tuple[str, float]] = []
+        for idx, score in ranked:
+            if score <= 0:
+                continue
+            chunk_id = self._chunk_ids[idx]
+            chunk = self._chunk_map.get(chunk_id)
+            if chunk is None or not _matches_metadata_filters(chunk, metadata_filters):
+                continue
+            results.append((chunk_id, float(score)))
+            if len(results) >= top_k:
+                break
+        return results
 
 
 def reciprocal_rank_fusion(
@@ -83,6 +103,108 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(key)
         result.append(normalized)
     return result
+
+
+def _looks_like_question(query: str) -> bool:
+    normalized = query.strip()
+    if not normalized:
+        return False
+    question_tokens = (
+        "?",
+        "？",
+        "什么",
+        "如何",
+        "怎么",
+        "怎样",
+        "为何",
+        "为什么",
+        "是否",
+        "哪种",
+        "哪些",
+        "谁",
+        "when",
+        "what",
+        "why",
+        "how",
+        "which",
+    )
+    lowered = normalized.casefold()
+    return any(token in normalized or token in lowered for token in question_tokens)
+
+
+def _matches_metadata_filters(
+    chunk: ChunkRecord,
+    metadata_filters: dict[str, object] | None = None,
+) -> bool:
+    if not metadata_filters:
+        return True
+
+    metadata = chunk.metadata or {}
+    for key, expected in metadata_filters.items():
+        if expected is None:
+            continue
+        if key == "page_number":
+            actual = chunk.page_number
+        elif key == "section_index":
+            actual = chunk.section_index
+        else:
+            actual = metadata.get(key)
+        if actual != expected:
+            return False
+    return True
+
+
+def _structural_score_boost(query: str, chunk: ChunkRecord) -> float:
+    metadata = chunk.metadata or {}
+    normalized_query = query.casefold()
+    boost = 0.0
+
+    code_terms = ("代码", "示例", "sample", "code", "snippet", "实现", "函数", "脚本", "命令")
+    list_terms = ("步骤", "清单", "列表", "排查", "检查", "要点", "总结", "事项")
+    heading_terms = ("概述", "介绍", "是什么", "总览", "目录", "章节", "section", "overview")
+
+    if metadata.get("block_type") == "code" or metadata.get("has_code") is True:
+        if any(term in normalized_query for term in code_terms):
+            boost += 0.02
+    if metadata.get("block_type") == "list" or metadata.get("has_list") is True:
+        if any(term in normalized_query for term in list_terms):
+            boost += 0.015
+    if metadata.get("block_type") == "heading":
+        if any(term in normalized_query for term in heading_terms):
+            boost += 0.01
+        heading_depth = metadata.get("heading_depth")
+        if isinstance(heading_depth, int) and heading_depth > 0:
+            boost += max(0.0, 0.005 - ((heading_depth - 1) * 0.001))
+
+    return boost
+
+
+def result_display_text(result: SearchResult) -> str:
+    context_text = result.context_text
+    if isinstance(context_text, str) and context_text.strip():
+        return context_text
+    return result.text
+
+
+def result_citation(result: SearchResult) -> str:
+    if isinstance(result.citation, str) and result.citation.strip():
+        return result.citation
+
+    metadata = result.metadata or {}
+    source_uri = str(metadata.get("source_uri") or result.id)
+    labels: list[str] = []
+    section_title = metadata.get("section_title")
+    if isinstance(section_title, str) and section_title.strip():
+        labels.append(section_title.strip())
+    page_number = metadata.get("page_number")
+    if isinstance(page_number, int):
+        labels.append(f"Page {page_number}")
+    heading_depth = metadata.get("heading_depth")
+    if isinstance(heading_depth, int):
+        labels.append(f"H{heading_depth}")
+    if labels:
+        return f"{source_uri} [{' | '.join(labels)}]"
+    return source_uri
 
 
 def rewrite_query(query: str, llm: AgentLLM | None = None) -> str:
@@ -124,6 +246,21 @@ def expand_queries(query: str, llm: AgentLLM | None = None) -> list[str]:
     except Exception:
         pass
     return _dedupe_preserve_order([query, *queries])[: max(settings.rag_multi_query_count, 1) + 1]
+
+
+def generate_hypothetical_document(query: str, llm: AgentLLM | None = None) -> str:
+    settings = get_settings()
+    if not settings.enable_hyde:
+        return ""
+    if settings.hyde_question_only and not _looks_like_question(query):
+        return ""
+    try:
+        llm_client = llm or AgentLLM()
+        prompt = HYDE_PROMPT.format(query=query)
+        response = llm_client.think([{"role": "user", "content": prompt}], temperature=0.2, silent=True)
+        return (response or "").strip()
+    except Exception:
+        return ""
 
 
 class HybridRetriever:
@@ -175,6 +312,162 @@ class HybridRetriever:
         self._chunks = {chunk.chunk_id: chunk for chunk in chunks}
         self._bm25.build(chunks)
 
+    def expand_contexts(
+        self,
+        results: list[SearchResult],
+        window: int | None = None,
+        view: str = "section",
+    ) -> list[SearchResult]:
+        if view != "chunk":
+            results = self.merge_results_by_section(results)
+        settings = get_settings()
+        if not settings.enable_context_expansion:
+            return results
+
+        resolved_window = settings.rag_context_window if window is None else window
+        max_chunks = settings.rag_context_max_chunks
+        if resolved_window <= 0 and max_chunks <= 1:
+            return results
+
+        catalog = get_knowledge_base_catalog()
+        expanded: list[SearchResult] = []
+        for result in results:
+            chunk = self._chunks.get(result.id)
+            if chunk is None:
+                expanded.append(result)
+                continue
+            context_chunks = self._collect_context_chunks(
+                chunk,
+                catalog=catalog,
+                window=resolved_window,
+                max_chunks=max_chunks,
+            )
+            if not context_chunks:
+                expanded.append(result)
+                continue
+
+            anchor_index = next(
+                (index for index, item in enumerate(context_chunks) if item.chunk_id == chunk.chunk_id),
+                None,
+            )
+            if anchor_index is None:
+                anchor_index = 0
+
+            context_parts: list[str] = []
+            for index, candidate in enumerate(context_chunks):
+                prefix = ">> " if index == anchor_index else ""
+                context_parts.append(f"{prefix}{candidate.text}".strip())
+            result.context_text = "\n\n".join(context_parts)
+            result.citation = self._build_result_citation(chunk, context_chunks)
+            expanded.append(result)
+        return expanded
+
+    def merge_results_by_section(self, results: list[SearchResult]) -> list[SearchResult]:
+        merged: list[SearchResult] = []
+        seen_groups: set[tuple[str, object]] = set()
+
+        for result in results:
+            chunk = self._chunks.get(result.id)
+            if chunk is None:
+                merged.append(result)
+                continue
+            group_key = (
+                chunk.document_id,
+                chunk.section_index if chunk.section_index is not None else chunk.chunk_index,
+            )
+            if group_key in seen_groups:
+                continue
+            seen_groups.add(group_key)
+            merged.append(result)
+        return merged
+
+    def _collect_context_chunks(
+        self,
+        anchor: ChunkRecord,
+        *,
+        catalog,
+        window: int,
+        max_chunks: int,
+    ) -> list[ChunkRecord]:
+        selected: list[ChunkRecord] = []
+        seen_ids: set[str] = set()
+
+        def append_chunks(chunks: list[ChunkRecord]):
+            for candidate in chunks:
+                if candidate.chunk_id in seen_ids:
+                    continue
+                selected.append(candidate)
+                seen_ids.add(candidate.chunk_id)
+                if len(selected) >= max_chunks:
+                    break
+
+        section_chunks_count = 0
+        if anchor.section_index is not None:
+            section_chunks = catalog.list_section_chunks(anchor.document_id, anchor.section_index)
+            append_chunks(section_chunks)
+            section_chunks_count = len(section_chunks)
+        if len(selected) < max_chunks and section_chunks_count <= 1 and anchor.page_number is not None:
+            page_chunks = [
+                chunk
+                for chunk in catalog.list_chunks(anchor.document_id)
+                if chunk.page_number == anchor.page_number
+            ]
+            append_chunks(page_chunks)
+        if len(selected) < max_chunks and section_chunks_count <= 1 and window > 0:
+            append_chunks(
+                catalog.list_neighbor_chunks(
+                    anchor.document_id,
+                    anchor.chunk_index,
+                    window=window,
+                )
+            )
+
+        if not selected:
+            return []
+        selected.sort(key=lambda item: item.chunk_index)
+        return selected[:max_chunks]
+
+    def _build_result_citation(self, anchor: ChunkRecord, context_chunks: list[ChunkRecord]) -> str:
+        metadata = anchor.metadata or {}
+        source_uri = str(metadata.get("source_uri") or anchor.document_id)
+        labels: list[str] = []
+
+        section_title = metadata.get("section_title")
+        if isinstance(section_title, str) and section_title.strip():
+            labels.append(section_title.strip())
+        elif context_chunks:
+            section_titles = [
+                str(chunk.metadata.get("section_title")).strip()
+                for chunk in context_chunks
+                if (
+                    isinstance(chunk.metadata.get("section_title"), str)
+                    and str(chunk.metadata.get("section_title")).strip()
+                )
+            ]
+            if section_titles:
+                labels.append(section_titles[0])
+
+        page_numbers = sorted(
+            {
+                chunk.page_number
+                for chunk in context_chunks
+                if isinstance(chunk.page_number, int)
+            }
+        )
+        if page_numbers:
+            if len(page_numbers) == 1:
+                labels.append(f"Page {page_numbers[0]}")
+            else:
+                labels.append(f"Page {page_numbers[0]}-{page_numbers[-1]}")
+
+        heading_depth = metadata.get("heading_depth")
+        if isinstance(heading_depth, int):
+            labels.append(f"H{heading_depth}")
+
+        if labels:
+            return f"{source_uri} [{' | '.join(labels)}]"
+        return source_uri
+
     def load_reranker(self, model_name: str | None = None):
         try:
             from sentence_transformers import CrossEncoder
@@ -188,14 +481,33 @@ class HybridRetriever:
         except Exception:
             self._reranker = None
 
-    def search(self, query: str, dense_results: list[tuple[str, float]], top_k: int = 5,
-               rrf_k: int = 60, min_score: float = 0.0) -> list[SearchResult]:
-        sparse = self._bm25.search(query, top_k=top_k * 2)
+    def search(
+        self,
+        query: str,
+        dense_results: list[tuple[str, float]],
+        top_k: int = 5,
+        rrf_k: int = 60,
+        min_score: float = 0.0,
+        metadata_filters: dict[str, object] | None = None,
+    ) -> list[SearchResult]:
+        sparse = self._bm25.search(query, top_k=top_k * 2, metadata_filters=metadata_filters)
         fused = reciprocal_rank_fusion(dense_results, sparse, k=rrf_k)
-        ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k * 2]
+        boosted: list[tuple[str, float]] = []
+        for chunk_id, score in fused.items():
+            chunk = self._chunks.get(chunk_id)
+            if chunk is None or not _matches_metadata_filters(chunk, metadata_filters):
+                continue
+            boosted.append((chunk_id, score + _structural_score_boost(query, chunk)))
+        ranked = sorted(boosted, key=lambda x: x[1], reverse=True)[:top_k * 2]
 
         if self._reranker is not None and len(ranked) > 1:
-            return self._rerank(query, ranked, top_k, min_score=min_score)
+            return self._rerank(
+                query,
+                ranked,
+                top_k,
+                min_score=min_score,
+                metadata_filters=metadata_filters,
+            )
 
         return [
             SearchResult(
@@ -209,13 +521,24 @@ class HybridRetriever:
             if chunk_id in self._chunks
         ]
 
-    def _rerank(self, query: str, candidates: list[tuple[str, float]], top_k: int,
-                 min_score: float = 0.3) -> list[SearchResult]:
+    def _rerank(
+        self,
+        query: str,
+        candidates: list[tuple[str, float]],
+        top_k: int,
+        min_score: float = 0.3,
+        metadata_filters: dict[str, object] | None = None,
+    ) -> list[SearchResult]:
         pairs = [(query, self._chunks[chunk_id].text) for chunk_id, _ in candidates if chunk_id in self._chunks]
         chunk_ids = [chunk_id for chunk_id, _ in candidates if chunk_id in self._chunks]
         scores = self._reranker.predict(pairs)
         scored = [(chunk_id, float(score)) for chunk_id, score in zip(chunk_ids, scores)]
-        filtered = [item for item in scored if item[1] >= min_score]
+        filtered = [
+            item
+            for item in scored
+            if item[1] >= min_score
+            and _matches_metadata_filters(self._chunks[item[0]], metadata_filters)
+        ]
         reranked = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_k]
         return [
             SearchResult(
@@ -320,18 +643,24 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
     if retriever._reranker is None:
         retriever.load_reranker()
     queries = expand_queries(query)
+    hypothetical_document = generate_hypothetical_document(query)
     dense_fused: dict[str, float] = {}
     for search_query in queries:
         dense_results = chroma_search(search_query, limit=10, namespace=namespace)
         for rank, item in enumerate(dense_results):
             dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
+    if hypothetical_document:
+        hyde_results = chroma_search(hypothetical_document, limit=10, namespace=namespace)
+        for rank, item in enumerate(hyde_results):
+            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 0.8 / (60 + rank + 1)
     dense_results = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
     if not dense_results:
         return "未找到相关知识。"
     results = retriever.search(query, dense_results, top_k=5)
     if not results:
         return "未找到相关知识。"
+    results = retriever.expand_contexts(results)
     return "\n\n".join(
-        f"[{index + 1}] {result.id} (相关度:{result.score:.2f}) {result.text}"
+        f"[{index + 1}] {result_citation(result)} (相关度:{result.score:.2f}) {result_display_text(result)}"
         for index, result in enumerate(results)
     )

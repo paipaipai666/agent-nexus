@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
-from agentnexus.rag.models import IngestedDocument
 
 runner = CliRunner()
 
@@ -29,9 +28,14 @@ class TestKbAdd:
         fake_collection = MagicMock()
         fake_collection.count.return_value = 1
 
-        with patch("agentnexus.cli.kb.ingest_document", return_value=fake_artifacts), \
-             patch("agentnexus.cli.kb._persist_ingested_document", return_value={"replaced_chunks": 0, "written_chunks": 1}), \
-             patch("agentnexus.cli.kb.get_collection", return_value=fake_collection):
+        with (
+            patch("agentnexus.cli.kb.ingest_document", return_value=fake_artifacts),
+            patch(
+                "agentnexus.cli.kb._persist_ingested_document",
+                return_value={"replaced_chunks": 0, "written_chunks": 1},
+            ),
+            patch("agentnexus.cli.kb.get_collection", return_value=fake_collection),
+        ):
             result = runner.invoke(app, ["kb", "add", str(filepath)])
             assert result.exit_code == 0
             assert "test.md" in result.stdout
@@ -56,14 +60,50 @@ class TestKbAdd:
         fake_collection = MagicMock()
         fake_collection.count.return_value = 2
 
-        with patch("agentnexus.cli.kb.ingest_document", return_value=fake_artifacts), \
-             patch("agentnexus.cli.kb._persist_ingested_document", return_value={"replaced_chunks": 0, "written_chunks": 2}), \
-             patch("agentnexus.cli.kb.get_collection", return_value=fake_collection):
+        with (
+            patch("agentnexus.cli.kb.ingest_document", return_value=fake_artifacts),
+            patch(
+                "agentnexus.cli.kb._persist_ingested_document",
+                return_value={"replaced_chunks": 0, "written_chunks": 2},
+            ),
+            patch("agentnexus.cli.kb.get_collection", return_value=fake_collection),
+        ):
             result = runner.invoke(app, ["kb", "add", str(docs_dir)])
             assert result.exit_code == 0
             assert "a.md" in result.stdout
             assert "b.md" in result.stdout
             assert "2 个文档块" in result.stdout
+
+    def test_directory_ingestion_supports_extended_formats(self, temp_agentnexus_home):
+        docs_dir = temp_agentnexus_home / "docs"
+        docs_dir.mkdir()
+        (docs_dir / "a.html").write_text("<h1>A</h1>", encoding="utf-8")
+        (docs_dir / "b.json").write_text("{\"name\": \"B\"}", encoding="utf-8")
+
+        fake_artifacts = MagicMock()
+        fake_artifacts.chunks = [MagicMock()]
+        fake_artifacts.chunks[0].text = "chunk"
+        fake_artifacts.chunks[0].chunk_id = "chunk_001"
+        fake_artifacts.document = MagicMock()
+        fake_artifacts.document.source_id = "src_test"
+        fake_artifacts.document.kb_id = ""
+
+        fake_collection = MagicMock()
+        fake_collection.count.return_value = 2
+
+        with (
+            patch("agentnexus.cli.kb.ingest_document", return_value=fake_artifacts),
+            patch(
+                "agentnexus.cli.kb._persist_ingested_document",
+                return_value={"replaced_chunks": 0, "written_chunks": 1},
+            ),
+            patch("agentnexus.cli.kb.get_collection", return_value=fake_collection),
+        ):
+            result = runner.invoke(app, ["kb", "add", str(docs_dir)])
+
+        assert result.exit_code == 0
+        assert "a.html" in result.stdout
+        assert "b.json" in result.stdout
 
 
 class TestKbList:
@@ -107,9 +147,15 @@ class TestKbSearch:
                 MagicMock(
                     score=0.91,
                     text="BM25 文本检索",
-                    metadata={"source_uri": "docs/support.md", "section_title": "检索"},
+                    metadata={
+                        "source_uri": "docs/support.md",
+                        "section_title": "检索",
+                        "block_type": "code",
+                        "heading_depth": 2,
+                    },
                 )
             ]
+            retriever.expand_contexts.side_effect = lambda results, view="section": results
             retriever_cls.return_value = retriever
             chroma_search.return_value = [{"id": "chunk_1", "score": 0.8, "text": "BM25 文本检索", "metadata": {}}]
 
@@ -117,15 +163,116 @@ class TestKbSearch:
 
             assert result.exit_code == 0
             assert "docs/support.md" in result.stdout
+            assert "检索" in result.stdout
             assert "BM25 文本检索" in result.stdout
+            assert "H2" in result.stdout
             retriever.load_reranker.assert_called_once()
             assert chroma_search.call_count == 2
+
+    def test_search_passes_structural_filters(self):
+        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
+             patch("agentnexus.cli.kb.chroma_search", return_value=[]), \
+             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+            retriever = MagicMock()
+            retriever._chunks = {"chunk_1": object()}
+            retriever._reranker = None
+            retriever.search.return_value = []
+            retriever_cls.return_value = retriever
+
+            result = runner.invoke(
+                app,
+                [
+                    "kb",
+                    "search",
+                    "检索用什么",
+                    "--source",
+                    "docs/support.md",
+                    "--format",
+                    "markdown",
+                    "--section",
+                    "检索",
+                    "--page",
+                    "2",
+                    "--block-type",
+                    "code",
+                    "--has-code",
+                    "--no-list",
+                    "--heading-depth",
+                    "2",
+                ],
+            )
+
+            assert result.exit_code == 0
+            retriever.search.assert_called_once_with(
+                "检索用什么",
+                [],
+                top_k=5,
+                min_score=0.0,
+                metadata_filters={
+                    "source_uri": "docs/support.md",
+                    "format": "markdown",
+                    "section_title": "检索",
+                    "page_number": 2,
+                    "block_type": "code",
+                    "has_code": True,
+                    "has_list": False,
+                    "heading_depth": 2,
+                },
+            )
+
+    def test_search_outputs_expanded_context(self):
+        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
+             patch("agentnexus.cli.kb.chroma_search") as chroma_search, \
+             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+            retriever = MagicMock()
+            retriever._chunks = {"chunk_1": object()}
+            retriever._reranker = object()
+            retriever.search.return_value = [
+                MagicMock(
+                    score=0.91,
+                    text="核心答案",
+                    context_text=None,
+                    metadata={"source_uri": "docs/support.md"},
+                )
+            ]
+            retriever.expand_contexts.side_effect = lambda results, view="section": [
+                MagicMock(
+                    score=results[0].score,
+                    text=results[0].text,
+                    context_text="前置说明\n\n>> 核心答案\n\n后续补充",
+                    metadata=results[0].metadata,
+                )
+            ]
+            retriever_cls.return_value = retriever
+            chroma_search.return_value = [{"id": "chunk_1", "score": 0.8, "text": "核心答案", "metadata": {}}]
+
+            result = runner.invoke(app, ["kb", "search", "检索用什么"])
+
+            assert result.exit_code == 0
+            assert "前置说明" in result.stdout
+            assert ">> 核心答案" in result.stdout
+            assert "后续补充" in result.stdout
+
+    def test_search_passes_chunk_view(self):
+        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
+             patch("agentnexus.cli.kb.chroma_search", return_value=[]), \
+             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+            retriever = MagicMock()
+            retriever._chunks = {"chunk_1": object()}
+            retriever._reranker = object()
+            retriever.search.return_value = [MagicMock(score=0.9, text="核心答案", metadata={})]
+            retriever.expand_contexts.return_value = [MagicMock(score=0.9, text="核心答案", metadata={})]
+            retriever_cls.return_value = retriever
+
+            result = runner.invoke(app, ["kb", "search", "检索用什么", "--view", "chunk"])
+
+            assert result.exit_code == 0
+            retriever.expand_contexts.assert_called_once_with(retriever.search.return_value, view="chunk")
 
 
 class TestKbPersistence:
     def test_persist_replaces_previous_source_chunks(self, temp_agentnexus_home):
         from agentnexus.cli import kb as kb_cli
-        from agentnexus.rag.chroma_client import chunk_metadata_to_chroma
         from agentnexus.rag.ingestion import ingest_document
         from agentnexus.rag.store import get_knowledge_base_catalog
 
@@ -181,3 +328,34 @@ class TestKbPersistence:
         assert runs
         assert runs[0].status == "completed"
         assert runs[0].chunks_written >= 1
+
+    def test_persist_uses_indexed_text_for_vector_upsert(self, temp_agentnexus_home):
+        from agentnexus.cli import kb as kb_cli
+        from agentnexus.rag.models import ChunkRecord, IngestedDocument, SourceDocument
+
+        document = SourceDocument.create(source_uri="docs/test.md", raw_text="raw body")
+        chunk = ChunkRecord(
+            chunk_id="chunk_001",
+            kb_id="",
+            document_id=document.document_id,
+            document_version=document.document_version,
+            chunk_index=0,
+            text="generation text",
+            indexed_text="retrieval text",
+            sparse_text="retrieval text",
+            metadata={"source_uri": "docs/test.md"},
+        )
+        artifacts = IngestedDocument(document=document, chunks=[chunk])
+        captured = {}
+
+        def fake_upsert(texts, metadatas=None, ids=None, **kwargs):
+            captured["texts"] = texts
+            captured["ids"] = ids
+            return ids or []
+
+        with patch("agentnexus.cli.kb.upsert_documents", side_effect=fake_upsert), \
+             patch("agentnexus.cli.kb.delete_documents", lambda *args, **kwargs: None):
+            kb_cli._persist_ingested_document(artifacts, "default")
+
+        assert captured["texts"] == ["retrieval text"]
+        assert captured["ids"] == ["chunk_001"]

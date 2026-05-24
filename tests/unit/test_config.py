@@ -20,7 +20,12 @@ class TestConfigSettings:
         assert s.max_agent_steps == 5
         assert s.enable_query_rewrite is True
         assert s.enable_multi_query is True
+        assert s.enable_hyde is False
+        assert s.hyde_question_only is True
+        assert s.enable_context_expansion is True
         assert s.rag_multi_query_count == 3
+        assert s.rag_context_window == 1
+        assert s.rag_context_max_chunks == 6
         assert s.embedding_model == "BAAI/bge-small-zh-v1.5"
         assert s.reranker_model == "BAAI/bge-reranker-v2-m3"
         assert s.rag_default_namespace == "default"

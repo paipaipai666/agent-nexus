@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from .models import ChunkRecord, DocumentSection, SourceDocument
@@ -27,6 +28,10 @@ _SEPARATORS = [
     " ",
     "",
 ]
+
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s+")
+_CODE_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 
 def chunk_text(
@@ -77,6 +82,7 @@ def chunk_structured_document(
             metadata.update(section.metadata)
             metadata["section_id"] = section.section_id
             metadata["section_index"] = section.section_index
+            metadata.update(_chunk_structure_metadata(part, section))
             chunks.append(
                 ChunkRecord.create(
                     document,
@@ -119,21 +125,22 @@ def _recursive_split(text: str, chunk_size: int, overlap: int) -> list[str]:
 
 
 def _semantic_split(text: str, chunk_size: int, overlap: int) -> list[str]:
-    paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
-    if not paragraphs:
+    blocks = _split_semantic_blocks(text)
+    if not blocks:
         return []
 
     chunks: list[str] = []
-    buffer = paragraphs[0]
-    for paragraph in paragraphs[1:]:
-        if len(buffer) + len(paragraph) <= chunk_size:
-            buffer += "\n\n" + paragraph
+    buffer = blocks[0]
+    for block in blocks[1:]:
+        candidate = f"{buffer}\n\n{block}".strip()
+        if len(candidate) <= chunk_size:
+            buffer = candidate
             continue
         if len(buffer) > chunk_size:
             chunks.extend(_recursive_split(buffer, chunk_size, overlap))
         else:
             chunks.append(buffer)
-        buffer = paragraph
+        buffer = block
 
     if len(buffer) > chunk_size:
         chunks.extend(_recursive_split(buffer, chunk_size, overlap))
@@ -147,6 +154,124 @@ def _semantic_split(text: str, chunk_size: int, overlap: int) -> list[str]:
             overlapped.append(f"{prefix}\n{chunks[index]}".strip() if prefix else chunks[index])
         return overlapped
     return chunks
+
+
+def _split_semantic_blocks(text: str) -> list[str]:
+    lines = text.splitlines()
+    if not lines:
+        return []
+
+    blocks: list[str] = []
+    buffer: list[str] = []
+    in_code_block = False
+
+    def flush_buffer():
+        if not buffer:
+            return
+        block = "\n".join(line.rstrip() for line in buffer).strip()
+        buffer.clear()
+        if block:
+            blocks.append(block)
+
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+
+        if _CODE_FENCE_RE.match(stripped):
+            flush_buffer()
+            code_lines = [line.rstrip()]
+            index += 1
+            while index < len(lines):
+                code_lines.append(lines[index].rstrip())
+                if _CODE_FENCE_RE.match(lines[index].strip()):
+                    index += 1
+                    break
+                index += 1
+            block = "\n".join(code_lines).strip()
+            if block:
+                blocks.append(block)
+            continue
+
+        if not stripped:
+            flush_buffer()
+            index += 1
+            continue
+
+        if _HEADING_LINE_RE.match(stripped):
+            flush_buffer()
+            heading_block = [line.rstrip()]
+            index += 1
+            while index < len(lines):
+                candidate = lines[index]
+                candidate_stripped = candidate.strip()
+                if not candidate_stripped:
+                    break
+                if _HEADING_LINE_RE.match(candidate_stripped) or _CODE_FENCE_RE.match(candidate_stripped):
+                    break
+                if _LIST_LINE_RE.match(candidate_stripped):
+                    break
+                heading_block.append(candidate.rstrip())
+                index += 1
+            block = "\n".join(heading_block).strip()
+            if block:
+                blocks.append(block)
+            continue
+
+        if _LIST_LINE_RE.match(stripped):
+            flush_buffer()
+            list_block = [line.rstrip()]
+            index += 1
+            while index < len(lines):
+                candidate = lines[index]
+                candidate_stripped = candidate.strip()
+                if not candidate_stripped:
+                    break
+                if _LIST_LINE_RE.match(candidate_stripped) or candidate.startswith((" ", "\t")):
+                    list_block.append(candidate.rstrip())
+                    index += 1
+                    continue
+                break
+            block = "\n".join(list_block).strip()
+            if block:
+                blocks.append(block)
+            continue
+
+        buffer.append(line.rstrip())
+        index += 1
+
+    flush_buffer()
+    return blocks
+
+
+def _chunk_structure_metadata(text: str, section: DocumentSection) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "block_type": _detect_block_type(text),
+        "has_code": bool(_CODE_FENCE_RE.search(text)),
+        "has_list": any(_LIST_LINE_RE.match(line.strip()) for line in text.splitlines() if line.strip()),
+    }
+    heading_path = section.metadata.get("heading_path") or []
+    if isinstance(heading_path, list):
+        normalized = [part for part in heading_path if isinstance(part, str) and part.strip()]
+        if normalized:
+            metadata["heading_depth"] = len(normalized)
+    return metadata
+
+
+def _detect_block_type(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return "paragraph"
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if not lines:
+        return "paragraph"
+    if _CODE_FENCE_RE.match(lines[0]):
+        return "code"
+    if _HEADING_LINE_RE.match(lines[0]):
+        return "heading"
+    if _LIST_LINE_RE.match(lines[0]):
+        return "list"
+    return "paragraph"
 
 
 def _section_prefix(section: DocumentSection) -> str:

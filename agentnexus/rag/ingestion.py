@@ -7,7 +7,8 @@ from .chunking import chunk_text as _chunk_text
 from .loaders import clean_text, load_document, load_structured_document
 from .models import IngestedDocument
 
-CONTEXTUAL_PROMPT = load_prompt("contextual")
+CONTEXTUAL_RETRIEVAL_PROMPT = load_prompt("contextual_retrieval")
+CONTEXTUAL_GENERATION_PROMPT = load_prompt("contextual_generation")
 chunk_text = _chunk_text
 
 
@@ -32,15 +33,19 @@ def ingest_document(
     )
 
     if enable_contextual and llm_client and chunks:
-        enriched_texts = enrich_chunks_with_context(
+        enriched_pairs = enrich_chunks_with_context(
             [chunk.indexed_text or chunk.text for chunk in chunks],
             document.indexed_text or document.raw_text or document.content,
             llm_client,
         )
-        for chunk, enriched_text in zip(chunks, enriched_texts, strict=False):
-            chunk.text = enriched_text
-            chunk.indexed_text = enriched_text
-            chunk.sparse_text = enriched_text
+        for chunk, enriched in zip(chunks, enriched_pairs, strict=False):
+            retrieval_text = enriched["retrieval"]
+            generation_text = enriched["generation"]
+            chunk.text = generation_text
+            chunk.indexed_text = retrieval_text
+            chunk.sparse_text = retrieval_text
+            chunk.metadata["generation_text"] = generation_text
+            chunk.metadata["retrieval_text"] = retrieval_text
 
     return IngestedDocument(document=document, chunks=chunks)
 
@@ -64,8 +69,8 @@ def ingest(
     return artifacts.legacy_chunks()
 
 
-def generate_chunk_context(document: str, chunk: str, llm_client) -> str:
-    prompt = CONTEXTUAL_PROMPT.format(document=document, chunk=chunk)
+def generate_chunk_context(document: str, chunk: str, llm_client, *, mode: str) -> str:
+    prompt = _contextual_prompt_for_mode(mode).format(document=document, chunk=chunk)
     try:
         response = llm_client.think(
             messages=[{"role": "user", "content": prompt}],
@@ -81,14 +86,33 @@ def enrich_chunks_with_context(
     chunks: list[str],
     document: str,
     llm_client,
-) -> list[str]:
+) -> list[dict[str, str]]:
     from rich.progress import track
 
-    enriched = []
+    enriched: list[dict[str, str]] = []
     for chunk in track(chunks, description="生成上下文摘要..."):
-        context = generate_chunk_context(document, chunk, llm_client)
-        if context:
-            enriched.append(f"{context}\n\n{chunk}")
-        else:
-            enriched.append(chunk)
+        retrieval_context = generate_chunk_context(document, chunk, llm_client, mode="retrieval")
+        generation_context = generate_chunk_context(document, chunk, llm_client, mode="generation")
+        enriched.append(
+            {
+                "retrieval": _merge_context_and_chunk(retrieval_context, chunk),
+                "generation": _merge_context_and_chunk(generation_context, chunk),
+            }
+        )
     return enriched
+
+
+def _contextual_prompt_for_mode(mode: str) -> str:
+    if mode == "retrieval":
+        return CONTEXTUAL_RETRIEVAL_PROMPT
+    if mode == "generation":
+        return CONTEXTUAL_GENERATION_PROMPT
+    raise ValueError(f"未知的 contextual 模式: {mode}")
+
+
+def _merge_context_and_chunk(context: str, chunk: str) -> str:
+    normalized_context = (context or "").strip()
+    normalized_chunk = (chunk or "").strip()
+    if normalized_context and normalized_chunk:
+        return f"{normalized_context}\n\n{normalized_chunk}"
+    return normalized_context or normalized_chunk

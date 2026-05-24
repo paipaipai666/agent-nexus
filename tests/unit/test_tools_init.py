@@ -152,6 +152,22 @@ class TestParamSchemas:
         meta = executor.registry._tools["file_write"][0]
         assert meta.param_schema["required"] == ["path", "content"]
 
+    def test_kb_search_exposes_advanced_rag_params(self):
+        executor = ToolExecutor()
+        register_all_tools(executor)
+        meta = executor.registry._tools["kb_search"][0]
+        props = meta.param_schema["properties"]
+
+        assert props["view"]["enum"] == ["section", "chunk"]
+        assert "source" in props
+        assert "file_format" in props
+        assert "section_title" in props
+        assert "page_number" in props
+        assert props["block_type"]["enum"] == ["paragraph", "list", "heading", "code"]
+        assert "has_code" in props
+        assert "has_list" in props
+        assert "heading_depth" in props
+
 
 class FakeMCPManager:
     def __init__(self):

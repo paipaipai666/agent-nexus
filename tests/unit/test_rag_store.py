@@ -130,6 +130,10 @@ class TestKnowledgeBaseCatalog:
                 "section_title": "Guide",
                 "section_index": 0,
                 "page_number": 3,
+                "block_type": "paragraph",
+                "has_code": False,
+                "has_list": False,
+                "heading_depth": 1,
             },
             raw_text="Body text",
             indexed_text="Guide\n\nBody text",
@@ -156,6 +160,8 @@ class TestKnowledgeBaseCatalog:
         assert listed_chunk.section_index == 0
         assert listed_chunk.page_number == 3
         assert listed_chunk.metadata["heading_path"] == ["Guide"]
+        assert listed_chunk.metadata["block_type"] == "paragraph"
+        assert listed_chunk.metadata["heading_depth"] == 1
 
     def test_get_and_delete_knowledge_base(self, temp_agentnexus_home):
         catalog = KnowledgeBaseCatalog()
@@ -246,6 +252,60 @@ class TestKnowledgeBaseCatalog:
 
         chunks = catalog.list_chunks_by_kb("kb_support")
         assert [chunk.text for chunk in chunks] == ["alpha", "beta"]
+
+    def test_list_section_chunks_returns_same_section_only(self, temp_agentnexus_home):
+        catalog = KnowledgeBaseCatalog()
+        catalog.upsert_knowledge_base(
+            KnowledgeBaseRecord(
+                kb_id="kb_support",
+                namespace="support",
+                display_name="Support KB",
+                collection_name="kb_support",
+            )
+        )
+        source_id = make_source_id("docs/a.md")
+        document_version = make_document_version(source_id, "body")
+        document = SourceDocument(
+            document_id=document_version,
+            kb_id="kb_support",
+            source_id=source_id,
+            source_uri="docs/a.md",
+            document_version=document_version,
+            content="body",
+        )
+        catalog.upsert_document(document)
+        chunk_a = ChunkRecord(
+            chunk_id=make_chunk_id(document_version, 0, "alpha", {"section_index": 0}),
+            kb_id="kb_support",
+            document_id=document.document_id,
+            document_version=document_version,
+            chunk_index=0,
+            text="alpha",
+            metadata={"section_index": 0},
+        )
+        chunk_b = ChunkRecord(
+            chunk_id=make_chunk_id(document_version, 1, "beta", {"section_index": 0}),
+            kb_id="kb_support",
+            document_id=document.document_id,
+            document_version=document_version,
+            chunk_index=1,
+            text="beta",
+            metadata={"section_index": 0},
+        )
+        chunk_c = ChunkRecord(
+            chunk_id=make_chunk_id(document_version, 2, "gamma", {"section_index": 1}),
+            kb_id="kb_support",
+            document_id=document.document_id,
+            document_version=document_version,
+            chunk_index=2,
+            text="gamma",
+            metadata={"section_index": 1},
+        )
+        catalog.upsert_chunks([chunk_a, chunk_b, chunk_c])
+
+        section_chunks = catalog.list_section_chunks(document.document_id, 0)
+
+        assert [chunk.text for chunk in section_chunks] == ["alpha", "beta"]
 
     def test_list_documents_by_source_and_delete_document(self, temp_agentnexus_home):
         catalog = KnowledgeBaseCatalog()

@@ -444,6 +444,23 @@ class TestEvalCoherence:
 
 
 class TestEvalRun:
+    def test_runtime_summary_is_printed(self):
+        with patch("agentnexus.cli.eval_cmd.RAGEvaluator") as mock_cls, \
+             patch("agentnexus.cli.eval_cmd.find_spec", return_value=object()), \
+             patch("agentnexus.cli.eval_cmd._detect_embedding_device", return_value="cuda"):
+            mock_instance = mock_cls.return_value
+            mock_instance.run_combination.side_effect = ValueError("test failure")
+
+            result = runner.invoke(app, ["eval", "run"])
+
+            assert result.exit_code == 0
+            assert "评估运行信息" in result.output
+            assert "Embedding:" in result.output
+            assert "device=cuda" in result.output
+            assert "GPU=yes" in result.output
+            assert "Reranker: disabled in `nexus eval run`" in result.output
+            assert "Query rewrite / multi-query / HyDE" in result.output
+
     def test_all_combos_fail(self):
         with patch("agentnexus.cli.eval_cmd.RAGEvaluator") as mock_cls:
             mock_instance = mock_cls.return_value
