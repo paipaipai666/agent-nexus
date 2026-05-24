@@ -209,7 +209,6 @@ nexus stats                                   # 查看 Token 统计
 ├── CLAUDE.md                      ← AI 助手提示
 ├── README.md                      ← 项目说明
 ├── agentnexus.spec                ← PyInstaller 打包配置
-├── eval_routes.json               ← 评估路由配置
 ├── pyproject.toml                 ← 项目配置 + 依赖声明
 └── requirements.txt               ← 兼容依赖列表
 ```

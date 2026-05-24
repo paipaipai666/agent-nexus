@@ -119,12 +119,13 @@ class TestRestartSafeRetrieval:
                 captured["dense_results"] = dense_results
                 return []
 
-        results = evaluator._retrieve(
+        full_ranked, truncated = evaluator._retrieve(
             query="检索用什么",
             retriever=FakeRetriever(),
             use_hybrid=True,
             max_tokens=100,
         )
 
-        assert results == []
+        assert full_ranked == []
+        assert truncated == []
         assert captured["dense_results"] == [("chunk_real_id", 0.9)]

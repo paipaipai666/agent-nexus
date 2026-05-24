@@ -19,32 +19,47 @@ class EvalSample:
 
 @dataclass
 class EvalRun:
+    def check_passed(self, thresholds: dict[str, float] | None = None) -> bool:
+        t = thresholds or DEFAULT_RAG_THRESHOLDS
+        return (
+            self.faithfulness >= t.get("faithfulness", 0.0)
+            and self.answer_relevancy >= t.get("answer_relevancy", 0.0)
+            and self.answer_correctness >= t.get("answer_correctness", 0.0)
+            and self.hit_rate >= t.get("hit_rate", 0.0)
+            and self.mrr >= t.get("mrr", 0.0)
+            and self.rejection_rate >= t.get("rejection_rate", 0.0)
+        )
     label: str
     strategy: ChunkStrategy
     chunk_size: int
     use_hybrid: bool
     faithfulness: float = 0.0
-    answer_relevancy: float = 0.0
+    answer_relevancy: float = 0.0       # 新: 回答是否切题（Judge LLM，不依赖 ground_truth）
+    answer_correctness: float = 0.0     # 原 answer_relevancy (与 ground_truth 比较)
     context_precision: float = 0.0
     context_recall: float = 0.0
     context_relevancy: float = 0.0
+    hit_rate: float = 0.0              # 检索命中率@k
+    mrr: float = 0.0                   # 平均倒数排名@k
     avg_latency_ms: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     p99_latency_ms: float = 0.0
-    # Bootstrap confidence intervals (Change 3)
     faithfulness_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     answer_relevancy_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    answer_correctness_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     context_precision_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     context_recall_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     context_relevancy_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
-    # Negative sample rejection rate (Change 4)
+    hit_rate_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    mrr_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     rejection_rate: float = 0.0
 
 
 EVAL_GENERATE_PROMPT = load_prompt("eval_generate")
 EVAL_FAITHFULNESS_PROMPT = load_prompt("eval_faithfulness")
-EVAL_RELEVANCY_PROMPT = load_prompt("eval_relevancy")
+EVAL_CORRECTNESS_PROMPT = load_prompt("eval_correctness")
+EVAL_ANSWER_RELEVANCY_PROMPT = load_prompt("eval_answer_relevancy")
 EVAL_PRECISION_PROMPT = load_prompt("eval_precision")
 EVAL_RECALL_PROMPT = load_prompt("eval_recall")
 
@@ -54,6 +69,19 @@ _REFUSAL_KEYWORDS = [
     "i don't know", "not found", "cannot", "unable",
     "无可奉告", "无法回答", "暂无", "无相关信息",
 ]
+
+# ── Default thresholds for CI gating ──
+DEFAULT_RAG_THRESHOLDS: dict[str, float] = {
+    "faithfulness": 0.80,
+    "answer_relevancy": 0.75,
+    "answer_correctness": 0.70,
+    "context_precision": 0.70,
+    "context_recall": 0.70,
+    "context_relevancy": 0.60,
+    "hit_rate": 0.85,
+    "mrr": 0.70,
+    "rejection_rate": 0.75,
+}
 
 
 class RAGEvaluator:
@@ -70,6 +98,7 @@ class RAGEvaluator:
         chunk_overlap: int,
         use_hybrid: bool,
         _token_budget: int | None = None,
+        top_k: int = 10,
     ) -> EvalRun:
         label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
         run = EvalRun(label=label, strategy=strategy, chunk_size=chunk_size, use_hybrid=use_hybrid)
@@ -93,34 +122,50 @@ class RAGEvaluator:
         ]
 
         faithfulness_scores = []
-        relevancy_scores = []
+        correctness_scores = []
+        answer_relevancy_scores = []
         precision_scores = []
         recall_scores = []
         context_relevancy_scores = []
+        hit_rates = []
+        mrrs = []
         latencies = []
 
         # ── Evaluate positive samples ──
         for sample in positive_samples:
-            # Change 2: dynamic token budget
             if _token_budget is not None and _token_budget > 0:
                 max_tokens = _token_budget
             else:
                 max_tokens = max(len(sample.question) * 5, 100)
 
             t0 = time.perf_counter()
-            retrieved = self._retrieve(sample.question, retriever, use_hybrid, max_tokens=max_tokens)
+            full_ranked, truncated = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
             latencies.append((time.perf_counter() - t0) * 1000)
 
-            if not retrieved:
+            if not full_ranked and not truncated:
                 continue
 
-            answer = self._generate_answer(sample.question, retrieved)
+            # Retrieval metrics (on full ranked list)
+            ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
+                sample, full_ranked, top_k=top_k,
+            )
+            precision_scores.append(ret_precision)
+            hit_rates.append(ret_hit)
+            mrrs.append(ret_mrr)
 
-            faithfulness_scores.append(self._score_faithfulness(answer, retrieved))
-            relevancy_scores.append(self._score_relevancy(sample.question, answer, sample.ground_truth))
-            precision_scores.append(self._score_precision(sample, retrieved))
-            recall_scores.append(self._score_recall(sample, retrieved))
-            context_relevancy_scores.append(self._score_context_relevancy(sample.question, retrieved))
+            # Recall / context relevancy (on truncated list)
+            if truncated:
+                recall_scores.append(self._score_recall(sample, truncated))
+                context_relevancy_scores.append(self._score_context_relevancy(sample.question, truncated))
+
+            # Generation
+            answer = self._generate_answer(sample.question, truncated)
+            faithfulness_scores.append(self._score_faithfulness(answer, truncated))
+            answer_relevancy_scores.append(self._score_answer_relevancy(sample.question, answer))
+            correctness_scores.append(self._score_correctness(sample.question, answer, sample.ground_truth))
 
         # ── Evaluate negative samples (rejection rate) ──
         correct_refusals = 0
@@ -130,7 +175,10 @@ class RAGEvaluator:
             else:
                 max_tokens = max(len(sample.question) * 5, 100)
 
-            retrieved = self._retrieve(sample.question, retriever, use_hybrid, max_tokens=max_tokens)
+            _, retrieved = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
             if not retrieved:
                 # No chunks retrieved → treat as correct refusal (nothing to answer from)
                 correct_refusals += 1
@@ -142,10 +190,13 @@ class RAGEvaluator:
 
         # ── Compute means ──
         run.faithfulness = _safe_mean(faithfulness_scores)
-        run.answer_relevancy = _safe_mean(relevancy_scores)
+        run.answer_relevancy = _safe_mean(answer_relevancy_scores)
+        run.answer_correctness = _safe_mean(correctness_scores)
         run.context_precision = _safe_mean(precision_scores)
         run.context_recall = _safe_mean(recall_scores)
         run.context_relevancy = _safe_mean(context_relevancy_scores)
+        run.hit_rate = _safe_mean(hit_rates)
+        run.mrr = _safe_mean(mrrs)
         run.avg_latency_ms = _safe_mean(latencies)
         sorted_lat = sorted(latencies)
         if sorted_lat:
@@ -153,14 +204,17 @@ class RAGEvaluator:
             run.p95_latency_ms = _percentile(sorted_lat, 95)
             run.p99_latency_ms = _percentile(sorted_lat, 99)
 
-        # ── Change 3: Bootstrap confidence intervals ──
+        # ── Bootstrap confidence intervals ──
         run.faithfulness_ci = _bootstrap_ci(faithfulness_scores)
-        run.answer_relevancy_ci = _bootstrap_ci(relevancy_scores)
+        run.answer_relevancy_ci = _bootstrap_ci(answer_relevancy_scores)
+        run.answer_correctness_ci = _bootstrap_ci(correctness_scores)
         run.context_precision_ci = _bootstrap_ci(precision_scores)
         run.context_recall_ci = _bootstrap_ci(recall_scores)
         run.context_relevancy_ci = _bootstrap_ci(context_relevancy_scores)
+        run.hit_rate_ci = _bootstrap_ci(hit_rates)
+        run.mrr_ci = _bootstrap_ci(mrrs)
 
-        # ── Change 4: Rejection rate for negative samples ──
+        # ── Rejection rate for negative samples ──
         if negative_samples:
             run.rejection_rate = correct_refusals / len(negative_samples)
 
@@ -173,18 +227,26 @@ class RAGEvaluator:
             return self._docs
         return chunks
 
-    def _retrieve(self, query, retriever, use_hybrid, max_tokens: int, min_score: float = 0.3):
-        """Retrieve chunks with dynamic token budget (Change 2).
+    def _retrieve(
+        self, query, retriever, use_hybrid, max_tokens: int,
+        min_score: float = 0.3, top_k: int = 10,
+    ) -> tuple[list[str], list[str]]:
+        """Retrieve chunks.
 
-        Fetches up to 10 candidates, then accumulates until token budget is reached.
+        Returns (full_ranked, truncated):
+          - full_ranked: top_k candidate chunks before token budget fitting
+            (used for hit_rate / MRR computation)
+          - truncated: chunks after token budget fitting
+            (used for generation + precision / recall)
         """
         if not use_hybrid:
-            candidates = [r["text"] for r in search(query, limit=10)]
-            return _fit_token_budget(candidates, max_tokens)
-        dense_results = search(query, limit=20)
+            candidates = [r["text"] for r in search(query, limit=top_k)]
+            return candidates, _fit_token_budget(candidates, max_tokens)
+        dense_results = search(query, limit=top_k * 2)
         dense = [(r["id"], r["score"]) for r in dense_results]
-        results = retriever.search(query, dense, top_k=10, min_score=min_score)
-        return _fit_token_budget([r.text for r in results], max_tokens)
+        results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
+        full_ranked = [r.text for r in results]
+        return full_ranked, _fit_token_budget(full_ranked, max_tokens)
 
     def _generate_answer(self, question: str, contexts: list[str]) -> str:
         ctx = "\n---\n".join(contexts)
@@ -194,11 +256,50 @@ class RAGEvaluator:
     def _score_faithfulness(self, answer: str, contexts: list[str]) -> float:
         ctx = "\n".join(contexts)
         prompt = EVAL_FAITHFULNESS_PROMPT.format(context=ctx, answer=answer)
-        return _parse_score(self._llm.think([{"role": "user", "content": prompt}]))
+        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
 
-    def _score_relevancy(self, question: str, answer: str, ground_truth: str) -> float:
-        prompt = EVAL_RELEVANCY_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
-        return _parse_score(self._llm.think([{"role": "user", "content": prompt}]))
+    def _score_correctness(self, question: str, answer: str, ground_truth: str) -> float:
+        prompt = EVAL_CORRECTNESS_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
+        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
+
+    def _score_answer_relevancy(self, question: str, answer: str) -> float:
+        """Judge whether the answer addresses the question (no ground truth needed)."""
+        if not answer:
+            return 0.0
+        prompt = EVAL_ANSWER_RELEVANCY_PROMPT.format(question=question, answer=answer)
+        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
+
+    def _score_retrieval_ranked(
+        self, sample: EvalSample, full_ranked: list[str], top_k: int = 10,
+    ) -> tuple[float, float, float]:
+        """Compute context_precision, hit_rate@k, and MRR@k in one LLM pass.
+
+        For each chunk in full_ranked[:k], asks Judge LLM whether it is relevant.
+        Returns (avg_precision, hit_rate, mrr).
+        """
+        if not full_ranked:
+            return (0.0, 0.0, 0.0)
+        candidates = full_ranked[:top_k] if top_k > 0 else full_ranked
+        relevant_flags: list[bool] = []
+        for chunk in candidates:
+            prompt = EVAL_PRECISION_PROMPT.format(chunk=chunk, question=sample.question)
+            try:
+                result = self._judge_llm.think([{"role": "user", "content": prompt}])
+            except Exception:
+                result = None
+            score = _parse_score(result)
+            relevant_flags.append(score >= 0.5)
+
+        total = len(candidates)
+        n_relevant = sum(relevant_flags)
+        precision = n_relevant / total if total > 0 else 0.0
+
+        hit = 1.0 if n_relevant > 0 else 0.0
+
+        first_rank = next((i + 1 for i, flag in enumerate(relevant_flags) if flag), None)
+        mrr = 1.0 / first_rank if first_rank else 0.0
+
+        return (precision, hit, mrr)
 
     # ── Change 1: LLM-based precision & recall ──
 

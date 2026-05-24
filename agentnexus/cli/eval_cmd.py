@@ -94,14 +94,29 @@ def _fmt_ci(score: float, ci: tuple | None = None) -> str:
     return f"{score:.3f}"
 
 
+def _fmt_pct(score: float) -> str:
+    return f"{score:.1%}"
+
+
 @eval_app.command("run")
-def eval_run():
+def eval_run(
+    ci: bool = typer.Option(False, "--ci", "-c", help="CI 模式：不达标则 exit(1)"),
+    top_k: int = typer.Option(10, "--top-k", "-k", help="检索排序截断数（Hit Rate / MRR 的 k）"),
+    dataset: str = typer.Option("", "--dataset", "-d", help="外部 JSONL 评测集路径"),
+):
     """运行 RAG 评估并输出指标报告"""
-    from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
+    from agentnexus.rag.eval_dataset import DATASET_VERSION, EVAL_SAMPLES, KNOWLEDGE_BASE, load_eval_dataset
+    from agentnexus.rag.evaluator import DEFAULT_RAG_THRESHOLDS
+
+    if dataset:
+        kb, samples, dataset_version = load_eval_dataset(dataset)
+        console.print(f"[bold]已加载外部数据集:[/bold] {dataset} ({len(samples)} 样本, version={dataset_version})")
+    else:
+        kb, samples, dataset_version = KNOWLEDGE_BASE, EVAL_SAMPLES, DATASET_VERSION
 
     console.print("[bold]正在运行 RAG 评估...[/bold]\n")
 
-    evaluator = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES)
+    evaluator = RAGEvaluator(kb, samples)
 
     combinations: list[tuple[ChunkStrategy, int, int, bool]] = [
         (ChunkStrategy.FIXED, 256, 64, False),
@@ -123,7 +138,7 @@ def eval_run():
         label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
         console.print(f"  [{len(results) + 1}/{len(combinations)}] 运行: {label}...", end=" ")
         try:
-            run = evaluator.run_combination(strategy, chunk_size, overlap, use_hybrid)
+            run = evaluator.run_combination(strategy, chunk_size, overlap, use_hybrid, top_k=top_k)
             results.append(run)
             console.print(f"[green]✓[/green] faithfulness={run.faithfulness:.3f}")
         except Exception as e:
@@ -136,11 +151,14 @@ def eval_run():
     table = Table(title="RAG 评估结果", box=box.ROUNDED)
     table.add_column("配置", style="cyan")
     table.add_column("Faithfulness", justify="right")
-    table.add_column("Relevancy", justify="right")
+    table.add_column("AnsRel", justify="right")
+    table.add_column("AnsCorr", justify="right")
     table.add_column("Precision", justify="right")
     table.add_column("Recall", justify="right")
-    table.add_column("CtxRelevancy", justify="right")
-    table.add_column("RejectRate", justify="right")
+    table.add_column("CtxRel", justify="right")
+    table.add_column("HitRate", justify="right")
+    table.add_column("MRR", justify="right")
+    table.add_column("Reject", justify="right")
     table.add_column("p95(ms)", justify="right")
 
     for r in sorted(results, key=lambda x: x.faithfulness, reverse=True):
@@ -148,9 +166,12 @@ def eval_run():
             r.label,
             _fmt_ci(r.faithfulness, getattr(r, "faithfulness_ci", None)),
             _fmt_ci(r.answer_relevancy, getattr(r, "answer_relevancy_ci", None)),
+            _fmt_ci(r.answer_correctness, getattr(r, "answer_correctness_ci", None)),
             _fmt_ci(r.context_precision, getattr(r, "context_precision_ci", None)),
             _fmt_ci(r.context_recall, getattr(r, "context_recall_ci", None)),
             _fmt_ci(r.context_relevancy, getattr(r, "context_relevancy_ci", None)),
+            _fmt_ci(r.hit_rate, getattr(r, "hit_rate_ci", None)),
+            _fmt_ci(r.mrr, getattr(r, "mrr_ci", None)),
             f"{getattr(r, 'rejection_rate', 0.0):.1%}",
             f"{r.p95_latency_ms:.0f}",
         )
@@ -166,23 +187,155 @@ def eval_run():
     report_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = report_dir / f"eval_report_{date_str}.json"
-    report_data = [
-        {
-            "label": r.label,
-            "strategy": r.strategy.value,
-            "chunk_size": r.chunk_size,
-            "use_hybrid": r.use_hybrid,
-            "faithfulness": r.faithfulness,
-            "answer_relevancy": r.answer_relevancy,
-            "context_precision": r.context_precision,
-            "context_recall": r.context_recall,
-            "avg_latency_ms": r.avg_latency_ms,
-            "rejection_rate": getattr(r, "rejection_rate", 0.0),
-        }
-        for r in results
-    ]
+    report_data = {
+        "dataset_version": dataset_version,
+        "top_k": top_k,
+        "configs": [
+            {
+                "label": r.label,
+                "strategy": r.strategy.value,
+                "chunk_size": r.chunk_size,
+                "use_hybrid": r.use_hybrid,
+                "faithfulness": r.faithfulness,
+                "answer_relevancy": r.answer_relevancy,
+                "answer_correctness": r.answer_correctness,
+                "context_precision": r.context_precision,
+                "context_recall": r.context_recall,
+                "context_relevancy": r.context_relevancy,
+                "hit_rate": r.hit_rate,
+                "mrr": r.mrr,
+                "avg_latency_ms": r.avg_latency_ms,
+                "p95_latency_ms": r.p95_latency_ms,
+                "rejection_rate": getattr(r, "rejection_rate", 0.0),
+            }
+            for r in results
+        ],
+    }
     report_path.write_text(json.dumps(report_data, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print(f"[dim]报告已保存: {report_path}[/dim]")
+
+    # CI gate
+    if ci:
+        console.print("\n[bold]CI 门禁检查:[/bold]")
+        all_passed = True
+        for r in results:
+            show = []
+            if not r.check_passed():
+                show.append(f"  [red]✗ {r.label}: FAIL[/red]")
+                all_passed = False
+            else:
+                show.append(f"  [green]✓ {r.label}: PASS[/green]")
+            for line in show:
+                console.print(line)
+        if all_passed:
+            console.print("\n[bold green]全部通过 ✓[/bold green]")
+        else:
+            console.print(f"\n[bold red]部分组合未达标，阈值:[/bold red]")
+            for k, v in sorted(DEFAULT_RAG_THRESHOLDS.items()):
+                console.print(f"  {k}: {v}")
+            raise typer.Exit(code=1)
+
+
+@eval_app.command("history")
+def eval_history():
+    """列出历史 RAG 评估报告"""
+    import glob as glob_module
+
+    report_dir = Path(get_settings().traces_dir) / "evals"
+    if not report_dir.exists():
+        console.print("[dim]暂无历史评估报告[/dim]")
+        return
+
+    files = sorted(report_dir.glob("eval_report_*.json"), reverse=True)
+    if not files:
+        console.print("[dim]暂无历史评估报告[/dim]")
+        return
+
+    table = Table(title="历史评估报告", box=box.ROUNDED)
+    table.add_column("时间", style="cyan")
+    table.add_column("数据集版本")
+    table.add_column("最优配置")
+    table.add_column("Faithfulness", justify="right")
+    table.add_column("HitRate", justify="right")
+    table.add_column("MRR", justify="right")
+    table.add_column("配置数", justify="right")
+
+    for file in files[:20]:
+        try:
+            raw = json.loads(file.read_text(encoding="utf-8"))
+            configs = raw.get("configs", raw if isinstance(raw, list) else [])
+            version = raw.get("dataset_version", "unknown")
+            ts = file.stem.replace("eval_report_", "")
+            best = max(configs, key=lambda r: r.get("faithfulness", 0))
+            table.add_row(
+                ts,
+                version,
+                best.get("label", "-"),
+                f"{best.get('faithfulness', 0):.3f}",
+                f"{best.get('hit_rate', 0):.3f}",
+                f"{best.get('mrr', 0):.3f}",
+                str(len(configs)),
+            )
+        except Exception:
+            continue
+
+    console.print(table)
+
+
+@eval_app.command("compare")
+def eval_compare(
+    baseline: str = typer.Option(..., "--baseline", "-b", help="基准报告 JSON 路径"),
+    candidate: str = typer.Option(..., "--candidate", "-c", help="候选报告 JSON 路径"),
+):
+    """对比两次 RAG 评估结果"""
+    b_path = Path(baseline)
+    c_path = Path(candidate)
+
+    if not b_path.exists():
+        console.print(f"[red]基准文件不存在: {baseline}[/red]")
+        return
+    if not c_path.exists():
+        console.print(f"[red]候选文件不存在: {candidate}[/red]")
+        return
+
+    b_raw = json.loads(b_path.read_text(encoding="utf-8"))
+    c_raw = json.loads(c_path.read_text(encoding="utf-8"))
+
+    b_configs = b_raw.get("configs", b_raw if isinstance(b_raw, list) else [])
+    c_configs = c_raw.get("configs", c_raw if isinstance(c_raw, list) else [])
+    b_version = b_raw.get("dataset_version", "unknown") if isinstance(b_raw, dict) else "unknown"
+    c_version = c_raw.get("dataset_version", "unknown") if isinstance(c_raw, dict) else "unknown"
+
+    if b_version != c_version:
+        console.print(f"[yellow]⚠ 数据集版本不一致: baseline={b_version} vs candidate={c_version}[/yellow]\n")
+
+    b_map = {r["label"]: r for r in b_configs}
+    c_map = {r["label"]: r for r in c_configs}
+
+    metrics = ["faithfulness", "answer_relevancy", "hit_rate", "mrr", "context_precision", "context_recall"]
+
+    table = Table(title=f"对比: {baseline} vs {candidate}", box=box.ROUNDED)
+    table.add_column("配置", style="cyan")
+    for m in metrics:
+        table.add_column(m, justify="right")
+
+    for label in sorted(set(list(b_map.keys()) + list(c_map.keys()))):
+        b = b_map.get(label, {})
+        c = c_map.get(label, {})
+        row = [label]
+        for m in metrics:
+            bv = b.get(m, 0)
+            cv = c.get(m, 0)
+            delta = cv - bv
+            if delta > 0.01:
+                row.append(f"[green]{cv:.3f} (Δ+{delta:.3f})[/green]")
+            elif delta < -0.01:
+                row.append(f"[red]{cv:.3f} (Δ{delta:.3f})[/red]")
+            else:
+                row.append(f"{cv:.3f}")
+        table.add_row(*row)
+
+    console.print(table)
 
 
 @eval_app.command("trajectory")
@@ -462,7 +615,7 @@ def eval_calibrate(
     retriever.rebuild_from_catalog()
 
     for idx, sample in enumerate(EVAL_SAMPLES):
-        retrieved = evaluator._retrieve(
+        _, retrieved = evaluator._retrieve(
             sample.question,
             retriever,
             use_hybrid,
@@ -489,7 +642,7 @@ def eval_calibrate(
         judge_recall = evaluator._score_recall(sample, retrieved)
         judge_faithfulness = evaluator._score_faithfulness(answer, retrieved)
         judge_relevancy = (
-            evaluator._score_relevancy(sample.question, answer, sample.ground_truth)
+            evaluator._score_correctness(sample.question, answer, sample.ground_truth)
             if sample.ground_truth
             else 0.0
         )

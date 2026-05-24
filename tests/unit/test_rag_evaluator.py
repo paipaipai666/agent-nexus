@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentnexus.rag.evaluator import (
+    EvalRun,
     EvalSample,
     RAGEvaluator,
     _bootstrap_ci,
@@ -14,6 +15,7 @@ from agentnexus.rag.evaluator import (
     _percentile,
     _safe_mean,
 )
+from agentnexus.rag.ingestion import ChunkStrategy
 
 
 class TestParseScore:
@@ -183,3 +185,174 @@ class TestRAGEvaluatorChunkAll:
         from agentnexus.rag.chunking import ChunkStrategy
         chunks = evaluator._chunk_all(ChunkStrategy.FIXED, 100, 0)
         assert chunks == ["  ", ""]
+
+
+class TestCheckPassed:
+    def test_all_above_threshold_passes(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        run.faithfulness = 0.90
+        run.answer_relevancy = 0.85
+        run.answer_correctness = 0.80
+        run.hit_rate = 0.90
+        run.mrr = 0.80
+        run.rejection_rate = 0.80
+        assert run.check_passed() is True
+
+    def test_below_threshold_fails(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        run.faithfulness = 0.50
+        run.answer_relevancy = 0.85
+        run.answer_correctness = 0.80
+        run.hit_rate = 0.90
+        run.mrr = 0.80
+        run.rejection_rate = 0.80
+        assert run.check_passed() is False
+
+    def test_custom_threshold(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        run.hit_rate = 0.95
+        custom = {"hit_rate": 0.99, "faithfulness": 0.0, "answer_relevancy": 0.0,
+                   "answer_correctness": 0.0, "mrr": 0.0, "rejection_rate": 0.0}
+        assert run.check_passed(custom) is False
+
+    def test_zero_defaults_fail_safe(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        # All defaults are 0.0, thresholds are all > 0, so should fail
+        assert run.check_passed() is False
+
+
+class TestEvalRunNewFields:
+    def test_default_values(self):
+        run = EvalRun(label="test", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        assert run.hit_rate == 0.0
+        assert run.mrr == 0.0
+        assert run.answer_correctness == 0.0
+        assert run.answer_relevancy == 0.0
+
+    def test_confidence_interval_defaults(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        assert run.hit_rate_ci == (0.0, 0.0)
+        assert run.mrr_ci == (0.0, 0.0)
+        assert run.answer_correctness_ci == (0.0, 0.0)
+        assert run.answer_relevancy_ci == (0.0, 0.0)
+
+    def test_assign_values(self):
+        run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
+        run.hit_rate = 0.85
+        run.mrr = 0.72
+        run.answer_correctness = 0.80
+        run.answer_relevancy = 0.90
+        assert run.hit_rate == 0.85
+        assert run.mrr == 0.72
+        assert run.answer_correctness == 0.80
+        assert run.answer_relevancy == 0.90
+
+
+class TestScoreAnswerRelevancy:
+    def test_empty_answer_returns_zero(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        score = evaluator._score_answer_relevancy("question", "")
+        assert score == 0.0
+        evaluator._judge_llm.think.assert_not_called()
+
+    def test_calls_judge_llm(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "0.85"
+        score = evaluator._score_answer_relevancy("test question", "test answer")
+        assert score == 0.85
+        evaluator._judge_llm.think.assert_called_once()
+
+
+class TestScoreRetrievalRanked:
+    def test_empty_full_ranked_returns_zeros(self):
+        evaluator = RAGEvaluator([], [])
+        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        precision, hit, mrr = evaluator._score_retrieval_ranked(sample, [], top_k=10)
+        assert precision == 0.0
+        assert hit == 0.0
+        assert mrr == 0.0
+
+    def test_all_relevant_returns_one(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "1.0"
+        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        precision, hit, mrr = evaluator._score_retrieval_ranked(
+            sample, ["chunk1", "chunk2"], top_k=2,
+        )
+        assert precision == 1.0
+        assert hit == 1.0
+        assert mrr == 1.0
+
+    def test_none_relevant_returns_zeros(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "0.0"
+        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        precision, hit, mrr = evaluator._score_retrieval_ranked(
+            sample, ["chunk1", "chunk2"], top_k=2,
+        )
+        assert precision == 0.0
+        assert hit == 0.0
+        assert mrr == 0.0
+
+    def test_first_relevant_at_rank_2(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        # chunk1 not relevant, chunk2 relevant
+        evaluator._judge_llm.think.side_effect = ["0.0", "1.0"]
+        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        precision, hit, mrr = evaluator._score_retrieval_ranked(
+            sample, ["chunk1", "chunk2"], top_k=2,
+        )
+        assert precision == 0.5
+        assert hit == 1.0
+        assert mrr == 0.5  # 1/2
+
+    def test_respects_top_k_limit(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "1.0"
+        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        chunks = [f"chunk{i}" for i in range(10)]
+        evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
+        # Should only call Judge for 5 chunks
+        assert evaluator._judge_llm.think.call_count == 5
+
+
+class TestScoreCorrectness:
+    def test_calls_judge_llm(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "0.75"
+        score = evaluator._score_correctness("q", "answer", "ground_truth")
+        assert score == 0.75
+        evaluator._judge_llm.think.assert_called_once()
+
+
+class TestFaithfulnessUsesJudgeLLM:
+    def test_faithfulness_calls_judge_not_agent(self):
+        evaluator = RAGEvaluator([], [])
+        evaluator._judge_llm = MagicMock()
+        evaluator._judge_llm.think.return_value = "0.9"
+        answer = "Based on the context, Qdrant uses HNSW."
+        contexts = ["Qdrant is a high-performance vector database using HNSW"]
+        score = evaluator._score_faithfulness(answer, contexts)
+        assert score == 0.9
+        evaluator._judge_llm.think.assert_called_once()
+
+
+class TestRetrieveReturnsTuple:
+    def test_retrieve_returns_two_elements(self, monkeypatch):
+        evaluator = RAGEvaluator(["doc content"], [])
+        mock_retriever = MagicMock()
+        mock_retriever.search.return_value = []
+        with patch("agentnexus.rag.evaluator.search") as mock_search:
+            mock_search.return_value = []
+            result = evaluator._retrieve("query", mock_retriever, use_hybrid=False, max_tokens=100)
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+            assert isinstance(result[0], list)
+            assert isinstance(result[1], list)

@@ -27,7 +27,6 @@ ReAct 单智能体任务协同 CLI 工具。Python 3.11+, 纯本地运行 (Chrom
 ├── CLAUDE.md
 ├── README.md
 ├── agentnexus.spec
-├── eval_routes.json
 ├── pyproject.toml
 └── requirements.txt
 ```
@@ -144,7 +143,6 @@ BM25 索引仅在内存中，不持久化，每次会话重建。
 
 ## 已知问题 / 注意点
 
-- `plan.md` 描述的 critic 阶段在计划中但在当前 FSM 中已移除独立节点——现为 analyst 内部调用 critic 评分
 - long_term.py 每次 save/search 都重建 ChromaDB client，频繁调用有性能开销
 - BM25 索引不持久化，重启后需重建
 - PII 过滤 (memory/manager.py) 用正则完全屏蔽 email/电话/API key，不含部分脱敏

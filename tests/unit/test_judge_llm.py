@@ -8,6 +8,10 @@ from agentnexus.core.judge_llm import _judge_llm, get_judge_llm
 
 
 class TestGetJudgeLLM:
+    def setup_method(self):
+        import agentnexus.core.judge_llm as m
+        m._judge_llm = None
+
     def teardown_method(self):
         import agentnexus.core.judge_llm as m
         m._judge_llm = None

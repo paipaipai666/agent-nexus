@@ -1,4 +1,4 @@
-from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
+from agentnexus.rag.eval_dataset import DATASET_VERSION, EVAL_SAMPLES, KNOWLEDGE_BASE
 
 
 class TestKnowledgeBase:
@@ -15,17 +15,20 @@ class TestKnowledgeBase:
 
 class TestEvalSamples:
     def test_total_count(self):
-        assert len(EVAL_SAMPLES) == 30
+        assert len(EVAL_SAMPLES) == 60
 
     def test_negative_samples_have_empty_ground_truth(self):
-        for sample in EVAL_SAMPLES[26:30]:
-            assert sample.ground_truth == ""
-            assert sample.reference_contexts == []
+        negatives = [s for s in EVAL_SAMPLES if not s.ground_truth]
+        assert len(negatives) == 11
+        for s in negatives:
+            assert s.reference_contexts == []
 
-    def test_factual_samples_have_content(self):
-        for sample in EVAL_SAMPLES[:13]:
-            assert sample.ground_truth.strip()
-            assert len(sample.reference_contexts) > 0
+    def test_positive_samples_have_content(self):
+        positives = [s for s in EVAL_SAMPLES if s.ground_truth]
+        assert len(positives) == 49
+        for s in positives:
+            assert s.ground_truth.strip()
+            assert len(s.reference_contexts) > 0
 
     def test_each_sample_has_question(self):
         for sample in EVAL_SAMPLES:
@@ -36,3 +39,6 @@ class TestEvalSamples:
         kb_text = " ".join(KNOWLEDGE_BASE)
         for snippet in sample.reference_contexts:
             assert snippet in kb_text
+
+    def test_dataset_version_defined(self):
+        assert DATASET_VERSION == "built-in-v1"

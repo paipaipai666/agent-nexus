@@ -19,6 +19,7 @@ jobs:
       - name: Test
         run: python -m pytest tests/ -v
       - name: Eval
-        run: python -c "from agentnexus.rag.eval_dataset import KNOWLEDGE_BASE, EVAL_SAMPLES; from agentnexus.rag.evaluator import RAGEvaluator; e = RAGEvaluator(KNOWLEDGE_BASE, EVAL_SAMPLES); print('eval samples:', len(EVAL_SAMPLES))"
+        run: nexus eval run --ci
         env:
           AGENTNEXUS_LLM_API_KEY: ${{ secrets.AGENTNEXUS_LLM_API_KEY }}
+          AGENTNEXUS_JUDGE_API_KEY: ${{ secrets.AGENTNEXUS_JUDGE_API_KEY }}

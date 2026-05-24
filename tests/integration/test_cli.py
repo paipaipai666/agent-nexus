@@ -140,24 +140,33 @@ class TestCliEvaluation:
                 self.use_hybrid = False
                 self.faithfulness = 1.0
                 self.answer_relevancy = 1.0
+                self.answer_correctness = 1.0
                 self.context_precision = 1.0
                 self.context_recall = 1.0
                 self.context_relevancy = 1.0
+                self.hit_rate = 1.0
+                self.mrr = 1.0
                 self.avg_latency_ms = 1.0
                 self.p95_latency_ms = 1.0
                 self.rejection_rate = 1.0
                 self.faithfulness_ci = (1.0, 1.0)
                 self.answer_relevancy_ci = (1.0, 1.0)
+                self.answer_correctness_ci = (1.0, 1.0)
                 self.context_precision_ci = (1.0, 1.0)
                 self.context_recall_ci = (1.0, 1.0)
                 self.context_relevancy_ci = (1.0, 1.0)
+                self.hit_rate_ci = (1.0, 1.0)
+                self.mrr_ci = (1.0, 1.0)
+
+            def check_passed(self, thresholds=None):
+                return True
 
         class FakeEvaluator:
             def __init__(self, documents, samples):
                 self.documents = documents
                 self.samples = samples
 
-            def run_combination(self, strategy, chunk_size, overlap, use_hybrid, _token_budget=None):
+            def run_combination(self, strategy, chunk_size, overlap, use_hybrid, _token_budget=None, top_k=10):
                 captured.append((strategy.value, chunk_size, use_hybrid))
                 return FakeRun()
 
