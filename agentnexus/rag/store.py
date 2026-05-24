@@ -252,9 +252,33 @@ class KnowledgeBaseCatalog:
         self._conn.commit()
 
     def upsert_document(self, record: SourceDocument):
-        created_at = record.created_at or _utc_now()
-        updated_at = record.updated_at or created_at
-        self._conn.execute(
+        self.upsert_documents([record])
+
+    def upsert_documents(self, records: list[SourceDocument]):
+        if not records:
+            return
+        payload = []
+        for record in records:
+            created_at = record.created_at or _utc_now()
+            updated_at = record.updated_at or created_at
+            payload.append(
+                (
+                    record.document_id,
+                    record.kb_id,
+                    record.source_id,
+                    record.source_uri,
+                    record.document_version,
+                    record.content,
+                    record.raw_text or record.content,
+                    record.indexed_text or record.content,
+                    record.sparse_text or record.indexed_text or record.content,
+                    _encode_sections(record.sections),
+                    _encode_metadata(record.metadata),
+                    created_at,
+                    updated_at,
+                )
+            )
+        self._conn.executemany(
             """
             INSERT INTO source_documents (
                 document_id, kb_id, source_id, source_uri, document_version,
@@ -274,21 +298,7 @@ class KnowledgeBaseCatalog:
                 metadata_json = excluded.metadata_json,
                 updated_at = excluded.updated_at
             """,
-            (
-                record.document_id,
-                record.kb_id,
-                record.source_id,
-                record.source_uri,
-                record.document_version,
-                record.content,
-                record.raw_text or record.content,
-                record.indexed_text or record.content,
-                record.sparse_text or record.indexed_text or record.content,
-                _encode_sections(record.sections),
-                _encode_metadata(record.metadata),
-                created_at,
-                updated_at,
-            ),
+            payload,
         )
         self._conn.commit()
 

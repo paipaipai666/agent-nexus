@@ -2,7 +2,6 @@
 import os
 
 import typer
-import yaml
 from pydantic import SecretStr
 from rich import box
 from rich.panel import Panel
@@ -17,7 +16,7 @@ def config(
     value: str = typer.Option(None, "--value", "-v", help="配置值"),
 ):
     """查看或修改配置"""
-    from agentnexus.core.config import Settings, _config_dir, get_settings
+    from agentnexus.core.config import Settings, _config_dir, _load_yaml, _write_yaml_config, get_settings
 
     settings = get_settings()
     config_path = _config_dir() / "config.yaml"
@@ -39,10 +38,9 @@ def config(
             console.print("示例: nexus config --set llm_model_id --value deepseek/deepseek-chat")
             return
 
-        data = yaml.safe_load(open(config_path, encoding="utf-8")) if config_path.exists() else {}
+        data = _load_yaml()
         data[key] = value
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        yaml.dump(data, open(config_path, "w", encoding="utf-8"), allow_unicode=True)
+        _write_yaml_config(data)
         console.print(f"[green]已保存[/green] {key} = [bold]{value}[/bold]")
         console.print(f"[dim]配置文件: {config_path}[/dim]")
         return
@@ -53,7 +51,7 @@ def config(
     table.add_column("Value", style="green")
     table.add_column("Source", style="dim")
 
-    yaml_data = yaml.safe_load(open(config_path, encoding="utf-8")) if config_path.exists() else {}
+    yaml_data = _load_yaml()
 
     for name, field in Settings.model_fields.items():
         resolved = getattr(settings, name)
@@ -83,7 +81,7 @@ def config(
 @app.command()
 def init():
     """首次初始化引导"""
-    from agentnexus.core.config import _config_dir
+    from agentnexus.core.config import _config_dir, _load_yaml, _write_yaml_config
 
     console.print(Panel("[bold]AgentNexus 初始化引导[/bold]", border_style="cyan"))
     console.print()
@@ -102,13 +100,12 @@ def init():
         base_url = "https://api.deepseek.com"
 
     config_path = _config_dir() / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    data = yaml.safe_load(open(config_path, encoding="utf-8")) if config_path.exists() else {}
+    data = _load_yaml()
     data["llm_api_key"] = api_key
     data["llm_model_id"] = model
     data["llm_base_url"] = base_url
-    yaml.dump(data, open(config_path, "w", encoding="utf-8"), allow_unicode=True)
+    _write_yaml_config(data)
 
     console.print()
     console.print("[green]配置完成![/green] 试试 nexus run '你好'")

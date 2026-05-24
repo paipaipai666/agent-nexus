@@ -11,13 +11,42 @@ import json
 import logging
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
 from agentnexus.observability.tracer import trace_manager
 
+try:
+    import jsonschema
+except ImportError:
+    jsonschema = None
+
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_PARAM_TOKENS = ("api_key", "apikey", "token", "secret", "password", "authorization")
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = str(key).lower().replace("-", "").replace("_", "")
+    return any(token.replace("_", "") in normalized for token in _SENSITIVE_PARAM_TOKENS)
+
+
+def _redact_sensitive_params(value: Any, key: str | None = None) -> Any:
+    if key is not None and _is_sensitive_key(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {k: _redact_sensitive_params(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_sensitive_params(item) for item in value]
+    return value
+
+
+def _serialize_params(params: dict, limit: int) -> str:
+    redacted = _redact_sensitive_params(params)
+    return json.dumps(redacted, ensure_ascii=False, default=str)[:limit]
 
 
 class RiskLevel(str, Enum):
@@ -61,6 +90,9 @@ class ToolRegistry:
         self._tools: dict[str, tuple[ToolMeta, Callable]] = {}
         self._rate_counters: dict[str, list[float]] = defaultdict(list)
         self._audit_log: list[AuditEntry] = audit_log or []
+        self._param_validators: dict[str, Any] = {}
+        self._output_validators: dict[str, Any] = {}
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
     # ── registration ──────────────────────────────────────────────
 
@@ -68,6 +100,8 @@ class ToolRegistry:
         if meta.name in self._tools:
             logger.warning("Tool '%s' already registered — overwriting", meta.name)
         self._tools[meta.name] = (meta, func)
+        self._param_validators[meta.name] = self._build_validator(meta.param_schema)
+        self._output_validators[meta.name] = self._build_validator(meta.output_schema)
 
     # ── call path (the governance gate) ───────────────────────────
 
@@ -85,11 +119,13 @@ class ToolRegistry:
 
         # 2. Parameter schema validation
         if meta.param_schema:
-            self._validate_params(name, params, meta.param_schema)
+            self._validate_params(name, params, self._param_validators.get(name))
 
         # 3. Rate limiting
         if meta.rate_limit_per_min > 0:
             self._check_rate_limit(name, meta.rate_limit_per_min)
+
+        redacted_params = _redact_sensitive_params(params)
 
         # 4. HITL gate
         hitl_triggered = False
@@ -101,7 +137,7 @@ class ToolRegistry:
                 f"调用者: {caller}\n"
                 f"工具: {name}\n"
                 f"风险: {meta.risk_level.value}\n"
-                f"参数: {json.dumps(params, ensure_ascii=False, default=str)[:500]}"
+                f"参数: {json.dumps(redacted_params, ensure_ascii=False, default=str)[:500]}"
             )
             if not hitl_approver(confirm_summary):
                 return "[blocked] 用户取消了该工具调用"
@@ -113,24 +149,21 @@ class ToolRegistry:
         span_input = {
             "tool_name": name,
             "caller": caller,
-            "params": params,
+            "params": redacted_params,
             "risk_level": meta.risk_level.value,
         }
         try:
             with trace_manager.span("tool", span_input) as span:
-                from concurrent.futures import ThreadPoolExecutor
-                from concurrent.futures import TimeoutError as FutureTimeout
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(func, **params)
-                    try:
-                        result = future.result(timeout=meta.timeout_sec)
-                    except FutureTimeout:
-                        error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
-                        raise TimeoutError(error)
+                future = self._executor.submit(func, **params)
+                try:
+                    result = future.result(timeout=meta.timeout_sec)
+                except FutureTimeout:
+                    error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
+                    raise TimeoutError(error)
                 result_str = str(result)[:500]
                 # 6. Output schema validation
                 if meta.output_schema:
-                    self._validate_output(name, result, meta.output_schema)
+                    self._validate_output(name, result, self._output_validators.get(name))
                 span.output = {"result_summary": result_str}
                 span.metadata = {"status": "ok", "caller": caller}
                 return result
@@ -148,7 +181,7 @@ class ToolRegistry:
                 self._audit_log.append(AuditEntry(
                     tool_name=name,
                     caller=caller,
-                    params=json.dumps(params, ensure_ascii=False, default=str)[:300],
+                    params=_serialize_params(params, 300),
                     result_summary=result_str[:300],
                     duration_ms=round(duration, 1),
                     hitl_triggered=hitl_triggered,
@@ -214,24 +247,34 @@ class ToolRegistry:
         return entry
 
     @staticmethod
-    def _validate_params(name: str, params: dict, schema: dict) -> None:
+    def _build_validator(schema: dict | None):
+        if not schema or jsonschema is None:
+            return None
         try:
-            import jsonschema
-            jsonschema.validate(params, schema)
-        except ImportError:
-            pass  # jsonschema not installed — skip validation with a warning
-            logger.debug("jsonschema not available, skipping param validation for '%s'", name)
+            validator_cls = jsonschema.validators.validator_for(schema)
+            validator_cls.check_schema(schema)
+            return validator_cls(schema)
+        except Exception as e:
+            logger.warning("Failed to compile schema validator: %s", e)
+            return None
+
+    @staticmethod
+    def _validate_params(name: str, params: dict, validator: Any) -> None:
+        if validator is None:
+            if jsonschema is None:
+                logger.debug("jsonschema not available, skipping param validation for '%s'", name)
+            return
+        try:
+            validator.validate(params)
         except Exception as e:
             raise ValueError(f"Tool '{name}' parameter validation failed: {e}") from e
 
     @staticmethod
-    def _validate_output(name: str, result: Any, schema: dict) -> None:
+    def _validate_output(name: str, result: Any, validator: Any) -> None:
+        if validator is None or not isinstance(result, dict):
+            return
         try:
-            import jsonschema
-            if isinstance(result, dict):
-                jsonschema.validate(result, schema)
-        except ImportError:
-            pass
+            validator.validate(result)
         except Exception as e:
             logger.warning("Tool '%s' output validation failed: %s", name, e)
 

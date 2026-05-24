@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import uuid
 from typing import Any
@@ -15,6 +16,10 @@ _client = None
 _client_path: str | None = None
 _collections: dict[str, Any] = {}
 _model = None
+_model_name: str | None = None
+_model_device: str | None = None
+_EMBED_BATCH_SIZE = 1024
+_EMBED_TORCH_THREADS_CAP = 12
 
 
 def resolve_collection_name(name: str | None = None, namespace: str | None = None) -> str:
@@ -40,13 +45,46 @@ def get_chroma_client():
     return _client
 
 
+def _resolve_embedding_device() -> str:
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+
+    return "cpu"
+
+
+def _configure_embedding_runtime(device: str) -> None:
+    if device != "cpu":
+        return
+    try:
+        import torch
+    except ImportError:
+        return
+
+    target_threads = min(max(os.cpu_count() or 1, 1), _EMBED_TORCH_THREADS_CAP)
+    if torch.get_num_threads() != target_threads:
+        torch.set_num_threads(target_threads)
+
+
 def get_embedding_model():
-    global _model
-    if _model is None:
+    global _model, _model_name, _model_device
+    settings = get_settings()
+    resolved_device = _resolve_embedding_device()
+    _configure_embedding_runtime(resolved_device)
+    if _model is None or _model_name != settings.embedding_model or _model_device != resolved_device:
         from sentence_transformers import SentenceTransformer
 
-        settings = get_settings()
-        _model = SentenceTransformer(settings.embedding_model)
+        _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
+        _model_name = settings.embedding_model
+        _model_device = resolved_device
     return _model
 
 
@@ -86,7 +124,13 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     model = get_embedding_model()
-    return model.encode(texts, normalize_embeddings=True).tolist()
+    embeddings = model.encode(
+        texts,
+        normalize_embeddings=True,
+        batch_size=_EMBED_BATCH_SIZE,
+        show_progress_bar=False,
+    )
+    return embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings
 
 
 def _normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
@@ -227,9 +271,12 @@ def delete_collection(name: str | None = None, namespace: str | None = None):
     _collections.pop(collection_name, None)
 
 
-def _reset_chroma_client():
-    global _client, _client_path, _collections, _model
+def _reset_chroma_client(reset_model: bool = False):
+    global _client, _client_path, _collections, _model, _model_name, _model_device
     _client = None
     _client_path = None
     _collections = {}
-    _model = None
+    if reset_model:
+        _model = None
+        _model_name = None
+        _model_device = None

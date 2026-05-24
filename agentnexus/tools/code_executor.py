@@ -6,6 +6,11 @@ import sys
 
 from agentnexus.core.config import get_settings
 
+try:
+    from e2b_code_interpreter import Sandbox
+except Exception:
+    Sandbox = None
+
 _HAS_MAIN_RE = re.compile(r'^if\s+__name__\s*==\s*["\']__main__["\']', re.MULTILINE)
 
 
@@ -47,9 +52,12 @@ def python_execute(code: str) -> str:
     if not api_key:
         return _execute_locally(code)
 
+    if Sandbox is None:
+        return _execute_locally_with_warning(code, "E2B sandbox 不可用")
+
+    previous_api_key = os.environ.get("E2B_API_KEY")
     try:
         os.environ["E2B_API_KEY"] = api_key
-        from e2b_code_interpreter import Sandbox
         with Sandbox() as sandbox:
             execution = sandbox.run_code(code)
 
@@ -67,9 +75,19 @@ def python_execute(code: str) -> str:
                 parts.append(f"[result]\n{res.json}")
 
         return "\n\n".join(parts) if parts else "[execution completed with no output]"
+    except Exception as e:
+        return _execute_locally_with_warning(code, f"E2B sandbox 失败: {e}")
+    finally:
+        if previous_api_key is None:
+            os.environ.pop("E2B_API_KEY", None)
+        else:
+            os.environ["E2B_API_KEY"] = previous_api_key
 
-    except Exception:
-        return _execute_locally(code)
+
+def _execute_locally_with_warning(code: str, reason: str) -> str:
+    local_result = _execute_locally(code)
+    warning = f"[warning] {reason}; falling back to local execution."
+    return f"{warning}\n{local_result}" if local_result else warning
 
 
 def _execute_locally(code: str, timeout: int = 30) -> str:

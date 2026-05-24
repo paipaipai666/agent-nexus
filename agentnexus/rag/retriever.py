@@ -176,6 +176,8 @@ def _get_retriever(namespace: str = "default", docs: list[str] | None = None) ->
 def build_knowledge_base(documents: list[str], load_reranker: bool = True, namespace: str = "default"):
     from .chroma_client import delete_collection
 
+    global _retriever
+
     delete_collection(namespace=namespace)
 
     catalog = get_knowledge_base_catalog()
@@ -191,6 +193,8 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
     )
     catalog.upsert_knowledge_base(kb_record)
 
+    document_records: list[SourceDocument] = []
+    chunk_records: list[ChunkRecord] = []
     chunk_texts: list[str] = []
     chunk_metadatas: list[dict] = []
     chunk_ids: list[str] = []
@@ -208,7 +212,7 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
             indexed_text=text,
             sparse_text=text,
         )
-        catalog.upsert_document(document)
+        document_records.append(document)
         chunk = ChunkRecord(
             chunk_id=make_chunk_id(document_version, 0, text),
             kb_id=kb_record.kb_id,
@@ -220,17 +224,21 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
             sparse_text=text,
             metadata={"source_uri": document.source_uri},
         )
-        catalog.upsert_chunks([chunk])
+        chunk_records.append(chunk)
         chunk_texts.append(chunk.text)
         chunk_metadatas.append(chunk.metadata)
         chunk_ids.append(chunk.chunk_id)
 
+    catalog.upsert_documents(document_records)
+    catalog.upsert_chunks(chunk_records)
     insert_documents(chunk_texts, metadatas=chunk_metadatas, ids=chunk_ids, namespace=namespace)
 
-    retriever = _get_retriever(namespace=namespace)
-    retriever.rebuild_from_catalog()
+    retriever = HybridRetriever(namespace=namespace)
+    retriever._chunks = {chunk.chunk_id: chunk for chunk in chunk_records}
+    retriever._bm25.build(chunk_records)
     if load_reranker:
         retriever.load_reranker()
+    _retriever = retriever
 
 
 def search_knowledge_base(query: str, namespace: str = "default") -> str:

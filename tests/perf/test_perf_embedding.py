@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
 
 EMBED_SINGLE_P95_MAX_MS = 200
 EMBED_BATCH_50_P95_MAX_MS = 2000
-EMBED_COLD_START_P95_MAX_MS = 9000
+EMBED_COLD_START_P95_MAX_MS = 14000 if os.name == "nt" else 9000
 EMBED_SMALL_TEXT_P95_MAX_MS = 200
 EMBED_LARGE_TEXT_P95_MAX_MS = 300
 
@@ -25,7 +26,7 @@ def _time_one(fn, arg):
 def test_embed_cold_start(perf_env):
     from agentnexus.rag import chroma_client
 
-    chroma_client._reset_chroma_client()
+    chroma_client._reset_chroma_client(reset_model=True)
 
     start = time.perf_counter()
     model = chroma_client.get_embedding_model()

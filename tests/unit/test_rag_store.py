@@ -174,6 +174,37 @@ class TestKnowledgeBaseCatalog:
         catalog.delete_knowledge_base("kb_support")
         assert catalog.get_knowledge_base("support") is None
 
+    def test_upsert_documents_supports_batch_write(self, temp_agentnexus_home):
+        catalog = KnowledgeBaseCatalog()
+        catalog.upsert_knowledge_base(
+            KnowledgeBaseRecord(
+                kb_id="kb_support",
+                namespace="support",
+                display_name="Support KB",
+                collection_name="kb_support",
+            )
+        )
+        doc_a = SourceDocument(
+            document_id="doc_a",
+            kb_id="kb_support",
+            source_id="src_a",
+            source_uri="docs/a.md",
+            document_version="v1",
+            content="alpha",
+        )
+        doc_b = SourceDocument(
+            document_id="doc_b",
+            kb_id="kb_support",
+            source_id="src_b",
+            source_uri="docs/b.md",
+            document_version="v1",
+            content="beta",
+        )
+
+        catalog.upsert_documents([doc_a, doc_b])
+
+        assert [doc.document_id for doc in catalog.list_documents("kb_support")] == ["doc_a", "doc_b"]
+
     def test_list_chunks_by_kb_returns_all_chunks(self, temp_agentnexus_home):
         catalog = KnowledgeBaseCatalog()
         catalog.upsert_knowledge_base(

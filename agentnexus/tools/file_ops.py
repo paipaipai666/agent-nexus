@@ -16,16 +16,26 @@ def _resolve_safe(path: str) -> Path:
     The workspace root is the directory where nexus was launched (os.getcwd()).
     Raises ValueError if the resolved path escapes the sandbox.
     """
-    workspace = Path(os.getcwd()).resolve()
-    p = (workspace / path).resolve()
-    try:
-        p.relative_to(workspace)
-    except ValueError:
-        raise ValueError(
-            f"路径越界: '{path}' 解析为 '{p}'，超出工作目录 '{workspace}'。"
-            " 不允许通过 ../ 访问上级目录。"
-        )
-    return p
+    workspace = Path(os.getcwd()).absolute()
+    candidate = workspace / path
+
+    def ensure_within_workspace(resolved: Path) -> None:
+        try:
+            resolved.relative_to(workspace)
+        except ValueError:
+            raise ValueError(
+                f"路径越界: '{path}' 解析为 '{resolved}'，超出工作目录 '{workspace}'。"
+                " 不允许通过 ../ 访问上级目录。"
+            )
+
+    existing_ancestor = candidate
+    while not existing_ancestor.exists() and existing_ancestor != existing_ancestor.parent:
+        existing_ancestor = existing_ancestor.parent
+
+    ensure_within_workspace(Path(existing_ancestor.resolve()))
+    resolved_candidate = Path(candidate.resolve())
+    ensure_within_workspace(resolved_candidate)
+    return resolved_candidate
 
 
 

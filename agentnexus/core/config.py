@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -66,10 +67,60 @@ class Settings(BaseSettings):
         return v.rstrip("/")
 
 
+class AgentNexusDumper(yaml.SafeDumper):
+    pass
+
+
+def _dump_secret_str(dumper: yaml.Dumper, value: SecretStr):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(value))
+
+
+AgentNexusDumper.add_representer(SecretStr, _dump_secret_str)
+yaml.add_representer(SecretStr, _dump_secret_str, Dumper=yaml.Dumper)
+yaml.add_representer(SecretStr, _dump_secret_str, Dumper=yaml.SafeDumper)
+
+
 def _config_dir() -> Path:
     d = Path(os.environ.get("AGENTNEXUS_HOME", Path.home() / ".agentnexus"))
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _set_restrictive_permissions(path: Path) -> None:
+    mode = 0o400 if os.name == "nt" else 0o600
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def _write_yaml_config(data: dict) -> Path:
+    config_path = _config_dir() / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        try:
+            os.chmod(config_path, 0o600)
+        except OSError:
+            pass
+
+    fd, tmp_name = tempfile.mkstemp(dir=config_path.parent, prefix="config.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, Dumper=AgentNexusDumper, allow_unicode=True, sort_keys=True)
+        _set_restrictive_permissions(tmp_path)
+        tmp_path.replace(config_path)
+        _set_restrictive_permissions(config_path)
+        global _settings_cache
+        _settings_cache = None
+        return config_path
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _default_paths() -> dict:

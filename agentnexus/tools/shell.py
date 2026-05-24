@@ -5,6 +5,7 @@ from __future__ import annotations
 import platform
 import re
 import subprocess
+import unicodedata
 
 from agentnexus.core.config import get_settings
 
@@ -41,6 +42,8 @@ _COMMON_BLACKLIST = [
     r"shutdown\s+(-s|-h|-r\s+now)",
     r"reboot",
     r"logoff",
+    r"rm\s+-rf\s+/",
+    r"(?:powershell(?:\.exe)?|pwsh)\s+.*(?:-|/)(?:e|enc|encodedcommand)\b",
 ]
 
 
@@ -55,9 +58,9 @@ def _check_blacklist(command: str) -> str | None:
     else:
         all_patterns.extend(_UNIX_BLACKLIST)
 
-    lower_cmd = command.lower()
+    normalized_cmd = unicodedata.normalize("NFKC", command).lower()
     for pattern in all_patterns:
-        if re.search(pattern, lower_cmd):
+        if re.search(pattern, normalized_cmd):
             return f"[blocked] 命令已被安全策略拦截: 匹配危险模式 '{pattern}'"
     return None
 
