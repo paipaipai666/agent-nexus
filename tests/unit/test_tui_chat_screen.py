@@ -1,7 +1,7 @@
-"""Tests for ChatScreen static methods: _condense_search_result,
-_condense_file_result, _format_subagent_result."""
+"""Tests for ChatScreen static methods, MCP formatting, and command helpers."""
 
 import json
+from unittest.mock import MagicMock
 
 from agentnexus.tui.screens.chat import ChatScreen
 
@@ -48,6 +48,124 @@ class TestCondenseFileResult:
 
     def test_empty(self):
         assert ChatScreen._condense_file_result("") == ""
+
+
+class TestFormatMcpHelpers:
+    def test_format_mcp_status(self):
+        result = ChatScreen._format_mcp_status({
+            "started": True,
+            "server_count": 2,
+            "connected_count": 1,
+            "failure_count": 1,
+            "tool_count": 3,
+            "servers": [
+                {
+                    "name": "docs",
+                    "transport": "stdio",
+                    "connected": True,
+                    "tool_names": ["mcp_docs__search"],
+                    "failure": None,
+                },
+                {
+                    "name": "remote",
+                    "transport": "streamable_http",
+                    "connected": False,
+                    "tool_names": [],
+                    "failure": "boom",
+                },
+            ],
+        })
+        assert "MCP 状态" in result
+        assert "1/2 已连接" in result
+        assert "docs" in result
+        assert "remote" in result
+
+    def test_format_mcp_tools(self):
+        result = ChatScreen._format_mcp_tools({
+            "servers": [
+                {"name": "docs", "tool_names": ["mcp_docs__search", "mcp_docs__open"]},
+            ]
+        })
+        assert "MCP Tools" in result
+        assert "mcp_docs__search" in result
+        assert "mcp_docs__open" in result
+
+    def test_format_mcp_tools_server_not_found(self):
+        result = ChatScreen._format_mcp_tools({"servers": []}, server_name="missing")
+        assert "未找到 MCP server" in result
+
+    def test_format_mcp_failures(self):
+        result = ChatScreen._format_mcp_failures({
+            "servers": [{"name": "remote", "failure": "timeout"}]
+        })
+        assert "MCP Failures" in result
+        assert "timeout" in result
+
+    def test_format_mcp_failures_empty(self):
+        result = ChatScreen._format_mcp_failures({"servers": []})
+        assert "当前没有 MCP 失败项" in result
+
+    def test_format_mcp_retry_result(self):
+        result = ChatScreen._format_mcp_retry_result({
+            "retried": ["remote"],
+            "reconnected": ["remote"],
+            "skipped": ["docs"],
+            "failed": {},
+        })
+        assert "MCP Retry" in result
+        assert "remote" in result
+        assert "docs" in result
+
+
+class TestMcpCommandHelpers:
+    def test_help_includes_mcp(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen.action_show_help()
+        message = screen._chat_area.add_system.call_args[0][0]
+        assert "/mcp" in message
+
+    def test_handle_mcp_without_manager(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("")
+        assert "未启用 MCP" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_mcp_retry_re_registers_tools(self):
+        manager = MagicMock()
+        manager.retry_failed.return_value = {
+            "retried": ["remote"],
+            "reconnected": ["remote"],
+            "skipped": [],
+            "failed": {},
+        }
+        agent = MagicMock()
+        screen = ChatScreen(agent=agent, memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry remote")
+        manager.retry_failed.assert_called_once_with(server_name="remote")
+        manager.register_tools.assert_called_once_with(agent.tool_executor)
+
+    def test_handle_mcp_retry_failed_alias(self):
+        manager = MagicMock()
+        manager.retry_failed.return_value = {
+            "retried": ["remote"],
+            "reconnected": [],
+            "skipped": [],
+            "failed": {"remote": "boom"},
+        }
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry --failed")
+        manager.retry_failed.assert_called_once_with(server_name=None)
+
+    def test_handle_mcp_unknown_subcommand(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {"servers": []}
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("unknown")
+        assert "用法: /mcp" in screen._chat_area.add_system.call_args[0][0]
 
 
 class TestFormatSubagentResult:

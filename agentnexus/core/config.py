@@ -3,8 +3,65 @@ import tempfile
 from pathlib import Path
 
 import yaml
-from pydantic import Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class MCPServerConfig(BaseModel):
+    name: str
+    enabled: bool = True
+    transport: str = Field(default="stdio")
+    command: str | None = Field(default=None)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = Field(default=None)
+    url: str | None = Field(default=None)
+    headers: dict[str, str] = Field(default_factory=dict)
+    tool_prefix: str | None = Field(default=None)
+    include_tools: list[str] = Field(default_factory=list)
+    exclude_tools: list[str] = Field(default_factory=list)
+    allowed_agents: list[str] = Field(
+        default_factory=lambda: ["react_agent", "subagent_explorer", "subagent_executor"]
+    )
+    risk_level: str = Field(default="medium")
+    require_hitl: bool = Field(default=False)
+    timeout_sec: int = Field(default=60, ge=1, le=600)
+    rate_limit_per_min: int = Field(default=10, ge=0, le=1000)
+
+    @field_validator("transport")
+    @classmethod
+    def normalize_transport(cls, value: str) -> str:
+        normalized = (value or "stdio").strip().lower().replace("-", "_")
+        if normalized == "http":
+            normalized = "streamable_http"
+        if normalized not in {"stdio", "streamable_http"}:
+            raise ValueError(f"不支持的 MCP transport: {value}")
+        return normalized
+
+    @field_validator("risk_level")
+    @classmethod
+    def normalize_risk_level(cls, value: str) -> str:
+        normalized = (value or "medium").strip().lower()
+        if normalized not in {"low", "medium", "high"}:
+            raise ValueError(f"不支持的风险等级: {value}")
+        return normalized
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str | None) -> str | None:
+        if not value:
+            return value
+        if not value.startswith(("http://", "https://")):
+            raise ValueError(f"MCP URL 必须以 http:// 或 https:// 开头: {value}")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_transport_requirements(self):
+        if self.transport == "stdio" and not self.command:
+            raise ValueError("stdio MCP server 必须提供 command")
+        if self.transport == "streamable_http" and not self.url:
+            raise ValueError("Streamable HTTP MCP server 必须提供 url")
+        return self
 
 
 class Settings(BaseSettings):
@@ -37,6 +94,9 @@ class Settings(BaseSettings):
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
+    mcp_enabled: bool = Field(default=False)
+    mcp_startup_timeout: int = Field(default=15, ge=1, le=300)
+    mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     # Compaction tuning
     autocompact_buffer_tokens: int = Field(default=8000, ge=1000, le=100000)
     large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)

@@ -10,6 +10,31 @@ from agentnexus.tools.subagent import make_subagent_run
 from agentnexus.tools.tool_executor import ToolExecutor
 
 
+class FakeMCPManager:
+    def list_subagent_tool_names(self):
+        return ["mcp_demo__echo"]
+
+    def register_tools(self, executor, include_tools=None):
+        if include_tools is not None and "mcp_demo__echo" not in include_tools:
+            return []
+        executor.registerTool(
+            "mcp_demo__echo",
+            "[MCP:demo] echo",
+            lambda message: message,
+            param_schema={
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            },
+            allowed_agents=["react_agent", "subagent_explorer"],
+            risk_level="medium",
+            require_hitl=False,
+            timeout_sec=30,
+            rate_limit_per_min=5,
+        )
+        return ["mcp_demo__echo"]
+
+
 class TestAgentIdentityAndToolFiltering:
     def test_to_openai_tools_filters_by_agent(self):
         te = ToolExecutor()
@@ -207,3 +232,29 @@ class TestSubagentRun:
         assert payload["role"] == "executor"
         assert payload["answer"] == "从步骤中提取"
         assert payload["recovery"]["attempted"] is True
+
+    def test_subagent_run_accepts_explicit_safe_mcp_tool(self, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
+
+        def fake_run(self, question, memory_manager=None):
+            captured["tools"] = set(self.tool_executor.registry.list_tools())
+            return SimpleNamespace(answer="mcp answer", steps=[])
+
+        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+
+        tool = make_subagent_run(
+            parent_llm=MagicMock(),
+            non_interactive=True,
+            mcp_manager=FakeMCPManager(),
+        )
+        payload = json.loads(tool(
+            task="请调用外部 MCP echo 工具",
+            role="reader",
+            allowed_tools=["mcp_demo__echo"],
+            max_steps=3,
+        ))
+
+        assert payload["status"] == "ok"
+        assert payload["allowed_tools"] == ["mcp_demo__echo"]
+        assert "mcp_demo__echo" in captured["tools"]

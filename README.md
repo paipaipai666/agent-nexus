@@ -30,7 +30,7 @@
 │                                   ▼                      │
 │  ┌──────────────────┐    ┌──────────────────┐           │
 │  │   Observation    │ ←  │   ToolExecutor   │           │
-│  │ 工具执行结果      │    │  9 种内置工具     │           │
+│  │ 工具执行结果      │    │  内置工具 + MCP   │           │
 │  └──────────────────┘    └──────────────────┘           │
 │                                                          │
 │  硬终止: max_steps / max_duration                        │
@@ -60,7 +60,8 @@
 |------|------|
 | **ReAct 循环** | Thought→Action→Observe 三步循环，LLM 驱动推理与工具调用 |
 | **硬终止保护** | `max_steps` + `max_duration` 双重保险，防止 Agent 跑飞 |
-| **9 种内置工具** | 代码执行（本地 + E2B 沙箱）、Web 搜索（Tavily）、文件读写、目录列表、grep 搜索、Shell 命令、记忆读写 |
+| **11 种内置工具** | 代码执行（本地 + E2B 沙箱）、Web 搜索（Tavily）、文件读写、目录列表、grep 搜索、Shell 命令、记忆读写、知识库检索、子代理委派 |
+| **MCP Client 扩展** | 可从外部 MCP server 导入 tools，统一纳入现有 ToolRegistry 的权限、Schema、HITL、超时、速率和审计链路 |
 | **HITL 确认** | 高风险操作（代码执行 / Shell / 覆盖文件）需用户确认，`-n` 跳过 |
 | **__main__ 自动追加** | AST 解析检测缺失的入口块，自动追加（工具方法） |
 
@@ -237,6 +238,48 @@ nexus stats                                   # 查看 Token 统计
 **关键环境变量**：
 - `AGENTNEXUS_HOME` — 数据根目录（默认 `~/.agentnexus`），控制 chroma/memory.db/traces 路径
 
+### MCP 配置
+
+MCP 为**默认关闭**的可选能力。当前首版支持：
+- `stdio` transport
+- `streamable_http` transport
+- 导入远端 `tools`
+- 主 Agent 与受控子代理共享同一套治理模型
+
+示例 `config.yaml`：
+
+```yaml
+mcp_enabled: true
+mcp_startup_timeout: 15
+mcp_servers:
+  - name: local-docs
+    transport: stdio
+    command: python
+    args: [server.py]
+    include_tools: [search_docs]
+    allowed_agents: [react_agent, subagent_explorer]
+    risk_level: medium
+    require_hitl: false
+
+  - name: remote-tools
+    transport: streamable_http
+    url: https://example.com/mcp
+    headers:
+      Authorization: Bearer ${TOKEN}
+    exclude_tools: [dangerous_tool]
+    allowed_agents: [react_agent]
+    risk_level: high
+    require_hitl: true
+```
+
+导入后的本地工具名会被规整为 `mcp_<server>__<tool>`，例如 `mcp_local_docs__search_docs`，以避免与内置工具重名。
+
+当前限制：
+- 只导入 MCP `tools`
+- 不兼容旧 SSE transport
+- `resources` / `prompts` 尚未接入当前 ReAct 流程
+- 子代理不会自动继承全部 MCP tools，只有显式允许且满足安全策略的工具才会暴露给子代理
+
 ## Agent 可用工具
 
 所有工具通过 `ToolRegistry` 统一注册，按风险等级分级，高风险操作需 HITL 确认。
@@ -252,6 +295,9 @@ nexus stats                                   # 查看 Token 统计
 | `file_write` | 中 | 写文件（覆盖需确认） |
 | `python_execute` | 高 | 沙箱中执行 Python（需确认） |
 | `shell_exec` | 高 | 执行 Shell 命令（需确认 + 黑名单保护） |
+| `kb_search` | 低 | 检索本地知识库，返回来源与分数 |
+| `subagent_run` | 低 | 委派受限子代理执行阅读、检索或受控验证任务 |
+| `mcp_<server>__<tool>` | 按配置 | 从外部 MCP server 导入的工具，名称会自动加前缀并复用本地治理链路 |
 
 ## 开发
 

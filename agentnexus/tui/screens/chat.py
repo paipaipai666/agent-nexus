@@ -59,11 +59,12 @@ class ChatScreen(Screen):
         ("escape", "focus_input", "输入"),
     ]
 
-    def __init__(self, agent, memory, version):
+    def __init__(self, agent, memory, version, mcp_manager=None):
         super().__init__()
         self._agent = agent
         self._memory = memory
         self._version = version
+        self._mcp_manager = mcp_manager
         self._running = False
         self._spinner_timer = None
         self._spinner_frames = None
@@ -138,7 +139,7 @@ class ChatScreen(Screen):
     def action_show_help(self):
         self._chat_area.add_system(
             "[dim]命令:[/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
-            "       /checkout <ref>  /diff [ref1] [ref2]  /status\n"
+            "       /checkout <ref>  /diff [ref1] [ref2]  /status  /mcp\n"
             "       /clear [--all]  /compact [指令]  /stats"
         )
 
@@ -288,8 +289,44 @@ class ChatScreen(Screen):
                 self._chat_area.add_system("[dim]当前上下文未达到压缩阈值[/]")
         elif cmd == "/stats":
             self._chat_area.add_system(self._hud._build_text())
+        elif cmd == "/mcp":
+            self._handle_mcp_command(arg)
         else:
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
+
+    def _handle_mcp_command(self, arg: str):
+        if self._mcp_manager is None:
+            self._chat_area.add_system("[dim]当前会话未启用 MCP。[/]")
+            return
+
+        try:
+            parts = arg.strip().split()
+            subcmd = parts[0] if parts else "status"
+            rest = parts[1:]
+
+            if subcmd == "status":
+                self._chat_area.add_system(self._format_mcp_status(self._mcp_manager.status_snapshot()))
+            elif subcmd == "tools":
+                server_name = rest[0] if rest else None
+                self._chat_area.add_system(
+                    self._format_mcp_tools(self._mcp_manager.status_snapshot(), server_name=server_name)
+                )
+            elif subcmd == "failures":
+                self._chat_area.add_system(self._format_mcp_failures(self._mcp_manager.status_snapshot()))
+            elif subcmd == "retry":
+                server_name = None
+                if rest and rest[0] != "--failed":
+                    server_name = rest[0]
+                result = self._mcp_manager.retry_failed(server_name=server_name)
+                if result.get("reconnected") and getattr(self._agent, "tool_executor", None) is not None:
+                    self._mcp_manager.register_tools(self._agent.tool_executor)
+                self._chat_area.add_system(self._format_mcp_retry_result(result))
+            else:
+                self._chat_area.add_system(
+                    "[dim]用法: /mcp [status|tools [server]|failures|retry [server|--failed]][/]"
+                )
+        except Exception as exc:
+            self._chat_area.add_system(f"[dim]MCP 命令失败: {exc}[/]")
 
     # ── spinner animation ────────────────────────────────────
 
@@ -367,6 +404,69 @@ class ChatScreen(Screen):
             lines.append(f"answer: {answer[:400]}")
         elif summary:
             lines.append(f"summary: {summary[:400]}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_status(snapshot: dict) -> str:
+        servers = snapshot.get("servers", []) or []
+        lines = [
+            "[bold]MCP 状态[/]",
+            f"[dim]started:[/] {snapshot.get('started', False)}",
+            f"[dim]servers:[/] {snapshot.get('connected_count', 0)}/{snapshot.get('server_count', 0)} 已连接",
+            f"[dim]tools:[/] {snapshot.get('tool_count', 0)}",
+            f"[dim]failures:[/] {snapshot.get('failure_count', 0)}",
+        ]
+        if servers:
+            lines.append("[bold]Servers:[/]")
+            for server in servers:
+                state = "[green]connected[/]" if server.get("connected") else "[dim]disconnected[/]"
+                lines.append(
+                    f"  - {server.get('name', 'unknown')} ({server.get('transport', 'unknown')}) {state} "
+                    f"tools={len(server.get('tool_names', []) or [])}"
+                )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_tools(snapshot: dict, server_name: str | None = None) -> str:
+        servers = snapshot.get("servers", []) or []
+        lines = ["[bold]MCP Tools[/]"]
+        matched = False
+        for server in servers:
+            if server_name and server.get("name") != server_name:
+                continue
+            matched = True
+            tools = server.get("tool_names", []) or []
+            lines.append(f"- {server.get('name', 'unknown')}: {', '.join(tools) if tools else '[dim]无工具[/]'}")
+        if server_name and not matched:
+            return f"[dim]未找到 MCP server: {server_name}[/]"
+        if not matched:
+            return "[dim]当前没有已导入的 MCP 工具。[/]"
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_failures(snapshot: dict) -> str:
+        servers = snapshot.get("servers", []) or []
+        failed = [server for server in servers if server.get("failure")]
+        if not failed:
+            return "[dim]当前没有 MCP 失败项。[/]"
+        lines = ["[bold]MCP Failures[/]"]
+        for server in failed:
+            lines.append(f"- {server.get('name', 'unknown')}: {server.get('failure')}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_retry_result(result: dict) -> str:
+        retried = result.get("retried", []) or []
+        reconnected = result.get("reconnected", []) or []
+        failed = result.get("failed", {}) or {}
+        skipped = result.get("skipped", []) or []
+        lines = ["[bold]MCP Retry[/]"]
+        lines.append(f"retried: {', '.join(retried) if retried else '-'}")
+        lines.append(f"reconnected: {', '.join(reconnected) if reconnected else '-'}")
+        lines.append(f"skipped: {', '.join(skipped) if skipped else '-'}")
+        if failed:
+            for name, reason in failed.items():
+                lines.append(f"failed: {name} -> {reason}")
         return "\n".join(lines)
 
     # ── compact event handling ───────────────────────────────

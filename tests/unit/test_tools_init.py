@@ -153,6 +153,50 @@ class TestParamSchemas:
         assert meta.param_schema["required"] == ["path", "content"]
 
 
+class FakeMCPManager:
+    def __init__(self):
+        self.register_calls = []
+
+    def register_tools(self, executor, include_tools=None):
+        self.register_calls.append(include_tools)
+        executor.registerTool(
+            "mcp_demo__echo",
+            "[MCP:demo] echo",
+            lambda message: message,
+            param_schema={
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            },
+            allowed_agents=["react_agent", "subagent_explorer"],
+            risk_level="medium",
+            require_hitl=True,
+            timeout_sec=45,
+            rate_limit_per_min=7,
+        )
+        return ["mcp_demo__echo"]
+
+
+class TestMCPRegistration:
+    def test_registers_mcp_tools_when_manager_present(self):
+        executor = ToolExecutor()
+        manager = FakeMCPManager()
+        register_all_tools(executor, mcp_manager=manager)
+        names = executor.registry.list_tools()
+        assert "mcp_demo__echo" in names
+        meta = executor.registry._tools["mcp_demo__echo"][0]
+        assert meta.risk_level == RiskLevel.MEDIUM
+        assert meta.require_hitl is True
+        assert manager.register_calls == [None]
+
+    def test_include_tools_filters_mcp_tools(self):
+        executor = ToolExecutor()
+        manager = FakeMCPManager()
+        register_all_tools(executor, include_tools={"mcp_demo__echo"}, mcp_manager=manager, enable_subagent=False)
+        assert executor.registry.list_tools() == ["mcp_demo__echo"]
+        assert manager.register_calls == [{"mcp_demo__echo"}]
+
+
 class TestDisableSubagent:
     def test_subagent_disabled(self):
         executor = ToolExecutor()

@@ -8,7 +8,8 @@ from agentnexus.tools.tool_executor import ToolExecutor
 def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
                        llm_client=None, include_tools: set[str] | None = None,
                        enable_subagent: bool = True,
-                       subagent_confirm=None):
+                       subagent_confirm=None,
+                       mcp_manager=None):
     """Register all available tools on the given executor.
 
     Call this once per CLI/TUI entry point instead of duplicating
@@ -21,6 +22,7 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
         include_tools: Optional allowlist of tool names to register.
         enable_subagent: Whether to register the subagent delegation tool.
         subagent_confirm: Optional confirmation callback forwarded to executor subagents.
+        mcp_manager: Optional MCP manager that can register imported tools.
     """
     from agentnexus.tools.code_executor import python_execute
     from agentnexus.tools.file_ops import file_list, file_read, file_write
@@ -266,13 +268,27 @@ def register_all_tools(executor: ToolExecutor, non_interactive: bool = False,
             timeout_sec=60,
         )
 
+    if mcp_manager is not None:
+        mcp_manager.register_tools(executor, include_tools=include_tools)
+
     if enable_subagent and want("subagent_run"):
         from agentnexus.tools.subagent import make_subagent_run
 
         executor.registerTool(
             "subagent_run",
-            "将一个明确、可独立完成、输入充分的子任务委派给子代理执行。默认是 Explorer（阅读、检索、归纳）；使用 executor 时可在受控条件下运行 Python 片段验证结果。优先通过 task 和 allowed_tools 约束子代理范围。旧 role 值 reader/researcher/analyst 会映射到 explorer。返回结构化结果供父代理继续综合。参数: task(必填), role(兼容字段,可选), allowed_tools(可选白名单), max_steps(默认4)",
-            make_subagent_run(parent_llm=llm_client, non_interactive=non_interactive, subagent_confirm=subagent_confirm),
+            (
+                "将一个明确、可独立完成、输入充分的子任务委派给子代理执行。默认是 Explorer"
+                "（阅读、检索、归纳）；使用 executor 时可在受控条件下运行 Python 片段验证结果。"
+                "优先通过 task 和 allowed_tools 约束子代理范围。旧 role 值"
+                " reader/researcher/analyst 会映射到 explorer。返回结构化结果供父代理继续综合。"
+                "参数: task(必填), role(兼容字段,可选), allowed_tools(可选白名单), max_steps(默认4)"
+            ),
+            make_subagent_run(
+                parent_llm=llm_client,
+                non_interactive=non_interactive,
+                subagent_confirm=subagent_confirm,
+                mcp_manager=mcp_manager,
+            ),
             param_schema={
                 "type": "object",
                 "properties": {

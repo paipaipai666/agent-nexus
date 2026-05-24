@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
+
+if TYPE_CHECKING:
+    from agentnexus.tools.mcp_adapter import MCPToolManager
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.llm import AgentLLM
@@ -58,12 +61,24 @@ def _normalize_role(role: str | None) -> str:
 
 
 
-def _resolve_allowed_tools(role: str, allowed_tools: Iterable[str] | None) -> tuple[list[str], str | None]:
-    preset = [name for name in _ROLE_TOOL_PRESETS.get(role, _ROLE_TOOL_PRESETS["explorer"]) if name in _SAFE_SUBAGENT_TOOLS]
+def _resolve_allowed_tools(
+    role: str,
+    allowed_tools: Iterable[str] | None,
+    mcp_manager: "MCPToolManager | None" = None,
+) -> tuple[list[str], str | None]:
+    preset = [
+        name
+        for name in _ROLE_TOOL_PRESETS.get(role, _ROLE_TOOL_PRESETS["explorer"])
+        if name in _SAFE_SUBAGENT_TOOLS
+    ]
     if allowed_tools is None:
         return preset, None
 
-    requested = [name for name in allowed_tools if name in preset]
+    allowed_pool = set(preset)
+    if mcp_manager is not None:
+        allowed_pool.update(mcp_manager.list_subagent_tool_names())
+
+    requested = [name for name in allowed_tools if name in allowed_pool]
     if requested:
         return requested, None
     return preset, "requested_tools_filtered"
@@ -90,7 +105,8 @@ def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None
 
 def _register_child_tools(executor: ToolExecutor, parent_llm: AgentLLM | None,
                           non_interactive: bool, include_tools: list[str],
-                          subagent_confirm: Callable[[str], bool] | None = None) -> None:
+                          subagent_confirm: Callable[[str], bool] | None = None,
+                          mcp_manager: "MCPToolManager | None" = None) -> None:
     from agentnexus.tools import register_all_tools
 
     register_all_tools(
@@ -100,6 +116,7 @@ def _register_child_tools(executor: ToolExecutor, parent_llm: AgentLLM | None,
         include_tools=set(include_tools),
         enable_subagent=False,
         subagent_confirm=subagent_confirm,
+        mcp_manager=mcp_manager,
     )
 
 
@@ -121,10 +138,18 @@ def _extract_step_summary(result) -> str:
 def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                           task: str, role: str, tool_names: list[str], max_steps: int,
                           retry_reason: str | None = None,
-                          subagent_confirm: Callable[[str], bool] | None = None) -> tuple[dict | None, Exception | None]:
+                          subagent_confirm: Callable[[str], bool] | None = None,
+                          mcp_manager: "MCPToolManager | None" = None) -> tuple[dict | None, Exception | None]:
     child_llm = _clone_llm(parent_llm)
     child_executor = ToolExecutor()
-    _register_child_tools(child_executor, parent_llm, non_interactive, tool_names, subagent_confirm)
+    _register_child_tools(
+        child_executor,
+        parent_llm,
+        non_interactive,
+        tool_names,
+        subagent_confirm,
+        mcp_manager,
+    )
     child_agent = ReActAgent(
         child_llm,
         child_executor,
@@ -185,12 +210,13 @@ def _build_payload(status: str, role: str, answer: str, summary: str,
 
 
 def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False,
-                      subagent_confirm: Callable[[str], bool] | None = None):
+                      subagent_confirm: Callable[[str], bool] | None = None,
+                      mcp_manager: "MCPToolManager | None" = None):
     def subagent_run(task: str, role: str = "explorer",
                      allowed_tools: list[str] | None = None,
                      max_steps: int = 4) -> str:
         effective_role = _normalize_role(role)
-        tool_names, tool_recovery = _resolve_allowed_tools(effective_role, allowed_tools)
+        tool_names, tool_recovery = _resolve_allowed_tools(effective_role, allowed_tools, mcp_manager)
         with trace_manager.span("subagent", {
             "requested_role": role,
             "effective_role": effective_role,
@@ -213,7 +239,14 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 return payload
 
             attempt, error = _run_subagent_attempt(
-                parent_llm, non_interactive, task, effective_role, tool_names, max_steps, subagent_confirm=subagent_confirm
+                parent_llm,
+                non_interactive,
+                task,
+                effective_role,
+                tool_names,
+                max_steps,
+                subagent_confirm=subagent_confirm,
+                mcp_manager=mcp_manager,
             )
             recovery = {
                 "attempted": False,
@@ -243,7 +276,11 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                         recovery=recovery if recovery["attempted"] else None,
                     )
                     span.output = {"payload": payload[:500]}
-                    span.metadata = {"status": "ok" if not recovery["attempted"] else "fallback", "agent_id": f"subagent_{effective_role}", "recovery": recovery if recovery["attempted"] else None}
+                    span.metadata = {
+                        "status": "ok" if not recovery["attempted"] else "fallback",
+                        "agent_id": f"subagent_{effective_role}",
+                        "recovery": recovery if recovery["attempted"] else None,
+                    }
                     return payload
 
             fallback_role = "explorer"
@@ -265,6 +302,7 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 min(max_steps + 1, 8),
                 retry_reason=fallback_reason,
                 subagent_confirm=subagent_confirm,
+                mcp_manager=mcp_manager,
             )
 
             if fallback_error is None and fallback_attempt is not None:
@@ -280,7 +318,11 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                         recovery=recovery,
                     )
                     span.output = {"payload": payload[:500]}
-                    span.metadata = {"status": "fallback", "agent_id": f"subagent_{fallback_role}", "recovery": recovery}
+                    span.metadata = {
+                        "status": "fallback",
+                        "agent_id": f"subagent_{fallback_role}",
+                        "recovery": recovery,
+                    }
                     return payload
 
             if attempt is not None and attempt.get("salvaged"):
@@ -295,7 +337,11 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                     recovery=recovery,
                 )
                 span.output = {"payload": payload[:500]}
-                span.metadata = {"status": "fallback", "agent_id": f"subagent_{effective_role}", "recovery": recovery}
+                span.metadata = {
+                    "status": "fallback",
+                    "agent_id": f"subagent_{effective_role}",
+                    "recovery": recovery,
+                }
                 return payload
 
             error_summary = str(fallback_error or error or "子代理未产出有效答案")

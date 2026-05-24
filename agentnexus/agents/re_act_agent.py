@@ -9,7 +9,6 @@ import re
 from typing import Callable
 
 from agentnexus.agents.fsm import StateMachine
-from agentnexus.observability.tracer import trace_manager
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
     AgentStep,
@@ -22,6 +21,7 @@ from agentnexus.agents.react_types import (
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
+from agentnexus.observability.tracer import trace_manager
 from agentnexus.prompts import load_prompt
 from agentnexus.tools.tool_executor import ToolExecutor
 
@@ -39,8 +39,6 @@ class ReActAgent:
     Constructor and public API remain backward-compatible.
     The run() method now delegates to a StateMachine with per-transition handlers.
     """
-
-    _HITL_TOOLS = {"python_execute", "code_executor", "shell_exec"}
 
     def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor,
                  max_steps: int | None = None,
@@ -817,13 +815,12 @@ class ReActAgent:
         return "== 近期对话 ==\n" + "\n".join(lines) + "\n\n"
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
-        need_hitl = name in self._HITL_TOOLS
         try:
             return str(self.tool_executor.registry.invoke(
                 name=name,
                 params=arguments,
                 caller=self.agent_id,
-                hitl_approver=self._confirm if need_hitl else None,
+                hitl_approver=self._confirm,
             ))
         except Exception as e:
             return f"错误: 工具 '{name}' 执行失败: {e}"

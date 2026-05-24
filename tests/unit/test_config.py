@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from agentnexus.core.config import Settings, _config_dir, _default_paths, get_settings
 
 
@@ -54,6 +56,47 @@ class TestConfigSettings:
     def test_max_agent_steps_bounds(self):
         s = Settings(max_agent_steps=50)
         assert s.max_agent_steps == 50
+
+    def test_mcp_stdio_server_config_parses(self):
+        s = Settings(
+            mcp_enabled=True,
+            mcp_servers=[{
+                "name": "demo",
+                "transport": "stdio",
+                "command": "python",
+                "args": ["server.py"],
+            }],
+        )
+        assert s.mcp_enabled is True
+        assert len(s.mcp_servers) == 1
+        server = s.mcp_servers[0]
+        assert server.name == "demo"
+        assert server.transport == "stdio"
+        assert server.command == "python"
+        assert server.args == ["server.py"]
+
+    def test_mcp_streamable_http_server_config_parses(self):
+        s = Settings(
+            mcp_enabled=True,
+            mcp_servers=[{
+                "name": "remote",
+                "transport": "streamable-http",
+                "url": "https://example.com/mcp/",
+                "headers": {"Authorization": "Bearer token"},
+            }],
+        )
+        server = s.mcp_servers[0]
+        assert server.transport == "streamable_http"
+        assert server.url == "https://example.com/mcp"
+        assert server.headers == {"Authorization": "Bearer token"}
+
+    def test_mcp_stdio_requires_command(self):
+        with pytest.raises(ValueError, match="command"):
+            Settings(mcp_enabled=True, mcp_servers=[{"name": "demo", "transport": "stdio"}])
+
+    def test_mcp_http_requires_url(self):
+        with pytest.raises(ValueError, match="url"):
+            Settings(mcp_enabled=True, mcp_servers=[{"name": "demo", "transport": "streamable_http"}])
 
 
 class TestTempAgentnexusHome:
