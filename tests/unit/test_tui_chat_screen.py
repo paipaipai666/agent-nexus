@@ -167,6 +167,129 @@ class TestMcpCommandHelpers:
         screen._handle_mcp_command("unknown")
         assert "用法: /mcp" in screen._chat_area.add_system.call_args[0][0]
 
+    def test_handle_mcp_status_subcommand(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {
+            "started": True, "server_count": 1, "connected_count": 1,
+            "failure_count": 0, "tool_count": 2,
+            "servers": [{"name": "docs", "transport": "stdio",
+            "connected": True, "tool_names": ["mcp_docs__search"], "failure": None}],
+        }
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("status")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "MCP 状态" in msg
+        assert "1/1 已连接" in msg
+
+    def test_handle_mcp_tools_all_servers(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {
+            "servers": [
+                {"name": "docs", "tool_names": ["mcp_docs__search", "mcp_docs__open"]},
+                {"name": "api", "tool_names": ["mcp_api__echo"]},
+            ],
+        }
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("tools")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "MCP Tools" in msg
+        assert "mcp_docs__search" in msg
+        assert "mcp_api__echo" in msg
+
+    def test_handle_mcp_tools_specific_server(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {
+            "servers": [
+                {"name": "docs", "tool_names": ["mcp_docs__search"]},
+                {"name": "api", "tool_names": ["mcp_api__echo"]},
+            ],
+        }
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("tools api")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "api" in msg
+        assert "mcp_api__echo" in msg
+        assert "docs" not in msg
+
+    def test_handle_mcp_tools_server_not_found(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {"servers": []}
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("tools nonexistent")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "未找到 MCP server" in msg
+
+    def test_handle_mcp_failures_subcommand(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {
+            "servers": [{"name": "remote", "failure": "timeout"}],
+        }
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("failures")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "MCP Failures" in msg
+        assert "timeout" in msg
+
+    def test_handle_mcp_failures_none(self):
+        manager = MagicMock()
+        manager.status_snapshot.return_value = {"servers": [{"name": "ok", "failure": None}]}
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("failures")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "当前没有 MCP 失败项" in msg
+
+    def test_handle_mcp_retry_re_registers_tools_on_agent(self):
+        manager = MagicMock()
+        manager.retry_failed.return_value = {
+            "retried": ["remote"],
+            "reconnected": ["remote"],
+            "skipped": [],
+            "failed": {},
+        }
+        agent = MagicMock()
+        screen = ChatScreen(agent=agent, memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry")
+        manager.retry_failed.assert_called_once_with(server_name=None)
+        manager.register_tools.assert_called_once_with(agent.tool_executor)
+
+    def test_handle_mcp_retry_without_agent_tool_executor(self):
+        """retry should not crash when agent has no tool_executor."""
+        manager = MagicMock()
+        manager.retry_failed.return_value = {
+            "retried": ["remote"],
+            "reconnected": ["remote"],
+            "skipped": [],
+            "failed": {},
+        }
+        agent = MagicMock()
+        agent.tool_executor = None
+        screen = ChatScreen(agent=agent, memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry")
+        manager.register_tools.assert_not_called()
+
+    def test_handle_mcp_no_reconnect_skips_register(self):
+        """retry with no reconnected servers should not call register_tools."""
+        manager = MagicMock()
+        manager.retry_failed.return_value = {
+            "retried": ["remote"],
+            "reconnected": [],
+            "skipped": [],
+            "failed": {"remote": "boom"},
+        }
+        agent = MagicMock()
+        screen = ChatScreen(agent=agent, memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry")
+        manager.register_tools.assert_not_called()
+
 
 class TestFormatSubagentResult:
     def test_valid_json(self):
@@ -229,3 +352,45 @@ class TestFormatSubagentResult:
         })
         result = ChatScreen._format_subagent_result(text)
         assert "tools: bash, python, read" in result
+
+
+class TestMcpCommandExceptionHandler:
+    def test_exception_during_status_shows_error(self):
+        """Exception in _handle_mcp_command must be caught and shown to user."""
+        manager = MagicMock()
+        manager.status_snapshot.side_effect = RuntimeError("snapshot failed")
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("status")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "snapshot failed" in msg
+
+    def test_exception_during_tools_shows_error(self):
+        """Exception when listing tools must be caught."""
+        manager = MagicMock()
+        manager.status_snapshot.side_effect = ValueError("tools error")
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("tools")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "tools error" in msg
+
+    def test_exception_during_retry_shows_error(self):
+        """Exception during retry must be caught."""
+        manager = MagicMock()
+        manager.retry_failed.side_effect = ConnectionError("retry failed")
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("retry")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "retry failed" in msg
+
+    def test_exception_preserves_chat_area_functionality(self):
+        """After exception, the chat area must still be usable."""
+        manager = MagicMock()
+        manager.status_snapshot.side_effect = RuntimeError("fail")
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
+        screen._chat_area = MagicMock()
+        screen._handle_mcp_command("status")
+        # Verify add_system was still called (error path, not crash)
+        assert screen._chat_area.add_system.called
