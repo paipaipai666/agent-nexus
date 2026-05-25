@@ -8,6 +8,7 @@ import pytest
 
 from agentnexus.tools.code_executor import (
     SandboxUnavailable,
+    _disabled_message,
     _execute_auto,
     _execute_bubblewrap,
     _execute_docker,
@@ -21,7 +22,6 @@ from agentnexus.tools.code_executor import (
     _has_e2b_key,
     _run_command,
     _unavailable_message,
-    _disabled_message,
     python_execute,
 )
 
@@ -335,7 +335,11 @@ class TestExecuteDocker:
     def test_docker_not_found(self):
         with patch("shutil.which", return_value=None):
             with pytest.raises(SandboxUnavailable, match="Docker CLI"):
-                _execute_docker("print(1)", type("Settings", (), {"code_execution_docker_image": "python:3.11-slim", "code_execution_memory_mb": 256})(), 30)
+                _execute_docker("print(1)", type(
+                    "Settings", (),
+                    {"code_execution_docker_image": "python:3.11-slim",
+                     "code_execution_memory_mb": 256}
+                )(), 30)
 
     def test_docker_security_flags(self, mocker):
         mocker.patch("shutil.which", return_value="/usr/bin/docker")
@@ -348,7 +352,11 @@ class TestExecuteDocker:
         mocker.patch("agentnexus.tools.code_executor._run_command", side_effect=capture)
         mocker.patch("pathlib.Path.write_text")
 
-        _execute_docker("print(1)", type("Settings", (), {"code_execution_docker_image": "python:3.11-slim", "code_execution_memory_mb": 256})(), 30)
+        _execute_docker("print(1)", type(
+            "Settings", (),
+            {"code_execution_docker_image": "python:3.11-slim",
+             "code_execution_memory_mb": 256}
+        )(), 30)
 
         cmd_str = " ".join(cmd_captured)
         assert "--network" in cmd_str and "none" in cmd_str
@@ -368,27 +376,11 @@ class TestExecuteDocker:
         mocker.patch("agentnexus.tools.code_executor._run_command", side_effect=capture)
         mocker.patch("pathlib.Path.write_text")
 
-        _execute_docker("print(1)", type("Settings", (), {"code_execution_docker_image": "python:3.11-slim", "code_execution_memory_mb": 256})(), 30)
-
-        cmd_str = " ".join(cmd_captured)
-        assert "--network" in cmd_str and "none" in cmd_str
-        assert "--read-only" in cmd_str
-        assert "--cap-drop" in cmd_str and "ALL" in cmd_str
-        assert "--security-opt" in cmd_str and "no-new-privileges" in cmd_str
-        assert "--user" in cmd_str and "65534:65534" in cmd_str
-
-    def test_docker_mount_read_only(self, mocker):
-        mocker.patch("shutil.which", return_value="/usr/bin/docker")
-        cmd_captured = []
-
-        def capture(cmd, timeout, cwd=None):
-            cmd_captured.extend(cmd)
-            return "ok"
-
-        mocker.patch("agentnexus.tools.code_executor._run_command", side_effect=capture)
-        mocker.patch("pathlib.Path.write_text")
-
-        _execute_docker("print(1)", type("Settings", (), {"code_execution_docker_image": "python:3.11-slim", "code_execution_memory_mb": 256})(), 30)
+        _execute_docker("print(1)", type(
+            "Settings", (),
+            {"code_execution_docker_image": "python:3.11-slim",
+             "code_execution_memory_mb": 256}
+        )(), 30)
 
         mounts = [x for x in cmd_captured if ":ro" in x]
         assert len(mounts) > 0
@@ -498,7 +490,7 @@ class TestPythonExecBackendDispatch:
     def test_backend_auto(self, mock_auto, mock_settings):
         mock_settings.return_value.code_execution_backend = "auto"
         mock_auto.return_value = "auto ok"
-        result = python_execute("print(1)")
+        python_execute("print(1)")
         assert mock_auto.called
 
     @patch("agentnexus.tools.code_executor.get_settings")
@@ -506,7 +498,7 @@ class TestPythonExecBackendDispatch:
     def test_backend_e2b(self, mock_e2b, mock_settings):
         mock_settings.return_value.code_execution_backend = "e2b"
         mock_e2b.return_value = "e2b ok"
-        result = python_execute("print(1)")
+        python_execute("print(1)")
         assert mock_e2b.called
 
     @patch("agentnexus.tools.code_executor.get_settings")
@@ -514,7 +506,7 @@ class TestPythonExecBackendDispatch:
     def test_backend_native(self, mock_native, mock_settings):
         mock_settings.return_value.code_execution_backend = "native"
         mock_native.return_value = "native ok"
-        result = python_execute("print(1)")
+        python_execute("print(1)")
         assert mock_native.called
 
     @patch("agentnexus.tools.code_executor.get_settings")
@@ -522,7 +514,7 @@ class TestPythonExecBackendDispatch:
     def test_backend_docker(self, mock_docker, mock_settings):
         mock_settings.return_value.code_execution_backend = "docker"
         mock_docker.return_value = "docker ok"
-        result = python_execute("print(1)")
+        python_execute("print(1)")
         assert mock_docker.called
 
     @patch("agentnexus.tools.code_executor.get_settings")
@@ -540,7 +532,7 @@ class TestPythonExecBackendDispatch:
         mock_settings.return_value.code_execution_backend = "local_unsafe"
         mock_settings.return_value.code_execution_allow_unsafe_local = True
         mock_local.return_value = "local ok"
-        result = python_execute("print(1)")
+        python_execute("print(1)")
         assert mock_local.called
 
     @patch("agentnexus.tools.code_executor.get_settings")

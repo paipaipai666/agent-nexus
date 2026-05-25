@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agentnexus.tools.code_executor import (
     SandboxUnavailable,
     _execute_auto,

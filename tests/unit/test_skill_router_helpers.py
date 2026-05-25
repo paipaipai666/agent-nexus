@@ -4,8 +4,8 @@ from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router import (
     IndexedSkillMetadata,
     SkillRouterIndex,
-    _entry_terms,
     _entries_signature,
+    _entry_terms,
     _format_reason,
     _parse_llm_skill_id,
     _score_entry,

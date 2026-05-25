@@ -5,22 +5,20 @@ profile construction, temp directory behavior, and cross-platform compatibility.
 """
 
 import sys
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentnexus.tools.shell import (
-    _execute_shell_bubblewrap,
-    _execute_shell_seatbelt,
-    _execute_shell_docker,
-    ShellSandboxUnavailable,
-)
 from agentnexus.tools.code_executor import (
+    SandboxUnavailable,
     _execute_bubblewrap,
     _execute_seatbelt,
-    SandboxUnavailable,
+)
+from agentnexus.tools.shell import (
+    ShellSandboxUnavailable,
+    _execute_shell_bubblewrap,
+    _execute_shell_docker,
+    _execute_shell_seatbelt,
 )
 
 

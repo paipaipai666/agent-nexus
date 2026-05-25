@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -20,7 +20,6 @@ class TestTuiCommand:
         mock_agent = MagicMock()
         mock_tui_app = MagicMock()
         mock_trace = MagicMock()
-        mock_skill_service = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
              patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
@@ -45,6 +44,7 @@ class TestTuiCommand:
                 memory=mock_memory,
                 version=mock_version,
                 mcp_manager=None,
+                skill_service=ANY,
             )
             mock_trace.configure.assert_called_once_with("/tmp/traces")
 
@@ -161,5 +161,6 @@ class TestTuiCommand:
                 memory=mock_memory,
                 version=mock_version,
                 mcp_manager=mock_manager,
+                skill_service=ANY,
             )
             mock_manager.close.assert_called_once()

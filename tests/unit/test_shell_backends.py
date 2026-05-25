@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentnexus.tools.shell import (
+    ShellSandboxUnavailable,
     _apply_timeout,
     _execute_shell_auto,
     _execute_shell_docker,
@@ -15,7 +16,6 @@ from agentnexus.tools.shell import (
     _format_shell_result,
     _run_shell_command,
     _shell_unavailable_message,
-    ShellSandboxUnavailable,
     shell_exec,
 )
 

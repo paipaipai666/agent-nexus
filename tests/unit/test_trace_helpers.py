@@ -6,11 +6,10 @@ import time
 from pathlib import Path
 
 from agentnexus.observability.tracer import (
-    _truncate,
-    _truncate_dict,
     TraceContext,
     TraceManager,
-    TraceSpan,
+    _truncate,
+    _truncate_dict,
 )
 
 
