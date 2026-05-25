@@ -150,6 +150,18 @@ class TestReActAgentConversationMode:
 
         assert result == expected
 
+    def test_build_prompt_includes_available_skill_context(self):
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.tools.tool_executor import ToolExecutor
+        mock_llm = MagicMock()
+        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent.set_available_skill_context("== Available Skills ==\n- default/docx: DOCX - Word docs\n\n")
+
+        result = agent._build_prompt("tools", "question", "", "", "")
+
+        assert "Available Skills" in result
+        assert "default/docx" in result
+
     def test_build_prompt_with_profile_injects_guidance(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow

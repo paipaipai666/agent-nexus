@@ -32,6 +32,7 @@ class SidePanel(Widget):
             "skill": "default",
             "workflow": "default",
             "status": "idle",
+            "available": [],
         }
 
     def update_version(self, branch: str, head: str, can_undo: bool, can_redo: bool):
@@ -70,11 +71,13 @@ class SidePanel(Widget):
         workflow: str = "default",
         status: str = "idle",
         runtime: dict | None = None,
+        available: list[tuple[str, str, str]] | None = None,
     ):
         self._skill_info = {
             "skill": skill or "default",
             "workflow": workflow or "default",
             "status": status or "idle",
+            "available": list(available or self._skill_info.get("available", [])),
         }
         if runtime:
             self._skill_info["runtime"] = runtime
@@ -162,6 +165,7 @@ class SidePanel(Widget):
         workflow = self._skill_info.get("workflow", "default")
         status = self._skill_info.get("status", "idle")
         runtime = self._skill_info.get("runtime", {}) or {}
+        available = self._skill_info.get("available", []) or []
         run_status = runtime.get("status", "")
         steps = runtime.get("steps", 0)
         ok = runtime.get("ok", 0)
@@ -188,7 +192,20 @@ class SidePanel(Widget):
         if auto_reason:
             label = f"Auto {auto_source}" if auto_source else "Auto"
             runtime_line += f"\n[dim]{label}[/] " + _truncate(auto_reason, 80)
-        return f"[dim]Skill[/] {skill}\n[dim]Workflow[/] {workflow}\n[dim]Status[/] {status}{runtime_line}"
+        available_line = ""
+        if available:
+            lines = ["\n[dim]Available[/]"]
+            for item in available[:6]:
+                skill_id = _truncate(str(item[0]), 24)
+                name = _truncate(str(item[1]), 26)
+                lines.append(f"{skill_id} [dim]{name}[/]")
+            if len(available) > 6:
+                lines.append(f"[dim]... {len(available) - 6} more[/]")
+            available_line = "\n".join(lines)
+        return (
+            f"[dim]Skill[/] {skill}\n[dim]Workflow[/] {workflow}\n"
+            f"[dim]Status[/] {status}{runtime_line}{available_line}"
+        )
 
     def compose(self) -> ComposeResult:
         yield Label("RUN", classes="panel-eyebrow")

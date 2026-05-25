@@ -89,6 +89,8 @@ class ChatService:
         if service is None:
             return text
         session = self._sessions[session_id]
+        if hasattr(self._agent, "set_available_skill_context"):
+            self._agent.set_available_skill_context(service.available_skill_context())
         if session.skill:
             service.use(session.skill)
         result = service.prepare_message(

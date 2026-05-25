@@ -343,6 +343,7 @@ class TestShellInjection:
         """Mock shell_exec with env var command returns stdout, not host env."""
         with patch("agentnexus.tools.shell.get_settings") as mock_settings:
             mock_settings.return_value.shell_enabled = True
+            mock_settings.return_value.shell_execution_backend = "local_unsafe"
             with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
                 mock_run.return_value.stdout = "mocked_output"
                 mock_run.return_value.stderr = ""

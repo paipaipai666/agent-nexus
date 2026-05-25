@@ -122,6 +122,16 @@ class Settings(BaseSettings):
     shell_enabled: bool = Field(default=True)
     shell_confirm: bool = Field(default=True)
     shell_timeout: int = Field(default=30, ge=1, le=300)
+    # Python code execution
+    # auto: e2b -> native OS sandbox -> docker -> disabled
+    code_execution_backend: str = Field(default="auto")
+    code_execution_timeout: int = Field(default=30, ge=1, le=300)
+    code_execution_memory_mb: int = Field(default=256, ge=64, le=8192)
+    code_execution_docker_image: str = Field(default="python:3.11-slim")
+    code_execution_allow_unsafe_local: bool = Field(default=False)
+    shell_execution_backend: str = Field(default="auto")
+    shell_execution_memory_mb: int = Field(default=256, ge=64, le=8192)
+    shell_execution_docker_image: str = Field(default="python:3.11-slim")
     # File operations
     file_read_max_mb: float = Field(default=10.0, ge=1, le=100)
     # Shell blacklist (regex patterns, checked case-insensitive)
@@ -144,6 +154,24 @@ class Settings(BaseSettings):
         if v and not v.startswith(("http://", "https://")):
             raise ValueError(f"必须以 http:// 或 https:// 开头: {v}")
         return v.rstrip("/")
+
+    @field_validator("code_execution_backend")
+    @classmethod
+    def normalize_code_execution_backend(cls, value: str) -> str:
+        normalized = (value or "auto").strip().lower().replace("-", "_")
+        allowed = {"auto", "e2b", "native", "docker", "disabled", "local_unsafe"}
+        if normalized not in allowed:
+            raise ValueError(f"Unsupported code execution backend: {value}")
+        return normalized
+
+    @field_validator("shell_execution_backend")
+    @classmethod
+    def normalize_shell_execution_backend(cls, value: str) -> str:
+        normalized = (value or "auto").strip().lower().replace("-", "_")
+        allowed = {"auto", "e2b", "native", "docker", "disabled", "local_unsafe"}
+        if normalized not in allowed:
+            raise ValueError(f"Unsupported shell execution backend: {value}")
+        return normalized
 
 
 class AgentNexusDumper(yaml.SafeDumper):

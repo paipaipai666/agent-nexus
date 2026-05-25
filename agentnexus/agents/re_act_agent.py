@@ -59,6 +59,7 @@ class ReActAgent:
         self._on_event: Callable | None = None
         self._session_profile: SessionProfile | None = None
         self._compiled_session_profile: CompiledSessionProfile | None = None
+        self._available_skill_context: str = ""
 
     # ================================================================
     # Public API (unchanged)
@@ -84,6 +85,10 @@ class ReActAgent:
         """Apply a workflow-backed session profile for future runs."""
         self._session_profile = profile
         self._compiled_session_profile = validate_session_profile(profile) if profile is not None else None
+
+    def set_available_skill_context(self, context: str) -> None:
+        """Expose local skill metadata to the next prompt without selecting a skill."""
+        self._available_skill_context = context or ""
 
     def run(self, question: str, memory_manager=None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
@@ -802,11 +807,12 @@ class ReActAgent:
         compiled = self._compiled_session_profile
         template = compiled.prompt_template if compiled else REACT_PROMPT_TEMPLATE
         extra_context = ""
+        blocks = [self._available_skill_context]
         if compiled:
-            blocks = [compiled.fragments_text, compiled.workflow_guidance]
-            extra_context = "\n\n".join(block for block in blocks if block)
-            if extra_context:
-                extra_context += "\n\n"
+            blocks.extend([compiled.fragments_text, compiled.workflow_guidance])
+        extra_context = "\n\n".join(block for block in blocks if block)
+        if extra_context:
+            extra_context += "\n\n"
         profile_conversation_context = conversation_context + extra_context
         return template.format(
             tools=tools_desc,

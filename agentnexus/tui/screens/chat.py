@@ -317,6 +317,8 @@ class ChatScreen(Screen):
         elif cmd == "/skill":
             self._handle_skill_command(arg)
         else:
+            if self._handle_dynamic_skill_command(cmd, arg):
+                return
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
 
     def _init_skill_registry(self):
@@ -615,11 +617,14 @@ class ChatScreen(Screen):
         try:
             self._sync_skill_service_state()
             runtime = self._skill_runtime_summary()
+            available = self._available_skill_summary()
             if self._current_skill is None:
                 if runtime:
-                    self._side_panel.update_skill("default", "default", self._skill_status, runtime=runtime)
+                    self._side_panel.update_skill(
+                        "default", "default", self._skill_status, runtime=runtime, available=available
+                    )
                 else:
-                    self._side_panel.update_skill("default", "default", self._skill_status)
+                    self._side_panel.update_skill("default", "default", self._skill_status, available=available)
             else:
                 if runtime:
                     self._side_panel.update_skill(
@@ -627,12 +632,14 @@ class ChatScreen(Screen):
                         self._current_skill.workflow_id,
                         self._skill_status,
                         runtime=runtime,
+                        available=available,
                     )
                 else:
                     self._side_panel.update_skill(
                         self._current_skill.namespace,
                         self._current_skill.workflow_id,
                         self._skill_status,
+                        available=available,
                     )
         except Exception:
             pass
@@ -669,6 +676,86 @@ class ChatScreen(Screen):
             "auto_reason": getattr(snapshot, "auto_route_reason", ""),
             "auto_source": getattr(snapshot, "auto_route_source", ""),
         }
+
+    def _available_skill_summary(self) -> list[tuple[str, str, str]]:
+        if self._skill_service is not None:
+            try:
+                return list(self._skill_service.snapshot().available_skills)
+            except Exception:
+                return []
+        registry = self._skill_registry
+        if registry is None:
+            return []
+        return [
+            (entry.qualified_id, entry.display_name, entry.description)
+            for entry in registry.list()
+            if entry.source_kind == "skill"
+        ]
+
+    def _handle_dynamic_skill_command(self, cmd: str, arg: str) -> bool:
+        if not cmd.startswith("/") or not cmd.endswith("-skill"):
+            return False
+        target = cmd[1:-6].strip()
+        if not target:
+            return False
+        instruction = arg.strip()
+        if not instruction:
+            self._chat_area.add_system(f"[dim]用法: /{target}-skill <指令>[/]")
+            return True
+        entry = self._resolve_dynamic_skill(target)
+        if entry is None:
+            return False
+        if self._skill_service is not None:
+            try:
+                self._skill_service.use(entry.qualified_id)
+                self._skill_status = self._skill_service.snapshot().status
+                self._current_skill = entry
+            except Exception as exc:
+                self._skill_status = "error"
+                self._refresh_skill_panel()
+                self._chat_area.add_system(f"[dim]Skill 命令失败: {exc}[/]")
+                return True
+        else:
+            profile = entry.workflow.to_session_profile()
+            try:
+                validate_session_profile(profile)
+                if hasattr(self._agent, "set_session_profile"):
+                    self._agent.set_session_profile(profile)
+            except Exception as exc:
+                self._skill_status = "error"
+                self._refresh_skill_panel()
+                self._chat_area.add_system(f"[dim]Skill 命令失败: {exc}[/]")
+                return True
+            self._current_skill = entry
+            self._skill_status = "selected"
+        self._refresh_skill_panel()
+        self._chat_area.add_system(f"[green]已使用 skill[/] {entry.qualified_id} [dim]执行指令。[/]")
+        self._running = True
+        self._run_agent(instruction)
+        return True
+
+    def _resolve_dynamic_skill(self, target: str) -> SkillEntry | None:
+        if self._skill_registry is None:
+            self._init_skill_registry()
+        registry = self._skill_registry
+        if registry is None:
+            return None
+        candidates = [target]
+        if "/" not in target:
+            candidates.append(target.replace("-", "_"))
+        for candidate in candidates:
+            try:
+                entry = registry.get(candidate)
+            except ValueError:
+                continue
+            if entry is not None:
+                return entry
+        for entry in registry.list():
+            if entry.workflow_id == target or entry.workflow_id.replace("_", "-") == target:
+                return entry
+            if entry.qualified_id.replace("/", "-") == target:
+                return entry
+        return None
 
     def _handle_mcp_command(self, arg: str):
         if self._mcp_manager is None:
@@ -772,6 +859,8 @@ class ChatScreen(Screen):
         if self._current_skill is None and self._skill_service is None:
             return text
         if self._skill_service is not None:
+            if hasattr(self._agent, "set_available_skill_context"):
+                self._agent.set_available_skill_context(self._skill_service.available_skill_context())
             workflow_result = self._skill_service.prepare_message(
                 text,
                 tool_executor=getattr(self._agent, "tool_executor", None),

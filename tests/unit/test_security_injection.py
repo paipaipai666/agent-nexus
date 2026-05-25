@@ -71,6 +71,7 @@ class TestShellInjection:
     def test_shell_exec_handles_subshell(self, mock_check, mock_settings):
         """shell_exec with subshell syntax does not crash."""
         mock_settings.return_value.shell_enabled = True
+        mock_settings.return_value.shell_execution_backend = "local_unsafe"
         mock_check.return_value = None
         with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
             mock_run.return_value.stdout = ""
@@ -515,6 +516,7 @@ class TestShellInfiniteLoop:
         """shell_exec with infinite loop triggers timeout."""
         import subprocess
         mock_settings.return_value.shell_enabled = True
+        mock_settings.return_value.shell_execution_backend = "local_unsafe"
         from agentnexus.tools.shell import shell_exec
         with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("cmd", 30)
@@ -565,6 +567,7 @@ class TestShellEdgeCases:
         """Negative timeout is capped to default."""
         mock_settings.return_value.shell_enabled = True
         mock_settings.return_value.shell_timeout = 30
+        mock_settings.return_value.shell_execution_backend = "local_unsafe"
         from agentnexus.tools.shell import shell_exec
         with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
             mock_run.return_value.stdout = ""

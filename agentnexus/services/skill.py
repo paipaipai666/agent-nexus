@@ -28,6 +28,7 @@ class SkillStatus:
     auto_route_reason: str = ""
     auto_route_score: float = 0.0
     auto_route_source: str = ""
+    available_skills: tuple[tuple[str, str, str], ...] = ()
 
 
 class SkillService:
@@ -185,4 +186,24 @@ class SkillService:
             auto_route_reason=getattr(self.last_route, "reason", "") or "",
             auto_route_score=getattr(self.last_route, "score", 0.0) or 0.0,
             auto_route_source=getattr(self.last_route, "source", "") or "",
+            available_skills=tuple(
+                (entry.qualified_id, entry.display_name, entry.description)
+                for entry in self.registry.list()
+                if entry.source_kind == "skill"
+            ),
         )
+
+    def available_skill_context(self, limit: int = 20) -> str:
+        entries = [entry for entry in self.registry.list() if entry.source_kind == "skill"]
+        if not entries:
+            return ""
+        lines = [
+            "== Available Skills ==",
+            "The following local skills may be selected automatically or invoked with /<skill-id>-skill <request>.",
+        ]
+        for entry in entries[:limit]:
+            desc = " ".join((entry.description or "").split())[:180]
+            lines.append(f"- {entry.qualified_id}: {entry.display_name} — {desc}")
+        if len(entries) > limit:
+            lines.append(f"- ... {len(entries) - limit} more skills available via /skill list")
+        return "\n".join(lines) + "\n\n"

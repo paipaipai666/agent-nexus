@@ -459,14 +459,24 @@ class TestSkillCommandHelpers:
         assert screen._current_skill == entry
         assert screen._skill_status == "selected"
         screen._agent.set_session_profile.assert_called_once()
-        screen._side_panel.update_skill.assert_called_with("review", "code_review", "selected")
+        screen._side_panel.update_skill.assert_called_with(
+            "review",
+            "code_review",
+            "selected",
+            available=[("review/code_review", "Code Review", "Review code changes")],
+        )
 
         screen._handle_skill_command("reset")
 
         assert screen._current_skill is None
         assert screen._skill_status == "idle"
         screen._agent.set_session_profile.assert_called_with(None)
-        screen._side_panel.update_skill.assert_called_with("default", "default", "idle")
+        screen._side_panel.update_skill.assert_called_with(
+            "default",
+            "default",
+            "idle",
+            available=[("review/code_review", "Code Review", "Review code changes")],
+        )
 
     def test_handle_skill_use_missing_fragment_sets_error(self):
         workflow = _workflow()
@@ -491,7 +501,12 @@ class TestSkillCommandHelpers:
         assert screen._current_skill is None
         assert screen._skill_status == "error"
         screen._agent.set_session_profile.assert_not_called()
-        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        screen._side_panel.update_skill.assert_called_with(
+            "default",
+            "default",
+            "error",
+            available=[("review/code_review", "Code Review", "Review code changes")],
+        )
         assert "Prompt fragment not found" in screen._chat_area.add_system.call_args[0][0]
 
     def test_handle_skill_use_ambiguous_sets_error(self):
@@ -508,7 +523,12 @@ class TestSkillCommandHelpers:
 
         assert screen._skill_status == "error"
         assert "Ambiguous skill id" in screen._chat_area.add_system.call_args[0][0]
-        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        screen._side_panel.update_skill.assert_called_with(
+            "default",
+            "default",
+            "error",
+            available=[("a/code_review", "Code Review", ""), ("b/code_review", "Code Review", "")],
+        )
 
     def test_handle_skill_use_duplicate_sets_error(self):
         entry = SkillEntry("review", "code_review", "Code Review", "", MagicMock(), _workflow())
@@ -553,7 +573,7 @@ class TestSkillCommandHelpers:
         screen._handle_skill_command("list")
 
         assert screen._skill_status == "error"
-        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error", available=[])
 
     def test_handle_skill_validate_success(self):
         registry = MagicMock()
@@ -587,7 +607,7 @@ class TestSkillCommandHelpers:
         registry.discover.assert_called_once()
         registry.validate.assert_called_once_with(None)
         assert screen._skill_status == "error"
-        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error", available=[])
         assert "validation failed" in screen._chat_area.add_system.call_args[0][0]
 
     def test_handle_skill_use_delegates_to_skill_service(self):
@@ -668,7 +688,7 @@ class TestSkillCommandHelpers:
 
         screen._refresh_skill_panel()
 
-        screen._side_panel.update_skill.assert_called_with("review", "code_review", "selected")
+        screen._side_panel.update_skill.assert_called_with("review", "code_review", "selected", available=[])
 
     def test_prepare_agent_question_applies_workflow_runtime(self):
         workflow = _workflow()
@@ -725,6 +745,7 @@ class TestSkillCommandHelpers:
                 "auto_reason": "",
                 "auto_source": "",
             },
+            available=[("review/code_review", "Code Review", "")],
         )
 
     def test_prepare_agent_question_auto_selects_skill_service_skill(self):
@@ -753,3 +774,45 @@ class TestSkillCommandHelpers:
         assert service.current == entry
         assert "Draft concise release notes." in question
         assert screen._side_panel.add_timeline_event.called
+
+    def test_handle_dynamic_skill_command_runs_instruction(self):
+        workflow = Workflow.model_validate({
+            "id": "docx",
+            "version": "1",
+            "display_name": "DOCX",
+            "description": "Create and edit Word documents.",
+            "prompt_profile": {"system": "react"},
+            "tool_policy": {"max_risk": "low"},
+            "steps": [{"type": "prompt", "id": "doc", "prompt": "Use DOCX skill."}],
+            "success_criteria": ["Done."],
+        })
+        entry = SkillEntry("default", "docx", "DOCX", workflow.description, MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        service = MagicMock()
+        service.registry = registry
+        service.current = None
+        service.use.return_value = entry
+        service.snapshot.return_value.status = "selected"
+        service.snapshot.return_value.available_skills = (("default/docx", "DOCX", workflow.description),)
+        service.available_skill_context.return_value = "== Available Skills ==\n- default/docx: DOCX\n\n"
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+        screen._run_agent = MagicMock()
+
+        handled = screen._handle_dynamic_skill_command("/docx-skill", "生成一份word文档")
+
+        assert handled is True
+        service.use.assert_called_once_with("default/docx")
+        screen._run_agent.assert_called_once_with("生成一份word文档")
+
+    def test_handle_dynamic_skill_command_without_instruction_shows_usage(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+
+        handled = screen._handle_dynamic_skill_command("/docx-skill", "")
+
+        assert handled is True
+        assert "用法" in screen._chat_area.add_system.call_args[0][0]

@@ -49,6 +49,7 @@ class TestToolSandboxIsolation:
         with patch("agentnexus.tools.shell._SYSTEM", "Windows"):
             with patch("agentnexus.tools.shell.get_settings") as mock_settings:
                 mock_settings.return_value.shell_enabled = True
+                mock_settings.return_value.shell_execution_backend = "local_unsafe"
                 with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
                     mock_run.return_value.stdout = "test.txt\n"
                     mock_run.return_value.stderr = ""

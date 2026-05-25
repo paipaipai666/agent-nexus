@@ -228,6 +228,14 @@ nexus stats                                   # 查看 Token 统计
 | `judge_base_url` | `https://open.bigmodel.cn/api/paas/v4/` | — | Judge 模型 API 地址 |
 | `tavily_api_key` | — | `AGENTNEXUS_TAVILY_API_KEY` | 搜索引擎 API Key（可选） |
 | `e2b_api_key` | — | `AGENTNEXUS_E2B_API_KEY` | 代码沙箱 API Key（可选） |
+| `code_execution_backend` | `auto` | `AGENTNEXUS_CODE_EXECUTION_BACKEND` | Python 执行后端：`auto` / `e2b` / `native` / `docker` / `disabled` / `local_unsafe` |
+| `code_execution_timeout` | `30` | `AGENTNEXUS_CODE_EXECUTION_TIMEOUT` | Python 执行超时（秒） |
+| `code_execution_memory_mb` | `256` | `AGENTNEXUS_CODE_EXECUTION_MEMORY_MB` | Docker 后端内存限制 |
+| `code_execution_docker_image` | `python:3.11-slim` | `AGENTNEXUS_CODE_EXECUTION_DOCKER_IMAGE` | Docker 后端镜像 |
+| `code_execution_allow_unsafe_local` | `false` | `AGENTNEXUS_CODE_EXECUTION_ALLOW_UNSAFE_LOCAL` | 是否允许显式使用裸本地 subprocess（仅可信代码） |
+| `shell_execution_backend` | `auto` | `AGENTNEXUS_SHELL_EXECUTION_BACKEND` | Shell 执行后端：`auto` / `e2b` / `native` / `docker` / `disabled` / `local_unsafe` |
+| `shell_execution_memory_mb` | `256` | `AGENTNEXUS_SHELL_EXECUTION_MEMORY_MB` | Shell Docker 后端内存限制 |
+| `shell_execution_docker_image` | `python:3.11-slim` | `AGENTNEXUS_SHELL_EXECUTION_DOCKER_IMAGE` | Shell Docker 后端镜像 |
 | `max_agent_steps` | `5` | — | Agent 最大循环步数 |
 | `embedding_model` | `BAAI/bge-small-zh-v1.5` | — | 嵌入模型 |
 | `reranker_model` | `BAAI/bge-reranker-v2-m3` | — | Reranker 模型 |
@@ -237,6 +245,19 @@ nexus stats                                   # 查看 Token 统计
 
 **关键环境变量**：
 - `AGENTNEXUS_HOME` — 数据根目录（默认 `~/.agentnexus`），控制 chroma/memory.db/traces 路径
+
+### 代码与命令执行降级策略
+
+`python_execute` 默认使用 `code_execution_backend=auto`，按以下顺序选择安全后端：
+
+1. E2B 云端沙箱：需要配置 `AGENTNEXUS_E2B_API_KEY`。
+2. 本地 OS 原生沙箱：Linux 使用 bubblewrap，macOS 使用 Seatbelt / `sandbox-exec`；Windows 原生沙箱能力目前只做可用性检测，无法稳定作为同步 Python runner 时会继续降级。
+3. Docker 容器：使用只读挂载、禁用网络、限制 CPU / 内存 / 进程数、丢弃 capabilities。
+4. 全部不可用时退回裸本地 subprocess，并在结果前输出强警告和失败原因。
+
+裸本地 subprocess 是最后兜底路径，不具备强隔离能力，仅适合执行用户信任的代码。若需要禁止这类兜底，可设置 `code_execution_backend=disabled` 关闭 Python 执行，或显式选择 `e2b` / `native` / `docker` 后端让失败直接返回错误。`local_unsafe` 仍需同时设置 `code_execution_allow_unsafe_local=true`，用于开发者显式调试。
+
+`shell_exec` 使用同样的默认降级策略：E2B（当前对任意 shell 标记为不可用）→ OS 原生沙箱 → Docker → 带警告的本地 shell。若需要禁止 shell 本地兜底，可设置 `shell_execution_backend=disabled`，或显式选择 `native` / `docker` 后端。
 
 ### MCP 配置
 
@@ -335,7 +356,7 @@ pyinstaller agentnexus.spec --noconfirm
 | 记忆存储 | SQLite（LTM + 版本控制）+ ChromaDB（向量检索） |
 | 对话版本控制 | SQLite DAG（STM 快照 + LTM 增量引用） |
 | 评估 | 四层评估体系（Component / Trajectory / Hallucination / Tool-Selection / Coherence） |
-| 代码沙箱 | 本地子进程隔离 + E2B 远程沙箱（可选） |
+| 代码沙箱 | E2B → OS 原生沙箱（bubblewrap / Seatbelt / Windows 检测）→ Docker → 带警告的本地 subprocess 兜底 |
 
 ## 许可
 

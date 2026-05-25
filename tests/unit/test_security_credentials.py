@@ -66,8 +66,10 @@ class TestE2BEnvHygiene:
 
         from agentnexus.tools.code_executor import python_execute
 
-        with patch("agentnexus.tools.code_executor._execute_locally") as mock_local:
-            mock_local.return_value = "ok"
+        mock_settings.return_value.code_execution_backend = "auto"
+        mock_settings.return_value.code_execution_timeout = 30
+        with patch("agentnexus.tools.code_executor._execute_native_sandbox") as mock_native:
+            mock_native.return_value = "ok"
             python_execute("print(1)")
 
         assert "E2B_API_KEY" not in os.environ

@@ -269,13 +269,20 @@ def _format_reason(entry: SkillEntry, matched: list[str], score: float) -> str:
 
 def _tokenize(text: str) -> list[str]:
     tokens: list[str] = []
-    for raw in _TOKEN_RE.findall((text or "").lower()):
+    normalized = _split_mixed_script_boundaries((text or "").lower())
+    for raw in _TOKEN_RE.findall(normalized):
         for part in re.split(r"[_\-]+", raw):
             token = part.strip()
             if len(token) < 2 or token in _STOPWORDS:
                 continue
             tokens.append(token)
     return tokens
+
+
+def _split_mixed_script_boundaries(text: str) -> str:
+    text = re.sub(r"([\u4e00-\u9fff])([a-z0-9])", r"\1 \2", text)
+    text = re.sub(r"([a-z0-9])([\u4e00-\u9fff])", r"\1 \2", text)
+    return text
 
 
 def _parse_llm_skill_id(raw: str) -> str | None:

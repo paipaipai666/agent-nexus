@@ -98,6 +98,7 @@ class TestSidePanelRendering:
             "skill": "review",
             "workflow": "code_review",
             "status": "active",
+            "available": [],
         }
 
     def test_update_skill_accepts_runtime_summary(self):
@@ -112,6 +113,17 @@ class TestSidePanelRendering:
         assert "completed" in text
         assert "1/2" in text
         assert "1 err" in text
+
+    def test_update_skill_renders_available_skills(self):
+        panel = SidePanel()
+        panel.update_skill(available=[
+            ("default/docx", "DOCX", "Work with Word docs"),
+            ("default/pdf", "PDF", "Work with PDF files"),
+        ])
+        text = panel._render_skill()
+        assert "Available" in text
+        assert "default/docx" in text
+        assert "DOCX" in text
 
     def test_update_memory_backward_compatibility(self):
         panel = SidePanel()

@@ -167,17 +167,23 @@ class TestCodeExecutorSecurity:
     def test_execute_locally_timeout(self, mock_settings):
         """Infinite loop triggers timeout (exception propagates, not caught yet)."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
 
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("python", 30)
-            with pytest.raises(subprocess.TimeoutExpired):
-                python_execute("import time; time.sleep(100)")
+            result = python_execute("import time; time.sleep(100)")
+        assert "超时" in result
 
     @patch("agentnexus.tools.code_executor.get_settings")
     def test_execute_locally_syntax_error(self, mock_settings):
         """Syntax error in code returns error, not crash."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
 
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
@@ -188,17 +194,19 @@ class TestCodeExecutorSecurity:
         assert "error" in result.lower() or "SyntaxError" in result
 
     def test_e2b_fallback_warning(self):
-        """When E2B fails, user should see a warning about local fallback."""
+        """When E2B fails, auto mode falls through to the next safe backend."""
         with patch("agentnexus.tools.code_executor.get_settings") as mock_settings:
             mock_settings.return_value.e2b_api_key.get_secret_value.return_value = "sk-test"
+            mock_settings.return_value.code_execution_backend = "auto"
+            mock_settings.return_value.code_execution_timeout = 30
             from agentnexus.tools.code_executor import python_execute
 
             with patch("agentnexus.tools.code_executor.Sandbox") as mock_sandbox:
                 mock_sandbox.side_effect = Exception("E2B unavailable")
-                with patch("agentnexus.tools.code_executor._execute_locally") as mock_local:
-                    mock_local.return_value = "local result"
+                with patch("agentnexus.tools.code_executor._execute_native_sandbox") as mock_native:
+                    mock_native.return_value = "native result"
                     result = python_execute("print(1)")
-        assert "fallback" in result.lower() or "local" in result.lower() or "warn" in result.lower()
+        assert result == "native result"
 
 
 class TestCodeExecutorAdversarial:
@@ -208,6 +216,9 @@ class TestCodeExecutorAdversarial:
     def test_import_os_in_code_is_isolated(self, mock_settings):
         """Subprocess isolation prevents __import__('os') from affecting host."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
         result = python_execute("import os; print(os.name)")
         assert "nt" in result or "posix" in result or "error" in result
@@ -216,6 +227,9 @@ class TestCodeExecutorAdversarial:
     def test_eval_in_code_is_isolated(self, mock_settings):
         """Subprocess isolation prevents eval from affecting host."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
         result = python_execute("print(eval('1+1'))")
         assert "2" in result or "error" in result
@@ -224,6 +238,9 @@ class TestCodeExecutorAdversarial:
     def test_exec_in_code_is_isolated(self, mock_settings):
         """Subprocess isolation prevents exec from affecting host."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
         result = python_execute("exec('x=1')")
         assert "error" not in (result or "").lower() or "exec" in result
@@ -232,11 +249,14 @@ class TestCodeExecutorAdversarial:
     def test_infinite_memory_triggers_timeout(self, mock_settings):
         """Infinite memory allocation triggers subprocess timeout."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute, subprocess
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("python", 30)
-            with pytest.raises(subprocess.TimeoutExpired):
-                python_execute("x = 'a' * 10**9")
+            result = python_execute("x = 'a' * 10**9")
+        assert "超时" in result
 
     @patch("agentnexus.tools.code_executor.get_settings")
     def test_negative_timeout_capped(self, mock_settings):
@@ -244,6 +264,9 @@ class TestCodeExecutorAdversarial:
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
         settings = mock_settings.return_value
         settings.shell_timeout = 30
+        settings.code_execution_backend = "local_unsafe"
+        settings.code_execution_allow_unsafe_local = True
+        settings.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
@@ -275,6 +298,9 @@ class TestCodeExecutorAdversarial:
     def test_code_subprocess_called_with_sys_executable(self, mock_settings):
         """python_execute calls subprocess with sys.executable, not a shell."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute, sys
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
@@ -289,6 +315,9 @@ class TestCodeExecutorAdversarial:
     def test_very_long_code_string(self, mock_settings):
         """Very long code string does not crash execution."""
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
+        mock_settings.return_value.code_execution_backend = "local_unsafe"
+        mock_settings.return_value.code_execution_allow_unsafe_local = True
+        mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
         with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0

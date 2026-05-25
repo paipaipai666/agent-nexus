@@ -49,3 +49,4 @@ perf_report.md
 security_test_report.md
 PLAN.md
 error.txt
+**/.tmp_pytest/

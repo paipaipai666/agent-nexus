@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from agentnexus.services.skill import SkillService
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
-from agentnexus.skills.router import SkillRouter, SkillRouterIndex, _parse_llm_skill_id
+from agentnexus.skills.router import SkillRouter, SkillRouterIndex, _parse_llm_skill_id, _tokenize
 from agentnexus.skills.workflow import Workflow
 
 
@@ -178,6 +178,13 @@ def test_skill_router_idf_downweights_common_terms():
     assert index.idf["security"] > index.idf["shared"]
 
 
+def test_skill_router_tokenize_splits_mixed_chinese_english():
+    tokens = _tokenize("生成一份word文档 docx格式")
+
+    assert "word" in tokens
+    assert "docx" in tokens
+
+
 def test_skill_service_auto_route_does_not_override_manual_skill():
     manual = _skill_entry("manual", "Manual Skill", "Handle manual tasks.")
     auto = _skill_entry("draft-writer", "Draft Writer", "Write concise product release notes and drafts.")
@@ -205,6 +212,19 @@ def test_skill_service_refresh_rebuilds_router_index():
 
     assert len(service.router.index.items) == 1
     assert service.router.index.items[0].entry == entry
+
+
+def test_skill_service_available_skill_context_lists_metadata():
+    entry = _skill_entry("docx", "DOCX", "Create and edit Word documents.")
+    registry = SkillRegistry([])
+    registry._entries = [entry]
+    service = SkillService(registry, agent=MagicMock())
+
+    context = service.available_skill_context()
+
+    assert "Available Skills" in context
+    assert "default/docx" in context
+    assert "Create and edit Word documents" in context
 
 
 def test_skill_service_auto_route_ignores_ambiguous_matches():
