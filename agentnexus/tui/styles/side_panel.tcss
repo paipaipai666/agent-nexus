@@ -1,41 +1,43 @@
 /* Palette — sync with base.tcss if changing values */
-$bg: #1a1b20;
-$surface: #22242b;
-$elevated: #292b33;
-$text: #e2e3e7;
-$text-dim: #848893;
-$muted: #5d606b;
-$primary: #fab283;
-$secondary: #6ba5f2;
-$accent: #a78bfa;
-$success: #7fd88f;
-$error: #e06c75;
-$warning: #f5a742;
-$assistant: #6ba5f2;
-$user: #a78bfa;
-$tool: #f5a742;
-$border: #333640;
+$sidepanel: #171a1f;
+$surface: #191c21;
+$elevated: #20242b;
+$text: #d9dde5;
+$text-dim: #8c93a1;
+$muted: #606774;
+$primary: #d59f5f;
+$secondary: #70a6e8;
+$border: #2b3038;
 
 /* ===== Side Panel ===== */
 #side-panel {
-  width: 28;
+  width: 38;
+  min-width: 34;
   padding: 1;
-  background: $surface;
-  border-left: solid $border;
+  background: $sidepanel;
+  border-left: tall $border;
   overflow-y: auto;
 }
-#side-panel .card {
-  padding: 1;
-  margin: 0 0 1 0;
-  background: $elevated;
-  border: solid $border;
-}
-#side-panel .card-title {
-  color: $primary;
+
+#side-panel .panel-eyebrow {
+  height: 1;
+  color: $secondary;
   text-style: bold;
-  padding: 0 0 1 0;
-  margin: 0 0 1 0;
-  border-bottom: solid $border;
+  margin-bottom: 1;
 }
-#side-panel .card-text { color: $text-dim; }
-#side-panel .card-dim  { color: $muted; text-style: italic; }
+
+#side-panel .section-title {
+  height: 1;
+  color: $text;
+  text-style: bold;
+  margin: 1 0 0 0;
+}
+
+#side-panel .section-body {
+  color: $text-dim;
+  background: $surface;
+  border-left: tall $border;
+  padding: 0 1;
+  margin: 0 0 1 0;
+  height: auto;
+}

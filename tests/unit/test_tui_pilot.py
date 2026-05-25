@@ -279,7 +279,10 @@ class TestAgentNexusTUIPilot:
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
                 from textual.widgets import Input
-                assert app.screen.query_one("#chat-input", Input) is not None
+                chat_input = app.screen.query_one("#chat-input", Input)
+                assert chat_input is not None
+                assert chat_input.styles.height.value == 1
+                assert app.screen.query_one("#input-area").styles.height.value == 3
 
     async def test_app_has_hud(self):
         """HUD widget is present after launch."""
@@ -295,6 +298,23 @@ class TestAgentNexusTUIPilot:
                 await pilot.pause()
                 from agentnexus.tui.widgets.hud import HUD
                 assert app.screen.query_one("#hud", HUD) is not None
+
+    async def test_app_has_side_panel(self):
+        """Runtime side panel is present after launch."""
+        with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
+            mock_settings.return_value.llm_model_id = "n/a"
+            from agentnexus.tui.app import AgentNexusTUI
+            app = AgentNexusTUI(
+                agent=_make_mock_agent(),
+                memory=MagicMock(),
+                version=_make_mock_version(),
+            )
+            async with app.run_test(size=(100, 24)) as pilot:
+                await pilot.pause()
+                from agentnexus.tui.widgets.side_panel import SidePanel
+                panel = app.screen.query_one("#side-panel", SidePanel)
+                assert "default" in panel._render_skill()
+                assert "mock" in panel._render_model() or "v4-flash" in panel._render_model()
 
     async def test_app_renders_top_bar(self):
         """Top bar is rendered with welcome message."""

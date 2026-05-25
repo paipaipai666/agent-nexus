@@ -1,30 +1,43 @@
 /* ===== Palette ===== */
-$bg: #1a1b20;
-$surface: #22242b;
-$elevated: #292b33;
-$text: #e2e3e7;
-$text-dim: #848893;
-$muted: #5d606b;
-$primary: #fab283;
-$secondary: #6ba5f2;
-$accent: #a78bfa;
-$success: #7fd88f;
+$bg: #14161a;
+$surface: #191c21;
+$elevated: #20242b;
+$sidepanel: #171a1f;
+$text: #d9dde5;
+$text-dim: #8c93a1;
+$muted: #606774;
+$primary: #d59f5f;
+$secondary: #70a6e8;
+$accent: #9d8fe8;
+$success: #75c990;
 $error: #e06c75;
-$warning: #f5a742;
-$assistant: #6ba5f2;
-$user: #a78bfa;
-$tool: #f5a742;
-$border: #333640;
+$warning: #d6a25d;
+$assistant: #70a6e8;
+$user: #9d8fe8;
+$tool: #d6a25d;
+$border: #2b3038;
 
 /* ===== Base ===== */
-Screen { background: $bg; color: $text; }
+Screen {
+    background: $bg;
+    color: $text;
+}
 
 /* ===== Scrollbar ===== */
-Scrollbar { background: transparent; color: $muted; }
-Scrollbar:hover { color: $secondary; }
+Scrollbar {
+    background: transparent;
+    color: $muted;
+}
+Scrollbar:hover {
+    color: $secondary;
+}
 
 /* ===== Loading ===== */
-LoadingIndicator { color: $primary; }
+LoadingIndicator {
+    color: $primary;
+}
 
 /* For any widget without custom background */
-Widget { background: transparent; }
+Widget {
+    background: transparent;
+}

@@ -5,115 +5,102 @@ from agentnexus.tui.widgets.side_panel import SidePanel
 
 class TestSidePanelRendering:
     def test_render_version_default(self):
-        """Default version info shows 'main' branch and em-dash HEAD."""
         panel = SidePanel()
         text = panel._render_version()
-        assert "分支:" in text
         assert "main" in text
-        assert "—" in text
+        assert "---" in text
 
     def test_render_version_with_undo_redo(self):
-        """Version display shows undo/redo actions when both are available."""
         panel = SidePanel()
-        panel._version_info = ("feature", "abc1234", True, True)
+        panel._version_info = ("feature", "abc123456789", True, True)
         text = panel._render_version()
         assert "feature" in text
-        assert "abc1234" in text
+        assert "abc12345" in text
         assert "/undo" in text
         assert "/redo" in text
 
-    def test_render_version_with_undo_only(self):
-        """Version display shows only undo when only undo is available."""
+    def test_render_timeline_empty(self):
         panel = SidePanel()
-        panel._version_info = ("main", "abc1234", True, False)
-        text = panel._render_version()
-        assert "/undo" in text
-        assert "/redo" not in text
+        assert "No conversation summary" in panel._render_timeline()
 
-    def test_render_version_with_redo_only(self):
-        """Version display shows only redo when only redo is available."""
+    def test_render_timeline_keeps_last_eight(self):
         panel = SidePanel()
-        panel._version_info = ("main", "abc1234", False, True)
-        text = panel._render_version()
-        assert "/redo" in text
-        assert "/undo" not in text
+        panel.update_timeline([{"kind": "thought", "text": f"event {i}"} for i in range(10)])
+        text = panel._render_timeline()
+        assert "event 9" in text
+        assert "event 2" in text
+        assert "event 1" not in text
 
-    def test_render_version_no_actions(self):
-        """No action labels when both undo and redo are unavailable."""
+    def test_add_timeline_event(self):
         panel = SidePanel()
-        panel._version_info = ("main", "abc1234", False, False)
-        text = panel._render_version()
-        assert "/undo" not in text
-        assert "/redo" not in text
-
-    def test_render_memory_empty(self):
-        """Empty memory shows placeholder text."""
-        panel = SidePanel()
-        assert panel._render_memory() == "[dim]暂无记忆[/]"
-
-    def test_render_memory_with_items(self):
-        """Only the first 5 items are rendered."""
-        panel = SidePanel()
-        panel._ltm_items = ["item1", "item2", "item3", "item4", "item5", "item6"]
-        text = panel._render_memory()
-        assert "item1" in text
-        assert "item5" in text
-        assert "item6" not in text
-
-    def test_render_memory_single_item(self):
-        """Single item renders correctly."""
-        panel = SidePanel()
-        panel._ltm_items = ["唯一记忆"]
-        text = panel._render_memory()
-        assert "唯一记忆" in text
-        assert "·" in text
+        panel.add_timeline_event("summary", "round one used search and answered")
+        text = panel._render_timeline()
+        assert "turn" in text
+        assert "round one" in text
 
     def test_render_tools_empty(self):
-        """Empty tool list shows placeholder text."""
         panel = SidePanel()
-        assert panel._render_tools() == "[dim]暂无调用[/]"
+        assert "No tools registered" in panel._render_tools()
 
-    def test_render_tools_with_items(self):
-        """Tool items show name, status mark, and duration."""
+    def test_render_tools_as_available_tools(self):
         panel = SidePanel()
-        panel._tool_items = [
-            {"name": "web_search", "ok": True, "ms": 150.0},
-            {"name": "file_read", "ok": False, "ms": 200.0},
-        ]
+        panel.update_tools([
+            {"name": "web_search", "risk": "low"},
+            {"name": "file_write", "risk": "medium"},
+            {"name": "shell_exec", "risk": "high"},
+        ])
         text = panel._render_tools()
         assert "web_search" in text
-        assert "file_read" in text
-        assert "150ms" in text
-        assert "200ms" in text
-        assert "✓" in text
-        assert "✗" in text
+        assert "file_write" in text
+        assert "shell_exec" in text
+        assert "low" in text
+        assert "med" in text
+        assert "high" in text
 
-    def test_render_tools_only_last_five(self):
-        """Only the last 5 tool items are displayed."""
+    def test_render_model_info(self):
         panel = SidePanel()
-        panel._tool_items = [
-            {"name": f"tool_{i}", "ok": True, "ms": float(i * 10)}
-            for i in range(10)
-        ]
-        text = panel._render_tools()
-        assert "tool_9" in text
-        assert "tool_5" in text
-        assert "tool_4" not in text  # item index 4 is the 5th item from start
+        panel.update_model("deepseek-v4-flash", "262k", "原生工具")
+        text = panel._render_model()
+        assert "deepseek-v4-flash" in text
+        assert "262k" in text
+        assert "原生工具" in text
 
-    def test_update_version_sets_state(self):
-        """update_version stores values in _version_info."""
+    def test_render_mcp_disabled(self):
         panel = SidePanel()
-        panel.update_version("new-branch", "new-head", True, False)
-        assert panel._version_info == ("new-branch", "new-head", True, False)
+        assert "disabled" in panel._render_mcp()
 
-    def test_update_memory_sets_state(self):
-        """update_memory stores items in _ltm_items."""
+    def test_render_mcp_snapshot(self):
+        panel = SidePanel()
+        panel.update_mcp({
+            "started": True,
+            "connected_count": 2,
+            "server_count": 3,
+            "tool_count": 9,
+            "failure_count": 1,
+        })
+        text = panel._render_mcp()
+        assert "online" in text
+        assert "2/3" in text
+        assert "9" in text
+        assert "1 fail" in text
+
+    def test_render_skill_default(self):
+        panel = SidePanel()
+        text = panel._render_skill()
+        assert "Skill" in text
+        assert "default" in text
+        assert "Workflow" in text
+
+    def test_update_skill_sets_state(self):
+        panel = SidePanel()
+        panel.update_skill("review", "code_review", "active")
+        assert panel._skill_info == {
+            "skill": "review",
+            "workflow": "code_review",
+            "status": "active",
+        }
+
+    def test_update_memory_backward_compatibility(self):
         panel = SidePanel()
         panel.update_memory(["a", "b"])
-        assert panel._ltm_items == ["a", "b"]
-
-    def test_update_tools_sets_state(self):
-        """update_tools stores items in _tool_items."""
-        panel = SidePanel()
-        panel.update_tools([{"name": "search", "ok": True, "ms": 100}])
-        assert panel._tool_items == [{"name": "search", "ok": True, "ms": 100}]
+        assert panel._skill_info["status"] == "2 memories"

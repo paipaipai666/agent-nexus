@@ -132,18 +132,21 @@ class TraceManager:
             return
         date_str = time.strftime("%Y-%m-%d")
         traces_path = Path(self._traces_dir)
-        traces_path.mkdir(parents=True, exist_ok=True)
-        file_path = traces_path / f"{date_str}.jsonl"
+        try:
+            traces_path.mkdir(parents=True, exist_ok=True)
+            file_path = traces_path / f"{date_str}.jsonl"
 
-        with open(file_path, "a", encoding="utf-8") as f:
-            for span in ctx.spans:
-                if span._flushed:
-                    continue  # already written by _flush_span
-                record = self._span_record(ctx.trace_id, span)
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                span._flushed = True
+            with open(file_path, "a", encoding="utf-8") as f:
+                for span in ctx.spans:
+                    if span._flushed:
+                        continue  # already written by _flush_span
+                    record = self._span_record(ctx.trace_id, span)
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    span._flushed = True
 
-        self._cleanup_old_traces()
+            self._cleanup_old_traces()
+        except OSError:
+            return
 
     def _flush_span(self, ctx: TraceContext, span: TraceSpan):
         """Write a single span to disk immediately (crash-safe)."""
@@ -151,12 +154,14 @@ class TraceManager:
             return
         date_str = time.strftime("%Y-%m-%d")
         file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        record = self._span_record(ctx.trace_id, span)
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        span._flushed = True
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            record = self._span_record(ctx.trace_id, span)
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            span._flushed = True
+        except OSError:
+            return
 
     @staticmethod
     def _span_record(trace_id: str, span: TraceSpan) -> dict:

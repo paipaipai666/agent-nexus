@@ -163,7 +163,6 @@ def _split_semantic_blocks(text: str) -> list[str]:
 
     blocks: list[str] = []
     buffer: list[str] = []
-    in_code_block = False
 
     def flush_buffer():
         if not buffer:

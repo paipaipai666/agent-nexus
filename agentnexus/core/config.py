@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     file_read_max_mb: float = Field(default=10.0, ge=1, le=100)
     # Shell blacklist (regex patterns, checked case-insensitive)
     shell_blacklist: list[str] = Field(default_factory=list)
+    # Declarative extensions and workflow defaults
+    extensions_enabled: bool = Field(default=True)
+    extensions_dirs: list[str] = Field(default_factory=list)
+    plugins_auto_discover: bool = Field(default=True)
+    skills_default_namespace: str = Field(default="default")
+    runtime_profile: str = Field(default="default")
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod

@@ -2,12 +2,12 @@
 
 from agentnexus.rag.chunking import (
     ChunkStrategy,
-    _fixed_window_split,
     _detect_block_type,
+    _fixed_window_split,
     _prepend_prefix,
-    _split_semantic_blocks,
     _section_body,
     _section_prefix,
+    _split_semantic_blocks,
     chunk_structured_document,
     chunk_text,
 )

@@ -1,50 +1,82 @@
 /* Palette — sync with base.tcss if changing values */
-$bg: #1a1b20;
-$surface: #22242b;
-$elevated: #292b33;
-$text: #e2e3e7;
-$text-dim: #848893;
-$muted: #5d606b;
-$primary: #fab283;
-$secondary: #6ba5f2;
-$accent: #a78bfa;
-$success: #7fd88f;
+$bg: #14161a;
+$surface: #191c21;
+$elevated: #20242b;
+$text: #d9dde5;
+$text-dim: #8c93a1;
+$muted: #606774;
+$primary: #d59f5f;
+$secondary: #70a6e8;
+$accent: #9d8fe8;
+$success: #75c990;
 $error: #e06c75;
-$warning: #f5a742;
-$assistant: #6ba5f2;
-$user: #a78bfa;
-$tool: #f5a742;
-$border: #333640;
+$warning: #d6a25d;
+$assistant: #70a6e8;
+$user: #9d8fe8;
+$tool: #d6a25d;
+$border: #2b3038;
 
 /* ===== Messages ===== */
 ChatMessage {
-  padding: 1 1 1 2;
+  padding: 0 1;
   height: auto;
   overflow-y: auto;
   margin-bottom: 1;
+  border-left: tall $border;
 }
-ChatMessage.assistant { border-left: solid $assistant; background: #1b1f26; }
-ChatMessage.user      { border-left: solid $user;      background: #1f1b26; }
-ChatMessage.system    { border-left: solid $muted; }
 
-#msg-content { color: $text; width: 1fr; }
+ChatMessage.assistant {
+  border-left: tall $assistant;
+}
 
-.msg-text { color: $text; width: 1fr; }
+ChatMessage.user {
+  border-left: tall $user;
+}
+
+ChatMessage.system {
+  color: $text-dim;
+  border-left: tall $muted;
+}
+
+#msg-content {
+  color: $text;
+  width: 1fr;
+}
+
+.msg-text {
+  color: $text;
+  width: 1fr;
+}
+
 .msg-code {
   background: $elevated;
   margin: 1 0;
   padding: 1;
   color: $text;
   width: 1fr;
+  border-left: tall $muted;
 }
 
 /* ===== Tool Call ===== */
 ToolCall {
   padding: 0 1;
-  border-left: solid $tool;
+  margin-bottom: 1;
+  border-left: tall $tool;
   height: auto;
   background: $surface;
 }
-ToolCall #tool-name   { color: $tool; text-style: bold; }
-ToolCall #tool-result { color: $text-dim; width: 1fr; }
-ToolCall #tool-meta   { color: $muted; text-style: italic; }
+
+ToolCall #tool-name {
+  color: $tool;
+  text-style: bold;
+}
+
+ToolCall #tool-result {
+  color: $text-dim;
+  width: 1fr;
+}
+
+ToolCall #tool-meta {
+  color: $muted;
+  text-style: italic;
+}

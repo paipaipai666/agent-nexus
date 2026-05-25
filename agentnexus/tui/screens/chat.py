@@ -22,6 +22,7 @@ from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall
+from agentnexus.tui.widgets.side_panel import SidePanel
 
 
 class ChatArea(Widget):
@@ -70,6 +71,9 @@ class ChatScreen(Screen):
         self._spinner_frames = None
         self._current_tool_name: str = ""
         self._current_tool_widget = None
+        self._current_tool_started_at = 0.0
+        self._turn_tool_names: list[str] = []
+        self._turn_thought_count = 0
         # Hook compact events for TUI visibility
         if self._memory:
             self._memory._on_compact = self._on_compact_event
@@ -79,6 +83,8 @@ class ChatScreen(Screen):
         self._chat_area = ChatArea(id="chat-area")
         with Horizontal(id="middle"):
             yield self._chat_area
+            self._side_panel = SidePanel(id="side-panel")
+            yield self._side_panel
         self._hud = HUD(id="hud")
         self._chat_input = InputBar(id="input-area")
         yield self._hud
@@ -88,24 +94,20 @@ class ChatScreen(Screen):
         model = getattr(self._agent, "model_id", "v4-flash") if self._agent else "v4-flash"
         branch = self._version.status().get("branch", "main") if self._version else "main"
 
-        left = "[#fab283]●[/] [bold]AgentNexus[/]"
-        center = f"[dim]会话:[/] {branch}  [dim]│[/]  [#6ba5f2]{model}[/]"
-        right = "[dim]^H 帮助  ^L 清屏  Esc 输入[/]"
+        left = "[#6ba5f2]AgentNexus[/] [dim]workspace[/]"
+        center = f"[dim]branch[/] {branch}  [dim]model[/] [#6ba5f2]{model}[/]"
+        right = "[dim]^H help  ^L clear  Esc focus[/]"
 
         return f"{left}  {center}  {right}"
 
     def on_mount(self):
-        logo = (
-            "[#fab283]"
-            "┌─────────────────────────────────┐\n"
-            "│  ⬡ AgentNexus                  │\n"
-            "│  Task Orchestrator  │\n"
-            "└─────────────────────────────────┘"
-            "[/]"
-        )
-        self._chat_area.add_system(logo)
-        self._chat_area.add_message("assistant", "欢迎使用 AgentNexus。输入问题开始，或 /help 查看命令。")
+        self._chat_area.add_system("[#6ba5f2]AgentNexus ready[/] [dim]Ask a question or type /help.[/]")
         self._refresh_version_display()
+        if hasattr(self, "_side_panel"):
+            self._side_panel.update_skill()
+            self._refresh_model_panel()
+            self._refresh_tools_panel()
+            self._refresh_mcp_panel()
         if hasattr(self, '_hud') and self._agent:
             try:
                 caps = self._agent.llm_client.capabilities
@@ -180,6 +182,15 @@ class ChatScreen(Screen):
             st.get("can_undo", False),
             st.get("can_redo", False),
         )
+        try:
+            self._side_panel.update_version(
+                st.get("branch", "main"),
+                st["head"]["id"] if st.get("head") else "---",
+                st.get("can_undo", False),
+                st.get("can_redo", False),
+            )
+        except Exception:
+            pass
         # Refresh top bar
         try:
             tb = self.query_one("#top-bar", Static)
@@ -297,9 +308,11 @@ class ChatScreen(Screen):
     def _handle_mcp_command(self, arg: str):
         if self._mcp_manager is None:
             self._chat_area.add_system("[dim]当前会话未启用 MCP。[/]")
+            self._refresh_mcp_panel()
             return
 
         try:
+            self._refresh_mcp_panel()
             parts = arg.strip().split()
             subcmd = parts[0] if parts else "status"
             rest = parts[1:]
@@ -327,6 +340,57 @@ class ChatScreen(Screen):
                 )
         except Exception as exc:
             self._chat_area.add_system(f"[dim]MCP 命令失败: {exc}[/]")
+            try:
+                self._side_panel.add_timeline_event("error", f"MCP command failed: {exc}")
+            except Exception:
+                pass
+
+    def _refresh_mcp_panel(self):
+        try:
+            snapshot = self._mcp_manager.status_snapshot() if self._mcp_manager is not None else None
+            self._side_panel.update_mcp(snapshot)
+        except Exception:
+            pass
+
+    def _refresh_tools_panel(self):
+        try:
+            registry = getattr(getattr(self._agent, "tool_executor", None), "registry", None)
+            tools = []
+            if registry is not None:
+                for name, (meta, _) in registry._tools.items():
+                    risk = getattr(meta.risk_level, "value", str(meta.risk_level))
+                    tools.append({"name": name, "risk": risk})
+            self._side_panel.update_tools(tools)
+        except Exception:
+            pass
+
+    def _refresh_model_panel(self, strategy: str = ""):
+        try:
+            model = getattr(self._agent, "model_id", "unknown") if self._agent else "unknown"
+            max_tokens = getattr(getattr(self, "_hud", None), "ctx_max", None)
+            if not isinstance(max_tokens, int) or max_tokens <= 0:
+                caps = getattr(getattr(self._agent, "llm_client", None), "capabilities", None)
+                max_tokens = getattr(caps, "max_context_tokens", None)
+            ctx = _format_ctx_window(max_tokens)
+            self._side_panel.update_model(model=model, ctx=ctx, strategy=strategy)
+        except Exception:
+            pass
+
+    def _record_turn_summary(self, question: str, answer: str = ""):
+        try:
+            tools = ", ".join(dict.fromkeys(self._turn_tool_names)) or "no tools"
+            thought_part = f"{self._turn_thought_count} thoughts"
+            answer_part = _plain_summary(answer, 32) if answer else "no answer"
+            question_part = _plain_summary(question, 24)
+            self._side_panel.add_timeline_event(
+                "summary",
+                f"{question_part}: {tools}; {thought_part}; {answer_part}",
+            )
+        except Exception:
+            pass
+        finally:
+            self._turn_tool_names = []
+            self._turn_thought_count = 0
 
     # ── spinner animation ────────────────────────────────────
 
@@ -564,6 +628,7 @@ class ChatScreen(Screen):
                         supports_thinking=caps.supports_thinking,
                         strategy=STRATEGY_LABELS.get(strategy, strategy),
                     )
+                    self._refresh_model_panel(STRATEGY_LABELS.get(strategy, strategy))
                 except Exception:
                     pass
             if etype == E.TOOLS_FOUND:
@@ -571,15 +636,19 @@ class ChatScreen(Screen):
                 if thought:
                     self._chat_area.add_system(
                         f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
+                    self._turn_thought_count += 1
             elif etype == E.ANSWER_THOUGHT:
                 thought = event.payload.get("thought")
                 if thought:
                     self._chat_area.add_system(
                         f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
+                    self._turn_thought_count += 1
             elif etype == E.TOOL_START:
                 self._stop_spinner()
                 tool_name = event.payload.get("name", "")
                 self._current_tool_name = tool_name
+                self._turn_tool_names.append(tool_name)
+                self._current_tool_started_at = time.monotonic()
                 widget = ToolCall(tool_name, result="executing...")
                 self._chat_area.mount(widget)
                 self._current_tool_widget = widget
@@ -590,6 +659,8 @@ class ChatScreen(Screen):
             elif etype == E.TOOL_DONE:
                 self._stop_spinner()
                 result = event.payload.get("result", "")
+                if self._current_tool_started_at:
+                    self._current_tool_started_at = 0.0
                 if self._current_tool_widget:
                     tool_lower = self._current_tool_widget.tool_name.strip().lower()
                     if tool_lower == "web_search":
@@ -614,6 +685,7 @@ class ChatScreen(Screen):
                 self._current_tool_widget = None
                 label = STRATEGY_LABELS.get(strategy, strategy or "?")
                 self._chat_area.add_system(f"[#e5c07b][策略降级] → {label}[/]")
+                self._refresh_model_panel(label)
 
         self._agent._on_event = _on_agent_event
 
@@ -637,6 +709,10 @@ class ChatScreen(Screen):
             except Exception:
                 pass
             self._chat_area.add_system(f"[#e06c75]错误: {e}[/]")
+            try:
+                self._side_panel.add_timeline_event("error", _plain_summary(str(e), 80))
+            except Exception:
+                pass
             self._running = False
             return
 
@@ -684,6 +760,23 @@ class ChatScreen(Screen):
                 )
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
+            self._record_turn_summary(text, answer)
         else:
             self._chat_area.add_system("[dim]Agent 未能得出答案。[/]")
+            self._record_turn_summary(text, "")
         self._running = False
+
+
+def _plain_summary(text: str, limit: int) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(0, limit - 1)] + "…"
+
+
+def _format_ctx_window(tokens) -> str:
+    if not isinstance(tokens, int) or tokens <= 0:
+        return "unknown"
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}m"
+    return f"{tokens // 1000}k"
