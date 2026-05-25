@@ -264,7 +264,7 @@ nexus stats                                   # 查看 Token 统计
 MCP 为**默认关闭**的可选能力。当前首版支持：
 - `stdio` transport
 - `streamable_http` transport
-- 导入远端 `tools`
+- 导入远端 `tools` / `resources` / `resource_templates` / `prompts`
 - 主 Agent 与受控子代理共享同一套治理模型
 
 示例 `config.yaml`：
@@ -278,6 +278,14 @@ mcp_servers:
     command: python
     args: [server.py]
     include_tools: [search_docs]
+    import_tools: true
+    import_resources: true
+    import_prompts: true
+    auto_context: true
+    health_check_interval_sec: 30
+    reconnect_initial_delay_sec: 1
+    reconnect_max_delay_sec: 60
+    max_concurrency_per_server: 4
     allowed_agents: [react_agent, subagent_explorer]
     risk_level: medium
     require_hitl: false
@@ -296,10 +304,10 @@ mcp_servers:
 导入后的本地工具名会被规整为 `mcp_<server>__<tool>`，例如 `mcp_local_docs__search_docs`，以避免与内置工具重名。
 
 当前限制：
-- 只导入 MCP `tools`
-- 不兼容旧 SSE transport
-- `resources` / `prompts` 尚未接入当前 ReAct 流程
-- 子代理不会自动继承全部 MCP tools，只有显式允许且满足安全策略的工具才会暴露给子代理
+- 支持 MCP `tools` / `resources` / `resource_templates` / `prompts`
+- 不兼容旧 SSE transport（设计上不支持）
+- MCP server 失败默认降级继续，并通过 health check + reconnect 自动恢复
+- 子代理不会自动继承全部 MCP capabilities，只有显式允许且满足安全策略的工具化能力才会暴露给子代理
 
 ## Agent 可用工具
 

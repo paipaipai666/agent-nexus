@@ -20,6 +20,17 @@ class MCPServerConfig(BaseModel):
     tool_prefix: str | None = Field(default=None)
     include_tools: list[str] = Field(default_factory=list)
     exclude_tools: list[str] = Field(default_factory=list)
+    import_tools: bool = Field(default=True)
+    import_resources: bool = Field(default=True)
+    import_prompts: bool = Field(default=True)
+    auto_context: bool = Field(default=True)
+    auto_context_max_items: int = Field(default=20, ge=0, le=200)
+    auto_context_max_chars: int = Field(default=4000, ge=0, le=50000)
+    health_check_interval_sec: int = Field(default=30, ge=1, le=3600)
+    reconnect_initial_delay_sec: int = Field(default=1, ge=1, le=3600)
+    reconnect_max_delay_sec: int = Field(default=60, ge=1, le=3600)
+    reconnect_max_attempts: int = Field(default=0, ge=0, le=1000000)
+    max_concurrency_per_server: int = Field(default=4, ge=1, le=100)
     allowed_agents: list[str] = Field(
         default_factory=lambda: ["react_agent", "subagent_explorer", "subagent_executor"]
     )

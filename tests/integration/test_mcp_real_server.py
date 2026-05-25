@@ -28,6 +28,16 @@ def add(a: int, b: int) -> int:
     """Add two integers."""
     return a + b
 
+@mcp.resource("docs://intro")
+def intro_doc() -> str:
+    """Intro document."""
+    return "AgentNexus MCP intro"
+
+@mcp.prompt()
+def summarize(topic: str) -> str:
+    """Summarize a topic."""
+    return f"Summarize {topic}"
+
 mcp.run(transport="stdio")
 '''
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
@@ -61,6 +71,26 @@ class TestRealMcpServer:
 
             result = manager.call_tool("mcp_live_server__add", {"a": 2, "b": 3})
             assert "5" in result
+
+            snapshot = manager.status_snapshot()
+            server = snapshot["servers"][0]
+            assert server["resource_count"] >= 1
+            assert server["prompt_count"] >= 1
+
+            result = manager.call_tool("mcp_live_server__list_resources", {})
+            assert "docs://intro" in result
+
+            result = manager.call_tool("mcp_live_server__read_resource", {"uri": "docs://intro"})
+            assert "AgentNexus MCP intro" in result
+
+            result = manager.call_tool("mcp_live_server__list_prompts", {})
+            assert "summarize" in result
+
+            result = manager.call_tool(
+                "mcp_live_server__get_prompt",
+                {"name": "summarize", "arguments": {"topic": "MCP"}},
+            )
+            assert "Summarize MCP" in result
         finally:
             manager.close()
 

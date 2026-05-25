@@ -776,6 +776,16 @@ class ChatScreen(Screen):
                 self._chat_area.add_system(
                     self._format_mcp_tools(self._mcp_manager.status_snapshot(), server_name=server_name)
                 )
+            elif subcmd == "resources":
+                server_name = rest[0] if rest else None
+                self._chat_area.add_system(
+                    self._format_mcp_resources(self._mcp_manager.status_snapshot(), server_name=server_name)
+                )
+            elif subcmd == "prompts":
+                server_name = rest[0] if rest else None
+                self._chat_area.add_system(
+                    self._format_mcp_prompts(self._mcp_manager.status_snapshot(), server_name=server_name)
+                )
             elif subcmd == "failures":
                 self._chat_area.add_system(self._format_mcp_failures(self._mcp_manager.status_snapshot()))
             elif subcmd == "retry":
@@ -785,10 +795,13 @@ class ChatScreen(Screen):
                 result = self._mcp_manager.retry_failed(server_name=server_name)
                 if result.get("reconnected") and getattr(self._agent, "tool_executor", None) is not None:
                     self._mcp_manager.register_tools(self._agent.tool_executor)
+                    if hasattr(self._agent, "set_mcp_context"):
+                        self._agent.set_mcp_context(self._mcp_manager.auto_context())
                 self._chat_area.add_system(self._format_mcp_retry_result(result))
             else:
                 self._chat_area.add_system(
-                    "[dim]用法: /mcp [status|tools [server]|failures|retry [server|--failed]][/]"
+                    "[dim]用法: /mcp [status|tools [server]|resources [server]|"
+                    "prompts [server]|failures|retry [server|--failed]][/]"
                 )
         except Exception as exc:
             self._chat_area.add_system(f"[dim]MCP 命令失败: {exc}[/]")
@@ -984,15 +997,23 @@ class ChatScreen(Screen):
             f"[dim]started:[/] {snapshot.get('started', False)}",
             f"[dim]servers:[/] {snapshot.get('connected_count', 0)}/{snapshot.get('server_count', 0)} 已连接",
             f"[dim]tools:[/] {snapshot.get('tool_count', 0)}",
+            f"[dim]resources:[/] {snapshot.get('resource_count', 0)} "
+            f"(+templates {snapshot.get('resource_template_count', 0)})",
+            f"[dim]prompts:[/] {snapshot.get('prompt_count', 0)}",
             f"[dim]failures:[/] {snapshot.get('failure_count', 0)}",
         ]
         if servers:
             lines.append("[bold]Servers:[/]")
             for server in servers:
-                state = "[green]connected[/]" if server.get("connected") else "[dim]disconnected[/]"
+                raw_state = server.get("state") or ("healthy" if server.get("connected") else "disconnected")
+                state = "[green]healthy[/]" if raw_state == "healthy" else f"[dim]{raw_state}[/]"
+                last_ping = server.get("last_ping_at")
+                ping_text = f" ping={int(last_ping)}" if last_ping else ""
                 lines.append(
                     f"  - {server.get('name', 'unknown')} ({server.get('transport', 'unknown')}) {state} "
-                    f"tools={len(server.get('tool_names', []) or [])}"
+                    f"tools={len(server.get('tool_names', []) or [])} "
+                    f"resources={server.get('resource_count', 0)} prompts={server.get('prompt_count', 0)} "
+                    f"reconnects={server.get('reconnect_attempts', 0)}{ping_text}"
                 )
         return "\n".join(lines)
 
@@ -1011,6 +1032,49 @@ class ChatScreen(Screen):
             return f"[dim]未找到 MCP server: {server_name}[/]"
         if not matched:
             return "[dim]当前没有已导入的 MCP 工具。[/]"
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_resources(snapshot: dict, server_name: str | None = None) -> str:
+        servers = snapshot.get("servers", []) or []
+        lines = ["[bold]MCP Resources[/]"]
+        matched = False
+        for server in servers:
+            if server_name and server.get("name") != server_name:
+                continue
+            matched = True
+            tools = server.get("resource_tool_names", []) or []
+            count = server.get("resource_count", 0)
+            templates = server.get("resource_template_count", 0)
+            lines.append(
+                f"- {server.get('name', 'unknown')}: resources={count} templates={templates} "
+                f"tools={', '.join(tools) if tools else '[dim]无资源工具[/]'}"
+            )
+        if server_name and not matched:
+            return f"[dim]未找到 MCP server: {server_name}[/]"
+        if not matched:
+            return "[dim]当前没有已导入的 MCP resources。[/]"
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mcp_prompts(snapshot: dict, server_name: str | None = None) -> str:
+        servers = snapshot.get("servers", []) or []
+        lines = ["[bold]MCP Prompts[/]"]
+        matched = False
+        for server in servers:
+            if server_name and server.get("name") != server_name:
+                continue
+            matched = True
+            tools = server.get("prompt_tool_names", []) or []
+            count = server.get("prompt_count", 0)
+            lines.append(
+                f"- {server.get('name', 'unknown')}: prompts={count} "
+                f"tools={', '.join(tools) if tools else '[dim]无 prompt 工具[/]'}"
+            )
+        if server_name and not matched:
+            return f"[dim]未找到 MCP server: {server_name}[/]"
+        if not matched:
+            return "[dim]当前没有已导入的 MCP prompts。[/]"
         return "\n".join(lines)
 
     @staticmethod

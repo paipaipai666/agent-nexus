@@ -10,6 +10,7 @@ import pytest
 
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_adapter import (
+    MCPServerState,
     MCPToolDescriptor,
     MCPToolManager,
     _content_block_to_text,
@@ -1921,3 +1922,102 @@ class TestStatusSnapshotValidation:
         assert snapshot["connected_count"] == 0
         assert snapshot["failure_count"] == 0
         assert snapshot["tool_count"] == 0
+
+
+class TestFullMcpCapabilities:
+    def test_imports_resource_and_prompt_bridge_tools(self):
+        config = MCPServerConfig(name="demo", transport="stdio", command="python")
+        manager = MCPToolManager([config])
+
+        session = SimpleNamespace(
+            list_tools=AsyncMock(return_value=SimpleNamespace(tools=[])),
+            list_resources=AsyncMock(return_value=SimpleNamespace(resources=[
+                SimpleNamespace(name="Doc", uri="file:///doc.md", description="Docs", mimeType="text/markdown")
+            ])),
+            list_resource_templates=AsyncMock(return_value=SimpleNamespace(resourceTemplates=[
+                SimpleNamespace(name="ById", uriTemplate="file:///{id}", description="By id")
+            ])),
+            list_prompts=AsyncMock(return_value=SimpleNamespace(prompts=[
+                SimpleNamespace(name="review", description="Review prompt", arguments=[])
+            ])),
+            read_resource=AsyncMock(return_value=SimpleNamespace(contents=[SimpleNamespace(text="doc body")])),
+            get_prompt=AsyncMock(return_value=SimpleNamespace(
+                messages=[SimpleNamespace(role="user", content="review")]
+            )),
+        )
+        runtime = SimpleNamespace(
+            config=config,
+            session=session,
+            tool_names=[],
+            resource_tool_names=[],
+            prompt_tool_names=[],
+            resource_descriptors=[],
+            resource_templates=[],
+            prompt_descriptors=[],
+        )
+
+        asyncio.run(manager._import_server_capabilities(runtime))
+
+        assert "mcp_demo__list_resources" in manager._tool_descriptors
+        assert "mcp_demo__read_resource" in manager._tool_descriptors
+        assert "mcp_demo__list_resource_templates" in manager._tool_descriptors
+        assert "mcp_demo__list_prompts" in manager._tool_descriptors
+        assert "mcp_demo__get_prompt" in manager._tool_descriptors
+        assert "file:///doc.md" in manager.auto_context()
+        assert "review" in manager.auto_context()
+
+    def test_read_resource_and_get_prompt_wrappers(self):
+        config = MCPServerConfig(name="demo", transport="stdio", command="python")
+        manager = MCPToolManager([config])
+        session = SimpleNamespace(
+            read_resource=AsyncMock(return_value=SimpleNamespace(contents=[SimpleNamespace(text="resource text")])),
+            get_prompt=AsyncMock(return_value=SimpleNamespace(
+                messages=[SimpleNamespace(role="user", content="prompt text")]
+            )),
+        )
+        manager._server_runtimes["demo"] = SimpleNamespace(
+            config=config,
+            session=session,
+            state=MCPServerState.HEALTHY,
+            semaphore=asyncio.Semaphore(4),
+        )
+        read_desc = manager._internal_descriptor(
+            config, "mcp_demo__read_resource", "read_resource", "read", {"uri": {"type": "string"}}, "resource", ["uri"]
+        )
+        prompt_desc = manager._internal_descriptor(
+            config, "mcp_demo__get_prompt", "get_prompt", "prompt", {"name": {"type": "string"}}, "prompt", ["name"]
+        )
+
+        assert asyncio.run(manager._call_tool_async(read_desc, {"uri": "file:///doc.md"})) == "resource text"
+        prompt_text = asyncio.run(manager._call_tool_async(prompt_desc, {"name": "review"}))
+        assert "prompt text" in prompt_text
+
+    def test_health_check_marks_degraded_and_schedules_reconnect(self):
+        config = MCPServerConfig(
+            name="demo",
+            transport="stdio",
+            command="python",
+            health_check_interval_sec=1,
+            reconnect_initial_delay_sec=1,
+        )
+        manager = MCPToolManager([config])
+        session = SimpleNamespace(send_ping=AsyncMock(side_effect=ConnectionError("lost")))
+        runtime = SimpleNamespace(
+            config=config,
+            session=session,
+            state=MCPServerState.HEALTHY,
+            last_ping_at=0,
+            consecutive_failures=0,
+            reconnect_attempts=0,
+            next_reconnect_at=None,
+            last_failure=None,
+        )
+        manager._server_runtimes["demo"] = runtime
+        manager._server_states["demo"] = MCPServerState.HEALTHY
+
+        asyncio.run(manager._health_check_once())
+
+        assert manager._server_states["demo"] == MCPServerState.DEGRADED
+        assert manager._failures["demo"] == "lost"
+        assert runtime.reconnect_attempts == 1
+        assert runtime.next_reconnect_at is not None

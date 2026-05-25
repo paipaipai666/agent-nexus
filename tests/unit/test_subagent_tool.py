@@ -51,7 +51,7 @@ class TestAgentIdentityAndToolFiltering:
         executor = ToolExecutor()
         captured = {}
 
-        def fake_invoke(name: str, params: dict, caller: str = "unknown", hitl_approver=None):
+        def fake_invoke(name: str, params: dict, caller: str = "unknown", hitl_approver=None, tool_policy=None):
             captured["caller"] = caller
             return "ok"
 

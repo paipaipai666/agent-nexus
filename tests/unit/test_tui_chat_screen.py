@@ -92,6 +92,31 @@ class TestFormatMcpHelpers:
         assert "mcp_docs__search" in result
         assert "mcp_docs__open" in result
 
+    def test_format_mcp_resources(self):
+        result = ChatScreen._format_mcp_resources({
+            "servers": [
+                {
+                    "name": "docs",
+                    "resource_count": 2,
+                    "resource_template_count": 1,
+                    "resource_tool_names": ["mcp_docs__read_resource"],
+                },
+            ]
+        })
+        assert "MCP Resources" in result
+        assert "resources=2" in result
+        assert "mcp_docs__read_resource" in result
+
+    def test_format_mcp_prompts(self):
+        result = ChatScreen._format_mcp_prompts({
+            "servers": [
+                {"name": "docs", "prompt_count": 1, "prompt_tool_names": ["mcp_docs__get_prompt"]},
+            ]
+        })
+        assert "MCP Prompts" in result
+        assert "prompts=1" in result
+        assert "mcp_docs__get_prompt" in result
+
     def test_format_mcp_tools_server_not_found(self):
         result = ChatScreen._format_mcp_tools({"servers": []}, server_name="missing")
         assert "未找到 MCP server" in result

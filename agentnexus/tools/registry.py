@@ -28,6 +28,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _SENSITIVE_PARAM_TOKENS = ("api_key", "apikey", "token", "secret", "password", "authorization")
+_VALIDATOR_CACHE: dict[str, Any] = {}
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -266,10 +267,15 @@ class ToolRegistry:
     def _build_validator(schema: dict | None):
         if not schema or jsonschema is None:
             return None
+        cache_key = json.dumps(schema, ensure_ascii=False, sort_keys=True, default=str)
+        if cache_key in _VALIDATOR_CACHE:
+            return _VALIDATOR_CACHE[cache_key]
         try:
             validator_cls = jsonschema.validators.validator_for(schema)
             validator_cls.check_schema(schema)
-            return validator_cls(schema)
+            validator = validator_cls(schema)
+            _VALIDATOR_CACHE[cache_key] = validator
+            return validator
         except Exception as e:
             logger.warning("Failed to compile schema validator: %s", e)
             return None

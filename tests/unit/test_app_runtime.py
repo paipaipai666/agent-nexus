@@ -34,3 +34,45 @@ def test_runtime_build_assembles_core_services():
     assert runtime.services.eval is not None
     assert runtime.services.config is not None
     mock_trace.configure.assert_called_once_with("/tmp/traces")
+
+
+def test_close_method(mocker):
+    """AppRuntime.close() calls mcp_manager.close() if manager exists."""
+    from agentnexus.app import AppRuntime
+
+    mock_mcp = mocker.MagicMock()
+    runtime = AppRuntime(
+        settings=mocker.MagicMock(),
+        llm=mocker.MagicMock(),
+        executor=mocker.MagicMock(),
+        agent=mocker.MagicMock(),
+        memory_manager=mocker.MagicMock(),
+        version_manager=mocker.MagicMock(),
+        mcp_manager=mock_mcp,
+        extension_manager=mocker.MagicMock(),
+        services=mocker.MagicMock(),
+        subagent_confirm=mocker.MagicMock(),
+        session_id="test-close",
+    )
+    runtime.close()
+    mock_mcp.close.assert_called_once()
+
+
+def test_close_method_no_mcp(mocker):
+    """AppRuntime.close() is noop when mcp_manager is None."""
+    from agentnexus.app import AppRuntime
+
+    runtime = AppRuntime(
+        settings=mocker.MagicMock(),
+        llm=mocker.MagicMock(),
+        executor=mocker.MagicMock(),
+        agent=mocker.MagicMock(),
+        memory_manager=mocker.MagicMock(),
+        version_manager=mocker.MagicMock(),
+        mcp_manager=None,
+        extension_manager=mocker.MagicMock(),
+        services=mocker.MagicMock(),
+        subagent_confirm=mocker.MagicMock(),
+        session_id="test-close-noop",
+    )
+    runtime.close()

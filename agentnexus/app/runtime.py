@@ -67,6 +67,8 @@ class AppRuntime:
         memory = MemoryManager(session_id, llm=llm)
         version = ConversationVersionManager(session_id, settings.memory_db_path)
         agent = ReActAgent(llm, executor, conversation_mode=True)
+        if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
+            agent.set_mcp_context(mcp_manager.auto_context())
         skill_registry = SkillRegistry.from_settings(settings)
         skill_registry.discover()
         skill_service = SkillService(

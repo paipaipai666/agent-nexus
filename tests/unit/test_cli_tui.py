@@ -20,6 +20,7 @@ class TestTuiCommand:
         mock_agent = MagicMock()
         mock_tui_app = MagicMock()
         mock_trace = MagicMock()
+        mock_skill_service = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
              patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \

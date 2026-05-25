@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from agentnexus.core.config import Settings, _config_dir, _default_paths, get_settings
 
@@ -87,6 +88,17 @@ class TestConfigSettings:
         assert server.transport == "stdio"
         assert server.command == "python"
         assert server.args == ["server.py"]
+        assert server.import_tools is True
+        assert server.import_resources is True
+        assert server.import_prompts is True
+        assert server.auto_context is True
+        assert server.auto_context_max_items == 20
+        assert server.auto_context_max_chars == 4000
+        assert server.health_check_interval_sec == 30
+        assert server.reconnect_initial_delay_sec == 1
+        assert server.reconnect_max_delay_sec == 60
+        assert server.reconnect_max_attempts == 0
+        assert server.max_concurrency_per_server == 4
 
     def test_mcp_streamable_http_server_config_parses(self):
         s = Settings(
@@ -111,6 +123,10 @@ class TestConfigSettings:
         with pytest.raises(ValueError, match="url"):
             Settings(mcp_enabled=True, mcp_servers=[{"name": "demo", "transport": "streamable_http"}])
 
+    def test_mcp_sse_remains_unsupported(self):
+        with pytest.raises(ValueError, match="transport"):
+            Settings(mcp_enabled=True, mcp_servers=[{"name": "old", "transport": "sse", "url": "https://x/mcp"}])
+
 
 class TestTempAgentnexusHome:
     def test_creates_config_dir(self, temp_agentnexus_home):
@@ -132,3 +148,63 @@ class TestTempAgentnexusHome:
         assert paths["traces_dir"].startswith(base)
         assert paths["chroma_persist_dir"].startswith(base)
         assert paths["rag_catalog_db_path"].startswith(base)
+
+
+class TestCodeExecutionBackendValidator:
+    """Tests for code_execution_backend and shell_execution_backend field validators."""
+
+    def test_code_execution_backend_auto(self, temp_agentnexus_home):
+        s = Settings(code_execution_backend="auto")
+        assert s.code_execution_backend == "auto"
+
+    def test_code_execution_backend_e2b(self, temp_agentnexus_home):
+        s = Settings(code_execution_backend="e2b")
+        assert s.code_execution_backend == "e2b"
+
+    def test_code_execution_backend_disabled(self, temp_agentnexus_home):
+        s = Settings(code_execution_backend="disabled")
+        assert s.code_execution_backend == "disabled"
+
+    def test_code_execution_backend_normalized(self, temp_agentnexus_home):
+        s = Settings(code_execution_backend="local-unsafe")
+        assert s.code_execution_backend == "local_unsafe"
+
+    def test_code_execution_backend_invalid_raises(self, temp_agentnexus_home):
+        with pytest.raises(ValidationError):
+            Settings(code_execution_backend="invalid_backend")
+
+    def test_shell_execution_backend_valid(self, temp_agentnexus_home):
+        s = Settings(shell_execution_backend="native")
+        assert s.shell_execution_backend == "native"
+
+    def test_shell_execution_backend_invalid_raises(self, temp_agentnexus_home):
+        with pytest.raises(ValidationError):
+            Settings(shell_execution_backend="unknown")
+
+    def test_shell_execution_backend_normalized(self, temp_agentnexus_home):
+        s = Settings(shell_execution_backend="local-unsafe")
+        assert s.shell_execution_backend == "local_unsafe"
+
+    def test_code_execution_timeout_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.code_execution_timeout == 30
+
+    def test_code_execution_memory_mb_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.code_execution_memory_mb == 256
+
+    def test_code_execution_docker_image_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.code_execution_docker_image == "python:3.11-slim"
+
+    def test_code_execution_allow_unsafe_local_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.code_execution_allow_unsafe_local is False
+
+    def test_shell_execution_memory_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.shell_execution_memory_mb == 256
+
+    def test_shell_execution_docker_image_default(self, temp_agentnexus_home):
+        s = Settings()
+        assert s.shell_execution_docker_image == "python:3.11-slim"

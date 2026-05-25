@@ -60,6 +60,7 @@ class ReActAgent:
         self._session_profile: SessionProfile | None = None
         self._compiled_session_profile: CompiledSessionProfile | None = None
         self._available_skill_context: str = ""
+        self._mcp_context: str = ""
 
     # ================================================================
     # Public API (unchanged)
@@ -89,6 +90,10 @@ class ReActAgent:
     def set_available_skill_context(self, context: str) -> None:
         """Expose local skill metadata to the next prompt without selecting a skill."""
         self._available_skill_context = context or ""
+
+    def set_mcp_context(self, context: str) -> None:
+        """Expose discovered MCP resources and prompts to the next prompt."""
+        self._mcp_context = context or ""
 
     def run(self, question: str, memory_manager=None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
@@ -807,7 +812,7 @@ class ReActAgent:
         compiled = self._compiled_session_profile
         template = compiled.prompt_template if compiled else REACT_PROMPT_TEMPLATE
         extra_context = ""
-        blocks = [self._available_skill_context]
+        blocks = [self._available_skill_context, self._mcp_context]
         if compiled:
             blocks.extend([compiled.fragments_text, compiled.workflow_guidance])
         extra_context = "\n\n".join(block for block in blocks if block)
