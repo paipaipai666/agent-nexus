@@ -26,13 +26,20 @@ class AgentNexusTUI(App):
     ]
     TITLE = "AgentNexus"
 
-    def __init__(self, agent, memory, version, mcp_manager=None):
+    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None):
         super().__init__()
         self._agent = agent
         self._memory = memory
         self._version = version
         self._mcp_manager = mcp_manager
+        self._skill_service = skill_service
 
     def on_mount(self):
         from agentnexus.tui.screens.chat import ChatScreen
-        self.push_screen(ChatScreen(self._agent, self._memory, self._version, self._mcp_manager))
+        self.push_screen(ChatScreen(
+            self._agent,
+            self._memory,
+            self._version,
+            self._mcp_manager,
+            skill_service=self._skill_service,
+        ))

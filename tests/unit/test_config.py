@@ -30,6 +30,11 @@ class TestConfigSettings:
         assert s.reranker_model == "BAAI/bge-reranker-v2-m3"
         assert s.rag_default_namespace == "default"
         assert s.rag_collection_prefix == "kb_"
+        assert s.default_skill == ""
+        assert s.skill_auto_route is True
+        assert s.skill_auto_route_llm_fallback is True
+        assert s.skill_auto_route_min_score == 2.0
+        assert s.skill_auto_route_margin == 0.75
 
     def test_default_rag_storage_paths(self, temp_agentnexus_home):
         s = get_settings()

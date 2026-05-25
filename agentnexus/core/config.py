@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     extensions_dirs: list[str] = Field(default_factory=list)
     plugins_auto_discover: bool = Field(default=True)
     skills_default_namespace: str = Field(default="default")
+    default_skill: str = Field(default="")
+    skill_auto_route: bool = Field(default=True)
+    skill_auto_route_llm_fallback: bool = Field(default=True)
+    skill_auto_route_min_score: float = Field(default=2.0, ge=0.1, le=100.0)
+    skill_auto_route_margin: float = Field(default=0.75, ge=0.0, le=100.0)
     runtime_profile: str = Field(default="default")
 
     @field_validator("llm_base_url", "judge_base_url")

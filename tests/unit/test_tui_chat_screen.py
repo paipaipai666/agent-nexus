@@ -3,6 +3,8 @@
 import json
 from unittest.mock import MagicMock
 
+from agentnexus.skills.registry import SkillEntry, SkillRegistry
+from agentnexus.skills.workflow import Workflow
 from agentnexus.tui.screens.chat import ChatScreen
 
 
@@ -394,3 +396,360 @@ class TestMcpCommandExceptionHandler:
         screen._handle_mcp_command("status")
         # Verify add_system was still called (error path, not crash)
         assert screen._chat_area.add_system.called
+
+
+def _workflow(workflow_id: str = "code_review") -> Workflow:
+    return Workflow.model_validate({
+        "id": workflow_id,
+        "version": "1",
+        "display_name": "Code Review",
+        "description": "Review code changes",
+        "prompt_profile": {"system": "react"},
+        "tool_policy": {"max_risk": "low"},
+        "steps": [{"type": "prompt", "id": "gather", "prompt": "Inspect."}],
+        "success_criteria": ["Findings are actionable."],
+        "resources": [
+            {"type": "reference", "path": "references/rules.md", "name": "rules.md", "size_bytes": 10},
+        ],
+    })
+
+
+class TestSkillCommandHelpers:
+    def test_format_skill_status_default(self):
+        registry = SkillRegistry([])
+        result = ChatScreen._format_skill_status(registry)
+        assert "Skill 状态" in result
+        assert "default/default" in result
+        assert "available" in result
+
+    def test_format_skill_list_empty(self):
+        registry = SkillRegistry([])
+        result = ChatScreen._format_skill_list(registry)
+        assert "未发现可用 skills" in result
+
+    def test_handle_skill_status(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = SkillRegistry([])
+        screen._skill_registry.discover()
+        screen._handle_skill_command("status")
+        msg = screen._chat_area.add_system.call_args[0][0]
+        assert "Skill 状态" in msg
+
+    def test_handle_skill_use_and_reset(self):
+        workflow = _workflow()
+        entry = SkillEntry(
+            namespace="review",
+            workflow_id="code_review",
+            display_name="Code Review",
+            description="Review code changes",
+            path=MagicMock(),
+            workflow=workflow,
+        )
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use code_review")
+
+        assert screen._current_skill == entry
+        assert screen._skill_status == "selected"
+        screen._agent.set_session_profile.assert_called_once()
+        screen._side_panel.update_skill.assert_called_with("review", "code_review", "selected")
+
+        screen._handle_skill_command("reset")
+
+        assert screen._current_skill is None
+        assert screen._skill_status == "idle"
+        screen._agent.set_session_profile.assert_called_with(None)
+        screen._side_panel.update_skill.assert_called_with("default", "default", "idle")
+
+    def test_handle_skill_use_missing_fragment_sets_error(self):
+        workflow = _workflow()
+        workflow.prompt_profile.fragments = ["missing_fragment"]
+        entry = SkillEntry(
+            namespace="review",
+            workflow_id="code_review",
+            display_name="Code Review",
+            description="Review code changes",
+            path=MagicMock(),
+            workflow=workflow,
+        )
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use code_review")
+
+        assert screen._current_skill is None
+        assert screen._skill_status == "error"
+        screen._agent.set_session_profile.assert_not_called()
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        assert "Prompt fragment not found" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_skill_use_ambiguous_sets_error(self):
+        first = SkillEntry("a", "code_review", "Code Review", "", MagicMock(), _workflow())
+        second = SkillEntry("b", "code_review", "Code Review", "", MagicMock(), _workflow())
+        registry = SkillRegistry([])
+        registry._entries = [first, second]
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use code_review")
+
+        assert screen._skill_status == "error"
+        assert "Ambiguous skill id" in screen._chat_area.add_system.call_args[0][0]
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+
+    def test_handle_skill_use_duplicate_sets_error(self):
+        entry = SkillEntry("review", "code_review", "Code Review", "", MagicMock(), _workflow())
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        registry.duplicate_ids = {"review/code_review": [MagicMock(), MagicMock()]}
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use review/code_review")
+
+        assert screen._skill_status == "error"
+        assert "Duplicate skill id" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_skill_list_refreshes_registry(self):
+        registry = MagicMock()
+        registry.list.return_value = []
+        registry.errors = []
+        registry.roots = []
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("list")
+
+        registry.discover.assert_called_once()
+        assert "未发现可用 skills" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_skill_list_error_updates_panel(self):
+        registry = MagicMock()
+        registry.list.return_value = []
+        registry.errors = ["bad workflow"]
+        registry.roots = []
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("list")
+
+        assert screen._skill_status == "error"
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+
+    def test_handle_skill_validate_success(self):
+        registry = MagicMock()
+        registry.errors = []
+        registry.validate.return_value = []
+        registry.list.return_value = [MagicMock()]
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("validate code_review")
+
+        registry.discover.assert_called_once()
+        registry.validate.assert_called_once_with("code_review")
+        assert screen._skill_status == "idle"
+        assert "validation passed" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_skill_validate_failure_updates_panel(self):
+        registry = MagicMock()
+        registry.errors = []
+        registry.validate.return_value = ["review/code_review: Prompt template not found"]
+        registry.list.return_value = []
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("validate")
+
+        registry.discover.assert_called_once()
+        registry.validate.assert_called_once_with(None)
+        assert screen._skill_status == "error"
+        screen._side_panel.update_skill.assert_called_with("default", "default", "error")
+        assert "validation failed" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_handle_skill_use_delegates_to_skill_service(self):
+        workflow = _workflow()
+        entry = SkillEntry("review", "code_review", "Code Review", "Review code changes", MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        service = MagicMock()
+        service.registry = registry
+        service.current = None
+        def use_skill(_target):
+            service.current = entry
+            return entry
+        service.use.side_effect = use_skill
+        service.snapshot.return_value.status = "selected"
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use code_review")
+
+        service.use.assert_called_once_with("code_review")
+        assert screen._current_skill == entry
+        assert screen._skill_status == "selected"
+
+    def test_handle_skill_use_default_persists_config(self, temp_agentnexus_home):
+        workflow = _workflow()
+        entry = SkillEntry("review", "code_review", "Code Review", "Review code changes", MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+
+        screen._handle_skill_command("use code_review --default")
+
+        import yaml
+
+        data = yaml.safe_load((temp_agentnexus_home / "config.yaml").read_text(encoding="utf-8"))
+        assert data["default_skill"] == "review/code_review"
+        assert screen._current_skill == entry
+
+    def test_handle_skill_default_reset_clears_config(self, temp_agentnexus_home):
+        (temp_agentnexus_home / "config.yaml").write_text("default_skill: review/code_review\n", encoding="utf-8")
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = SkillRegistry([])
+
+        screen._handle_skill_command("default reset")
+
+        import yaml
+
+        data = yaml.safe_load((temp_agentnexus_home / "config.yaml").read_text(encoding="utf-8")) or {}
+        assert "default_skill" not in data
+        assert screen._current_skill is None
+
+    def test_init_skill_registry_uses_skill_service(self):
+        service = MagicMock()
+        service.registry = SkillRegistry([])
+        service.current = None
+        service.snapshot.return_value.status = "idle"
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._init_skill_registry()
+        assert screen._skill_registry is service.registry
+        assert screen._skill_status == "idle"
+
+    def test_refresh_skill_panel_syncs_service_current(self):
+        workflow = _workflow()
+        entry = SkillEntry("review", "code_review", "Code Review", "", MagicMock(), workflow)
+        service = MagicMock()
+        service.current = entry
+        service.snapshot.return_value.status = "selected"
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._side_panel = MagicMock()
+
+        screen._refresh_skill_panel()
+
+        screen._side_panel.update_skill.assert_called_with("review", "code_review", "selected")
+
+    def test_prepare_agent_question_applies_workflow_runtime(self):
+        workflow = _workflow()
+        workflow.steps[0].prompt = "Inspect workflow."
+        entry = SkillEntry(
+            namespace="review",
+            workflow_id="code_review",
+            display_name="Code Review",
+            description="Review code changes",
+            path=MagicMock(),
+            workflow=workflow,
+        )
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._current_skill = entry
+        screen._side_panel = MagicMock()
+
+        question = screen._prepare_agent_question("user question")
+
+        assert "Workflow Runtime Context" in question
+        assert "Inspect workflow." in question
+        assert question.endswith("== User Question ==\nuser question")
+        assert screen._side_panel.add_timeline_event.called
+
+    def test_prepare_agent_question_uses_skill_service_runtime(self):
+        workflow = _workflow()
+        entry = SkillEntry("review", "code_review", "Code Review", "", MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        from agentnexus.services.skill import SkillService
+
+        service = SkillService(registry, agent=MagicMock())
+        service.current = entry
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._current_skill = entry
+        screen._side_panel = MagicMock()
+
+        question = screen._prepare_agent_question("user question")
+
+        assert "Workflow Runtime Context" in question
+        assert service.snapshot().last_run_status == "completed"
+        screen._side_panel.update_skill.assert_called_with(
+            "review",
+            "code_review",
+            "idle",
+            runtime={
+                "status": "completed",
+                "steps": 1,
+                "ok": 1,
+                "errors": 0,
+                "skipped": 0,
+                "scripts": 0,
+                "references": 1,
+                "assets": 0,
+                "auto_reason": "",
+                "auto_source": "",
+            },
+        )
+
+    def test_prepare_agent_question_auto_selects_skill_service_skill(self):
+        workflow = Workflow.model_validate({
+            "id": "draft-writer",
+            "version": "1",
+            "display_name": "Draft Writer",
+            "description": "Write concise release notes and drafts.",
+            "prompt_profile": {"system": "react"},
+            "tool_policy": {"max_risk": "low"},
+            "steps": [{"type": "prompt", "id": "draft", "prompt": "Draft concise release notes."}],
+            "success_criteria": ["Done."],
+        })
+        entry = SkillEntry("default", "draft-writer", "Draft Writer", workflow.description, MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+
+        from agentnexus.services.skill import SkillService
+
+        service = SkillService(registry, agent=MagicMock())
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._side_panel = MagicMock()
+
+        question = screen._prepare_agent_question("Please write concise release notes.")
+
+        assert service.current == entry
+        assert "Draft concise release notes." in question
+        assert screen._side_panel.add_timeline_event.called

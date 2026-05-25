@@ -70,6 +70,44 @@ def _contains_pii(text: str) -> bool:
     return any(p.search(text) for p in _PII_PATTERNS)
 
 
+def _mask_pii(text: str) -> str:
+    """Partially mask PII in text, preserving structure for memory extraction.
+
+    - Email: keep first char of local part + domain TLD
+    - Phone: keep first 3 + last 4 digits
+    - API key: keep 'sk-' prefix
+    - Credit card: keep first 4 + last 4 digits
+    """
+    if not text:
+        return text
+    # Mask email: user@example.com → u***@***.com
+    def _mask_email(m):
+        domain = m.group(2)
+        tld = domain.rsplit(".", 1)
+        masked = re.sub(r"[^.]", "*", tld[0])
+        return m.group(1) + "***@" + masked + "." + tld[1]
+    text = re.sub(r"([\w.-])[\w.-]+@([\w.-]+\.\w+)", _mask_email, text)
+    # Mask phone: keep first 3 + last 4
+    text = re.sub(
+        r"(1[3-9]\d)\d{4}(\d{4})\b",
+        lambda m: m.group(1) + "****" + m.group(2),
+        text,
+    )
+    # Mask API key: keep 'sk-' prefix
+    text = re.sub(
+        r"(sk-)[A-Za-z0-9]{32,}",
+        lambda m: m.group(1) + "*" * min(8, len(m.group(0)) - 3) + ("..." if len(m.group(0)) > 11 else ""),
+        text,
+    )
+    # Mask credit card: keep first 4 + last 4
+    text = re.sub(
+        r"\b(\d{4})\d{7,11}(\d{4})\b",
+        lambda m: m.group(1) + "****" + m.group(2),
+        text,
+    )
+    return text
+
+
 
 
 class MemoryManager:
@@ -531,7 +569,8 @@ class MemoryManager:
         if not allow_memory:
             return
         if _contains_pii(question) or _contains_pii(answer):
-            return
+            question = _mask_pii(question)
+            answer = _mask_pii(answer)
 
         prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
         response = self._llm.think([{"role": "user", "content": prompt}]) or "{}"

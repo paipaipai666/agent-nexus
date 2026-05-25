@@ -41,6 +41,6 @@ class ToolExecutor:
         """Legacy API: return raw callable."""
         return self.registry.get_tool(name)
 
-    def getAvailableTools(self, agent: str = "*") -> str:
+    def getAvailableTools(self, agent: str = "*", tool_policy=None) -> str:
         """Legacy API: return formatted description string."""
-        return self.registry.get_available_tools(agent)
+        return self.registry.get_available_tools(agent, tool_policy=tool_policy)

@@ -3,6 +3,7 @@
 
 import pytest
 
+from agentnexus.skills.workflow import ToolPolicy
 from agentnexus.tools.registry import (
     RiskLevel,
     ToolMeta,
@@ -191,6 +192,49 @@ class TestQueryAPI:
         names = [t["function"]["name"] for t in tools]
         assert "user_tool" in names
         assert "admin_tool" not in names
+
+    def test_get_available_tools_respects_tool_policy(self):
+        r = ToolRegistry()
+        r.register(_make_meta(name="file_read", description="read", risk_level=RiskLevel.LOW), lambda: None)
+        r.register(_make_meta(name="shell_exec", description="shell", risk_level=RiskLevel.HIGH), lambda: None)
+        policy = ToolPolicy(allow=["file_read", "shell_exec"], max_risk="low", allow_subagents=False)
+        text = r.get_available_tools("user", tool_policy=policy)
+        assert "file_read" in text
+        assert "shell_exec" not in text
+
+    def test_invoke_respects_tool_policy_and_audits_block(self):
+        r = ToolRegistry()
+        called = {"value": False}
+
+        def shell():
+            called["value"] = True
+            return "ok"
+
+        r.register(_make_meta(name="shell_exec", risk_level=RiskLevel.HIGH), shell)
+        policy = ToolPolicy(allow=["shell_exec"], max_risk="low")
+
+        with pytest.raises(PermissionError, match="not visible"):
+            r.invoke("shell_exec", {}, caller="react_agent", tool_policy=policy)
+
+        assert called["value"] is False
+        audit = r.get_audit_log()
+        assert len(audit) == 1
+        assert audit[0].tool_name == "shell_exec"
+        assert "not visible" in audit[0].error
+
+    def test_invoke_without_tool_policy_preserves_existing_behavior(self):
+        r = ToolRegistry()
+        r.register(_make_meta(name="shell_exec", risk_level=RiskLevel.HIGH), lambda: "ok")
+        assert r.invoke("shell_exec", {}, caller="react_agent") == "ok"
+
+    def test_to_openai_tools_respects_tool_policy(self):
+        r = ToolRegistry()
+        r.register(_make_meta(name="file_read", risk_level=RiskLevel.LOW), lambda: None)
+        r.register(_make_meta(name="web_search", risk_level=RiskLevel.LOW), lambda: None)
+        policy = ToolPolicy(allow=["file_read", "web_search"], deny=["web_search"], max_risk="low")
+        tools = r.to_openai_tools("user", tool_policy=policy)
+        names = [t["function"]["name"] for t in tools]
+        assert names == ["file_read"]
 
     def test_get_audit_log_returns_copy(self):
         r = ToolRegistry()

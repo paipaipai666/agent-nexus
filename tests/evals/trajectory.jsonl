@@ -1,0 +1,10 @@
+{"trace_id": "eval_traj_001", "question": "搜索并总结 Python 异步编程的优缺点", "expected_trajectory": ["web_search: Python 异步编程优缺点", "web_search: async/await 性能对比", "直接回答"]}
+{"trace_id": "eval_traj_002", "question": "读取 config.yaml 并修改数据库连接字符串", "expected_trajectory": ["read: config.yaml", "edit: 修改 database_url", "read: 验证修改结果"]}
+{"trace_id": "eval_traj_003", "question": "搜索 FastAPI 文档然后写一个 Hello World 应用", "expected_trajectory": ["search: FastAPI 教程", "write: main.py 文件", "bash: 运行验证"]}
+{"trace_id": "eval_traj_004", "question": "找出最大的 .log 文件并压缩", "expected_trajectory": ["bash: 查找 .log 文件大小", "bash: gzip 压缩最大的文件", "bash: 验证压缩结果"]}
+{"trace_id": "eval_traj_005", "question": "在 GitHub 上搜索 opencode 项目", "expected_trajectory": ["web_search: opencode GitHub", "web_fetch: 项目 README", "直接回答摘要"]}
+{"trace_id": "eval_traj_006", "question": "计算项目的代码行数并按语言分类", "expected_trajectory": ["glob: 查找所有代码文件", "bash: 统计各语言行数", "直接回答统计结果"]}
+{"trace_id": "eval_traj_007", "question": "分析最近的 git 提交并生成 changelog", "expected_trajectory": ["bash: git log", "bash: git diff --stat", "write: CHANGELOG.md"]}
+{"trace_id": "eval_traj_008", "question": "查找使用了已弃用 API 的代码", "expected_trajectory": ["grep: 搜索已弃用函数名", "read: 确认使用上下文", "edit: 替换为新 API"]}
+{"trace_id": "eval_traj_009", "question": "创建并激活 Python 虚拟环境", "expected_trajectory": ["bash: python -m venv venv", "bash: 激活虚拟环境", "bash: pip list 验证"]}
+{"trace_id": "eval_traj_010", "question": "查找所有图片文件并生成缩略图", "expected_trajectory": ["glob: 查找 *.jpg/*.png", "bash: 使用 Pillow/ImageMagick", "bash: 验证输出目录"]}

@@ -18,6 +18,9 @@ app.add_typer(logs_app, name="logs")
 eval_app = typer.Typer(help="RAG 评估")
 app.add_typer(eval_app, name="eval")
 
+skill_app = typer.Typer(help="Skill / Workflow 管理")
+app.add_typer(skill_app, name="skill")
+
 from agentnexus.cli import (
     audit,  # noqa: E402
     config,  # noqa: E402
@@ -25,6 +28,7 @@ from agentnexus.cli import (
     kb,  # noqa: E402
     logs,  # noqa: E402
     memory_cmd,  # noqa: E402
+    skill_cmd,  # noqa: E402
     stats,  # noqa: E402
     tui_cmd,  # noqa: E402
 )

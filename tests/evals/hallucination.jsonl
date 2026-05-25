@@ -1,0 +1,10 @@
+{"trace_id": "eval_hal_001", "question": "Python 3.12 引入了哪些新特性？", "expected_answer": "Python 3.12 引入了更灵活的 f-string、类型参数语法、性能优化等特性。", "reference_facts": ["Python 3.12 在 2023 年 10 月发布", "新特性包括 f-string 重用引号、type 语句、@override 装饰器"]}
+{"trace_id": "eval_hal_002", "question": "AgentNexus 支持哪些 LLM 提供商？", "expected_answer": "AgentNexus 通过 litellm 支持多模型提供商。", "reference_facts": ["AgentNexus 使用 litellm 进行 LLM 调用", "配置通过 AGENTNEXUS_LLM_API_KEY 和 AGENTNEXUS_LLM_MODEL_ID 控制"]}
+{"trace_id": "eval_hal_003", "question": "SQLAlchemy 2.0 的主要变化是什么？", "expected_answer": "SQLAlchemy 2.0 引入了新的 ORM 声明式映射语法。", "reference_facts": ["2.0 使用 Mapped[] 和 mapped_column()", "旧语法 Column() 仍然支持但已弃用"]}
+{"trace_id": "eval_hal_004", "question": "ChromaDB 的默认向量距离计算方式是什么？", "expected_answer": "ChromaDB 默认使用余弦距离（cosine distance）。", "reference_facts": ["ChromaDB 支持 cosine、l2、ip 三种距离", "LTM 集合指定了 hnsw:space=cosine"]}
+{"trace_id": "eval_hal_005", "question": "Pydantic v2 使用什么语言实现核心？", "expected_answer": "Pydantic v2 使用 Rust 实现核心（pydantic-core）。", "reference_facts": ["pydantic-core 是 Rust 实现的", "相比 v1 速度提升 5-50 倍"]}
+{"trace_id": "eval_hal_006", "question": "AgentNexus 使用什么向量数据库？", "expected_answer": "AgentNexus 使用 ChromaDB 作为向量数据库。", "reference_facts": ["ChromaDB 用于 RAG 文档存储", "使用 PersistentClient 本地持久化"]}
+{"trace_id": "eval_hal_007", "question": "如何在 FastAPI 中实现依赖注入？", "expected_answer": "FastAPI 使用 Depends() 函数实现依赖注入。", "reference_facts": ["FastAPI 基于 Starlette", "依赖注入通过类型注解和 Depends 实现"]}
+{"trace_id": "eval_hal_008", "question": "什么是 BM25 检索算法？", "expected_answer": "BM25 是一种基于词频和逆文档频率的排序函数。", "reference_facts": ["BM25 是 TF-IDF 的改进版本", "在 AgentNexus 中用于稀疏检索"]}
+{"trace_id": "eval_hal_009", "question": "AgentNexus 的记忆系统如何工作？", "expected_answer": "AgentNexus 使用短期记忆（STM）和长期记忆（LTM）双层架构。", "reference_facts": ["STM 是内存中的 deque", "LTM 使用 SQLite + ChromaDB 持久化"]}
+{"trace_id": "eval_hal_010", "question": "nexus eval 命令支持哪些评估类型？", "expected_answer": "nexus eval 支持 agent、RAG、trajectory、hallucination、tool-selection、coherence 等评估。", "reference_facts": ["eval 命令包含 12 个子命令", "支持 LLM-as-Judge 和规则评估"]}

@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from agentnexus.observability.tracer import trace_manager
+from agentnexus.skills.profile import filter_tool_meta
 
 try:
     import jsonschema
@@ -105,54 +106,66 @@ class ToolRegistry:
 
     # ── call path (the governance gate) ───────────────────────────
 
-    def invoke(self, name: str, params: dict, caller: str = "unknown",
-               hitl_approver: Callable[[str], bool] | None = None) -> Any:
+    def invoke(
+        self,
+        name: str,
+        params: dict,
+        caller: str = "unknown",
+        hitl_approver: Callable[[str], bool] | None = None,
+        tool_policy: Any = None,
+    ) -> Any:
         """Execute a tool with full governance checks. Raises on violation."""
         meta, func = self._get_tool(name)
-
-        # 1. RBAC check
-        if "*" not in meta.allowed_agents and caller not in meta.allowed_agents:
-            raise PermissionError(
-                f"Agent '{caller}' is not allowed to call tool '{name}' "
-                f"(allowed: {meta.allowed_agents})"
-            )
-
-        # 2. Parameter schema validation
-        if meta.param_schema:
-            self._validate_params(name, params, self._param_validators.get(name))
-
-        # 3. Rate limiting
-        if meta.rate_limit_per_min > 0:
-            self._check_rate_limit(name, meta.rate_limit_per_min)
-
-        redacted_params = _redact_sensitive_params(params)
-
-        # 4. HITL gate
-        hitl_triggered = False
-        if meta.require_hitl:
-            hitl_triggered = True
-            if hitl_approver is None:
-                return "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
-            confirm_summary = (
-                f"调用者: {caller}\n"
-                f"工具: {name}\n"
-                f"风险: {meta.risk_level.value}\n"
-                f"参数: {json.dumps(redacted_params, ensure_ascii=False, default=str)[:500]}"
-            )
-            if not hitl_approver(confirm_summary):
-                return "[blocked] 用户取消了该工具调用"
-
-        # 5. Execute with timeout enforcement
         start = time.time()
+        hitl_triggered = False
         error = None
         result_str = ""
-        span_input = {
-            "tool_name": name,
-            "caller": caller,
-            "params": redacted_params,
-            "risk_level": meta.risk_level.value,
-        }
+
+        # 1. RBAC check
         try:
+            if "*" not in meta.allowed_agents and caller not in meta.allowed_agents:
+                raise PermissionError(
+                    f"Agent '{caller}' is not allowed to call tool '{name}' "
+                    f"(allowed: {meta.allowed_agents})"
+                )
+
+            # 2. Skill tool policy hard gate
+            if not filter_tool_meta(name, meta, tool_policy):
+                raise PermissionError(
+                    f"Tool '{name}' is not visible under current skill tool_policy"
+                )
+
+            # 3. Parameter schema validation
+            if meta.param_schema:
+                self._validate_params(name, params, self._param_validators.get(name))
+
+            # 4. Rate limiting
+            if meta.rate_limit_per_min > 0:
+                self._check_rate_limit(name, meta.rate_limit_per_min)
+
+            redacted_params = _redact_sensitive_params(params)
+
+            # 5. HITL gate
+            if meta.require_hitl:
+                hitl_triggered = True
+                if hitl_approver is None:
+                    return "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
+                confirm_summary = (
+                    f"调用者: {caller}\n"
+                    f"工具: {name}\n"
+                    f"风险: {meta.risk_level.value}\n"
+                    f"参数: {json.dumps(redacted_params, ensure_ascii=False, default=str)[:500]}"
+                )
+                if not hitl_approver(confirm_summary):
+                    return "[blocked] 用户取消了该工具调用"
+
+            # 6. Execute with timeout enforcement
+            span_input = {
+                "tool_name": name,
+                "caller": caller,
+                "params": redacted_params,
+                "risk_level": meta.risk_level.value,
+            }
             with trace_manager.span("tool", span_input) as span:
                 future = self._executor.submit(func, **params)
                 try:
@@ -161,7 +174,7 @@ class ToolRegistry:
                     error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
                     raise TimeoutError(error)
                 result_str = str(result)[:500]
-                # 6. Output schema validation
+                # 7. Output schema validation
                 if meta.output_schema:
                     self._validate_output(name, result, self._output_validators.get(name))
                 span.output = {"result_summary": result_str}
@@ -190,11 +203,12 @@ class ToolRegistry:
 
     # ── query API (for LLM prompt building) ───────────────────────
 
-    def get_available_tools(self, agent: str = "*") -> str:
+    def get_available_tools(self, agent: str = "*", tool_policy: Any = None) -> str:
         """Return a formatted description of tools available to *agent*."""
         lines = []
         for name, (meta, _) in self._tools.items():
-            if "*" in meta.allowed_agents or agent in meta.allowed_agents:
+            allowed = "*" in meta.allowed_agents or agent in meta.allowed_agents
+            if allowed and filter_tool_meta(name, meta, tool_policy):
                 risk_tag = f"[{meta.risk_level.value}]"
                 lines.append(f"- {name}: {meta.description} {risk_tag}")
         return "\n".join(lines) if lines else "(no tools available)"
@@ -207,11 +221,13 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
 
-    def to_openai_tools(self, agent: str = "*") -> list[dict]:
+    def to_openai_tools(self, agent: str = "*", tool_policy: Any = None) -> list[dict]:
         """Convert registered tools to OpenAI function-calling format."""
         tools = []
         for name, (meta, _) in self._tools.items():
             if "*" not in meta.allowed_agents and agent not in meta.allowed_agents:
+                continue
+            if not filter_tool_meta(name, meta, tool_policy):
                 continue
             # Strip default values from properties — OpenAI doesn't use them
             schema = {"type": "object", "properties": {}, "required": meta.param_schema.get("required", [])}

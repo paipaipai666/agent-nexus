@@ -143,6 +143,8 @@ BM25 索引仅在内存中，不持久化，每次会话重建。
 
 ## 已知问题 / 注意点
 
-- long_term.py 每次 save/search 都重建 ChromaDB client，频繁调用有性能开销
-- BM25 索引不持久化，重启后需重建
-- PII 过滤 (memory/manager.py) 用正则完全屏蔽 email/电话/API key，不含部分脱敏
+- long_term.py: `_get_ltm_collection()` 使用模块级单例缓存 ChromaDB client（非每次重建），但无持久化压力测试 → 已补充 `tests/perf/test_perf_long_term_stress.py`（8 个压力测试）
+- BM25 索引不持久化，重启后需重建，无性能回退测试 → 已补充 `tests/perf/test_perf_bm25_rebuild.py`（3 个基准测试）
+- PII 过滤: 原为完全屏蔽（`_contains_pii` 返回 bool），现已实现部分脱敏 `_mask_pii()`（保留邮箱首字+域名、手机前3后4、API key 前缀、信用卡前4后4），新增 12 个单元测试
+- evals/ 目录原空 → 已填充 5 个评估数据集（agent_eval / tool_selection / hallucination / coherence / trajectory，各 10 条）
+- ChromaDB 1.5.8 numpy 数组兼容性: `_fallback_cosine_search()` 中 `chroma_results.get("embeddings") or []` 需 `is not None` 检查

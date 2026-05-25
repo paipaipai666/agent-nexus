@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class AppServices:
     chat: object
+    skill: object
     knowledge_base: object
     eval: object
     config: object
-

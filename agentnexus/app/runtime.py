@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService
+from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService, SkillService
 
 
 @dataclass
@@ -32,6 +32,7 @@ class AppRuntime:
         from agentnexus.memory.manager import MemoryManager
         from agentnexus.memory.versioned import ConversationVersionManager
         from agentnexus.observability.tracer import trace_manager
+        from agentnexus.skills import SkillRegistry
         from agentnexus.tools import register_all_tools
         from agentnexus.tools.confirm_bridge import ConfirmBridge
         from agentnexus.tools.mcp_adapter import create_mcp_manager_from_settings
@@ -66,10 +67,23 @@ class AppRuntime:
         memory = MemoryManager(session_id, llm=llm)
         version = ConversationVersionManager(session_id, settings.memory_db_path)
         agent = ReActAgent(llm, executor, conversation_mode=True)
+        skill_registry = SkillRegistry.from_settings(settings)
+        skill_registry.discover()
+        skill_service = SkillService(
+            skill_registry,
+            agent=agent,
+            auto_route=getattr(settings, "skill_auto_route", True),
+            auto_route_llm_fallback=getattr(settings, "skill_auto_route_llm_fallback", True),
+            llm_client=llm,
+        )
+        skill_service.router.min_score = getattr(settings, "skill_auto_route_min_score", 2.0)
+        skill_service.router.margin = getattr(settings, "skill_auto_route_margin", 0.75)
+        skill_service.use_default(getattr(settings, "default_skill", ""))
         trace_manager.configure(settings.traces_dir)
 
         services = AppServices(
-            chat=ChatService(agent, memory, version),
+            chat=ChatService(agent, memory, version, skill_service=skill_service, tool_executor=executor),
+            skill=skill_service,
             knowledge_base=KnowledgeBaseService(settings),
             eval=EvalService(settings),
             config=ConfigService(settings, extension_manager),

@@ -1,0 +1,10 @@
+{"trace_id": "eval_tool_001", "question": "查看 config.yaml 的内容", "expected_answer": "使用 read 工具读取文件内容。", "tools_used": ["read"]}
+{"trace_id": "eval_tool_002", "question": "搜索所有包含 'TODO' 的文件", "expected_answer": "使用 grep 工具递归搜索 TODO 关键字。", "tools_used": ["grep"]}
+{"trace_id": "eval_tool_003", "question": "安装 requests 库", "expected_answer": "使用 bash 运行 pip install requests。", "tools_used": ["bash"]}
+{"trace_id": "eval_tool_004", "question": "今天天气怎么样？", "expected_answer": "使用 web_search 搜索今天的天气信息。", "tools_used": ["web_search"]}
+{"trace_id": "eval_tool_005", "question": "把 hello.txt 重命名为 greeting.txt", "expected_answer": "使用 bash 运行 mv 或 rename 命令。", "tools_used": ["bash"]}
+{"trace_id": "eval_tool_006", "question": "在 src/main.py 第 10 行后插入一行注释", "expected_answer": "使用 read 读取文件，edit 在指定位置插入注释。", "tools_used": ["read", "edit"]}
+{"trace_id": "eval_tool_007", "question": "谁提交了最近的 commit？", "expected_answer": "使用 bash 运行 git log 查看提交历史。", "tools_used": ["bash"]}
+{"trace_id": "eval_tool_008", "question": "搜索数据库连接池相关文档", "expected_answer": "使用 search 在知识库中查找连接池相关内容。", "tools_used": ["search"]}
+{"trace_id": "eval_tool_009", "question": "把 test.log 的最后 100 行保存到 error.log", "expected_answer": "使用 bash 运行 tail 命令并重定向输出。", "tools_used": ["bash", "write"]}
+{"trace_id": "eval_tool_010", "question": "对比两个 JSON 文件的差异", "expected_answer": "使用 bash 运行 diff 或 jq 命令对比文件。", "tools_used": ["bash", "read"]}

@@ -100,6 +100,19 @@ class TestSidePanelRendering:
             "status": "active",
         }
 
+    def test_update_skill_accepts_runtime_summary(self):
+        panel = SidePanel()
+        panel.update_skill("review", "code_review", "selected", runtime={
+            "status": "completed",
+            "steps": 2,
+            "ok": 1,
+            "errors": 1,
+        })
+        text = panel._render_skill()
+        assert "completed" in text
+        assert "1/2" in text
+        assert "1 err" in text
+
     def test_update_memory_backward_compatibility(self):
         panel = SidePanel()
         panel.update_memory(["a", "b"])

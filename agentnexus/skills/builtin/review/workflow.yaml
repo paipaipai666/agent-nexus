@@ -1,0 +1,43 @@
+id: code_review
+version: "1"
+display_name: Code Review
+description: Review code changes with a concise, actionable checklist.
+entry_mode: chat
+prompt_profile:
+  system: react
+  fragments:
+    - security
+  variables: {}
+tool_policy:
+  allow:
+    - file_read
+    - file_list
+    - grep_search
+    - kb_search
+    - memory_search
+  deny:
+    - shell_exec
+    - python_execute
+    - file_write
+  max_risk: low
+  allow_subagents: false
+memory_policy:
+  inject_long_term: true
+  allow_save: false
+retrieval_policy:
+  namespace: default
+  view: section
+  top_k: 3
+steps:
+  - type: prompt
+    id: scope
+    prompt: Identify the files, behavior, and risks relevant to the requested review.
+  - type: retrieve
+    id: context
+    prompt: Find project context relevant to the requested review.
+  - type: finalize
+    id: findings
+    prompt: Prioritize concrete bugs, regressions, and missing tests.
+success_criteria:
+  - Findings are actionable and cite specific files or behavior.
+  - Cosmetic opinions are omitted unless they affect usability or maintainability.

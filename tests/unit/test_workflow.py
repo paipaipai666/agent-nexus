@@ -53,6 +53,9 @@ success_criteria:
         profile = workflow.to_session_profile()
 
         assert profile.workflow_id == "code_review"
+        assert profile.display_name == "Code Review"
+        assert profile.description == "Review code changes"
+        assert profile.success_criteria == ["Findings are actionable."]
         assert profile.tool_policy.allow == ["grep_search", "file_read"]
         assert profile.retrieval_policy.top_k == 3
         assert [step.type for step in profile.steps] == ["prompt", "retrieve"]

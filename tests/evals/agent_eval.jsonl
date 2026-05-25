@@ -1,0 +1,50 @@
+{"trace_id": "eval_agent_001", "question": "用 Python 实现一个快速排序算法", "expected_answer": "提供一个包含快速排序算法的 Python 函数，包含分区逻辑和递归调用。", "tools_used": ["write"]}
+{"trace_id": "eval_agent_002", "question": "当前目录有哪些文件？", "expected_answer": "列出当前工作目录下的所有文件和子目录。", "tools_used": ["bash", "glob"]}
+{"trace_id": "eval_agent_003", "question": "搜索 Python 异常处理相关文档", "expected_answer": "在知识库中搜索并返回与 Python 异常处理相关的文档片段。", "tools_used": ["search", "web_search"]}
+{"trace_id": "eval_agent_004", "question": "帮我写一个 Dockerfile 部署 Flask 应用", "expected_answer": "生成一个包含 Flask 依赖安装和启动命令的 Dockerfile。", "tools_used": ["write", "read"]}
+{"trace_id": "eval_agent_005", "question": "解释 git rebase 和 merge 的区别", "expected_answer": "解释 rebase 和 merge 的概念、用途和主要区别。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_006", "question": "帮我调试这个代码：运行 test.py 后报错 ImportError", "expected_answer": "读取 test.py 内容，检查导入的模块是否已安装，给出修复建议。", "tools_used": ["read", "bash", "web_search"]}
+{"trace_id": "eval_agent_007", "question": "将 src/ 目录下的所有 .py 文件中的 print 替换为 logging", "expected_answer": "批量读取 .py 文件，用 logging 替换 print，写回文件。", "tools_used": ["glob", "read", "edit", "write"]}
+{"trace_id": "eval_agent_008", "question": "搜索关于 FastAPI 依赖注入的资料并总结", "expected_answer": "搜索知识库和网络，总结 FastAPI 依赖注入的核心概念和用法。", "tools_used": ["search", "web_search"]}
+{"trace_id": "eval_agent_009", "question": "什么是 RESTful API 设计规范？", "expected_answer": "解释 RESTful API 的核心原则：资源导向、HTTP 方法语义、无状态等。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_010", "question": "把项目依赖导出到 requirements.txt", "expected_answer": "运行 pip freeze 或 pip list 命令导出当前环境的依赖列表。", "tools_used": ["bash", "write"]}
+{"trace_id": "eval_agent_011", "question": "重构这个计算器：将 if-else 改为策略模式", "expected_answer": "读取当前计算器代码，识别策略接口，为每个运算创建策略类，更新调用方。", "tools_used": ["read", "write", "edit"]}
+{"trace_id": "eval_agent_012", "question": "查找项目中所有 TODO 注释并生成报告", "expected_answer": "使用 grep 搜索 TODO 关键字，统计每个文件的数量，生成 Markdown 报告。", "tools_used": ["grep", "write"]}
+{"trace_id": "eval_agent_013", "question": "写一个 bash 脚本批量重命名 .jpg 文件为日期前缀", "expected_answer": "生成一个 bash 循环脚本遍历 .jpg 文件，用 stat 获取修改日期并重命名。", "tools_used": ["write", "bash"]}
+{"trace_id": "eval_agent_014", "question": "解释 Python 的 GIL 是什么以及如何绕过", "expected_answer": "解释全局解释器锁的概念，介绍多线程、多进程、异步等替代方案。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_015", "question": "帮我创建一个 React 组件：可排序表格", "expected_answer": "生成一个支持点击表头排序的 React 表格组件 TypeScript 代码。", "tools_used": ["write", "read"]}
+{"trace_id": "eval_agent_016", "question": "分析项目的代码复杂度", "expected_answer": "使用 radon 或类似工具分析代码圈的复杂度，给出改进建议。", "tools_used": ["bash", "read"]}
+{"trace_id": "eval_agent_017", "question": "把 Markdown 文档中的代码块提取到单独文件", "expected_answer": "解析 Markdown 文件，提取每个代码块的语言和内容，按文件名保存。", "tools_used": ["read", "write"]}
+{"trace_id": "eval_agent_018", "question": "设置 pre-commit 钩子运行 ruff 检查", "expected_answer": "创建 .pre-commit-config.yaml 配置 ruff 钩子，运行 pre-commit install。", "tools_used": ["write", "bash"]}
+{"trace_id": "eval_agent_019", "question": "将 CSV 文件转换为 JSON 格式", "expected_answer": "读取 CSV 文件，解析表头和数据行，输出 JSON 数组格式。", "tools_used": ["read", "write"]}
+{"trace_id": "eval_agent_020", "question": "解释 HTTP 状态码 301、302、401、403、500 的含义", "expected_answer": "解释 301 永久重定向、302 临时重定向、401 未授权、403 禁止、500 服务器错误的含义。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_021", "question": "使用 pytest 为现有模块编写单元测试", "expected_answer": "分析现有模块的接口，为每个函数编写 pytest 测试用例，覆盖正常和异常路径。", "tools_used": ["read", "write", "bash"]}
+{"trace_id": "eval_agent_022", "question": "从 URL 下载文件并保存到本地", "expected_answer": "使用 curl 或 wget 下载文件，保存到指定路径，验证下载完整性。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_023", "question": "设置环境变量并运行测试", "expected_answer": "使用 bash 设置环境变量后运行 pytest，确保环境变量在子进程中生效。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_024", "question": "搜索 Node.js 事件循环机制并总结", "expected_answer": "搜索 Node.js 事件循环的资料，总结事件循环的阶段和异步 I/O 模型。", "tools_used": ["web_search", "search"]}
+{"trace_id": "eval_agent_025", "question": "比较 SQLAlchemy 和 Django ORM 的差异", "expected_answer": "从配置方式、查询语法、性能、迁移工具等方面比较两个 ORM 的差异。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_026", "question": "优化这段 SQL 查询：为 WHERE 子句添加索引建议", "expected_answer": "分析 SQL 查询的 WHERE 和 JOIN 条件，建议合适的复合索引。", "tools_used": ["read", "web_search"]}
+{"trace_id": "eval_agent_027", "question": "创建一个 Python 装饰器用于记录函数执行时间", "expected_answer": "编写一个 timer 装饰器，记录函数的执行时间并输出日志。", "tools_used": ["write"]}
+{"trace_id": "eval_agent_028", "question": "把 JSON Schema 转换为 Python 数据类", "expected_answer": "解析 JSON Schema 定义，自动生成对应的 Python dataclass 代码。", "tools_used": ["read", "write"]}
+{"trace_id": "eval_agent_029", "question": "解释 Kubernetes Pod 和 Deployment 的区别", "expected_answer": "解释 Pod 是最小部署单元，Deployment 管理 Pod 的副本和滚动更新策略。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_030", "question": "生成项目的 API 文档框架", "expected_answer": "扫描项目中的路由或视图函数，提取 docstring，生成 API 文档框架。", "tools_used": ["grep", "read", "write"]}
+{"trace_id": "eval_agent_031", "question": "查找大文件并清理日志目录", "expected_answer": "使用 find 查找超过 100MB 的文件，检查日志目录并建议清理策略。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_032", "question": "实现一个简单的 LRU 缓存", "expected_answer": "使用 OrderedDict 实现 LRU 缓存类，包含 get、put 方法，容量限制。", "tools_used": ["write"]}
+{"trace_id": "eval_agent_033", "question": "解释 Docker 和虚拟机的主要区别", "expected_answer": "比较 Docker 容器和虚拟机的架构差异：共享宿主机内核 vs 完整 OS。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_034", "question": "将 Python 2 代码升级到 Python 3 语法", "expected_answer": "识别 Python 2 特有的语法（print 语句、异常语法等），逐个转换为 Python 3 等效语法。", "tools_used": ["read", "edit"]}
+{"trace_id": "eval_agent_035", "question": "创建 Git 仓库并做初始提交", "expected_answer": "运行 git init，添加 .gitignore，做初始提交。", "tools_used": ["bash", "write"]}
+{"trace_id": "eval_agent_036", "question": "查询系统资源使用情况", "expected_answer": "使用 top、free、df 等命令查看 CPU、内存、磁盘使用情况。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_037", "question": "把 JWT Token 的 payload 解码出来", "expected_answer": "使用 base64 解码 JWT 的第二部分（payload），返回 JSON 内容。", "tools_used": ["bash", "read"]}
+{"trace_id": "eval_agent_038", "question": "生成数据库 ER 图的 PlantUML 描述", "expected_answer": "读取数据库模型定义，生成 PlantUML ER 图语法。", "tools_used": ["read", "write"]}
+{"trace_id": "eval_agent_039", "question": "配置 nginx 反向代理到本地 8080 端口", "expected_answer": "生成 nginx 配置文件片段，包含 proxy_pass 到 localhost:8080。", "tools_used": ["write", "read"]}
+{"trace_id": "eval_agent_040", "question": "搜索并安装 Python 的异步 HTTP 库", "expected_answer": "搜索 httpx 或 aiohttp 的安装和使用方式，执行 pip install。", "tools_used": ["web_search", "bash"]}
+{"trace_id": "eval_agent_041", "question": "合并两个 Git 分支并解决冲突", "expected_answer": "执行 git merge，检查冲突文件，手动解决冲突后提交。", "tools_used": ["bash", "read", "edit"]}
+{"trace_id": "eval_agent_042", "question": "解释 OAuth 2.0 的授权码流程", "expected_answer": "详细说明授权码流程的步骤：用户授权、重定向、授权码换令牌。", "tools_used": ["web_search"]}
+{"trace_id": "eval_agent_043", "question": "把代码中的魔法数字替换为命名常量", "expected_answer": "扫描代码中的数字字面量，提取有意义的命名常量并替换。", "tools_used": ["grep", "read", "edit"]}
+{"trace_id": "eval_agent_044", "question": "创建虚拟环境并安装项目依赖", "expected_answer": "创建 Python 虚拟环境，激活，从 requirements.txt 安装依赖。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_045", "question": "搜索 Python 的 asyncio 最佳实践", "expected_answer": "搜索 asyncio 的最佳实践资料，总结事件循环管理和协程使用要点。", "tools_used": ["web_search", "search"]}
+{"trace_id": "eval_agent_046", "question": "计算 Git 仓库中每个人的代码贡献量", "expected_answer": "使用 git shortlog -sne 统计每个作者的提交次数和变更行数。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_047", "question": "生成有效的 requirements.txt（仅生产依赖）", "expected_answer": "使用 pip list --format=freeze 过滤出非 dev 依赖，写入 requirements.txt。", "tools_used": ["bash", "write"]}
+{"trace_id": "eval_agent_048", "question": "在远程服务器上执行命令（SSH）", "expected_answer": "使用 SSH 连接到远程服务器并执行指定命令。注意：此操作可能需要用户确认。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_049", "question": "把 MySQL 查询结果导出为 CSV", "expected_answer": "使用 MySQL 的 SELECT INTO OUTFILE 或 mysqldump --csv 导出查询结果。", "tools_used": ["bash"]}
+{"trace_id": "eval_agent_050", "question": "创建一个 Python 命令行工具入口", "expected_answer": "使用 click 或 argparse 编写命令行工具，包含参数解析和帮助信息。", "tools_used": ["write"]}

@@ -29,6 +29,7 @@ _UNIX_BLACKLIST = [
     r"rm\s+-rf\s+/",
     r"mkfs",
     r"dd\s+if=",
+    r">>\s*/dev/sd",
     r">\s*/dev/sd",
     r"chmod\s+777\s+/",
     r":\s*\(\s*\)\s*\{\s*:\s*\|:",

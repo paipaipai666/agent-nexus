@@ -64,8 +64,20 @@ class SidePanel(Widget):
         self._model_info = {"model": model or "unknown", "ctx": ctx or "unknown", "strategy": strategy or ""}
         self._refresh_section("model-card", self._render_model())
 
-    def update_skill(self, skill: str = "default", workflow: str = "default", status: str = "idle"):
-        self._skill_info = {"skill": skill or "default", "workflow": workflow or "default", "status": status or "idle"}
+    def update_skill(
+        self,
+        skill: str = "default",
+        workflow: str = "default",
+        status: str = "idle",
+        runtime: dict | None = None,
+    ):
+        self._skill_info = {
+            "skill": skill or "default",
+            "workflow": workflow or "default",
+            "status": status or "idle",
+        }
+        if runtime:
+            self._skill_info["runtime"] = runtime
         self._refresh_section("skill-card", self._render_skill())
 
     # Backward-compatible shim for old tests/callers.
@@ -149,7 +161,34 @@ class SidePanel(Widget):
         skill = self._skill_info.get("skill", "default")
         workflow = self._skill_info.get("workflow", "default")
         status = self._skill_info.get("status", "idle")
-        return f"[dim]Skill[/] {skill}\n[dim]Workflow[/] {workflow}\n[dim]Status[/] {status}"
+        runtime = self._skill_info.get("runtime", {}) or {}
+        run_status = runtime.get("status", "")
+        steps = runtime.get("steps", 0)
+        ok = runtime.get("ok", 0)
+        errors = runtime.get("errors", 0)
+        scripts = runtime.get("scripts", 0)
+        references = runtime.get("references", 0)
+        assets = runtime.get("assets", 0)
+        auto_reason = runtime.get("auto_reason", "")
+        auto_source = runtime.get("auto_source", "")
+        runtime_line = ""
+        if run_status:
+            runtime_line = f"\n[dim]Run[/] {run_status}  [dim]steps[/] {ok}/{steps}"
+            if errors:
+                runtime_line += f"  [#e06c75]{errors} err[/]"
+        resources = []
+        if scripts:
+            resources.append(f"scripts {scripts}")
+        if references:
+            resources.append(f"refs {references}")
+        if assets:
+            resources.append(f"assets {assets}")
+        if resources:
+            runtime_line += "\n[dim]Resources[/] " + ", ".join(resources)
+        if auto_reason:
+            label = f"Auto {auto_source}" if auto_source else "Auto"
+            runtime_line += f"\n[dim]{label}[/] " + _truncate(auto_reason, 80)
+        return f"[dim]Skill[/] {skill}\n[dim]Workflow[/] {workflow}\n[dim]Status[/] {status}{runtime_line}"
 
     def compose(self) -> ComposeResult:
         yield Label("RUN", classes="panel-eyebrow")

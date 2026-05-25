@@ -1,0 +1,10 @@
+{"trace_id": "eval_coh_001", "question": "帮我创建一个 Python Web 项目", "steps": ["了解项目需求和技术栈", "创建项目目录结构", "安装 Flask/FastAPI 依赖", "编写主应用代码", "添加路由和视图函数", "编写测试用例", "提供启动说明"]}
+{"trace_id": "eval_coh_002", "question": "调试这个 500 错误", "steps": ["复现错误并捕获日志", "分析错误栈跟踪", "定位问题代码位置", "提出修复方案", "验证修复有效"]}
+{"trace_id": "eval_coh_003", "question": "如何优化数据库查询性能？", "steps": ["识别慢查询", "分析查询执行计划", "建议索引优化", "考虑查询重构", "评估优化效果"]}
+{"trace_id": "eval_coh_004", "question": "把项目从 JavaScript 迁移到 TypeScript", "steps": ["安装 TypeScript 依赖", "创建 tsconfig.json 配置", "重命名文件为 .ts", "添加类型注解", "修复类型错误", "验证构建通过"]}
+{"trace_id": "eval_coh_005", "question": "实现用户认证系统", "steps": ["设计用户数据模型", "实现注册接口", "实现登录接口", "添加 JWT Token 验证", "实现受保护路由", "添加刷新 Token 机制"]}
+{"trace_id": "eval_coh_006", "question": "部署应用到生产环境", "steps": ["准备服务器环境", "配置反向代理", "设置 CI/CD 流水线", "配置数据库连接", "部署应用", "验证健康检查"]}
+{"trace_id": "eval_coh_007", "question": "重构这个大型函数", "steps": ["理解函数功能", "识别可拆分逻辑", "提取独立函数", "保持接口兼容", "更新调用方代码", "运行回归测试"]}
+{"trace_id": "eval_coh_008", "question": "实现数据导出为 Excel 功能", "steps": ["选择 Excel 库", "定义导出数据格式", "编写导出函数", "添加导出进度反馈", "处理大数据量分片", "测试导出正确性"]}
+{"trace_id": "eval_coh_009", "question": "搭建微服务监控系统", "steps": ["选择监控方案", "部署 Prometheus", "集成服务指标", "配置 Grafana 面板", "设置告警规则", "验证监控覆盖"]}
+{"trace_id": "eval_coh_010", "question": "实现 WebSocket 实时通信", "steps": ["选择 WebSocket 库", "设计消息协议", "实现服务端端点", "实现客户端连接", "处理重连逻辑", "测试消息收发"]}

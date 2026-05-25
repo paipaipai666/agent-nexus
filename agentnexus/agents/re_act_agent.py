@@ -23,6 +23,7 @@ from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.prompts import load_prompt
+from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_session_profile
 from agentnexus.tools.tool_executor import ToolExecutor
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
@@ -47,7 +48,8 @@ class ReActAgent:
                  agent_id: str = "react_agent"):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
-        self.max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
+        configured_max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
+        self.max_steps = configured_max_steps if isinstance(configured_max_steps, int) else 5
         self._output = output or print
         self._confirm = confirm_fn or self._default_confirm
         self._async_confirm = async_confirm
@@ -55,6 +57,8 @@ class ReActAgent:
         self.agent_id = agent_id
         self._total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
         self._on_event: Callable | None = None
+        self._session_profile: SessionProfile | None = None
+        self._compiled_session_profile: CompiledSessionProfile | None = None
 
     # ================================================================
     # Public API (unchanged)
@@ -67,6 +71,19 @@ class ReActAgent:
     @property
     def model_id(self) -> str:
         return self.llm_client.model
+
+    @property
+    def session_profile(self) -> SessionProfile | None:
+        return self._session_profile
+
+    @property
+    def compiled_session_profile(self) -> CompiledSessionProfile | None:
+        return self._compiled_session_profile
+
+    def set_session_profile(self, profile: SessionProfile | None) -> None:
+        """Apply a workflow-backed session profile for future runs."""
+        self._session_profile = profile
+        self._compiled_session_profile = validate_session_profile(profile) if profile is not None else None
 
     def run(self, question: str, memory_manager=None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
@@ -144,8 +161,9 @@ class ReActAgent:
             ctx.memory_context = memory_manager.init_session(ctx.question)
             memory_manager.append("user", ctx.question)
 
-        ctx.tools = self.tool_executor.registry.to_openai_tools(self.agent_id)
-        ctx.tools_desc = self.tool_executor.getAvailableTools(self.agent_id)
+        tool_policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
+        ctx.tools = self.tool_executor.registry.to_openai_tools(self.agent_id, tool_policy=tool_policy)
+        ctx.tools_desc = self.tool_executor.getAvailableTools(self.agent_id, tool_policy=tool_policy)
 
         if self.conversation_mode and memory_manager:
             ctx.conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
@@ -160,7 +178,9 @@ class ReActAgent:
 
         if memory_manager:
             def rebuild():
-                new_tools_desc = self.tool_executor.getAvailableTools(self.agent_id)
+                profile = self._compiled_session_profile
+                policy = profile.tool_policy if profile else None
+                new_tools_desc = self.tool_executor.getAvailableTools(self.agent_id, tool_policy=policy)
                 new_conv = ""
                 if self.conversation_mode:
                     new_conv = self._build_conversation_context(memory_manager, per_msg_limit=800)
@@ -779,12 +799,21 @@ class ReActAgent:
 
     def _build_prompt(self, tools_desc: str, question: str, history_str: str,
                        memory_context: str, conversation_context: str) -> str:
-        return REACT_PROMPT_TEMPLATE.format(
+        compiled = self._compiled_session_profile
+        template = compiled.prompt_template if compiled else REACT_PROMPT_TEMPLATE
+        extra_context = ""
+        if compiled:
+            blocks = [compiled.fragments_text, compiled.workflow_guidance]
+            extra_context = "\n\n".join(block for block in blocks if block)
+            if extra_context:
+                extra_context += "\n\n"
+        profile_conversation_context = conversation_context + extra_context
+        return template.format(
             tools=tools_desc,
             question=question,
             history=history_str,
             memory_context=memory_context,
-            conversation_context=conversation_context,
+            conversation_context=profile_conversation_context,
         )
 
     def _build_conversation_context(self, memory_manager, per_msg_limit: int = 500) -> str:
@@ -816,11 +845,13 @@ class ReActAgent:
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         try:
+            policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
             return str(self.tool_executor.registry.invoke(
                 name=name,
                 params=arguments,
                 caller=self.agent_id,
                 hitl_approver=self._confirm,
+                tool_policy=policy,
             ))
         except Exception as e:
             return f"错误: 工具 '{name}' 执行失败: {e}"

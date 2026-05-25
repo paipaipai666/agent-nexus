@@ -67,7 +67,8 @@ class AgentLLM:
               tools: list[dict] | None = None,
               response_format: dict | None = None,
               projection_fn: Callable | None = None,
-              thinking: bool | None = None) -> str:
+              thinking: bool | None = None,
+              max_attempts: int | None = None) -> str:
         if not self.api_key or not self.base_url:
             return ""
 
@@ -76,11 +77,12 @@ class AgentLLM:
 
         effective_messages = projection_fn(messages) if projection_fn else messages
 
-        for attempt in range(LLM_MAX_RETRIES):
+        attempts = max(1, min(max_attempts or LLM_MAX_RETRIES, LLM_MAX_RETRIES))
+        for attempt in range(attempts):
             result = self._call(effective_messages, temperature, silent, attempt, tools, response_format, thinking)
             if result:
                 return result
-            if attempt < LLM_MAX_RETRIES - 1:
+            if attempt < attempts - 1:
                 delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
                 time.sleep(delay)
         return ""

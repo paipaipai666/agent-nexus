@@ -37,10 +37,19 @@ class AgentEvent:
 class ChatService:
     """UI-neutral interaction facade for chat sessions."""
 
-    def __init__(self, agent: Any, memory_manager: Any = None, version_manager: Any = None):
+    def __init__(
+        self,
+        agent: Any,
+        memory_manager: Any = None,
+        version_manager: Any = None,
+        skill_service: Any = None,
+        tool_executor: Any = None,
+    ):
         self._agent = agent
         self._memory = memory_manager
         self._version = version_manager
+        self._skill_service = skill_service
+        self._tool_executor = tool_executor or getattr(agent, "tool_executor", None)
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
 
@@ -57,7 +66,8 @@ class ChatService:
         self._run_events[run.id] = events
         events.put(AgentEvent("message_started", {"text": text}, run_id=run.id, session_id=session_id))
         try:
-            result = self._agent.run(text, memory_manager=self._memory)
+            agent_text = self._prepare_message(text, events, run.id, session_id)
+            result = self._agent.run(agent_text, memory_manager=self._memory)
             answer = getattr(result, "answer", result)
             events.put(AgentEvent("message_delta", {"text": answer or ""}, run_id=run.id, session_id=session_id))
             events.put(AgentEvent("run_finished", {"answer": answer or ""}, run_id=run.id, session_id=session_id))
@@ -67,6 +77,51 @@ class ChatService:
         finally:
             events.put(None)
         return run
+
+    def _prepare_message(
+        self,
+        text: str,
+        events: queue.Queue[AgentEvent | None],
+        run_id: str,
+        session_id: str,
+    ) -> str:
+        service = self._skill_service
+        if service is None:
+            return text
+        session = self._sessions[session_id]
+        if session.skill:
+            service.use(session.skill)
+        result = service.prepare_message(
+            text,
+            tool_executor=self._tool_executor,
+            memory_manager=self._memory,
+        )
+        snapshot = service.snapshot()
+        if snapshot.auto_route_reason:
+            events.put(AgentEvent(
+                "skill_auto_selected",
+                {
+                    "skill": snapshot.current,
+                    "score": snapshot.auto_route_score,
+                    "source": snapshot.auto_route_source,
+                    "reason": snapshot.auto_route_reason,
+                },
+                run_id=run_id,
+                session_id=session_id,
+            ))
+        for event in result.events:
+            events.put(AgentEvent(
+                "workflow_step",
+                {
+                    "step_id": event.step_id,
+                    "step_type": event.step_type,
+                    "status": event.status,
+                    "summary": event.summary,
+                },
+                run_id=run_id,
+                session_id=session_id,
+            ))
+        return result.enhanced_question
 
     def stream_events(self, run_id: str) -> Iterator[AgentEvent]:
         events = self._run_events.get(run_id)
@@ -97,4 +152,3 @@ class ChatService:
             "memory": self._memory,
             "version": self._version,
         }
-

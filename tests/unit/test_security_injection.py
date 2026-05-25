@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentnexus.memory.manager import _contains_pii
+from agentnexus.memory.manager import _contains_pii, _mask_pii
 from agentnexus.tools.file_ops import _resolve_safe, file_list, file_read
 from agentnexus.tools.memory_save import memory_save
 from agentnexus.tools.shell import _check_blacklist, shell_exec
@@ -320,6 +320,73 @@ class TestPiiFilter:
     def test_no_pii_clean_chinese(self):
         """Clean Chinese text with numbers is not detected."""
         assert not _contains_pii("你好，世界 2024")
+
+
+class TestPiiMasking:
+    """_mask_pii partially masks PII instead of full block."""
+
+    def test_mask_email_keeps_prefix_and_domain(self):
+        result = _mask_pii("email: user@example.com")
+        assert "***" in result
+        assert "user@example.com" not in result
+        assert ".com" in result
+
+    def test_mask_email_preserves_surrounding_text(self):
+        result = _mask_pii("contact me at alice@example.com for info")
+        assert "contact me at" in result
+        assert "for info" in result
+
+    def test_mask_phone_keeps_prefix_and_suffix(self):
+        result = _mask_pii("call 13800138000 now")
+        assert "138" in result
+        assert "8000" in result
+        assert "****" in result
+        assert "13800138000" not in result
+
+    def test_mask_phone_short_number_unchanged(self):
+        result = _mask_pii("call 1234")
+        assert result == "call 1234"
+
+    def test_mask_api_key_masks_middle(self):
+        key = "sk-" + "a" * 40
+        result = _mask_pii(f"key={key}")
+        assert "sk-" in result
+        assert "aaa" not in result.lower()
+
+    def test_mask_api_key_short_prefix_unchanged(self):
+        result = _mask_pii("key=sk-abc")
+        assert result == "key=sk-abc"
+
+    def test_mask_credit_card_keeps_first4_last4(self):
+        result = _mask_pii("card 4111111111111111")
+        assert "4111" in result
+        assert "1111" in result
+        assert "****" in result
+
+    def test_mask_credit_card_short_number_unchanged(self):
+        result = _mask_pii("number 12345")
+        assert result == "number 12345"
+
+    def test_mask_multiple_pii_in_one_string(self):
+        result = _mask_pii("email user@test.com phone 13800138000")
+        assert "***" in result
+        assert "****" in result
+        assert "user@test.com" not in result
+        assert "13800138000" not in result
+
+    def test_mask_empty_string_returns_empty(self):
+        assert _mask_pii("") == ""
+
+    def test_mask_no_pii_returns_identical(self):
+        text = "hello world, how are you?"
+        assert _mask_pii(text) == text
+
+    def test_mask_pii_in_chinese_context(self):
+        result = _mask_pii("我的邮箱是 user@test.com，电话 13800138000")
+        assert "***" in result
+        assert "****" in result
+        assert "我的邮箱是" in result
+        assert "电话" in result
 
 
 class TestSqlInjection:

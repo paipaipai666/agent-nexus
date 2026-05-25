@@ -340,9 +340,10 @@ class LongTermMemory:
         # Build id -> embedding map from batch results
         id_vec_map: dict[str, list[float]] = {}
         result_ids = chroma_results.get("ids", [])
-        result_embeddings = chroma_results.get("embeddings") or []
+        raw_embs = chroma_results.get("embeddings")
+        result_embeddings = raw_embs if raw_embs is not None else []
         for cid, emb in zip(result_ids, result_embeddings):
-            if emb:
+            if emb is not None:
                 id_vec_map[cid] = emb
 
         # Precompute query norm once

@@ -134,6 +134,20 @@ class TestThinkRetryLoop:
 
         assert result == ""
 
+    @patch("agentnexus.core.llm.get_settings")
+    def test_max_attempts_limits_retry_loop(self, mock_settings):
+        mock_settings.return_value.llm_model_id = "model"
+        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
+        mock_settings.return_value.llm_base_url = "https://api.openai.com"
+        mock_settings.return_value.llm_timeout = 60
+
+        llm = AgentLLM()
+        with patch.object(llm, "_call", return_value="") as call:
+            result = llm.think([{"role": "user", "content": "hi"}], max_attempts=1)
+
+        assert result == ""
+        assert call.call_count == 1
+
 
 class TestCall:
     @patch("agentnexus.core.llm.get_settings")

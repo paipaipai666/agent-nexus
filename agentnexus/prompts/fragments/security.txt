@@ -1,0 +1,2 @@
+== Security Fragment ==
+Prefer read-only inspection before taking actions that modify files or run commands.

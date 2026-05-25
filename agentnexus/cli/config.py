@@ -25,6 +25,11 @@ def config(
         "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
         "tavily_api_key", "e2b_api_key", "max_agent_steps",
         "enable_contextual_retrieval",
+        "default_skill",
+        "skill_auto_route",
+        "skill_auto_route_llm_fallback",
+        "skill_auto_route_min_score",
+        "skill_auto_route_margin",
     ]
 
     if key is not None:

@@ -18,6 +18,12 @@ from textual.widgets import Input, Label, Static
 from agentnexus.core.config import get_settings
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.observability.tracer import trace_manager
+from agentnexus.skills import (
+    SkillEntry,
+    SkillRegistry,
+    format_tool_policy_summary,
+    validate_session_profile,
+)
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
@@ -60,12 +66,13 @@ class ChatScreen(Screen):
         ("escape", "focus_input", "输入"),
     ]
 
-    def __init__(self, agent, memory, version, mcp_manager=None):
+    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None):
         super().__init__()
         self._agent = agent
         self._memory = memory
         self._version = version
         self._mcp_manager = mcp_manager
+        self._skill_service = skill_service
         self._running = False
         self._spinner_timer = None
         self._spinner_frames = None
@@ -74,6 +81,9 @@ class ChatScreen(Screen):
         self._current_tool_started_at = 0.0
         self._turn_tool_names: list[str] = []
         self._turn_thought_count = 0
+        self._skill_registry: SkillRegistry | None = None
+        self._current_skill: SkillEntry | None = None
+        self._skill_status = "idle"
         # Hook compact events for TUI visibility
         if self._memory:
             self._memory._on_compact = self._on_compact_event
@@ -102,9 +112,10 @@ class ChatScreen(Screen):
 
     def on_mount(self):
         self._chat_area.add_system("[#6ba5f2]AgentNexus ready[/] [dim]Ask a question or type /help.[/]")
+        self._init_skill_registry()
         self._refresh_version_display()
         if hasattr(self, "_side_panel"):
-            self._side_panel.update_skill()
+            self._refresh_skill_panel()
             self._refresh_model_panel()
             self._refresh_tools_panel()
             self._refresh_mcp_panel()
@@ -142,7 +153,8 @@ class ChatScreen(Screen):
         self._chat_area.add_system(
             "[dim]命令:[/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
             "       /checkout <ref>  /diff [ref1] [ref2]  /status  /mcp\n"
-            "       /clear [--all]  /compact [指令]  /stats"
+            "       /skill [status|list|use <id> [--default]|default <id>|validate [id]|reset]  "
+            "/clear [--all]  /compact [指令]  /stats"
         )
 
     def action_focus_input(self):
@@ -302,8 +314,361 @@ class ChatScreen(Screen):
             self._chat_area.add_system(self._hud._build_text())
         elif cmd == "/mcp":
             self._handle_mcp_command(arg)
+        elif cmd == "/skill":
+            self._handle_skill_command(arg)
         else:
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
+
+    def _init_skill_registry(self):
+        if self._skill_service is not None:
+            try:
+                self._skill_registry = self._skill_service.registry
+                snapshot = self._skill_service.snapshot()
+                self._skill_status = snapshot.status
+                self._current_skill = getattr(self._skill_service, "current", None)
+                return
+            except Exception:
+                pass
+        try:
+            self._skill_registry = SkillRegistry.from_settings(get_settings())
+            self._skill_registry.discover()
+            self._skill_status = "error" if self._skill_registry.errors else "idle"
+            if self._skill_registry.errors:
+                self._chat_area.add_system(self._format_skill_errors(self._skill_registry))
+        except Exception as exc:
+            self._skill_registry = None
+            self._skill_status = "error"
+            try:
+                self._chat_area.add_system(f"[dim]Skill registry 初始化失败: {exc}[/]")
+            except Exception:
+                pass
+
+    def _handle_skill_command(self, arg: str):
+        if self._skill_registry is None:
+            self._init_skill_registry()
+        registry = self._skill_registry
+        if registry is None:
+            self._chat_area.add_system("[dim]Skill registry 不可用。[/]")
+            self._refresh_skill_panel()
+            return
+
+        parts = arg.strip().split(maxsplit=1)
+        subcmd = parts[0] if parts else "status"
+        rest = parts[1] if len(parts) > 1 else ""
+
+        try:
+            if subcmd == "status":
+                self._sync_skill_service_state()
+                applied = getattr(self._agent, "session_profile", None) is not None
+                default_skill = getattr(get_settings(), "default_skill", "")
+                skill_snapshot = self._skill_service.snapshot() if self._skill_service is not None else None
+                self._chat_area.add_system(
+                    self._format_skill_status(
+                        registry,
+                        self._current_skill,
+                        self._skill_status,
+                        applied=applied,
+                        default_skill=default_skill,
+                        runtime=skill_snapshot,
+                    )
+                )
+            elif subcmd == "list":
+                if self._skill_service is not None:
+                    self._skill_service.refresh()
+                else:
+                    registry.discover()
+                self._chat_area.add_system(self._format_skill_list(registry))
+                self._skill_status = "error" if registry.errors else (
+                    "selected" if self._current_skill is not None else "idle"
+                )
+                self._refresh_skill_panel()
+            elif subcmd == "validate":
+                if self._skill_service is not None:
+                    self._skill_service.refresh()
+                    errors = self._skill_service.validate(rest.strip() or None)
+                    self._skill_status = self._skill_service.snapshot().status
+                else:
+                    registry.discover()
+                    errors = registry.validate(rest.strip() or None)
+                    self._skill_status = "error" if errors else (
+                        "selected" if self._current_skill is not None else "idle"
+                    )
+                self._chat_area.add_system(self._format_skill_validation(registry, errors, rest.strip() or None))
+                self._refresh_skill_panel()
+            elif subcmd == "use":
+                target, persist_default = self._parse_skill_use_args(rest)
+                if not target:
+                    self._chat_area.add_system(
+                        "[dim]用法: /skill use <skill_id | namespace/skill_id> [--default][/]"
+                    )
+                    return
+                try:
+                    entry = registry.get(target)
+                except ValueError as exc:
+                    self._skill_status = "error"
+                    self._refresh_skill_panel()
+                    self._chat_area.add_system(f"[dim]{exc}[/]")
+                    return
+                if entry is None:
+                    self._chat_area.add_system(f"[dim]未找到 skill: {target}[/]")
+                    return
+                profile = entry.workflow.to_session_profile()
+                if self._skill_service is not None:
+                    entry = self._skill_service.use(target)
+                    self._skill_status = self._skill_service.snapshot().status
+                else:
+                    validate_session_profile(profile)
+                    if hasattr(self._agent, "set_session_profile"):
+                        self._agent.set_session_profile(profile)
+                    self._skill_status = "selected"
+                self._current_skill = entry
+                if persist_default:
+                    self._persist_default_skill(entry.qualified_id)
+                self._refresh_skill_panel()
+                self._chat_area.add_system(
+                    f"[green]已选择 skill[/] {entry.qualified_id} [dim]({entry.display_name}; "
+                    f"{format_tool_policy_summary(profile.tool_policy)})[/]"
+                    + (" [dim]已设为默认[/]" if persist_default else "")
+                )
+            elif subcmd == "default":
+                target = rest.strip()
+                if target in {"", "reset", "none", "default"}:
+                    self._clear_default_skill()
+                    if self._skill_service is not None:
+                        self._skill_service.reset()
+                    elif hasattr(self._agent, "set_session_profile"):
+                        self._agent.set_session_profile(None)
+                    self._current_skill = None
+                    self._skill_status = "idle"
+                    self._refresh_skill_panel()
+                    self._chat_area.add_system("[dim]默认 skill 已清除，当前会话已恢复默认。[/]")
+                    return
+                try:
+                    entry = registry.get(target)
+                except ValueError as exc:
+                    self._skill_status = "error"
+                    self._refresh_skill_panel()
+                    self._chat_area.add_system(f"[dim]{exc}[/]")
+                    return
+                if entry is None:
+                    self._chat_area.add_system(f"[dim]未找到 skill: {target}[/]")
+                    return
+                profile = entry.workflow.to_session_profile()
+                if self._skill_service is not None:
+                    entry = self._skill_service.use(target)
+                    self._skill_status = self._skill_service.snapshot().status
+                else:
+                    validate_session_profile(profile)
+                    if hasattr(self._agent, "set_session_profile"):
+                        self._agent.set_session_profile(profile)
+                    self._skill_status = "selected"
+                self._current_skill = entry
+                self._persist_default_skill(entry.qualified_id)
+                self._refresh_skill_panel()
+                self._chat_area.add_system(f"[green]默认 skill 已设置[/] {entry.qualified_id}")
+            elif subcmd == "reset":
+                if self._skill_service is not None:
+                    self._skill_service.reset()
+                elif hasattr(self._agent, "set_session_profile"):
+                    self._agent.set_session_profile(None)
+                self._current_skill = None
+                self._skill_status = "idle"
+                self._refresh_skill_panel()
+                self._chat_area.add_system("[dim]已恢复默认 skill/workflow。[/]")
+            else:
+                self._chat_area.add_system(
+                    "[dim]用法: /skill [status|list|use <id> [--default]|default <id>|validate [id]|reset][/]"
+                )
+        except Exception as exc:
+            self._skill_status = "error"
+            self._refresh_skill_panel()
+            self._chat_area.add_system(f"[dim]Skill 命令失败: {exc}[/]")
+
+    @staticmethod
+    def _parse_skill_use_args(rest: str) -> tuple[str, bool]:
+        parts = rest.strip().split()
+        persist_default = "--default" in parts
+        target_parts = [part for part in parts if part != "--default"]
+        return (" ".join(target_parts).strip(), persist_default)
+
+    @staticmethod
+    def _persist_default_skill(qualified_id: str) -> None:
+        from agentnexus.core.config import _load_yaml, _write_yaml_config
+
+        data = _load_yaml()
+        data["default_skill"] = qualified_id
+        _write_yaml_config(data)
+
+    @staticmethod
+    def _clear_default_skill() -> None:
+        from agentnexus.core.config import _load_yaml, _write_yaml_config
+
+        data = _load_yaml()
+        data.pop("default_skill", None)
+        _write_yaml_config(data)
+
+    @staticmethod
+    def _format_skill_status(
+        registry: SkillRegistry,
+        current: SkillEntry | None = None,
+        status: str = "idle",
+        applied: bool = False,
+        default_skill: str = "",
+        runtime=None,
+    ) -> str:
+        current_id = current.qualified_id if current else "default/default"
+        default_id = default_skill or "default/default"
+        roots = ", ".join(str(root) for root in registry.roots) or "-"
+        policy = format_tool_policy_summary(current.workflow.tool_policy if current else None)
+        lines = [
+            "[bold]Skill 状态[/]",
+            f"[dim]current:[/] {current_id}",
+            f"[dim]default:[/] {default_id}",
+            f"[dim]status:[/] {status}",
+            f"[dim]applied:[/] {applied}",
+            f"[dim]tools:[/] {policy}",
+            f"[dim]auto_route:[/] {getattr(runtime, 'auto_route_enabled', True) if runtime is not None else True}",
+            f"[dim]available:[/] {len(registry.list())}",
+            f"[dim]roots:[/] {roots}",
+        ]
+        if runtime is not None and getattr(runtime, "auto_route_reason", ""):
+            source = getattr(runtime, "auto_route_source", "") or "auto"
+            lines.append(f"[dim]auto_selected:[/] {source}: {runtime.auto_route_reason}")
+        if runtime is not None and getattr(runtime, "last_run_status", ""):
+            lines.extend([
+                f"[dim]last_run:[/] {runtime.last_run_status} {runtime.last_run_id}",
+                f"[dim]steps:[/] {runtime.ok_steps}/{runtime.step_count} ok  {runtime.error_steps} error",
+            ])
+        has_resources = (
+            runtime is not None
+            and (
+                getattr(runtime, "scripts", 0)
+                or getattr(runtime, "references", 0)
+                or getattr(runtime, "assets", 0)
+            )
+        )
+        if has_resources:
+            lines.append(
+                f"[dim]resources:[/] scripts={runtime.scripts} references={runtime.references} assets={runtime.assets}"
+            )
+        if registry.errors:
+            lines.append(f"[#e06c75]errors:[/] {len(registry.errors)}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_skill_list(registry: SkillRegistry) -> str:
+        entries = registry.list()
+        if not entries:
+            if registry.errors:
+                return "[dim]未发现可用 skills。[/]\n" + "\n".join(
+                    f"[#e06c75]- {err}[/]" for err in registry.errors[:5]
+                )
+            return "[dim]未发现可用 skills。[/]"
+        lines = ["[bold]Skills[/]"]
+        for entry in entries:
+            desc = f" [dim]- {entry.description[:60]}[/]" if entry.description else ""
+            source = "workflow" if entry.source_kind == "workflow" else "skill"
+            resources = ChatScreen._format_skill_resource_counts(entry)
+            resource_text = f" [dim]{resources}[/]" if resources else ""
+            lines.append(
+                f"- [#6ba5f2]{entry.qualified_id}[/] {entry.display_name} "
+                f"[dim]({source})[/]{resource_text}{desc}"
+            )
+        if registry.errors:
+            lines.append(f"[#e06c75]{len(registry.errors)} 个 skill 加载失败，见 /skill status[/]")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_skill_resource_counts(entry: SkillEntry) -> str:
+        counts = {"script": 0, "reference": 0, "asset": 0}
+        for resource in getattr(entry.workflow, "resources", []) or []:
+            counts[resource.type] = counts.get(resource.type, 0) + 1
+        parts = []
+        if counts["script"]:
+            parts.append(f"scripts={counts['script']}")
+        if counts["reference"]:
+            parts.append(f"refs={counts['reference']}")
+        if counts["asset"]:
+            parts.append(f"assets={counts['asset']}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _format_skill_validation(registry: SkillRegistry, errors: list[str], target: str | None = None) -> str:
+        scope = target or "all"
+        if not errors:
+            return f"[green]Skill validation passed[/] [dim]{scope}; {len(registry.list())} skills[/]"
+        lines = [f"[#e06c75]Skill validation failed[/] [dim]{scope}; {len(errors)} errors[/]"]
+        lines.extend(f"- {error}" for error in errors[:8])
+        if len(errors) > 8:
+            lines.append(f"[dim]... {len(errors) - 8} more[/]")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_skill_errors(registry: SkillRegistry) -> str:
+        lines = [f"[#e06c75]Skill registry 发现 {len(registry.errors)} 个加载错误[/]"]
+        lines.extend(f"[dim]- {err}[/]" for err in registry.errors[:3])
+        if len(registry.errors) > 3:
+            lines.append("[dim]更多错误可通过 /skill list 查看。[/]")
+        return "\n".join(lines)
+
+    def _refresh_skill_panel(self):
+        try:
+            self._sync_skill_service_state()
+            runtime = self._skill_runtime_summary()
+            if self._current_skill is None:
+                if runtime:
+                    self._side_panel.update_skill("default", "default", self._skill_status, runtime=runtime)
+                else:
+                    self._side_panel.update_skill("default", "default", self._skill_status)
+            else:
+                if runtime:
+                    self._side_panel.update_skill(
+                        self._current_skill.namespace,
+                        self._current_skill.workflow_id,
+                        self._skill_status,
+                        runtime=runtime,
+                    )
+                else:
+                    self._side_panel.update_skill(
+                        self._current_skill.namespace,
+                        self._current_skill.workflow_id,
+                        self._skill_status,
+                    )
+        except Exception:
+            pass
+
+    def _sync_skill_service_state(self):
+        if self._skill_service is None:
+            return
+        try:
+            snapshot = self._skill_service.snapshot()
+            self._skill_status = snapshot.status
+            self._current_skill = getattr(self._skill_service, "current", None)
+        except Exception:
+            pass
+
+    def _skill_runtime_summary(self) -> dict:
+        if self._skill_service is None:
+            return {}
+        try:
+            snapshot = self._skill_service.snapshot()
+        except Exception:
+            return {}
+        status = getattr(snapshot, "last_run_status", "")
+        if not isinstance(status, str) or not status:
+            return {}
+        return {
+            "status": status,
+            "steps": getattr(snapshot, "step_count", 0),
+            "ok": getattr(snapshot, "ok_steps", 0),
+            "errors": getattr(snapshot, "error_steps", 0),
+            "skipped": getattr(snapshot, "skipped_steps", 0),
+            "scripts": getattr(snapshot, "scripts", 0),
+            "references": getattr(snapshot, "references", 0),
+            "assets": getattr(snapshot, "assets", 0),
+            "auto_reason": getattr(snapshot, "auto_route_reason", ""),
+            "auto_source": getattr(snapshot, "auto_route_source", ""),
+        }
 
     def _handle_mcp_command(self, arg: str):
         if self._mcp_manager is None:
@@ -391,6 +756,58 @@ class ChatScreen(Screen):
         finally:
             self._turn_tool_names = []
             self._turn_thought_count = 0
+
+    def _apply_workflow_event(self, event):
+        try:
+            marker = "error" if getattr(event, "status", "") == "error" else "run"
+            text = f"{event.step_type}:{event.step_id} {event.status}"
+            summary = getattr(event, "summary", "")
+            if summary:
+                text = f"{text} - {summary}"
+            self._side_panel.add_timeline_event(marker, _plain_summary(text, 80))
+        except Exception:
+            pass
+
+    def _prepare_agent_question(self, text: str) -> str:
+        if self._current_skill is None and self._skill_service is None:
+            return text
+        if self._skill_service is not None:
+            workflow_result = self._skill_service.prepare_message(
+                text,
+                tool_executor=getattr(self._agent, "tool_executor", None),
+                memory_manager=self._memory,
+            )
+        else:
+            from agentnexus.skills import WorkflowRuntime
+
+            profile = self._current_skill.workflow.to_session_profile()
+            workflow_result = WorkflowRuntime().prepare(
+                text,
+                profile,
+                tool_executor=getattr(self._agent, "tool_executor", None),
+                memory_manager=self._memory,
+            )
+        for workflow_event in workflow_result.events:
+            try:
+                self.app.call_from_thread(self._apply_workflow_event, workflow_event)
+            except Exception:
+                self._apply_workflow_event(workflow_event)
+        if self._skill_service is not None:
+            try:
+                snapshot = self._skill_service.snapshot()
+                if snapshot.auto_route_reason:
+                    source = snapshot.auto_route_source or "auto"
+                    self._side_panel.add_timeline_event(
+                        "run",
+                        _plain_summary(
+                            f"Auto skill ({source}): {snapshot.current} - {snapshot.auto_route_reason}",
+                            96,
+                        ),
+                    )
+            except Exception:
+                pass
+        self._refresh_skill_panel()
+        return workflow_result.enhanced_question
 
     # ── spinner animation ────────────────────────────────────
 
@@ -694,7 +1111,8 @@ class ChatScreen(Screen):
             trace_manager.configure(get_settings().traces_dir)
             trace_manager.start_trace(text)
             try:
-                result = self._agent.run(text, memory_manager=self._memory)
+                agent_question = self._prepare_agent_question(text)
+                result = self._agent.run(agent_question, memory_manager=self._memory)
                 return result.answer
             finally:
                 trace_manager.end_trace()

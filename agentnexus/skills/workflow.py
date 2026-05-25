@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 StepType = Literal["prompt", "tool_call", "retrieve", "checkpoint", "finalize"]
+SkillResourceType = Literal["script", "reference", "asset"]
 
 
 class PromptProfile(BaseModel):
@@ -60,6 +61,14 @@ class WorkflowStep(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class SkillResource(BaseModel):
+    type: SkillResourceType
+    path: str
+    absolute_path: str = ""
+    name: str
+    size_bytes: int = 0
+
+
 class Workflow(BaseModel):
     id: str
     version: str
@@ -73,25 +82,34 @@ class Workflow(BaseModel):
     memory_policy: MemoryPolicy = Field(default_factory=MemoryPolicy)
     retrieval_policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
     fallbacks: list[str] = Field(default_factory=list)
+    resources: list[SkillResource] = Field(default_factory=list)
 
     def to_session_profile(self) -> "SessionProfile":
         return SessionProfile(
             workflow_id=self.id,
+            display_name=self.display_name,
+            description=self.description or "",
             prompt_profile=self.prompt_profile,
             tool_policy=self.tool_policy,
             memory_policy=self.memory_policy,
             retrieval_policy=self.retrieval_policy,
             steps=self.steps,
+            success_criteria=self.success_criteria,
+            resources=self.resources,
         )
 
 
 class SessionProfile(BaseModel):
     workflow_id: str
+    display_name: str = ""
+    description: str = ""
     prompt_profile: PromptProfile
     tool_policy: ToolPolicy
     memory_policy: MemoryPolicy
     retrieval_policy: RetrievalPolicy
     steps: list[WorkflowStep]
+    success_criteria: list[str] = Field(default_factory=list)
+    resources: list[SkillResource] = Field(default_factory=list)
 
 
 class WorkflowLoader:
