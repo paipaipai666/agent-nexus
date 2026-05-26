@@ -1,20 +1,16 @@
-import json
-import os
-import re
-import threading
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from hashlib import blake2b
 from typing import Any
 
 from agentnexus.core.config import get_settings
+from agentnexus.rag import embeddings as embedding_service
+from agentnexus.storage import chroma as storage_chroma
 
 from .models import ChunkRecord
 
 COLLECTION_NAME = "documents"
-VECTOR_DIM = 512
-DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
+VECTOR_DIM = embedding_service.VECTOR_DIM
+DEFAULT_COLLECTION_METADATA = storage_chroma.DEFAULT_COLLECTION_METADATA
 
 _client = None
 _client_path: str | None = None
@@ -22,9 +18,9 @@ _collections: dict[str, Any] = {}
 _model = None
 _model_name: str | None = None
 _model_device: str | None = None
-_EMBED_BATCH_SIZE = 1024
-_EMBED_TORCH_THREADS_CAP = 12
-_chroma_lock = threading.RLock()
+_EMBED_BATCH_SIZE = embedding_service._EMBED_BATCH_SIZE
+_EMBED_TORCH_THREADS_CAP = embedding_service._EMBED_TORCH_THREADS_CAP
+_chroma_lock = storage_chroma._chroma_lock
 
 
 @contextmanager
@@ -35,7 +31,7 @@ def chroma_operation_lock() -> Iterator[None]:
     access from multiple threads. Keep this lock at the boundary where code
     enters ChromaDB so RAG and LTM share the same synchronization primitive.
     """
-    with _chroma_lock:
+    with storage_chroma.chroma_operation_lock():
         yield
 
 
@@ -55,131 +51,53 @@ class _ThreadSafeChromaCollection:
         return _locked_call
 
 
-class _FallbackEmbeddingModel:
-    def __init__(self, dim: int = VECTOR_DIM):
-        self.dim = dim
-
-    def _encode_one(self, text: str, normalize_embeddings: bool = True) -> list[float]:
-        vector = [0.0] * self.dim
-        for token in _fallback_tokenize(text):
-            index = int.from_bytes(blake2b(token.encode("utf-8"), digest_size=8).digest(), "big") % self.dim
-            vector[index] += 1.0
-        if normalize_embeddings:
-            norm = sum(value * value for value in vector) ** 0.5
-            if norm > 0:
-                return [value / norm for value in vector]
-        return vector
-
-    def encode(
-        self,
-        texts,
-        normalize_embeddings: bool = True,
-        batch_size: int | None = None,
-        show_progress_bar: bool = False,
-    ):
-        del batch_size, show_progress_bar
-        if isinstance(texts, str):
-            return self._encode_one(texts, normalize_embeddings=normalize_embeddings)
-        return [
-            self._encode_one(text, normalize_embeddings=normalize_embeddings)
-            for text in texts
-        ]
+_FallbackEmbeddingModel = embedding_service._FallbackEmbeddingModel
 
 
 def _fallback_tokenize(text: str) -> list[str]:
-    normalized = (text or "").strip().lower()
-    if not normalized:
-        return []
-    raw_tokens = re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
-    if not raw_tokens:
-        return [normalized]
-
-    tokens: list[str] = []
-    for token in raw_tokens:
-        if re.fullmatch(r"[\u4e00-\u9fff]+", token):
-            chars = [char for char in token if char.strip()]
-            tokens.extend(chars)
-            if len(chars) >= 2:
-                tokens.extend("".join(chars[index:index + 2]) for index in range(len(chars) - 1))
-            if len(chars) >= 3:
-                tokens.extend("".join(chars[index:index + 3]) for index in range(len(chars) - 2))
-            continue
-        tokens.append(token)
-    return tokens or [normalized]
+    return embedding_service._fallback_tokenize(text)
 
 
 def resolve_collection_name(name: str | None = None, namespace: str | None = None) -> str:
-    if name:
-        return name
-    if namespace:
-        settings = get_settings()
-        normalized = re.sub(r"[^0-9A-Za-z_.-]+", "_", namespace.strip()).strip("_.-")
-        normalized = normalized or settings.rag_default_namespace
-        return f"{settings.rag_collection_prefix}{normalized}"
-    return COLLECTION_NAME
+    return storage_chroma.resolve_collection_name(name=name, namespace=namespace)
 
 
 def get_chroma_client():
     global _client, _client_path, _collections
-    settings = get_settings()
-    with chroma_operation_lock():
-        if _client is None or _client_path != settings.chroma_persist_dir:
-            import chromadb
-
-            _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-            _client_path = settings.chroma_persist_dir
-            _collections = {}
-        return _client
+    client = storage_chroma.get_chroma_client()
+    _client = storage_chroma._client
+    _client_path = storage_chroma._client_path
+    _collections = storage_chroma._collections
+    return client
 
 
 def _resolve_embedding_device() -> str:
-    try:
-        import torch
-    except ImportError:
-        return "cpu"
-
-    if torch.cuda.is_available():
-        return "cuda"
-
-    mps = getattr(getattr(torch, "backends", None), "mps", None)
-    if mps is not None and mps.is_available():
-        return "mps"
-
-    return "cpu"
+    return embedding_service.resolve_embedding_device()
 
 
 def _configure_embedding_runtime(device: str) -> None:
-    if device != "cpu":
-        return
-    try:
-        import torch
-    except ImportError:
-        return
-
-    target_threads = min(max(os.cpu_count() or 1, 1), _EMBED_TORCH_THREADS_CAP)
-    if torch.get_num_threads() != target_threads:
-        torch.set_num_threads(target_threads)
+    embedding_service.configure_embedding_runtime(device)
 
 
 def get_embedding_model():
     global _model, _model_name, _model_device
-    settings = get_settings()
-    resolved_device = _resolve_embedding_device()
-    _configure_embedding_runtime(resolved_device)
-    if _model is None or _model_name != settings.embedding_model or _model_device != resolved_device:
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
-        except Exception:
-            _model = _FallbackEmbeddingModel()
-        _model_name = settings.embedding_model
-        _model_device = resolved_device
+    embedding_service._model = _model
+    embedding_service._model_name = _model_name
+    embedding_service._model_device = _model_device
+    embedding_service._FallbackEmbeddingModel = _FallbackEmbeddingModel
+    embedding_service.get_embedding_model(
+        settings_provider=get_settings,
+        device_resolver=_resolve_embedding_device,
+        runtime_configurer=_configure_embedding_runtime,
+    )
+    _model = embedding_service._model
+    _model_name = embedding_service._model_name
+    _model_device = embedding_service._model_device
     return _model
 
 
 def _embedding_to_list(value):
-    return value.tolist() if hasattr(value, "tolist") else value
+    return embedding_service.embedding_to_list(value)
 
 
 def get_collection(
@@ -187,16 +105,12 @@ def get_collection(
     namespace: str | None = None,
     metadata: dict | None = None,
 ):
-    collection_name = resolve_collection_name(name=name, namespace=namespace)
-    with chroma_operation_lock():
-        if collection_name not in _collections:
-            client = get_chroma_client()
-            collection = client.get_or_create_collection(
-                name=collection_name,
-                metadata=metadata or DEFAULT_COLLECTION_METADATA,
-            )
-            _collections[collection_name] = _ThreadSafeChromaCollection(collection)
-        return _collections[collection_name]
+    collection = storage_chroma.get_collection(name=name, namespace=namespace, metadata=metadata)
+    global _client, _client_path, _collections
+    _client = storage_chroma._client
+    _client_path = storage_chroma._client_path
+    _collections = storage_chroma._collections
+    return collection
 
 
 def _validate_payload_lengths(
@@ -204,16 +118,11 @@ def _validate_payload_lengths(
     metadatas: list[dict] | None = None,
     ids: list[str] | None = None,
 ):
-    if metadatas is not None and len(metadatas) != len(texts):
-        raise ValueError("metadatas length must match texts length")
-    if ids is not None and len(ids) != len(texts):
-        raise ValueError("ids length must match texts length")
+    storage_chroma._validate_payload_lengths(texts, metadatas=metadatas, ids=ids)
 
 
 def _build_ids(texts: list[str], ids: list[str] | None = None) -> list[str]:
-    if ids is not None:
-        return ids
-    return [uuid.uuid4().hex for _ in range(len(texts))]
+    return storage_chroma._build_ids(texts, ids=ids)
 
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
@@ -230,43 +139,16 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 def _normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (str, int, float)):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return storage_chroma.normalize_chroma_metadata_value(value)
 
 
 def normalize_metadata_for_chroma(metadata: dict[str, Any] | None) -> dict[str, str | int | float | bool]:
-    if not metadata:
-        return {}
-
-    normalized: dict[str, str | int | float | bool] = {}
-    for key, value in metadata.items():
-        if key == "heading_path":
-            path_parts = [part for part in value if isinstance(part, str) and part] if isinstance(value, list) else []
-            if path_parts:
-                normalized["heading_path_text"] = " / ".join(path_parts)
-                normalized["heading_depth"] = len(path_parts)
-            continue
-        if value is None:
-            continue
-        normalized[key] = _normalize_chroma_metadata_value(value)
-    return normalized
+    return storage_chroma.normalize_metadata_for_chroma(metadata)
 
 
 
 def chunk_metadata_to_chroma(chunk: ChunkRecord) -> dict[str, str | int | float | bool]:
-    metadata = normalize_metadata_for_chroma(chunk.metadata)
-    metadata.setdefault("chunk_id", chunk.chunk_id)
-    metadata.setdefault("document_id", chunk.document_id)
-    metadata.setdefault("document_version", chunk.document_version)
-    metadata.setdefault("chunk_index", chunk.chunk_index)
-    if chunk.section_index is not None:
-        metadata["section_index"] = chunk.section_index
-    if chunk.page_number is not None:
-        metadata["page_number"] = chunk.page_number
-    return metadata
+    return storage_chroma.chunk_metadata_to_chroma(chunk)
 
 
 def insert_documents(
@@ -277,23 +159,16 @@ def insert_documents(
     namespace: str | None = None,
     metadata: dict | None = None,
 ) -> list[str]:
-    if not texts:
-        return []
-    _validate_payload_lengths(texts, metadatas=metadatas, ids=ids)
-    resolved_ids = _build_ids(texts, ids=ids)
-    resolved_metadatas = (
-        [normalize_metadata_for_chroma(item) for item in metadatas]
-        if metadatas is not None
-        else None
+    return storage_chroma.insert_documents(
+        texts,
+        metadatas=metadatas,
+        ids=ids,
+        name=name,
+        namespace=namespace,
+        metadata=metadata,
+        collection_provider=get_collection,
+        embed_texts_provider=_embed_texts,
     )
-    col = get_collection(name=name, namespace=namespace, metadata=metadata)
-    col.add(
-        ids=resolved_ids,
-        embeddings=_embed_texts(texts),
-        documents=texts,
-        metadatas=resolved_metadatas,
-    )
-    return resolved_ids
 
 
 def upsert_documents(
@@ -304,23 +179,16 @@ def upsert_documents(
     namespace: str | None = None,
     metadata: dict | None = None,
 ) -> list[str]:
-    if not texts:
-        return []
-    _validate_payload_lengths(texts, metadatas=metadatas, ids=ids)
-    resolved_ids = _build_ids(texts, ids=ids)
-    resolved_metadatas = (
-        [normalize_metadata_for_chroma(item) for item in metadatas]
-        if metadatas is not None
-        else None
+    return storage_chroma.upsert_documents(
+        texts,
+        metadatas=metadatas,
+        ids=ids,
+        name=name,
+        namespace=namespace,
+        metadata=metadata,
+        collection_provider=get_collection,
+        embed_texts_provider=_embed_texts,
     )
-    col = get_collection(name=name, namespace=namespace, metadata=metadata)
-    col.upsert(
-        ids=resolved_ids,
-        embeddings=_embed_texts(texts),
-        documents=texts,
-        metadatas=resolved_metadatas,
-    )
-    return resolved_ids
 
 
 def search(
@@ -330,44 +198,19 @@ def search(
     namespace: str | None = None,
     where: dict[str, Any] | None = None,
 ) -> list[dict]:
-    col = get_collection(name=name, namespace=namespace)
-    model = get_embedding_model()
-    query_vec = _embedding_to_list(model.encode(query, normalize_embeddings=True))
-    results = col.query(
-        query_embeddings=[query_vec],
-        n_results=limit,
-        include=["documents", "distances", "metadatas"],
+    return storage_chroma.search(
+        query,
+        limit=limit,
+        name=name,
+        namespace=namespace,
         where=where,
+        collection_provider=get_collection,
+        embedding_model_provider=get_embedding_model,
     )
-    if not results["ids"] or not results["ids"][0]:
-        return []
-
-    metadatas = results.get("metadatas") or []
-    metadata_rows = metadatas[0] if metadatas else []
-    payload = []
-    for index, rid in enumerate(results["ids"][0]):
-        payload.append(
-            {
-                "id": rid,
-                "score": 1.0 - results["distances"][0][index],
-                "text": results["documents"][0][index],
-                "metadata": metadata_rows[index] if index < len(metadata_rows) and metadata_rows[index] else {},
-            }
-        )
-    return payload
 
 
 def delete_collection(name: str | None = None, namespace: str | None = None):
-    collection_name = resolve_collection_name(name=name, namespace=namespace)
-    client = get_chroma_client()
-    with chroma_operation_lock():
-        try:
-            client.delete_collection(collection_name)
-        except Exception as e:
-            from rich.console import Console
-
-            Console().print(f"[yellow]ChromaDB 删除集合异常: {e}[/yellow]")
-        _collections.pop(collection_name, None)
+    storage_chroma.delete_collection(name=name, namespace=namespace)
 
 
 def delete_documents(
@@ -376,19 +219,23 @@ def delete_documents(
     name: str | None = None,
     namespace: str | None = None,
 ):
-    if not ids and not where:
-        return
-    col = get_collection(name=name, namespace=namespace)
-    col.delete(ids=ids, where=where)
+    storage_chroma.delete_documents(
+        ids=ids,
+        where=where,
+        name=name,
+        namespace=namespace,
+        collection_provider=get_collection,
+    )
 
 
 def _reset_chroma_client(reset_model: bool = False):
     global _client, _client_path, _collections, _model, _model_name, _model_device
-    with chroma_operation_lock():
-        _client = None
-        _client_path = None
-        _collections = {}
-        if reset_model:
-            _model = None
-            _model_name = None
-            _model_device = None
+    storage_chroma.reset_storage_client()
+    _client = None
+    _client_path = None
+    _collections = {}
+    if reset_model:
+        _model = None
+        _model_name = None
+        _model_device = None
+        embedding_service.reset_embedding_model()

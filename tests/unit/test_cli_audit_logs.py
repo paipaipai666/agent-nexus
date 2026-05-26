@@ -8,8 +8,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
-from agentnexus.cli.audit import append_audit, get_audit_log
 from agentnexus.cli.logs import _read_trace_spans
+from agentnexus.observability import audit_log as audit_mod
+from agentnexus.observability.audit_log import append_audit, get_audit_log
 from agentnexus.tools.registry import AuditEntry
 
 runner = CliRunner()
@@ -17,7 +18,6 @@ runner = CliRunner()
 
 class TestAudit:
     def setup_method(self):
-        import agentnexus.cli.audit as audit_mod
         audit_mod._global_audit_log.clear()
 
     def test_audit_empty(self):

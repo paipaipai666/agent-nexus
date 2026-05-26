@@ -139,6 +139,26 @@ def _decode_sections(payload: str | None) -> list[DocumentSection]:
     ]
 
 
+def _chunk_record_from_row(row) -> ChunkRecord:
+    indexed_text = row["indexed_text"] or row["text"]
+    return ChunkRecord(
+        chunk_id=row["chunk_id"],
+        kb_id=row["kb_id"],
+        document_id=row["document_id"],
+        document_version=row["document_version"],
+        chunk_index=row["chunk_index"],
+        text=row["text"],
+        metadata=_decode_metadata(row["metadata_json"]),
+        raw_text=row["raw_text"] or row["text"],
+        indexed_text=indexed_text,
+        sparse_text=row["sparse_text"] or indexed_text,
+        section_index=row["section_index"],
+        page_number=row["page_number"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 class KnowledgeBaseCatalog:
     def __init__(self, db_path: str | None = None):
         settings = get_settings()
@@ -433,50 +453,14 @@ class KnowledgeBaseCatalog:
             "SELECT * FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC",
             (document_id,),
         ).fetchall()
-        return [
-            ChunkRecord(
-                chunk_id=row["chunk_id"],
-                kb_id=row["kb_id"],
-                document_id=row["document_id"],
-                document_version=row["document_version"],
-                chunk_index=row["chunk_index"],
-                text=row["text"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["text"],
-                indexed_text=row["indexed_text"] or row["text"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
-                section_index=row["section_index"],
-                page_number=row["page_number"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        return [_chunk_record_from_row(row) for row in rows]
 
     def list_chunks_by_kb(self, kb_id: str) -> list[ChunkRecord]:
         rows = self._conn.execute(
             "SELECT * FROM document_chunks WHERE kb_id = ? ORDER BY document_id ASC, chunk_index ASC",
             (kb_id,),
         ).fetchall()
-        return [
-            ChunkRecord(
-                chunk_id=row["chunk_id"],
-                kb_id=row["kb_id"],
-                document_id=row["document_id"],
-                document_version=row["document_version"],
-                chunk_index=row["chunk_index"],
-                text=row["text"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["text"],
-                indexed_text=row["indexed_text"] or row["text"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
-                section_index=row["section_index"],
-                page_number=row["page_number"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        return [_chunk_record_from_row(row) for row in rows]
 
     def list_neighbor_chunks(
         self,

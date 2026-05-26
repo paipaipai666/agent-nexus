@@ -2,18 +2,17 @@ import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import jieba
-from rank_bm25 import BM25Okapi
-
 if TYPE_CHECKING:
     from sentence_transformers import CrossEncoder
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
+from agentnexus.storage.chroma import insert_documents, resolve_collection_name
+from agentnexus.storage.chroma import search as chroma_search
 
-from .chroma_client import insert_documents, resolve_collection_name
-from .chroma_client import search as chroma_search
+from . import query_expansion as _query_expansion
+from . import ranking as _ranking
 from .ids import make_chunk_id, make_document_version, make_source_id
 from .models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
 from .store import get_knowledge_base_catalog
@@ -23,10 +22,6 @@ warnings.filterwarnings("ignore", message=".*pkg_resources.*")
 QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
 MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
 HYDE_PROMPT = load_prompt("rag_hyde")
-
-
-def _tokenize(text: str) -> list[str]:
-    return list(jieba.cut(text))
 
 
 @dataclass
@@ -42,15 +37,10 @@ class SearchResult:
 
 class BM25Index:
     def __init__(self):
-        self._index: BM25Okapi | None = None
-        self._chunk_map: dict[str, ChunkRecord] = {}
-        self._chunk_ids: list[str] = []
+        self._impl = _ranking.BM25Index()
 
     def build(self, chunks: list[ChunkRecord]):
-        self._chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
-        self._chunk_ids = [chunk.chunk_id for chunk in chunks]
-        tokenized = [_tokenize(chunk.sparse_text or chunk.indexed_text or chunk.text) for chunk in chunks]
-        self._index = BM25Okapi(tokenized) if tokenized else None
+        self._impl.build(chunks)
 
     def search(
         self,
@@ -58,23 +48,7 @@ class BM25Index:
         top_k: int = 10,
         metadata_filters: dict[str, object] | None = None,
     ) -> list[tuple[str, float]]:
-        if self._index is None:
-            return []
-        tokenized_query = _tokenize(query)
-        scores = self._index.get_scores(tokenized_query)
-        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
-        results: list[tuple[str, float]] = []
-        for idx, score in ranked:
-            if score <= 0:
-                continue
-            chunk_id = self._chunk_ids[idx]
-            chunk = self._chunk_map.get(chunk_id)
-            if chunk is None or not _matches_metadata_filters(chunk, metadata_filters):
-                continue
-            results.append((chunk_id, float(score)))
-            if len(results) >= top_k:
-                break
-        return results
+        return self._impl.search(query, top_k=top_k, metadata_filters=metadata_filters)
 
 
 def reciprocal_rank_fusion(
@@ -82,27 +56,11 @@ def reciprocal_rank_fusion(
     sparse_results: list[tuple[str, float]],
     k: int = 60,
 ) -> dict[str, float]:
-    scores: dict[str, float] = {}
-    for rank, (chunk_id, _) in enumerate(dense_results):
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank + 1)
-    for rank, (chunk_id, _) in enumerate(sparse_results):
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank + 1)
-    return scores
+    return _ranking.reciprocal_rank_fusion(dense_results, sparse_results, k=k)
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        normalized = value.strip()
-        if not normalized:
-            continue
-        key = normalized.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(normalized)
-    return result
+    return _query_expansion.dedupe_preserve_order(values)
 
 
 def _looks_like_question(query: str) -> bool:
@@ -569,7 +527,7 @@ def _get_retriever(namespace: str = "default", docs: list[str] | None = None) ->
 
 
 def build_knowledge_base(documents: list[str], load_reranker: bool = True, namespace: str = "default"):
-    from .chroma_client import delete_collection
+    from agentnexus.storage.chroma import delete_collection
 
     global _retriever
 

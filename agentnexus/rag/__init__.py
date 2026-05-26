@@ -1,11 +1,12 @@
-from .chroma_client import (
+from agentnexus.storage.chroma import (
     delete_collection,
     get_collection,
-    get_embedding_model,
     insert_documents,
     resolve_collection_name,
     upsert_documents,
 )
+
+from .embeddings import get_embedding_model
 from .evaluator import EvalRun, EvalSample, RAGEvaluator
 from .ids import make_chunk_id, make_document_version, make_source_id
 from .ingestion import (

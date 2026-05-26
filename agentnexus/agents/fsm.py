@@ -59,6 +59,7 @@ class StateMachine:
         self._queue.append(initial_event)
 
         while True:
+            self._raise_if_cancelled(ctx)
             if self._queue:
                 event = self._queue.popleft()
             elif not self._try_auto_advance(ctx, handlers):
@@ -77,7 +78,9 @@ class StateMachine:
             # Invoke handler BEFORE DONE check — handler may set ctx.last_answer
             handler_fn = handlers.get(t.handler)
             if handler_fn:
+                self._raise_if_cancelled(ctx)
                 new_events = handler_fn(ctx, event)
+                self._raise_if_cancelled(ctx)
                 if new_events:
                     for ne in new_events:
                         ne.step_id = ctx.current_step
@@ -93,6 +96,7 @@ class StateMachine:
 
         Returns True if an unconditional transition was found and fired.
         """
+        self._raise_if_cancelled(ctx)
         for t in self._table:
             if t.state == self._state and t.event is None:
                 from_state = self._state
@@ -101,7 +105,9 @@ class StateMachine:
 
                 handler_fn = handlers.get(t.handler)
                 if handler_fn:
+                    self._raise_if_cancelled(ctx)
                     new_events = handler_fn(ctx, None)
+                    self._raise_if_cancelled(ctx)
                     if new_events:
                         for ne in new_events:
                             ne.step_id = ctx.current_step
@@ -111,3 +117,9 @@ class StateMachine:
                     return True  # will be caught by outer loop's while check
                 return True
         return False
+
+    @staticmethod
+    def _raise_if_cancelled(ctx) -> None:
+        checker = getattr(ctx, "cancel_checker", None)
+        if checker is not None and checker():
+            raise RuntimeError("cancelled")

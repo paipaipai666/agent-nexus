@@ -3,7 +3,7 @@
 Runs the full ReAct agent through multi-step tasks with mocked LLM,
 validating intermediate state assertions (tool calls, observations, reasoning steps).
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -54,6 +54,15 @@ class TestE2EReActAgent:
         assert result.answer is not None
         assert "42" in result.answer
 
+    def test_cancel_checker_stops_run(self):
+        agent, llm = self._make_agent()
+        agent.set_cancel_checker(lambda: True)
+
+        with pytest.raises(RuntimeError, match="cancelled"):
+            agent.run("stop")
+
+        llm.think.assert_not_called()
+
     def test_e2e_tool_then_answer(self):
         agent, llm = self._make_agent()
         call_count = [0]
@@ -87,7 +96,7 @@ class TestE2EReActAgent:
             return "Combined result."
         llm.think.side_effect = mock_think
 
-        result = agent.run("Search and read")
+        agent.run("Search and read")
         assert call_count[0] >= 1
 
     def test_e2e_max_steps_respected(self):
@@ -110,7 +119,7 @@ class TestE2EReActAgent:
         agent, llm = self._make_agent()
         llm.think.side_effect = lambda **kw: (setattr(llm, 'last_tool_calls', []) or "Answer")
 
-        result = agent.run("Test question")
+        agent.run("Test question")
         assert llm.think.called
 
     def test_e2e_error_handling(self):

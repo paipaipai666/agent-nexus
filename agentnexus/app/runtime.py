@@ -66,7 +66,7 @@ class AppRuntime:
         )
 
         try:
-            from agentnexus.cli.audit import _global_audit_log
+            from agentnexus.observability.audit_log import _global_audit_log
 
             executor.registry._audit_log = _global_audit_log
         except Exception:
@@ -89,16 +89,23 @@ class AppRuntime:
             agent.set_mcp_context(mcp_manager.auto_context())
         skill_registry = SkillRegistry.from_settings(settings)
         skill_registry.discover()
+        auto_route = getattr(settings, "skill_auto_route", True)
+        auto_route_llm_fallback = getattr(settings, "skill_auto_route_llm_fallback", True)
+        min_score = getattr(settings, "skill_auto_route_min_score", 2.0)
+        margin = getattr(settings, "skill_auto_route_margin", 0.75)
+        default_skill = getattr(settings, "default_skill", "")
         skill_service = SkillService(
             skill_registry,
             agent=agent,
-            auto_route=getattr(settings, "skill_auto_route", True),
-            auto_route_llm_fallback=getattr(settings, "skill_auto_route_llm_fallback", True),
+            auto_route=auto_route if isinstance(auto_route, bool) else True,
+            auto_route_llm_fallback=(
+                auto_route_llm_fallback if isinstance(auto_route_llm_fallback, bool) else True
+            ),
             llm_client=llm,
         )
-        skill_service.router.min_score = getattr(settings, "skill_auto_route_min_score", 2.0)
-        skill_service.router.margin = getattr(settings, "skill_auto_route_margin", 0.75)
-        skill_service.use_default(getattr(settings, "default_skill", ""))
+        skill_service.router.min_score = min_score if isinstance(min_score, (int, float)) else 2.0
+        skill_service.router.margin = margin if isinstance(margin, (int, float)) else 0.75
+        skill_service.use_default(default_skill if isinstance(default_skill, str) else "")
         capability_runtime = CapabilityRuntime(
             settings=settings,
             executor=executor,

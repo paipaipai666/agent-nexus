@@ -116,29 +116,53 @@ class Transition(NamedTuple):
 # ============================================================
 
 @dataclass
-class ExecutionContext:
-    """Per-run() mutable state shared across all FSM handlers."""
-
-    # -- immutable config --
+class RunState:
     question: str = ""
-
-    # -- mutable LLM state --
-    messages: list[dict] = field(default_factory=list)
     current_step: int = 0
     json_retries: int = 0
     strategy: CallingStrategy = CallingStrategy.PROMPT_JSON
     max_steps: int = 10
     max_json_retries: int = 2
+    thinking_enabled: bool = False
+    cancel_checker: Any = None
 
-    # -- capability & memory --
+
+@dataclass
+class MemoryRetrievalState:
     session_caps: Any = None       # SessionCapabilityTracker
     memory_manager: Any = None     # MemoryManager
-
-    # -- prompt building --
-    tools: list[dict] = field(default_factory=list)
-    tools_desc: str = ""
     memory_context: str = ""
     conv_ctx: str = ""
+
+
+@dataclass
+class ToolCallState:
+    tools: list[dict] = field(default_factory=list)
+    tools_desc: str = ""
+    pending_tool_calls: list[dict] = field(default_factory=list)
+    last_subagent_payload: Optional[dict] = None
+
+
+def _state_property(state_name: str, attr_name: str):
+    def getter(self):
+        return getattr(getattr(self, state_name), attr_name)
+
+    def setter(self, value):
+        setattr(getattr(self, state_name), attr_name, value)
+
+    return property(getter, setter)
+
+
+@dataclass(init=False)
+class ExecutionContext:
+    """Per-run() mutable state shared across all FSM handlers."""
+
+    run_state: RunState = field(default_factory=RunState)
+    memory_state: MemoryRetrievalState = field(default_factory=MemoryRetrievalState)
+    tool_state: ToolCallState = field(default_factory=ToolCallState)
+
+    # -- mutable LLM state --
+    messages: list[dict] = field(default_factory=list)
 
     # -- audit trail --
     steps: list[AgentStep] = field(default_factory=list)
@@ -147,13 +171,86 @@ class ExecutionContext:
     # -- per-step transient --
     last_response_text: str = ""
     last_reasoning: str = ""
-    pending_tool_calls: list[dict] = field(default_factory=list)
     last_answer: Optional[str] = None
-    thinking_enabled: bool = False
-    last_subagent_payload: Optional[dict] = None
 
     # -- TUI event side-channel (bypasses FSM queue) --
     _on_emit: Any = None  # Callable[[ReActEvent, Optional[ReActState], Optional[ReActState]], None]
+
+    question = _state_property("run_state", "question")
+    current_step = _state_property("run_state", "current_step")
+    json_retries = _state_property("run_state", "json_retries")
+    strategy = _state_property("run_state", "strategy")
+    max_steps = _state_property("run_state", "max_steps")
+    max_json_retries = _state_property("run_state", "max_json_retries")
+    thinking_enabled = _state_property("run_state", "thinking_enabled")
+    cancel_checker = _state_property("run_state", "cancel_checker")
+    session_caps = _state_property("memory_state", "session_caps")
+    memory_manager = _state_property("memory_state", "memory_manager")
+    memory_context = _state_property("memory_state", "memory_context")
+    conv_ctx = _state_property("memory_state", "conv_ctx")
+    tools = _state_property("tool_state", "tools")
+    tools_desc = _state_property("tool_state", "tools_desc")
+    pending_tool_calls = _state_property("tool_state", "pending_tool_calls")
+    last_subagent_payload = _state_property("tool_state", "last_subagent_payload")
+
+    def __init__(
+        self,
+        question: str = "",
+        messages: list[dict] | None = None,
+        current_step: int = 0,
+        json_retries: int = 0,
+        strategy: CallingStrategy = CallingStrategy.PROMPT_JSON,
+        max_steps: int = 10,
+        max_json_retries: int = 2,
+        session_caps: Any = None,
+        memory_manager: Any = None,
+        tools: list[dict] | None = None,
+        tools_desc: str = "",
+        memory_context: str = "",
+        conv_ctx: str = "",
+        steps: list[AgentStep] | None = None,
+        _total_usage: dict | None = None,
+        last_response_text: str = "",
+        last_reasoning: str = "",
+        pending_tool_calls: list[dict] | None = None,
+        last_answer: Optional[str] = None,
+        thinking_enabled: bool = False,
+        last_subagent_payload: Optional[dict] = None,
+        _on_emit: Any = None,
+        cancel_checker: Any = None,
+        run_state: RunState | None = None,
+        memory_state: MemoryRetrievalState | None = None,
+        tool_state: ToolCallState | None = None,
+    ) -> None:
+        self.run_state = run_state or RunState(
+            question=question,
+            current_step=current_step,
+            json_retries=json_retries,
+            strategy=strategy,
+            max_steps=max_steps,
+            max_json_retries=max_json_retries,
+            thinking_enabled=thinking_enabled,
+            cancel_checker=cancel_checker,
+        )
+        self.memory_state = memory_state or MemoryRetrievalState(
+            session_caps=session_caps,
+            memory_manager=memory_manager,
+            memory_context=memory_context,
+            conv_ctx=conv_ctx,
+        )
+        self.tool_state = tool_state or ToolCallState(
+            tools=tools or [],
+            tools_desc=tools_desc,
+            pending_tool_calls=pending_tool_calls or [],
+            last_subagent_payload=last_subagent_payload,
+        )
+        self.messages = messages or []
+        self.steps = steps or []
+        self._total_usage = _total_usage or {"input_tokens": 0, "output_tokens": 0}
+        self.last_response_text = last_response_text
+        self.last_reasoning = last_reasoning
+        self.last_answer = last_answer
+        self._on_emit = _on_emit
 
     def emit(self, event_type: 'ReActEventType', **payload: Any) -> None:
         """Push a real-time event directly to TUI, bypassing the FSM queue."""

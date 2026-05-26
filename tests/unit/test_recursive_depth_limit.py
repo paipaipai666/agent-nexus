@@ -5,8 +5,6 @@ and prevent infinite recursion.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.tool_executor import ToolExecutor
 

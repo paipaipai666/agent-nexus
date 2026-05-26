@@ -4,9 +4,7 @@ Validates that a saved trace can be replayed and the agent produces
 the same or equivalent output.
 """
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.tool_executor import ToolExecutor

@@ -2,7 +2,7 @@
 
 from agentnexus.core.llm import AgentLLM
 from agentnexus.memory.long_term import get_long_term_memory
-from agentnexus.rag.chroma_client import get_embedding_model
+from agentnexus.rag.embeddings import get_embedding_model
 
 _QUERY_REWRITE_PROMPT = """\
 将以下用户查询改写为3-5个关键词或短语，用空格分隔，用于向量搜索。提取核心概念和人名/地名/专有名词，去除语气词和冗余描述。只输出关键词。

@@ -16,10 +16,10 @@ def config(
     value: str = typer.Option(None, "--value", "-v", help="配置值"),
 ):
     """查看或修改配置"""
-    from agentnexus.core.config import Settings, _config_dir, _load_yaml, _write_yaml_config, get_settings
+    from agentnexus.core.config import Settings, get_config_dir, get_settings, load_config_yaml, write_config_yaml
 
     settings = get_settings()
-    config_path = _config_dir() / "config.yaml"
+    config_path = get_config_dir() / "config.yaml"
 
     SETTABLE_KEYS = [
         "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
@@ -51,9 +51,9 @@ def config(
             console.print("示例: nexus config --set llm_model_id --value deepseek/deepseek-chat")
             return
 
-        data = _load_yaml()
+        data = load_config_yaml()
         data[key] = value
-        _write_yaml_config(data)
+        write_config_yaml(data)
         console.print(f"[green]已保存[/green] {key} = [bold]{value}[/bold]")
         console.print(f"[dim]配置文件: {config_path}[/dim]")
         return
@@ -64,7 +64,7 @@ def config(
     table.add_column("Value", style="green")
     table.add_column("Source", style="dim")
 
-    yaml_data = _load_yaml()
+    yaml_data = load_config_yaml()
 
     for name, field in Settings.model_fields.items():
         resolved = getattr(settings, name)
@@ -94,7 +94,7 @@ def config(
 @app.command()
 def init():
     """首次初始化引导"""
-    from agentnexus.core.config import _config_dir, _load_yaml, _write_yaml_config
+    from agentnexus.core.config import get_config_dir, load_config_yaml, write_config_yaml
 
     console.print(Panel("[bold]AgentNexus 初始化引导[/bold]", border_style="cyan"))
     console.print()
@@ -112,13 +112,13 @@ def init():
     if not base_url:
         base_url = "https://api.deepseek.com"
 
-    config_path = _config_dir() / "config.yaml"
+    config_path = get_config_dir() / "config.yaml"
 
-    data = _load_yaml()
+    data = load_config_yaml()
     data["llm_api_key"] = api_key
     data["llm_model_id"] = model
     data["llm_base_url"] = base_url
-    _write_yaml_config(data)
+    write_config_yaml(data)
 
     console.print()
     console.print("[green]配置完成![/green] 试试 nexus run '你好'")

@@ -6,8 +6,6 @@ Uses real judge prompts with mocked responses that simulate realistic outputs.
 import re
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.core.judge_llm import get_judge_llm
 
 

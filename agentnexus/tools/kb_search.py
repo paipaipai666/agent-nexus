@@ -1,7 +1,7 @@
 """kb_search tool — search the structured knowledge base with citations."""
 
-from agentnexus.rag.chroma_client import search as chroma_search
 from agentnexus.rag.retriever import HybridRetriever, expand_queries, result_citation, result_display_text
+from agentnexus.storage.chroma import search as chroma_search
 
 
 def _build_search_where(

@@ -4,10 +4,7 @@ Validates that the ReAct agent correctly selects tools based on LLM responses.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.core.llm import AgentLLM
 from agentnexus.tools.tool_executor import ToolExecutor
 
 
@@ -63,7 +60,7 @@ class TestDecisionLevelToolSelection:
         llm.think.side_effect = mock_think
 
         with patch("agentnexus.tools.registry.ToolRegistry.invoke", return_value="{'results': []}"):
-            result = agent.run("What is Python?")
+            agent.run("What is Python?")
 
         assert call_count[0] >= 1
 
@@ -80,7 +77,7 @@ class TestDecisionLevelToolSelection:
         llm.last_reasoning_content = "Need to find docs"
         llm.think.side_effect = lambda **kw: "Answer based on docs"
 
-        result = agent.run("Find docs")
+        agent.run("Find docs")
         assert llm.think.called
 
     def test_llm_error_is_handled(self):

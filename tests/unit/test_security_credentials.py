@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from agentnexus.core.config import _load_yaml, _write_yaml_config
+from agentnexus.core.config import get_config_dir, load_config_yaml, write_config_yaml
 
 
 class TestSecretStrSafety:
@@ -88,19 +88,18 @@ class TestYamlSecurity:
 
     def test_load_yaml_empty_file_returns_empty_dict(self):
         """An empty or non-existent YAML file returns {}."""
-        result = _load_yaml()
+        result = load_config_yaml()
         assert isinstance(result, dict)
 
     def test_config_dir_creation(self):
-        """_config_dir() creates directory successfully."""
-        from agentnexus.core.config import _config_dir
-        d = _config_dir()
+        """get_config_dir() creates directory successfully."""
+        d = get_config_dir()
         assert d.exists()
         assert d.is_dir()
 
     def test_yaml_file_permissions_restrictive(self, temp_agentnexus_home):
         """YAML config file should be written with restrictive permissions."""
-        yaml_path = _write_yaml_config({"llm_api_key": "test-key"})
+        yaml_path = write_config_yaml({"llm_api_key": "test-key"})
         perms = oct(yaml_path.stat().st_mode)[-3:]
         expected = ("444",) if os.name == "nt" else ("600", "400")
         assert perms in expected, f"permissions are {perms}, expected one of {expected}"

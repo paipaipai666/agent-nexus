@@ -14,8 +14,6 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 
 def _workspace_tmp() -> Path:
     root = Path.cwd() / "build" / "test-workspace" / uuid.uuid4().hex
@@ -57,21 +55,21 @@ class TestDiscoveryMultipleDirs:
     def test_discovery_from_multiple_dirs(self):
         tmp_path = _workspace_tmp()
         try:
-            p1 = _write_plugin(tmp_path / "builtin", "alpha", """
+            _write_plugin(tmp_path / "builtin", "alpha", """
 name: alpha
 version: "0.1"
 api_version: "1"
 providers: []
 compatibility: {}
 """)
-            p2 = _write_plugin(tmp_path / "plugins", "beta", """
+            _write_plugin(tmp_path / "plugins", "beta", """
 name: beta
 version: "0.1"
 api_version: "1"
 providers: []
 compatibility: {}
 """)
-            p3 = _write_plugin(tmp_path / "extra", "gamma", """
+            _write_plugin(tmp_path / "extra", "gamma", """
 name: gamma
 version: "0.1"
 api_version: "1"

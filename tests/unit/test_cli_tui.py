@@ -50,6 +50,7 @@ class TestTuiCommand:
                 version=mock_version,
                 mcp_manager=None,
                 skill_service=ANY,
+                capability_runtime=ANY,
             )
             mock_trace.configure.assert_called_once_with("/tmp/traces")
 
@@ -172,6 +173,7 @@ class TestTuiCommand:
                 version=mock_version,
                 mcp_manager=mock_manager,
                 skill_service=ANY,
+                capability_runtime=ANY,
             )
             mock_manager.close.assert_called_once()
 

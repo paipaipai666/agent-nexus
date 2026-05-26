@@ -317,6 +317,40 @@ class TestAgentNexusTUIPilot:
                 hud = app.screen.query_one("#hud")
                 assert input_bar.region.y < hud.region.y
 
+    async def test_app_quit_action_is_disabled(self):
+        """Default Textual quit shortcut must not close the TUI."""
+        with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
+            mock_settings.return_value.llm_model_id = "n/a"
+            from agentnexus.tui.app import AgentNexusTUI
+            app = AgentNexusTUI(
+                agent=_make_mock_agent(),
+                memory=MagicMock(),
+                version=_make_mock_version(),
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                app.notify = MagicMock()
+                app.action_quit()
+                assert not app._exit
+                app.notify.assert_called_once()
+
+    async def test_exit_command_closes_tui(self):
+        """The supported TUI exit path is the explicit /exit command."""
+        with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
+            mock_settings.return_value.llm_model_id = "n/a"
+            from agentnexus.tui.app import AgentNexusTUI
+            from agentnexus.tui.widgets.input_bar import InputBar
+            app = AgentNexusTUI(
+                agent=_make_mock_agent(),
+                memory=MagicMock(),
+                version=_make_mock_version(),
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                app.screen.on_input_bar_app_submit(InputBar.AppSubmit("/exit"))
+                await pilot.pause()
+                assert app._exit
+
     async def test_app_has_side_panel(self):
         """Runtime side panel is present after launch."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:

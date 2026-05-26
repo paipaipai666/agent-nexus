@@ -27,9 +27,9 @@ def eval_calibrate(
     ),
 ):
     """Judge 校准：导出样本供人工打分，计算 Judge 与人工评分的一致性"""
-    from agentnexus.rag.chroma_client import delete_collection
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
+    from agentnexus.storage.chroma import delete_collection
 
     evaluator = _rag_evaluator_cls()(KNOWLEDGE_BASE, EVAL_SAMPLES)
     strategy, chunk_size, overlap, use_hybrid = ChunkStrategy.FIXED, 256, 64, False

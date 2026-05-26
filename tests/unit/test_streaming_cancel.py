@@ -4,8 +4,6 @@ Validates that streaming responses handle mid-stream exceptions gracefully.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.core.llm import AgentLLM
 
 

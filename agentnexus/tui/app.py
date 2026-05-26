@@ -45,3 +45,10 @@ class AgentNexusTUI(App):
             skill_service=self._skill_service,
             capability_runtime=self._capability_runtime,
         ))
+
+    def action_quit(self):
+        """Disable Textual's default quit shortcut; use /exit from the input box."""
+        try:
+            self.notify("请输入 /exit 退出 TUI")
+        except Exception:
+            pass

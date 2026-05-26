@@ -3,9 +3,7 @@
 Validates that ExecutionContext accumulates correct steps, tool_outputs,
 and pending_tool_calls after multi-step agent runs.
 """
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.tool_executor import ToolExecutor
@@ -53,7 +51,6 @@ class TestIntermediateStateAssertions:
     def test_tool_outputs_populated_after_execution(self):
         agent, llm = self._make_agent()
         call_count = [0]
-        executed_tools = []
 
         def mock_think(**kw):
             call_count[0] += 1
@@ -88,7 +85,6 @@ class TestIntermediateStateAssertions:
         """Multiple tool calls in one step produce multiple outputs."""
         agent, llm = self._make_agent()
         call_count = [0]
-        executed = []
 
         def mock_think(**kw):
             call_count[0] += 1

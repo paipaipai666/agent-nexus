@@ -3,7 +3,7 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from agentnexus.core.config import Settings, _config_dir, _default_paths, get_settings
+from agentnexus.core.config import Settings, _default_paths, get_config_dir, get_settings
 
 
 class TestConfigSettings:
@@ -138,7 +138,7 @@ class TestTempAgentnexusHome:
         assert os.environ["AGENTNEXUS_HOME"] == str(temp_agentnexus_home)
 
     def test_config_dir_uses_tmp(self, temp_agentnexus_home):
-        d = _config_dir()
+        d = get_config_dir()
         assert str(temp_agentnexus_home) in str(d)
 
     def test_default_paths_use_correct_dirs(self, temp_agentnexus_home):

@@ -154,12 +154,12 @@ def init_skill(
     workflow: bool = typer.Option(False, "--workflow", help="生成旧版 workflow.yaml，而不是通用 SKILL.md"),
 ):
     """在 ~/.agentnexus/skills 下创建一个通用 SKILL.md skill 模板。"""
-    from agentnexus.core.config import _config_dir, get_settings
+    from agentnexus.core.config import get_config_dir, get_settings
 
     settings = get_settings()
     namespace, workflow_id = _parse_target(target, settings.skills_default_namespace)
     name = display_name or workflow_id.replace("_", " ").replace("-", " ").title()
-    path = Path(_config_dir()) / "skills" / namespace / ("workflow.yaml" if workflow else "SKILL.md")
+    path = Path(get_config_dir()) / "skills" / namespace / ("workflow.yaml" if workflow else "SKILL.md")
     if path.exists() and not force:
         console.print(f"[red]skill 已存在:[/red] {path}")
         console.print("[dim]如需覆盖，请加 --force[/dim]")
@@ -196,7 +196,7 @@ def validate_skill(
 @skill_app.command("use")
 def use_skill(target: str = typer.Argument(..., help="skill_id 或 namespace/skill_id")):
     """设置默认 skill，后续 TUI 启动会自动应用。"""
-    from agentnexus.core.config import _load_yaml, _write_yaml_config
+    from agentnexus.core.config import load_config_yaml, write_config_yaml
 
     registry = _registry()
     try:
@@ -213,20 +213,20 @@ def use_skill(target: str = typer.Argument(..., help="skill_id 或 namespace/ski
         for error in errors:
             console.print(f"- {error}")
         raise typer.Exit(code=1)
-    data = _load_yaml()
+    data = load_config_yaml()
     data["default_skill"] = entry.qualified_id
-    _write_yaml_config(data)
+    write_config_yaml(data)
     console.print(f"[green]默认 skill 已设置[/green] {entry.qualified_id}")
 
 
 @skill_app.command("reset")
 def reset_skill():
     """清除默认 skill。"""
-    from agentnexus.core.config import _load_yaml, _write_yaml_config
+    from agentnexus.core.config import load_config_yaml, write_config_yaml
 
-    data = _load_yaml()
+    data = load_config_yaml()
     data.pop("default_skill", None)
-    _write_yaml_config(data)
+    write_config_yaml(data)
     console.print("[green]默认 skill 已清除[/green]")
 
 

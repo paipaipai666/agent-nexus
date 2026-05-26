@@ -30,7 +30,7 @@ _ltm_collection = None
 
 def _get_ltm_collection():
     global _ltm_collection
-    from agentnexus.rag.chroma_client import chroma_operation_lock, get_collection
+    from agentnexus.storage.chroma import chroma_operation_lock, get_collection
 
     with chroma_operation_lock():
         if _ltm_collection is None:

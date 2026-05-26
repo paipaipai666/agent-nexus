@@ -6,6 +6,7 @@ from agentnexus.services.container import AppServices
 from agentnexus.services.eval import EvalService
 from agentnexus.services.knowledge import KnowledgeBaseService
 from agentnexus.services.skill import SkillService, SkillStatus
+from agentnexus.services.turn import TurnRecord, TurnRuntime
 
 __all__ = [
     "AgentEvent",
@@ -18,4 +19,6 @@ __all__ = [
     "SessionHandle",
     "SkillService",
     "SkillStatus",
+    "TurnRecord",
+    "TurnRuntime",
 ]

@@ -11,13 +11,16 @@ from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
+from textual.events import Key
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Input, Label, Static
+from textual.worker import get_current_worker
 
 from agentnexus.core.config import get_settings
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.observability.tracer import trace_manager
+from agentnexus.services.chat import ChatService
 from agentnexus.skills import (
     SkillEntry,
     SkillRegistry,
@@ -45,6 +48,7 @@ COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("/skill", "管理 Skill"),
     ("/mcp", "管理 MCP server"),
     ("/plugin", "管理插件"),
+    ("/exit", "退出 TUI"),
 )
 
 COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
@@ -88,8 +92,9 @@ class ChatScreen(Screen):
     BINDINGS = [
         ("ctrl+l", "clear_screen", "清屏"),
         ("ctrl+h", "show_help", "帮助"),
-        ("escape", "focus_input", "输入"),
     ]
+
+    ESC_DOUBLE_TAP_SECONDS = 0.6
 
     def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None, capability_runtime=None):
         super().__init__()
@@ -110,6 +115,19 @@ class ChatScreen(Screen):
         self._skill_registry: SkillRegistry | None = None
         self._current_skill: SkillEntry | None = None
         self._skill_status = "idle"
+        self._last_escape_at = 0.0
+        self._agent_worker = None
+        self._chat_service = ChatService(
+            agent=agent,
+            memory_manager=memory,
+            version_manager=version,
+            skill_service=skill_service,
+            tool_executor=getattr(agent, "tool_executor", None),
+            capability_runtime=capability_runtime,
+        )
+        self._chat_session = self._chat_service.start_session()
+        self._current_run_id: str = ""
+        self._current_turn = None
         # Hook compact events for TUI visibility
         if self._memory:
             self._memory._on_compact = self._on_compact_event
@@ -199,6 +217,19 @@ class ChatScreen(Screen):
     def on_input_bar_app_input_changed(self, event: InputBar.AppInputChanged):
         self._update_command_suggestions(event.text)
 
+    def on_key(self, event: Key):
+        if event.key != "escape":
+            return
+        now = time.monotonic()
+        if now - self._last_escape_at <= self.ESC_DOUBLE_TAP_SECONDS:
+            event.stop()
+            self._last_escape_at = 0.0
+            self._force_interrupt_agent()
+            return
+        self._last_escape_at = now
+        event.stop()
+        self.action_focus_input()
+
     # ── keybindings ────────────────────────────────────────────
 
     def action_clear_screen(self):
@@ -234,11 +265,10 @@ class ChatScreen(Screen):
 
     def _commit_if_answered(self, question: str, answer: str):
         """Auto-commit after a successful answer."""
-        if not self._version or not self._memory:
-            return
-        stm_json = self._memory.short_term.to_json()
-        self._version.commit(stm_json, question=question, answer=answer, new_ltm_ids=[])
-        self._refresh_version_display()
+        turn = getattr(self, "_current_turn", None)
+        if turn is not None:
+            turn.finish(answer)
+            self._refresh_version_display()
 
     def _refresh_version_display(self):
         """Update top bar and side panel with current version state."""
@@ -276,6 +306,8 @@ class ChatScreen(Screen):
 
         if cmd == "/help":
             self.action_show_help()
+        elif cmd == "/exit":
+            self.app.exit()
         elif cmd == "/clear":
             if arg.strip() == "--all" and self._version:
                 self._version.reset()
@@ -630,19 +662,19 @@ class ChatScreen(Screen):
 
     @staticmethod
     def _persist_default_skill(qualified_id: str) -> None:
-        from agentnexus.core.config import _load_yaml, _write_yaml_config
+        from agentnexus.core.config import load_config_yaml, write_config_yaml
 
-        data = _load_yaml()
+        data = load_config_yaml()
         data["default_skill"] = qualified_id
-        _write_yaml_config(data)
+        write_config_yaml(data)
 
     @staticmethod
     def _clear_default_skill() -> None:
-        from agentnexus.core.config import _load_yaml, _write_yaml_config
+        from agentnexus.core.config import load_config_yaml, write_config_yaml
 
-        data = _load_yaml()
+        data = load_config_yaml()
         data.pop("default_skill", None)
-        _write_yaml_config(data)
+        write_config_yaml(data)
 
     @staticmethod
     def _format_skill_status(
@@ -839,13 +871,13 @@ class ChatScreen(Screen):
         if not target:
             return False
         entry = self._resolve_dynamic_skill(target)
-        if entry is None:
-            return False
         instruction = arg.strip()
         if not instruction:
             command = f"/{target}" if short_form else f"/{target}-skill"
             self._chat_area.add_system(f"[dim]用法: {command} <指令>[/]")
             return True
+        if entry is None:
+            return False
         if self._skill_service is not None:
             try:
                 self._skill_service.use(entry.qualified_id)
@@ -1095,6 +1127,7 @@ class ChatScreen(Screen):
                 memory_manager=self._memory,
             )
         for workflow_event in workflow_result.events:
+            self._chat_service.record_workflow_event(self._current_run_id, workflow_event)
             try:
                 self.app.call_from_thread(self._apply_workflow_event, workflow_event)
             except Exception:
@@ -1123,6 +1156,32 @@ class ChatScreen(Screen):
             self._spinner_timer.stop()
             self._spinner_timer = None
         self._spinner_frames = None
+
+    def _force_interrupt_agent(self):
+        if self._current_run_id:
+            self._chat_service.cancel_run(self._current_run_id, reason="用户双击 ESC 强制中断")
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+        self._running = False
+        self._stop_spinner()
+        self._current_tool_widget = None
+        try:
+            self._chat_area.query_one("#loading-indicator").remove()
+        except Exception:
+            pass
+        try:
+            snapshot = self._chat_service.get_run_snapshot(self._current_run_id) if self._current_run_id else None
+            answer = snapshot.answer if snapshot is not None else ""
+            question = snapshot.question if snapshot is not None else "interrupted turn"
+            self._chat_area.add_system("[#e5c07b]已强制中断当前 Agent 活动，并记录中断摘要。[/]")
+            self._side_panel.add_timeline_event("error", "Agent interrupted by double Escape")
+            self._record_turn_summary(question, answer)
+        except Exception:
+            pass
 
     def _tick_spinner(self):
         if not self._current_tool_widget or not self._spinner_frames:
@@ -1347,6 +1406,12 @@ class ChatScreen(Screen):
 
     @work(exclusive=True)
     async def _run_agent(self, text: str):
+        self._agent_worker = get_current_worker()
+        run, _events, turn = self._chat_service.begin_turn(self._chat_session.id, text)
+        self._current_run_id = run.id
+        self._current_turn = turn
+        if hasattr(self._agent, "set_cancel_checker"):
+            self._agent.set_cancel_checker(turn.cancel_checker)
         if self._capability_runtime is not None:
             self._capability_runtime.refresh_if_stale()
             self._refresh_tools_panel()
@@ -1374,7 +1439,9 @@ class ChatScreen(Screen):
                 event.set()
 
             self.app.call_from_thread(_show_dialog)
-            event.wait()  # block agent thread until user responds
+            while not event.wait(0.05):
+                if turn.cancel_checker():
+                    return False
             return result_holder[0]
 
         self._agent._confirm = _tui_confirm
@@ -1399,6 +1466,9 @@ class ChatScreen(Screen):
         }
 
         def _apply_event(event, from_state, to_state):
+            if turn.cancel_checker():
+                return
+            self._chat_service.record_agent_event(run.id, event)
             from agentnexus.agents.react_types import ReActEventType as E
             etype = event.type
             strategy = event.payload.get("strategy")
@@ -1476,7 +1546,11 @@ class ChatScreen(Screen):
             trace_manager.start_trace(text)
             try:
                 agent_question = self._prepare_agent_question(text)
+                if turn.cancel_checker():
+                    raise RuntimeError("cancelled")
                 result = self._agent.run(agent_question, memory_manager=self._memory)
+                if turn.cancel_checker():
+                    raise RuntimeError("cancelled")
                 return result.answer
             finally:
                 trace_manager.end_trace()
@@ -1490,12 +1564,36 @@ class ChatScreen(Screen):
                 self._chat_area.query_one("#loading-indicator").remove()
             except Exception:
                 pass
-            self._chat_area.add_system(f"[#e06c75]错误: {e}[/]")
+            if str(e) == "cancelled":
+                reason = "用户中断或取消信号"
+                record = turn.cancel(reason)
+                answer = record.answer
+                self._chat_area.add_system("[#e5c07b]Agent 活动已中断，中断摘要已写入会话。[/]")
+            else:
+                reason = "Agent 执行错误"
+                record = turn.fail(reason, str(e))
+                answer = record.answer
+                self._chat_area.add_system(f"[#e06c75]错误: {e}[/]\n[dim]已记录失败摘要。[/]")
             try:
                 self._side_panel.add_timeline_event("error", _plain_summary(str(e), 80))
             except Exception:
                 pass
+            self._record_turn_summary(text, answer)
             self._running = False
+            self._agent_worker = None
+            self._current_turn = None
+            self._current_run_id = ""
+            if hasattr(self._agent, "set_cancel_checker"):
+                self._agent.set_cancel_checker(None)
+            return
+
+        if turn.cancel_checker():
+            self._running = False
+            self._agent_worker = None
+            self._current_turn = None
+            self._current_run_id = ""
+            if hasattr(self._agent, "set_cancel_checker"):
+                self._agent.set_cancel_checker(None)
             return
 
         # ── Remove loading indicator ──
@@ -1544,9 +1642,15 @@ class ChatScreen(Screen):
             self._commit_if_answered(text, answer)
             self._record_turn_summary(text, answer)
         else:
-            self._chat_area.add_system("[dim]Agent 未能得出答案。[/]")
-            self._record_turn_summary(text, "")
+            answer = turn.finish("").answer
+            self._chat_area.add_system("[dim]Agent 未能得出答案，已记录本轮执行摘要。[/]")
+            self._record_turn_summary(text, answer)
         self._running = False
+        self._agent_worker = None
+        self._current_turn = None
+        self._current_run_id = ""
+        if hasattr(self._agent, "set_cancel_checker"):
+            self._agent.set_cancel_checker(None)
 
 
 def _plain_summary(text: str, limit: int) -> str:

@@ -75,8 +75,8 @@ class TestYamlSafeLoad:
         assert data["cases"][0]["name"] == "test_case"
 
     def test_config_yaml_loads_with_safe_load(self, temp_agentnexus_home):
-        """Config YAML is loaded with yaml.safe_load via _load_yaml."""
-        from agentnexus.core.config import _load_yaml
+        """Config YAML is loaded with yaml.safe_load via load_config_yaml."""
+        from agentnexus.core.config import load_config_yaml
 
         config_yaml = """
         llm_api_key: "sk-test-12345"
@@ -86,7 +86,7 @@ class TestYamlSafeLoad:
         config_path = temp_agentnexus_home / "config.yaml"
         config_path.write_text(config_yaml, encoding="utf-8")
 
-        loaded = _load_yaml()
+        loaded = load_config_yaml()
         assert loaded["llm_api_key"] == "sk-test-12345"
         assert loaded["llm_model_id"] == "test/model"
         assert loaded["shell_timeout"] == 60

@@ -4,8 +4,6 @@ Validates the full ReAct loop: LLM response -> tool call -> observation -> next 
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.tool_executor import ToolExecutor
 
@@ -53,7 +51,7 @@ class TestToolCallPipeline:
             return "Python is a language."
         llm.think.side_effect = mock_think
 
-        result = agent.run("What is Python?")
+        agent.run("What is Python?")
 
         assert call_count[0] >= 1
 
@@ -72,7 +70,7 @@ class TestToolCallPipeline:
             return "Final answer."
         llm.think.side_effect = mock_think
 
-        result = agent.run("Search and read")
+        agent.run("Search and read")
         assert call_count[0] >= 1
 
     def test_tool_observation_feeds_back_to_llm(self):
@@ -90,7 +88,7 @@ class TestToolCallPipeline:
             return "Based on search results."
         llm.think.side_effect = mock_think
 
-        result = agent.run("What is Python?")
+        agent.run("What is Python?")
         assert call_count[0] >= 1
 
     def test_pipeline_with_error_recovery(self):
@@ -109,6 +107,6 @@ class TestToolCallPipeline:
             return "tool result after retry"
 
         with patch("agentnexus.tools.registry.ToolRegistry.invoke", side_effect=failing_execute):
-            result = agent.run("What is test?")
+            agent.run("What is test?")
 
         assert call_count[0] >= 1

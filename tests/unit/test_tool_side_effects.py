@@ -61,7 +61,7 @@ class TestToolSideEffects:
 
         te = ToolExecutor()
         te.registerTool("mock_tool", "测试工具", mock_tool, audit_enabled=True)
-        result = te.getTool("mock_tool")(param="value")
+        te.getTool("mock_tool")(param="value")
 
         assert len(audit_log) == 1
         assert audit_log[0]["params"]["param"] == "value"

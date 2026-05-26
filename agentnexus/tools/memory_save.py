@@ -1,7 +1,7 @@
 """memory_save tool — allows agents to proactively save facts to long-term memory."""
 
 from agentnexus.memory.long_term import get_long_term_memory
-from agentnexus.rag.chroma_client import get_embedding_model
+from agentnexus.rag.embeddings import get_embedding_model
 
 _VALID_CATEGORIES = {
     "user_preference", "entity_fact", "conclusion",

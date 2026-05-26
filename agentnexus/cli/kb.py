@@ -1,94 +1,46 @@
 """CLI kb add/list/search commands"""
 import os
 import time
-import uuid
 
 import typer
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag.chroma_client import (
-    chunk_metadata_to_chroma,
-    delete_documents,
-    get_collection,
-    resolve_collection_name,
-    upsert_documents,
-)
-from agentnexus.rag.chroma_client import (
-    search as chroma_search,
-)
+from agentnexus.rag import kb_service
 from agentnexus.rag.ingestion import ingest_document
+from agentnexus.rag.kb_service import (
+    default_kb_record,
+    delete_existing_source_versions,
+    finish_ingestion_run,
+    persist_ingested_document,
+    start_ingestion_run,
+)
 from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
 from agentnexus.rag.retriever import HybridRetriever, expand_queries, result_citation, result_display_text
 from agentnexus.rag.store import get_knowledge_base_catalog
+from agentnexus.storage.chroma import delete_documents, get_collection, upsert_documents
+from agentnexus.storage.chroma import search as chroma_search
 from agentnexus.tools.kb_search import _build_search_where
 
 from . import console, kb_app
 
 
 def _default_kb_record(namespace: str) -> KnowledgeBaseRecord:
-    collection_name = resolve_collection_name(namespace=namespace)
-    return KnowledgeBaseRecord(
-        kb_id=collection_name,
-        namespace=namespace,
-        display_name=namespace,
-        collection_name=collection_name,
-    )
+    return default_kb_record(namespace)
 
 
 def _delete_existing_source_versions(namespace: str, source_id: str) -> int:
-    catalog = get_knowledge_base_catalog()
-    kb_record = _default_kb_record(namespace)
-    catalog.upsert_knowledge_base(kb_record)
-
-    existing_documents = catalog.list_documents_by_source(kb_record.kb_id, source_id)
-    if not existing_documents:
-        return 0
-
-    deleted_chunks = 0
-    for document in existing_documents:
-        chunks = catalog.list_chunks(document.document_id)
-        chunk_ids = [chunk.chunk_id for chunk in chunks]
-        if chunk_ids:
-            delete_documents(ids=chunk_ids, namespace=namespace)
-            deleted_chunks += len(chunk_ids)
-        catalog.delete_document(document.document_id)
-    return deleted_chunks
+    kb_service.delete_documents = delete_documents
+    return delete_existing_source_versions(namespace, source_id)
 
 
 def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict[str, int]:
-    kb_record = _default_kb_record(namespace)
-    catalog = get_knowledge_base_catalog()
-    catalog.upsert_knowledge_base(kb_record)
-
-    artifacts.document.kb_id = kb_record.kb_id
-    replaced_chunks = _delete_existing_source_versions(namespace, artifacts.document.source_id)
-    catalog.upsert_document(artifacts.document)
-
-    for chunk in artifacts.chunks:
-        chunk.kb_id = kb_record.kb_id
-    catalog.upsert_chunks(artifacts.chunks)
-
-    upsert_documents(
-        [chunk.indexed_text or chunk.text for chunk in artifacts.chunks],
-        metadatas=[chunk_metadata_to_chroma(chunk) for chunk in artifacts.chunks],
-        ids=[chunk.chunk_id for chunk in artifacts.chunks],
-        namespace=namespace,
-    )
-    return {"replaced_chunks": replaced_chunks, "written_chunks": len(artifacts.chunks)}
+    kb_service.delete_documents = delete_documents
+    kb_service.upsert_documents = upsert_documents
+    return persist_ingested_document(artifacts, namespace)
 
 
 def _start_ingestion_run(namespace: str, source_uri: str) -> IngestionRunRecord:
-    kb_record = _default_kb_record(namespace)
-    catalog = get_knowledge_base_catalog()
-    catalog.upsert_knowledge_base(kb_record)
-    run = IngestionRunRecord(
-        run_id=f"ingest_{uuid.uuid4().hex[:12]}",
-        kb_id=kb_record.kb_id,
-        status="running",
-        source_uri=source_uri,
-    )
-    catalog.upsert_ingestion_run(run)
-    return run
+    return start_ingestion_run(namespace, source_uri)
 
 
 def _finish_ingestion_run(
@@ -100,14 +52,14 @@ def _finish_ingestion_run(
     error_message: str = "",
     metadata: dict | None = None,
 ):
-    run.status = status
-    run.documents_seen = documents_seen
-    run.chunks_written = chunks_written
-    run.error_message = error_message
-    run.metadata = dict(metadata or {})
-    run.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    catalog = get_knowledge_base_catalog()
-    catalog.upsert_ingestion_run(run)
+    finish_ingestion_run(
+        run,
+        status=status,
+        documents_seen=documents_seen,
+        chunks_written=chunks_written,
+        error_message=error_message,
+        metadata=metadata,
+    )
 
 
 @kb_app.command("add")

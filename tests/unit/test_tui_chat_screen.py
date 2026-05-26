@@ -1,7 +1,10 @@
 """Tests for ChatScreen static methods, MCP formatting, and command helpers."""
 
+import inspect
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from textual.events import Key
 
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.workflow import Workflow
@@ -983,3 +986,50 @@ class TestPluginCommands:
 
         runtime.enable.assert_called_once_with("plugins", "demo")
         assert "Plugin enabled" in screen._chat_area.add_system.call_args[0][0]
+
+
+class TestExitAndInterruptCommands:
+    def test_double_escape_interrupts_agent(self):
+        agent = MagicMock()
+        screen = ChatScreen(agent=agent, memory=None, version=None)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._stop_spinner = MagicMock()
+        screen.action_focus_input = MagicMock()
+        screen._last_escape_at = 100.0
+        screen._current_run_id = "run_1"
+        screen._chat_service = MagicMock()
+        screen._chat_service.get_run_snapshot.return_value = MagicMock(
+            answer="interrupted",
+            question="question",
+        )
+
+        event = MagicMock(spec=Key)
+        event.key = "escape"
+
+        with patch("agentnexus.tui.screens.chat.time.monotonic", return_value=100.2):
+            screen.on_key(event)
+
+        screen._chat_service.cancel_run.assert_called_once_with(
+            screen._current_run_id,
+            reason="用户双击 ESC 强制中断",
+        )
+        screen._stop_spinner.assert_called_once()
+        screen.action_focus_input.assert_not_called()
+        event.stop.assert_called_once()
+
+    def test_tui_no_longer_owns_turn_persistence(self):
+        screen = ChatScreen(agent=MagicMock(), memory=MagicMock(), version=MagicMock())
+
+        assert not hasattr(screen, "_turn_journal")
+        assert not hasattr(screen, "_persist_interrupted_turn")
+        assert not hasattr(screen, "_build_interrupted_answer")
+
+    def test_tui_delegates_journal_recording_to_chat_service(self):
+        run_source = inspect.getsource(ChatScreen._run_agent.__wrapped__)
+        prepare_source = inspect.getsource(ChatScreen._prepare_agent_question)
+
+        assert "record_agent_event" in run_source
+        assert "record_workflow_event" in prepare_source
+        assert "turn.record(" not in run_source
+        assert "turn.record(" not in prepare_source

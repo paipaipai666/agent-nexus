@@ -7,8 +7,6 @@ import json
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.observability.stats import _cost, compute_stats
 
 

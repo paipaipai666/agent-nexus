@@ -5,8 +5,6 @@ validating that the full agent maintains context across turns.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.tool_executor import ToolExecutor
 
@@ -46,9 +44,9 @@ class TestMultiTurnRegression:
         agent, llm = self._make_agent("Answer")
         llm.think.side_effect = lambda **kw: (setattr(llm, 'last_error', '') or "Answer")
 
-        r1 = agent.run("Turn 1 question")
+        agent.run("Turn 1 question")
 
-        r2 = agent.run("Turn 2 question")
+        agent.run("Turn 2 question")
 
         assert llm.think.call_count >= 2
 
@@ -82,7 +80,7 @@ class TestMultiTurnRegression:
         mgr.append("user", "Use Python for this")
         mgr.append("assistant", "Okay, using Python")
 
-        result = agent.run("Add unit tests", memory_manager=mgr)
+        agent.run("Add unit tests", memory_manager=mgr)
 
         assert mgr.short_term.get_all()
         assert len(mgr.short_term.get_all()) >= 2

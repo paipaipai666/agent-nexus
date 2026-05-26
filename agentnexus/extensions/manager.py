@@ -115,7 +115,7 @@ class ExtensionManager:
             if not enabled_globally:
                 disabled.append(descriptor)
                 continue
-            if plugin_enabled.get(descriptor.name, False) is not True:
+            if not self._is_plugin_enabled(descriptor, plugin_enabled):
                 disabled.append(descriptor)
                 continue
             plugin_providers, provider_errors = self._load_plugin_providers(descriptor)
@@ -159,14 +159,23 @@ class ExtensionManager:
 
     def _plugin_enabled_map(self) -> dict[str, bool]:
         try:
-            from agentnexus.core.config import _load_yaml
+            from agentnexus.core.config import load_config_yaml
 
-            data = _load_yaml()
+            data = load_config_yaml()
             capabilities = data.get("capabilities") if isinstance(data, dict) else {}
             plugins = capabilities.get("plugins") if isinstance(capabilities, dict) else {}
             return dict(plugins) if isinstance(plugins, dict) else {}
         except Exception:
             return {}
+
+    @staticmethod
+    def _is_plugin_enabled(descriptor: ExtensionDescriptor, enabled_map: dict[str, bool]) -> bool:
+        if descriptor.name in enabled_map:
+            return enabled_map[descriptor.name] is True
+        manifest = descriptor.manifest
+        if manifest is None:
+            return False
+        return not manifest.providers
 
     def _extension_dirs(self) -> list[Path]:
         return [self.built_in_dir, *self.extra_dirs, self.user_dir]

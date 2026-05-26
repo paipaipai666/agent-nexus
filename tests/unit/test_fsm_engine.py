@@ -1,6 +1,8 @@
 """Tests for the transfer-table-driven StateMachine FSM engine."""
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.react_types import (
     ExecutionContext,
@@ -385,3 +387,17 @@ class TestStateMachineDone:
 
         answer, _ = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"h": lambda c, e: []})
         assert answer == "early-exit"
+
+
+class TestStateMachineCancellation:
+    def test_cancel_checker_stops_before_handler(self):
+        handler = MagicMock(return_value=[])
+        table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "h")]
+        fsm = StateMachine(table=table)
+        ctx = ExecutionContext(question="test")
+        ctx.cancel_checker = lambda: True
+
+        with pytest.raises(RuntimeError, match="cancelled"):
+            fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"h": handler})
+
+        handler.assert_not_called()

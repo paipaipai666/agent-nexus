@@ -7,10 +7,18 @@ from pathlib import Path
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
+from agentnexus.core.pii import contains_pii as _contains_pii
+from agentnexus.core.pii import mask_pii as _mask_pii
+from agentnexus.memory.compaction import is_recoverable_tool
+from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
+from agentnexus.memory.extraction import extract_and_save_memories
 from agentnexus.memory.long_term import get_long_term_memory
+from agentnexus.memory.offload import offload_large_result
+from agentnexus.memory.projection import build_projection as build_projected_messages
+from agentnexus.memory.projection import microcompact_messages, project_aggressive, project_mild
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.prompts import load_prompt
-from agentnexus.rag.chroma_client import get_embedding_model
+from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +31,6 @@ def _extract_xml_tag(text: str, tag: str) -> str | None:
 
 EXTRACT_PROMPT = load_prompt("memory_extract")
 SUMMARIZE_PROMPT = load_prompt("memory_summarize")
-
-# Tool results that can be regenerated / re-fetched — safe to microcompact
-_RECOVERABLE_TOOLS = frozenset({
-    "read", "bash", "grep", "glob", "web_search", "web_fetch",
-    "edit", "write", "search",
-})
 
 MEMORY_CATEGORIES = {
     "user_preference": 0.9,
@@ -50,27 +52,7 @@ CATEGORY_LABELS = {
     "tool_preference": "工具偏好",
 }
 
-_PII_PATTERNS = [
-    re.compile(r"[\w.-]+@[\w.-]+\.\w+"),
-    re.compile(r"1[3-9]\d{9}"),
-    re.compile(r"sk-[A-Za-z0-9]{32,}"),
-    re.compile(r"\b\d{15,19}\b"),
-]
-
-
-def _parse_tool_message(content: str) -> tuple[str | None, str | None]:
-    """Parse a tool message to extract tool name and params."""
-    m = re.match(r"Action:\s*([\w-]+)\[([^\]]*)\]", content)
-    if m:
-        return m.group(1), m.group(2)
-    return None, None
-
-
-def _contains_pii(text: str) -> bool:
-    return any(p.search(text) for p in _PII_PATTERNS)
-
-
-def _mask_pii(text: str) -> str:
+def _legacy_mask_pii(text: str) -> str:
     """Partially mask PII in text, preserving structure for memory extraction.
 
     - Email: keep first char of local part + domain TLD
@@ -181,7 +163,7 @@ class MemoryManager:
                 if summary:
                     # Prepend summary for richer context when available
                     query_text = f"{summary[:300]} {question}"
-        query_vec = self._embed_model.encode(query_text, normalize_embeddings=True).tolist()
+        query_vec = embedding_to_list(self._embed_model.encode(query_text, normalize_embeddings=True))
         memories = self.long_term.search(
             query_embedding=query_vec, limit=ltm_limit, min_similarity=ltm_similarity)
 
@@ -239,13 +221,8 @@ class MemoryManager:
 
     def _offload_large_result(self, content: str) -> str:
         """Write large tool result to disk, return a stub with preview."""
-        Path(self._offload_dir).mkdir(parents=True, exist_ok=True)
-        ts = int(time.time() * 1000)
-        fname = f"{self.session_id}_{ts}.txt"
-        fpath = Path(self._offload_dir) / fname
-        fpath.write_text(content, encoding="utf-8")
-        preview = content[:500]
-        return f"[工具结果已缓存] 文件: {fpath}\n预览(前500字符): {preview}"
+        return offload_large_result(content, self._offload_dir, self.session_id)
+        return ""
 
     def bridge_read(self, filepath: str, content_preview: str = ""):
         self._recent_reads.append((filepath, content_preview[:5000], time.time()))
@@ -339,117 +316,37 @@ class MemoryManager:
         90% ctx used → mild compression. 95% → aggressive compression.
         """
         tokens = self.short_term.estimate_tokens()
-        ratio = tokens / max(self._ctx_max, 1)
-
-        if ratio < 0.90:
-            return messages
-        if ratio < 0.95:
-            return self._project_mild(messages)
-        return self._project_aggressive(messages)
+        return build_projected_messages(
+            messages,
+            token_count=tokens,
+            ctx_max=self._ctx_max,
+            parse_tool_message=_parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
 
     def _project_mild(self, messages: list[dict]) -> list[dict]:
         """90% threshold: truncate long messages, keep last 4 intact."""
-        projected = []
-        keep_recent = min(4, len(messages))
-        for i, m in enumerate(messages):
-            is_recent = i >= len(messages) - keep_recent
-            content = m.get("content", "")
-            if is_recent:
-                projected.append(dict(m))
-                continue
-            if m["role"] in ("assistant", "tool") and len(content) > 1000:
-                projected.append({
-                    **m,
-                    "content": content[:500] + "\n...[投影截断]...\n" + content[-500:],
-                })
-            else:
-                projected.append(dict(m))
-        return projected
+        return project_mild(messages)
 
     def _project_aggressive(self, messages: list[dict]) -> list[dict]:
         """95% threshold: clear recoverable tool results, truncate all assistants,
         insert boundary marker, keep last 3 intact."""
-        projected = []
-        keep_recent = min(3, len(messages))
-        boundary_inserted = False
-
-        for i, m in enumerate(messages):
-            is_recent = i >= len(messages) - keep_recent
-            role = m.get("role", "")
-
-            if is_recent:
-                if not boundary_inserted and len(projected) > 0:
-                    projected.append({
-                        "role": "system",
-                        "content": "[上下文投影] 此标记之前的对话已被投影压缩。",
-                    })
-                    boundary_inserted = True
-                projected.append(dict(m))
-                continue
-
-            if role == "tool":
-                tool_name, _ = _parse_tool_message(m.get("content", ""))
-                if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
-                    projected.append({
-                        **m,
-                        "content": f"[工具结果已投影清除] 工具: {tool_name}",
-                    })
-                else:
-                    projected.append(dict(m))
-            elif role == "assistant":
-                content = m.get("content", "")
-                projected.append({
-                    **m,
-                    "content": content[:500] + "\n...[投影压缩]...\n" + content[-500:] if len(content) > 1000
-                    else content,
-                })
-            else:
-                projected.append(dict(m))
-
-        if not boundary_inserted:
-            projected.insert(0, {
-                "role": "system",
-                "content": "[上下文投影] 对话上下文已通过读时投影压缩。",
-            })
-        return projected
+        return project_aggressive(
+            messages,
+            parse_tool_message=_parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
 
     def microcompact(self):
-        all_msgs = self.short_term.get_all()
-        cleaned = False
-        recoverable_indices = []
-        for i, m in enumerate(all_msgs):
-            if m["role"] == "tool":
-                tool_name, _ = _parse_tool_message(m.get("content", ""))
-                if tool_name and tool_name.lower() in _RECOVERABLE_TOOLS:
-                    recoverable_indices.append(i)
-        keep_last = 5
-        if len(recoverable_indices) > keep_last:
-            skip_indices = set(recoverable_indices[-keep_last:])
-        else:
-            skip_indices = set(recoverable_indices)
-        for i in recoverable_indices:
-            if i in skip_indices:
-                continue
-            m = all_msgs[i]
-            tool_name, _ = _parse_tool_message(m.get("content", ""))
-            all_msgs[i] = {
-                **m,
-                "content": f"[工具结果已清理] 工具: {tool_name}",
-            }
-            cleaned = True
-        for i, m in enumerate(all_msgs):
-            if m["role"] == "assistant":
-                content = m.get("content", "")
-                if len(content) > 2000:
-                    all_msgs[i] = {
-                        **m,
-                        "content": content[:500] + "\n...[截断]...\n" + content[-500:],
-                    }
-                    cleaned = True
+        compacted, cleaned = microcompact_messages(
+            self.short_term.get_all(),
+            parse_tool_message=_parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         if cleaned:
             self.short_term._messages.clear()
-            for m in all_msgs:
-                self.short_term._messages.append(m)
+            for message in compacted:
+                self.short_term._messages.append(message)
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
                        is_auto: bool = True) -> int:
@@ -571,6 +468,15 @@ class MemoryManager:
         if _contains_pii(question) or _contains_pii(answer):
             question = _mask_pii(question)
             answer = _mask_pii(answer)
+        extract_and_save_memories(
+            llm=self._llm,
+            embed_model=self._embed_model,
+            long_term=self.long_term,
+            session_id=self.session_id,
+            question=question,
+            answer=answer,
+        )
+        return
 
         prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
         response = self._llm.think([{"role": "user", "content": prompt}]) or "{}"
@@ -587,7 +493,7 @@ class MemoryManager:
                 if not isinstance(item, str) or len(item.strip()) < 5:
                     continue
                 item = item.strip()
-                vec = self._embed_model.encode(item, normalize_embeddings=True).tolist()
+                vec = embedding_to_list(self._embed_model.encode(item, normalize_embeddings=True))
                 self.long_term.save(
                     session_id=self.session_id,
                     content=item,

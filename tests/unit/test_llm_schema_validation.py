@@ -6,8 +6,6 @@ including nested objects, arrays, and required fields.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.core.llm import AgentLLM
 
 
@@ -22,15 +20,6 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_base_url = "http://localhost:9999"
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
-
-        schema = {
-            "type": "object",
-            "properties": {
-                "thought": {"type": "string"},
-                "action": {"type": "string"},
-            },
-            "required": ["thought", "action"],
-        }
 
         chunk = MagicMock()
         delta = MagicMock()

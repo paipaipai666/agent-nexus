@@ -1,13 +1,16 @@
 """grep_search tool — ripgrep code search for exact symbol/pattern matching."""
 
+import fnmatch
+import re
 import subprocess
+from pathlib import Path
 
 
 def grep_available() -> bool:
     try:
         subprocess.run(["rg", "--version"], capture_output=True, timeout=2)
         return True
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -42,10 +45,13 @@ def grep_search(
     if not pattern or len(pattern.strip()) < 2:
         return "[grep_search] 搜索模式至少需要2个字符"
 
-    if not grep_available():
-        return "[grep_search] ripgrep (rg) 未安装，此工具不可用"
-
     max_results = max(1, min(50, max_results))
+
+    if not grep_available():
+        fallback = _python_grep_search(pattern, path, glob, max_results, literal)
+        if fallback.startswith("[grep_search] 未找到"):
+            return "[grep_search] ripgrep (rg) 未安装，且 Python fallback " + fallback.removeprefix("[grep_search] ")
+        return "[grep_search] ripgrep (rg) 未安装，已使用 Python fallback\n" + fallback
 
     try:
         args = [
@@ -61,8 +67,8 @@ def grep_search(
             args, capture_output=True, text=True,
             timeout=15, encoding="utf-8", errors="replace",
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "[grep_search] 搜索超时或 rg 不可用"
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return _python_grep_search(pattern, path, glob, max_results, literal)
 
     if result.returncode not in (0, 1) or not result.stdout:
         return f"[grep_search] 未找到匹配 '{pattern}' 的结果"
@@ -87,4 +93,38 @@ def grep_search(
     if not output_lines:
         return f"[grep_search] 未找到匹配 '{pattern}' 的结果"
 
+    return "\n".join(output_lines)
+
+
+def _python_grep_search(
+    pattern: str,
+    path: str,
+    glob: str,
+    max_results: int,
+    literal: bool,
+) -> str:
+    root = Path(path)
+    if not root.exists():
+        return f"[grep_search] 路径不存在: {path}"
+    matcher = None if literal else re.compile(pattern)
+    output_lines = [f"grep 搜索结果 (模式: '{pattern}'):"]
+    files = [root] if root.is_file() else sorted(item for item in root.rglob("*") if item.is_file())
+    for file_path in files:
+        rel = str(file_path if root.is_file() else file_path.relative_to(root))
+        if not fnmatch.fnmatch(file_path.name, glob) and not fnmatch.fnmatch(rel, glob):
+            continue
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
+                for lineno, line in enumerate(handle, start=1):
+                    text = line.rstrip("\n")
+                    matched = pattern in text if literal else matcher.search(text) is not None
+                    if not matched:
+                        continue
+                    output_lines.append(f"  {rel}:{lineno}  {text.strip()}")
+                    if len(output_lines) > max_results:
+                        return "\n".join(output_lines)
+        except OSError:
+            continue
+    if len(output_lines) == 1:
+        return f"[grep_search] 未找到匹配 '{pattern}' 的结果"
     return "\n".join(output_lines)

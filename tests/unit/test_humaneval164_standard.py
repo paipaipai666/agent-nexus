@@ -3,10 +3,6 @@
 Tests alignment with the official HumanEval benchmark format.
 """
 import json
-import os
-import tempfile
-
-import pytest
 
 
 class TestHumanEval164Dataset:
@@ -17,7 +13,12 @@ class TestHumanEval164Dataset:
             "task_id": "HumanEval/0",
             "prompt": "def add(a: int, b: int) -> int:\n    \"\"\"Return a + b.\"\"\"\n",
             "canonical_solution": "    return a + b\n",
-            "test": "def check(candidate):\n    assert candidate(1, 2) == 3\n    assert candidate(-1, 1) == 0\n    assert candidate(0, 0) == 0\n",
+            "test": (
+                "def check(candidate):\n"
+                "    assert candidate(1, 2) == 3\n"
+                "    assert candidate(-1, 1) == 0\n"
+                "    assert candidate(0, 0) == 0\n"
+            ),
             "entry_point": "add",
         },
         {
@@ -31,7 +32,11 @@ class TestHumanEval164Dataset:
             "task_id": "HumanEval/2",
             "prompt": "def is_palindrome(s: str) -> bool:\n    \"\"\"Return True if s is a palindrome.\"\"\"\n",
             "canonical_solution": "    return s == s[::-1]\n",
-            "test": "def check(candidate):\n    assert candidate('aba') == True\n    assert candidate('abc') == False\n",
+            "test": (
+                "def check(candidate):\n"
+                "    assert candidate('aba') == True\n"
+                "    assert candidate('abc') == False\n"
+            ),
             "entry_point": "is_palindrome",
         },
     ]
@@ -83,7 +88,8 @@ class TestHumanEval164Dataset:
     def test_prompt_ends_with_colon(self):
         """All prompts end with function definition colon."""
         for problem in self._SAMPLE_PROBLEMS:
-            assert problem["prompt"].strip().endswith(":") or problem["prompt"].strip().endswith("\"\"\"")
+            prompt = problem["prompt"].strip()
+            assert prompt.endswith(":") or prompt.endswith("\"\"\"")
 
     def test_canonical_solution_indentation(self):
         """Solutions are indented properly."""

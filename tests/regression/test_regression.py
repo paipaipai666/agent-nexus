@@ -7,7 +7,7 @@ def test_config_loading():
 
 
 def test_chromadb_store_and_search(temp_agentnexus_home):
-    from agentnexus.rag.chroma_client import delete_collection, insert_documents, search
+    from agentnexus.storage.chroma import delete_collection, insert_documents, search
 
     delete_collection()
     insert_documents(["Qdrant 是向量数据库", "LangGraph 是多智能体框架"])
@@ -43,8 +43,8 @@ def test_ingestion_clean_text():
 
 
 def test_hybrid_retrieval(temp_agentnexus_home):
-    from agentnexus.rag.chroma_client import delete_collection
     from agentnexus.rag.retriever import build_knowledge_base, search_knowledge_base
+    from agentnexus.storage.chroma import delete_collection
 
     delete_collection()
     build_knowledge_base(

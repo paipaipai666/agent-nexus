@@ -1,15 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+
+def collect_data_globs(*patterns):
+    datas = []
+    for pattern, target in patterns:
+        for path in Path().glob(pattern):
+            if path.is_file():
+                datas.append((str(path), target))
+    return datas
+
+
+datas = collect_data_globs(
+    ('agentnexus/prompts/*.txt', 'agentnexus/prompts'),
+    ('agentnexus/prompts/fragments/*.txt', 'agentnexus/prompts/fragments'),
+    ('agentnexus/skills/builtin/*/workflow.yaml', 'agentnexus/skills/builtin'),
+    ('agentnexus/builtin_extensions/*/plugin.yaml', 'agentnexus/builtin_extensions'),
+    ('agentnexus/builtin_extensions/*/workflow.yaml', 'agentnexus/builtin_extensions'),
+)
+
+
 a = Analysis(
     ['agentnexus/__main__.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('agentnexus/prompts/*.txt', 'agentnexus/prompts'),
-        ('agentnexus/prompts/fragments/*.txt', 'agentnexus/prompts/fragments'),
-        ('agentnexus/skills/builtin/*/workflow.yaml', 'agentnexus/skills/builtin'),
-        ('agentnexus/builtin_extensions/*/plugin.yaml', 'agentnexus/builtin_extensions'),
-        ('agentnexus/builtin_extensions/*/workflow.yaml', 'agentnexus/builtin_extensions'),
-    ],
+    datas=datas,
     hiddenimports=[
         'chromadb',
         'sentence_transformers',
@@ -26,14 +41,49 @@ a = Analysis(
         'yaml',
         'pydantic',
         'pydantic_settings',
+        'agentnexus.agents.json_helpers',
+        'agentnexus.agents.llm_strategy',
+        'agentnexus.agents.prompt_builder',
+        'agentnexus.agents.react_runtime',
+        'agentnexus.agents.tool_runner',
         'agentnexus.app.runtime',
+        'agentnexus.core.pii',
         'agentnexus.extensions.manager',
+        'agentnexus.memory.compaction',
+        'agentnexus.memory.extraction',
+        'agentnexus.memory.offload',
+        'agentnexus.memory.projection',
+        'agentnexus.observability.audit_log',
+        'agentnexus.rag.citations',
+        'agentnexus.rag.embeddings',
+        'agentnexus.rag.kb_service',
+        'agentnexus.rag.loaders',
+        'agentnexus.rag.loaders.common',
+        'agentnexus.rag.loaders.html',
+        'agentnexus.rag.loaders.json_loader',
+        'agentnexus.rag.loaders.markdown',
+        'agentnexus.rag.loaders.office',
+        'agentnexus.rag.loaders.pdf',
+        'agentnexus.rag.loaders.text',
+        'agentnexus.rag.query_expansion',
+        'agentnexus.rag.ranking',
+        'agentnexus.rag.store',
         'agentnexus.skills.profile',
         'agentnexus.skills.registry',
         'agentnexus.skills.runtime',
         'agentnexus.skills.workflow',
         'agentnexus.services.chat',
         'agentnexus.services.skill',
+        'agentnexus.services.turn',
+        'agentnexus.storage.chroma',
+        'agentnexus.tools.mcp_call',
+        'agentnexus.tools.mcp_capabilities',
+        'agentnexus.tools.mcp_connection',
+        'agentnexus.tools.mcp_descriptors',
+        'agentnexus.tools.mcp_health',
+        'agentnexus.tools.mcp_lifecycle',
+        'agentnexus.tools.mcp_result',
+        'agentnexus.tools.mcp_schema',
         'agentnexus.tools.providers',
     ],
     hookspath=[],

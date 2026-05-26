@@ -130,8 +130,8 @@ class TestCodeQuality:
                 \"\"\"Return the difference of a and b.\"\"\"
                 return a - b
         """)
-        import tempfile
         import pathlib
+        import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)

@@ -34,9 +34,9 @@ def _endpoint_mode(base_url: str) -> str:
 
 def _detect_embedding_device() -> str:
     try:
-        from agentnexus.rag.chroma_client import _resolve_embedding_device
+        from agentnexus.rag.embeddings import resolve_embedding_device
 
-        return _resolve_embedding_device()
+        return resolve_embedding_device()
     except Exception:
         return "cpu"
 

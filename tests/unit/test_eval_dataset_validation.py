@@ -51,15 +51,14 @@ class TestEvalDatasetsWellFormed:
     @pytest.mark.parametrize("dataset_path", EVAL_DATASET_FILES, ids=lambda p: p.name)
     def test_dataset_has_at_least_one_sample(self, dataset_path: Path):
         lines = dataset_path.read_text(encoding="utf-8").strip().split("\n")
-        samples = [l for l in lines if l.strip() and '"question"' in l]
+        samples = [line for line in lines if line.strip() and '"question"' in line]
         assert len(samples) >= 1, f"{dataset_path.name} has no sample entries with 'question'"
 
     def test_no_empty_lines_between_entries(self):
         for dataset_path in EVAL_DATASET_FILES:
             lines = dataset_path.read_text(encoding="utf-8").split("\n")
-            empty_line_nums = [i + 1 for i, l in enumerate(lines) if not l.strip()]
-            if empty_line_nums:
-                pass
+            empty_line_nums = [i + 1 for i, line in enumerate(lines[:-1]) if not line.strip()]
+            assert not empty_line_nums, f"{dataset_path.name} has empty lines at {empty_line_nums}"
 
 
 class TestLoadEvalDataset:
@@ -107,7 +106,6 @@ class TestLoadEvalDataset:
         assert len(lines) >= 1
 
     def test_all_samples_have_required_fields(self):
-        required_fields = {"question", "expected_answer"}
         for dataset_path in EVAL_DATASET_FILES:
             lines = dataset_path.read_text(encoding="utf-8").strip().split("\n")
             for i, line in enumerate(lines, 1):

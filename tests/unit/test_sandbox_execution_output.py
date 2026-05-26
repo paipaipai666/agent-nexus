@@ -5,8 +5,6 @@ captures stderr, and handles multi-file scenarios.
 """
 from unittest.mock import patch
 
-import pytest
-
 
 class TestSandboxExecutionOutput:
     """Real sandbox execution output correctness."""

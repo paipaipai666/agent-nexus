@@ -6,9 +6,9 @@ from pathlib import Path
 from agentnexus.core.judge_llm import get_judge_llm
 from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
-from agentnexus.rag.chroma_client import delete_collection, search
 from agentnexus.rag.ingestion import ChunkStrategy, chunk_text, ingest_document
 from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base, result_display_text
+from agentnexus.storage.chroma import delete_collection, search
 
 
 @dataclass

@@ -65,7 +65,7 @@ class TestChatService:
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         events = list(service.stream_events(run.id))
-        assert len(events) == 3
+        assert len(events) == 4
         assert events[0].type == "message_started"
         assert events[0].payload["text"] == "hello"
         assert events[0].run_id == run.id
@@ -74,6 +74,8 @@ class TestChatService:
         assert events[1].payload["text"] == "mock answer"
         assert events[2].type == "run_finished"
         assert events[2].payload["answer"] == "mock answer"
+        assert events[3].type == "run_persisted"
+        assert events[3].payload["status"] == "finished"
 
     def test_send_message_agent_returns_object_with_answer_attr(self):
         agent = MagicMock()
@@ -88,12 +90,20 @@ class TestChatService:
     def test_send_message_agent_returns_none_answer(self):
         agent = MagicMock()
         agent.run.return_value = MagicMock(answer=None)
-        service = ChatService(agent=agent)
+        memory = MagicMock()
+        memory.short_term.to_json.return_value = '{"messages":[]}'
+        version = MagicMock()
+        service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         events = list(service.stream_events(run.id))
         assert events[1].payload["text"] == ""
         assert events[2].payload["answer"] == ""
+        snapshot = service.get_run_snapshot(run.id)
+        assert snapshot.status == "empty_answer"
+        assert "Agent 未能得出最终答案" in snapshot.answer
+        memory.append.assert_called_once_with("assistant", snapshot.answer)
+        version.commit.assert_called_once()
 
     def test_stream_events_unknown_run_id_raises_key_error(self):
         service = ChatService(agent=MagicMock())
@@ -108,13 +118,14 @@ class TestChatService:
         run = service.send_message(session.id, "hello")
         # Consume events that are already queued
         events_before = list(service.stream_events(run.id))
-        assert len(events_before) == 3
+        assert len(events_before) == 4
         # Cancel and read new events
         service.cancel_run(run.id)
         events_after = list(service.stream_events(run.id))
-        assert len(events_after) == 1
-        assert events_after[0].type == "run_failed"
+        assert len(events_after) == 2
+        assert events_after[0].type == "run_interrupted"
         assert events_after[0].payload["error"] == "cancelled"
+        assert events_after[1].type == "run_persisted"
 
     def test_cancel_run_unknown_run_id_is_noop(self):
         service = ChatService(agent=MagicMock())
@@ -179,16 +190,38 @@ class TestChatService:
     def test_agent_exception_emits_run_failed_then_none(self):
         agent = MagicMock()
         agent.run.side_effect = RuntimeError("something broke")
-        service = ChatService(agent=agent)
+        memory = MagicMock()
+        memory.short_term.to_json.return_value = '{"messages":[]}'
+        version = MagicMock()
+        service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
         session = service.start_session()
         with pytest.raises(RuntimeError, match="something broke"):
             service.send_message(session.id, "hello")
         run_id = next(iter(service._run_events))
         events = list(service.stream_events(run_id))
-        assert len(events) == 2
+        assert len(events) == 3
         assert events[0].type == "message_started"
         assert events[1].type == "run_failed"
         assert events[1].payload["error"] == "something broke"
+        assert events[2].type == "run_persisted"
+        snapshot = service.get_run_snapshot(run_id)
+        assert snapshot.status == "failed"
+        assert "something broke" in snapshot.answer
+        memory.append.assert_called_once_with("assistant", snapshot.answer)
+        version.commit.assert_called_once()
+
+    def test_cancel_run_sets_cancel_checker(self):
+        service = ChatService(agent=MagicMock())
+        session = service.start_session()
+        run, _events, turn = service.begin_turn(session.id, "hello")
+
+        assert turn.cancel_checker() is False
+        service.cancel_run(run.id, reason="user stopped")
+
+        snapshot = service.get_run_snapshot(run.id)
+        assert snapshot.status == "interrupted"
+        assert turn.cancel_checker() is True
+        assert "user stopped" in snapshot.answer
 
     def test_multiple_sessions_independent(self):
         agent = MagicMock()
@@ -264,6 +297,7 @@ class TestChatService:
             "workflow_step",
             "message_delta",
             "run_finished",
+            "run_persisted",
         ]
         workflow_event = events[1]
         assert workflow_event.payload["status"] == "ok"
@@ -272,6 +306,38 @@ class TestChatService:
         sent_text = agent.run.call_args[0][0]
         assert "Workflow Runtime Context" in sent_text
         assert "Inspect." in sent_text
+        snapshot = service.get_run_snapshot(run.id)
+        assert any("workflow:" in item for item in snapshot.journal)
+
+    def test_send_message_records_agent_events_in_turn_journal(self):
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
+
+        agent = MagicMock()
+
+        def run(_text, memory_manager=None):
+            agent._on_event(
+                ReActEvent(ReActEventType.TOOL_START, {"name": "web_search", "arguments": {"query": "x"}}),
+                None,
+                None,
+            )
+            agent._on_event(
+                ReActEvent(ReActEventType.TOOL_DONE, {"name": "web_search", "result": "result"}),
+                None,
+                None,
+            )
+            return "answer"
+
+        agent.run.side_effect = run
+        service = ChatService(agent=agent)
+        session = service.start_session()
+
+        run_handle = service.send_message(session.id, "hello")
+
+        snapshot = service.get_run_snapshot(run_handle.id)
+        assert any("tool start: web_search" in item for item in snapshot.journal)
+        assert any("tool done: web_search" in item for item in snapshot.journal)
+        event_types = [event.type for event in service.stream_events(run_handle.id)]
+        assert "turn_journal" in event_types
 
     def test_send_message_applies_session_skill(self):
         from agentnexus.services.skill import SkillService

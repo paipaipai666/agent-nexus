@@ -81,11 +81,16 @@ class SkillRegistry:
     def from_settings(cls, settings: Settings) -> "SkillRegistry":
         home = Path(os.environ.get("AGENTNEXUS_HOME", Path.home() / ".agentnexus"))
         roots: list[Path | str] = [home / "skills"]
-        roots.extend(settings.extensions_dirs or [])
+        extensions_dirs = getattr(settings, "extensions_dirs", [])
+        if isinstance(extensions_dirs, (list, tuple)):
+            roots.extend(extensions_dirs)
         builtin = Path(__file__).parent / "builtin"
         if builtin.exists():
             roots.append(builtin)
-        return cls(roots, default_namespace=settings.skills_default_namespace)
+        default_namespace = getattr(settings, "skills_default_namespace", "default")
+        if not isinstance(default_namespace, str):
+            default_namespace = "default"
+        return cls(roots, default_namespace=default_namespace)
 
     def discover(self) -> list[SkillEntry]:
         self.errors = []

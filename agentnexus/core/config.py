@@ -75,6 +75,79 @@ class MCPServerConfig(BaseModel):
         return self
 
 
+class LLMSettings(BaseModel):
+    api_key: SecretStr
+    model_id: str
+    base_url: str
+    timeout: int
+    model_tool_calling: bool | None
+    model_json_mode: bool | None
+    model_thinking: bool | None
+    model_thinking_budget: int
+    judge_model_id: str
+    judge_api_key: SecretStr
+    judge_base_url: str
+
+
+class RAGSettings(BaseModel):
+    enable_contextual_retrieval: bool
+    enable_query_rewrite: bool
+    enable_multi_query: bool
+    enable_hyde: bool
+    hyde_question_only: bool
+    enable_context_expansion: bool
+    multi_query_count: int
+    context_window: int
+    context_max_chunks: int
+    embedding_model: str
+    reranker_model: str
+    chroma_persist_dir: str
+    catalog_db_path: str
+    default_namespace: str
+    collection_prefix: str
+
+
+class MemorySettings(BaseModel):
+    db_path: str
+    max_memories: int
+    ttl_days: int
+    autocompact_buffer_tokens: int
+    large_result_threshold: int
+    offload_enabled: bool
+    snip_enabled: bool
+    time_microcompact_interval: int
+    post_compact_max_files: int
+    post_compact_token_per_file: int
+    post_compact_token_budget: int
+    transcript_enabled: bool
+
+
+class RuntimeSettings(BaseModel):
+    max_agent_steps: int
+    traces_dir: str
+    trace_retention_days: int
+    shell_enabled: bool
+    shell_confirm: bool
+    shell_timeout: int
+    code_execution_backend: str
+    code_execution_timeout: int
+    code_execution_memory_mb: int
+    code_execution_docker_image: str
+    code_execution_allow_unsafe_local: bool
+    shell_execution_backend: str
+    shell_execution_memory_mb: int
+    shell_execution_docker_image: str
+    file_read_max_mb: float
+    shell_blacklist: list[str]
+    runtime_profile: str
+
+
+class MCPSettings(BaseModel):
+    enabled: bool
+    startup_timeout: int
+    servers: list[MCPServerConfig]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
 
@@ -184,6 +257,89 @@ class Settings(BaseSettings):
             raise ValueError(f"Unsupported shell execution backend: {value}")
         return normalized
 
+    @property
+    def llm(self) -> LLMSettings:
+        return LLMSettings(
+            api_key=self.llm_api_key,
+            model_id=self.llm_model_id,
+            base_url=self.llm_base_url,
+            timeout=self.llm_timeout,
+            model_tool_calling=self.model_tool_calling,
+            model_json_mode=self.model_json_mode,
+            model_thinking=self.model_thinking,
+            model_thinking_budget=self.model_thinking_budget,
+            judge_model_id=self.judge_model_id,
+            judge_api_key=self.judge_api_key,
+            judge_base_url=self.judge_base_url,
+        )
+
+    @property
+    def rag(self) -> RAGSettings:
+        return RAGSettings(
+            enable_contextual_retrieval=self.enable_contextual_retrieval,
+            enable_query_rewrite=self.enable_query_rewrite,
+            enable_multi_query=self.enable_multi_query,
+            enable_hyde=self.enable_hyde,
+            hyde_question_only=self.hyde_question_only,
+            enable_context_expansion=self.enable_context_expansion,
+            multi_query_count=self.rag_multi_query_count,
+            context_window=self.rag_context_window,
+            context_max_chunks=self.rag_context_max_chunks,
+            embedding_model=self.embedding_model,
+            reranker_model=self.reranker_model,
+            chroma_persist_dir=self.chroma_persist_dir,
+            catalog_db_path=self.rag_catalog_db_path,
+            default_namespace=self.rag_default_namespace,
+            collection_prefix=self.rag_collection_prefix,
+        )
+
+    @property
+    def memory(self) -> MemorySettings:
+        return MemorySettings(
+            db_path=self.memory_db_path,
+            max_memories=self.max_memories,
+            ttl_days=self.memory_ttl_days,
+            autocompact_buffer_tokens=self.autocompact_buffer_tokens,
+            large_result_threshold=self.large_result_threshold,
+            offload_enabled=self.offload_enabled,
+            snip_enabled=self.snip_enabled,
+            time_microcompact_interval=self.time_microcompact_interval,
+            post_compact_max_files=self.post_compact_max_files,
+            post_compact_token_per_file=self.post_compact_token_per_file,
+            post_compact_token_budget=self.post_compact_token_budget,
+            transcript_enabled=self.transcript_enabled,
+        )
+
+    @property
+    def mcp(self) -> MCPSettings:
+        return MCPSettings(
+            enabled=self.mcp_enabled,
+            startup_timeout=self.mcp_startup_timeout,
+            servers=self.mcp_servers,
+        )
+
+    @property
+    def runtime(self) -> RuntimeSettings:
+        return RuntimeSettings(
+            max_agent_steps=self.max_agent_steps,
+            traces_dir=self.traces_dir,
+            trace_retention_days=self.trace_retention_days,
+            shell_enabled=self.shell_enabled,
+            shell_confirm=self.shell_confirm,
+            shell_timeout=self.shell_timeout,
+            code_execution_backend=self.code_execution_backend,
+            code_execution_timeout=self.code_execution_timeout,
+            code_execution_memory_mb=self.code_execution_memory_mb,
+            code_execution_docker_image=self.code_execution_docker_image,
+            code_execution_allow_unsafe_local=self.code_execution_allow_unsafe_local,
+            shell_execution_backend=self.shell_execution_backend,
+            shell_execution_memory_mb=self.shell_execution_memory_mb,
+            shell_execution_docker_image=self.shell_execution_docker_image,
+            file_read_max_mb=self.file_read_max_mb,
+            shell_blacklist=self.shell_blacklist,
+            runtime_profile=self.runtime_profile,
+        )
+
 
 class AgentNexusDumper(yaml.SafeDumper):
     pass
@@ -202,6 +358,10 @@ def _config_dir() -> Path:
     d = Path(os.environ.get("AGENTNEXUS_HOME", Path.home() / ".agentnexus"))
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def get_config_dir() -> Path:
+    return _config_dir()
 
 
 def _set_restrictive_permissions(path: Path) -> None:
@@ -241,6 +401,10 @@ def _write_yaml_config(data: dict) -> Path:
         raise
 
 
+def write_config_yaml(data: dict) -> Path:
+    return _write_yaml_config(data)
+
+
 def _default_paths() -> dict:
     d = _config_dir()
     return {
@@ -257,6 +421,10 @@ def _load_yaml() -> dict:
         with open(yaml_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
+def load_config_yaml() -> dict:
+    return _load_yaml()
 
 
 _settings_cache: Settings | None = None

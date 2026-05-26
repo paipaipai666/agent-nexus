@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 BUILTIN_REVIEW_DIR = (
     Path(__file__).resolve().parents[2]
     / "agentnexus" / "skills" / "builtin" / "review"
@@ -103,10 +102,13 @@ class TestRouterEndToEnd:
 
     @pytest.fixture
     def skill_entry(self, tmp_path) -> list:
-        from agentnexus.skills.workflow import (
-            PromptProfile, ToolPolicy, Workflow, WorkflowStep,
-        )
         from agentnexus.skills.registry import SkillEntry
+        from agentnexus.skills.workflow import (
+            PromptProfile,
+            ToolPolicy,
+            Workflow,
+            WorkflowStep,
+        )
         workflow = Workflow(
             id="test-router",
             version="1.0.0",
@@ -188,9 +190,9 @@ class TestSkillRuntime:
 class TestSkillServiceCore:
 
     def test_skill_service_state(self):
+        from agentnexus.services.skill import SkillService
         from agentnexus.skills.registry import SkillRegistry
         from agentnexus.skills.router import SkillRouter
-        from agentnexus.services.skill import SkillService
         registry = SkillRegistry(roots=[])
         router = SkillRouter()
         service = SkillService(registry=registry, router=router)

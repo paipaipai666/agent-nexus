@@ -2,12 +2,10 @@
 
 Validates that each tool returns the expected format for success/failure.
 """
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentnexus.tools.tool_executor import ToolExecutor
-from agentnexus.tools.registry import RiskLevel, ToolMeta
 
 
 class TestToolReturnFormats:

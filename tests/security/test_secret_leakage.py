@@ -14,8 +14,8 @@ from agentnexus.core import config as agentnexus_config
 from agentnexus.core.config import (
     AgentNexusDumper,
     _dump_secret_str,
-    _write_yaml_config,
     get_settings,
+    write_config_yaml,
 )
 from agentnexus.observability.tracer import _truncate, _truncate_dict
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
@@ -104,7 +104,7 @@ class TestConfigSecretLeakage:
             "tavily_api_key": SecretStr("tavily-key-abcde"),
             "e2b_api_key": SecretStr("e2b-key-fghij"),
         }
-        config_path = _write_yaml_config(config_data)
+        config_path = write_config_yaml(config_data)
 
         with open(config_path, "r", encoding="utf-8") as f:
             raw = f.read()

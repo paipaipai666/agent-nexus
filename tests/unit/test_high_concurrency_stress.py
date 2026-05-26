@@ -6,9 +6,7 @@ Validates resource scheduling and context isolation under high concurrency
 import concurrent.futures
 import threading
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.observability.tracer import TraceContext
@@ -120,8 +118,9 @@ class TestHighConcurrencyStress:
     @patch("agentnexus.memory.manager.MemoryManager.maybe_compact")
     def test_mixed_operations_high_concurrency(self, mock_compact):
         """Mixed append, get_all, and mark_api_call under high concurrency."""
-        from agentnexus.memory.manager import MemoryManager
         from unittest.mock import patch
+
+        from agentnexus.memory.manager import MemoryManager
 
         with patch("agentnexus.memory.manager.get_embedding_model") as mock_emb:
             mock_emb.return_value.encode.return_value.tolist.return_value = [0.1]

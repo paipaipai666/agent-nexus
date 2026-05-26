@@ -3,84 +3,37 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import re
 import threading
 import time
-from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
 import httpx
 
 from agentnexus.core.config import MCPServerConfig
+from agentnexus.tools import (
+    mcp_call,
+    mcp_capabilities,
+    mcp_connection,
+    mcp_descriptors,
+    mcp_health,
+    mcp_lifecycle,
+    mcp_result,
+)
+from agentnexus.tools.mcp_schema import (
+    MCPPromptDescriptor,
+    MCPResourceDescriptor,
+    MCPServerState,
+    MCPToolDescriptor,
+    ServerRuntime,
+)
 from agentnexus.tools.tool_executor import ToolExecutor
 
 _NAME_SANITIZER = re.compile(r"[^a-zA-Z0-9_]+")
 
 
-class MCPServerState(StrEnum):
-    DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    RECONNECTING = "reconnecting"
-    CLOSED = "closed"
-
-
-@dataclass
-class MCPToolDescriptor:
-    local_name: str
-    remote_name: str
-    server_name: str
-    description: str
-    param_schema: dict
-    allowed_agents: list[str]
-    risk_level: str
-    require_hitl: bool
-    timeout_sec: int
-    rate_limit_per_min: int
-    capability: str = "tool"
-
-
-@dataclass
-class MCPResourceDescriptor:
-    name: str
-    uri: str
-    server_name: str
-    description: str = ""
-    mime_type: str = ""
-
-
-@dataclass
-class MCPPromptDescriptor:
-    name: str
-    server_name: str
-    description: str = ""
-    arguments: list[dict] = field(default_factory=list)
-
-
-@dataclass
-class _ServerRuntime:
-    config: MCPServerConfig
-    session: Any
-    exit_stack: AsyncExitStack
-    tool_names: list[str] = field(default_factory=list)
-    resource_tool_names: list[str] = field(default_factory=list)
-    prompt_tool_names: list[str] = field(default_factory=list)
-    resource_descriptors: list[MCPResourceDescriptor] = field(default_factory=list)
-    resource_templates: list[dict] = field(default_factory=list)
-    prompt_descriptors: list[MCPPromptDescriptor] = field(default_factory=list)
-    call_lock: asyncio.Lock | None = None
-    semaphore: asyncio.Semaphore | None = None
-    state: MCPServerState = MCPServerState.HEALTHY
-    last_ping_at: float | None = None
-    consecutive_failures: int = 0
-    reconnect_attempts: int = 0
-    next_reconnect_at: float | None = None
-    last_failure: str | None = None
+_ServerRuntime = ServerRuntime
 
 
 class MCPToolManager:
@@ -356,9 +309,7 @@ class MCPToolManager:
                     continue
                 try:
                     await asyncio.wait_for(runtime.session.send_ping(), timeout=min(server.timeout_sec, 10))
-                    runtime.last_ping_at = time.time()
-                    runtime.consecutive_failures = 0
-                    runtime.last_failure = None
+                    mcp_health.mark_runtime_healthy(runtime)
                     self._failures.pop(server.name, None)
                 except Exception as exc:
                     runtime.state = MCPServerState.DEGRADED
@@ -372,14 +323,12 @@ class MCPToolManager:
 
     async def _connect_all(self) -> None:
         self._ensure_sdk_available()
-        for server in self._servers:
-            self._server_states[server.name] = MCPServerState.CONNECTING
-            try:
-                await self._connect_server(server)
-                self._failures.pop(server.name, None)
-            except Exception as exc:
-                self._server_states[server.name] = MCPServerState.DISCONNECTED
-                self._failures[server.name] = str(exc)
+        await mcp_lifecycle.connect_all(
+            self._servers,
+            connect_server=self._connect_server,
+            server_states=self._server_states,
+            failures=self._failures,
+        )
 
     async def _retry_failed_async(self, server_name: str | None = None) -> dict:
         self._ensure_sdk_available()
@@ -453,151 +402,62 @@ class MCPToolManager:
         return None
 
     async def _connect_server(self, config: MCPServerConfig) -> None:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-        from mcp.client.streamable_http import streamable_http_client
-
-        stack = AsyncExitStack()
-        self._server_states[config.name] = MCPServerState.CONNECTING
-        try:
-            if config.transport == "stdio":
-                server_params = StdioServerParameters(
-                    command=config.command,
-                    args=config.args,
-                    env=config.env or None,
-                    cwd=config.cwd,
-                )
-                read_stream, write_stream = await stack.enter_async_context(stdio_client(server_params))
-            else:
-                http_client = await stack.enter_async_context(
-                    httpx.AsyncClient(headers=config.headers or None, timeout=config.timeout_sec)
-                )
-                kwargs = self._build_http_client_kwargs(streamable_http_client, config, http_client)
-                transport_result = await stack.enter_async_context(streamable_http_client(**kwargs))
-                if len(transport_result) >= 2:
-                    read_stream, write_stream = transport_result[0], transport_result[1]
-                else:
-                    raise RuntimeError(f"Unexpected MCP HTTP transport result: {transport_result}")
-
-            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-            await asyncio.wait_for(session.initialize(), timeout=self._startup_timeout)
-            runtime = _ServerRuntime(
-                config=config,
-                session=session,
-                exit_stack=stack,
-                semaphore=asyncio.Semaphore(config.max_concurrency_per_server),
-                call_lock=asyncio.Lock(),
-                state=MCPServerState.HEALTHY,
-                last_ping_at=time.time(),
-            )
-            self._server_runtimes[config.name] = runtime
-            self._server_states[config.name] = MCPServerState.HEALTHY
-            await self._import_server_capabilities(runtime)
-            self._failures.pop(config.name, None)
-        except Exception:
-            self._server_runtimes.pop(config.name, None)
-            self._clear_server_descriptors(config.name)
-            await stack.aclose()
-            self._server_states[config.name] = MCPServerState.DISCONNECTED
-            raise
+        await mcp_lifecycle.connect_server(
+            config,
+            startup_timeout=self._startup_timeout,
+            server_runtimes=self._server_runtimes,
+            server_states=self._server_states,
+            failures=self._failures,
+            import_capabilities=self._import_server_capabilities,
+            clear_descriptors=self._clear_server_descriptors,
+        )
 
     async def _import_server_capabilities(self, runtime: _ServerRuntime) -> None:
-        config = runtime.config
-        self._clear_server_descriptors(config.name)
-        if config.import_tools:
-            tools_result = await asyncio.wait_for(runtime.session.list_tools(), timeout=self._startup_timeout)
-            for tool in getattr(tools_result, "tools", []) or []:
-                descriptor = self._build_descriptor(config, tool)
-                if descriptor is None:
-                    continue
-                self._tool_descriptors[descriptor.local_name] = descriptor
-                runtime.tool_names.append(descriptor.local_name)
-        if config.import_resources:
-            await self._import_resources(runtime)
-        if config.import_prompts:
-            await self._import_prompts(runtime)
+        await mcp_capabilities.import_server_capabilities(
+            runtime,
+            startup_timeout=self._startup_timeout,
+            tool_descriptors=self._tool_descriptors,
+            resource_descriptors=self._resource_descriptors,
+            resource_template_descriptors=self._resource_template_descriptors,
+            prompt_descriptors=self._prompt_descriptors,
+            failures=self._failures,
+            clear_descriptors=self._clear_server_descriptors,
+            build_descriptor=self._build_descriptor,
+            ensure_unique_name=self._ensure_unique_name,
+        )
 
     async def _import_resources(self, runtime: _ServerRuntime) -> None:
-        config = runtime.config
-        if not hasattr(runtime.session, "list_resources") and not hasattr(runtime.session, "list_resource_templates"):
-            return
-        resources: list[MCPResourceDescriptor] = []
-        templates: list[dict] = []
-        listed_any = False
-        try:
-            result = await asyncio.wait_for(runtime.session.list_resources(), timeout=self._startup_timeout)
-            for item in getattr(result, "resources", []) or []:
-                resources.append(_resource_descriptor_from_sdk(config.name, item))
-            listed_any = True
-        except Exception as exc:
-            self._failures[config.name] = f"list_resources: {exc}"
-        try:
-            result = await asyncio.wait_for(runtime.session.list_resource_templates(), timeout=self._startup_timeout)
-            for item in getattr(result, "resourceTemplates", None) or getattr(result, "resource_templates", []) or []:
-                templates.append(_dump_sdk_object(item))
-            listed_any = True
-        except Exception as exc:
-            if "list_resources" not in self._failures.get(config.name, ""):
-                self._failures[config.name] = f"list_resource_templates: {exc}"
-        self._resource_descriptors[config.name] = resources
-        self._resource_template_descriptors[config.name] = templates
-        runtime.resource_descriptors = resources
-        runtime.resource_templates = templates
-        if not listed_any or not hasattr(runtime.session, "read_resource"):
-            return
-        for descriptor in self._build_resource_tool_descriptors(config):
-            self._tool_descriptors[descriptor.local_name] = descriptor
-            runtime.resource_tool_names.append(descriptor.local_name)
+        await mcp_capabilities.import_resources(
+            runtime,
+            startup_timeout=self._startup_timeout,
+            tool_descriptors=self._tool_descriptors,
+            resource_descriptors=self._resource_descriptors,
+            resource_template_descriptors=self._resource_template_descriptors,
+            failures=self._failures,
+            ensure_unique_name=self._ensure_unique_name,
+        )
 
     async def _import_prompts(self, runtime: _ServerRuntime) -> None:
-        config = runtime.config
-        if not hasattr(runtime.session, "list_prompts"):
-            return
-        prompts: list[MCPPromptDescriptor] = []
-        listed = False
-        try:
-            result = await asyncio.wait_for(runtime.session.list_prompts(), timeout=self._startup_timeout)
-            for item in getattr(result, "prompts", []) or []:
-                prompts.append(_prompt_descriptor_from_sdk(config.name, item))
-            listed = True
-        except Exception as exc:
-            self._failures[config.name] = f"list_prompts: {exc}"
-        self._prompt_descriptors[config.name] = prompts
-        runtime.prompt_descriptors = prompts
-        if not listed or not hasattr(runtime.session, "get_prompt"):
-            return
-        for descriptor in self._build_prompt_tool_descriptors(config):
-            self._tool_descriptors[descriptor.local_name] = descriptor
-            runtime.prompt_tool_names.append(descriptor.local_name)
+        await mcp_capabilities.import_prompts(
+            runtime,
+            startup_timeout=self._startup_timeout,
+            tool_descriptors=self._tool_descriptors,
+            prompt_descriptors=self._prompt_descriptors,
+            failures=self._failures,
+            ensure_unique_name=self._ensure_unique_name,
+        )
 
     def _build_resource_tool_descriptors(self, config: MCPServerConfig) -> list[MCPToolDescriptor]:
-        prefix = _sanitize_name(config.tool_prefix or config.name)
-        return [
-            self._internal_descriptor(config, f"mcp_{prefix}__list_resources", "list_resources",
-                                      f"[MCP:{config.name}] List available MCP resources.",
-                                      {}, "resource"),
-            self._internal_descriptor(config, f"mcp_{prefix}__read_resource", "read_resource",
-                                      f"[MCP:{config.name}] Read an MCP resource by uri.",
-                                      {"uri": {"type": "string"}}, "resource", ["uri"]),
-            self._internal_descriptor(config, f"mcp_{prefix}__list_resource_templates", "list_resource_templates",
-                                      f"[MCP:{config.name}] List MCP resource templates.",
-                                      {}, "resource"),
-        ]
+        return mcp_capabilities.build_resource_tool_descriptors(
+            config,
+            ensure_unique_name=self._ensure_unique_name,
+        )
 
     def _build_prompt_tool_descriptors(self, config: MCPServerConfig) -> list[MCPToolDescriptor]:
-        prefix = _sanitize_name(config.tool_prefix or config.name)
-        return [
-            self._internal_descriptor(config, f"mcp_{prefix}__list_prompts", "list_prompts",
-                                      f"[MCP:{config.name}] List available MCP prompts.",
-                                      {}, "prompt"),
-            self._internal_descriptor(config, f"mcp_{prefix}__get_prompt", "get_prompt",
-                                      f"[MCP:{config.name}] Get an MCP prompt by name and optional arguments.",
-                                      {
-                                          "name": {"type": "string"},
-                                          "arguments": {"type": "object", "additionalProperties": {"type": "string"}},
-                                      },
-                                      "prompt", ["name"]),
-        ]
+        return mcp_capabilities.build_prompt_tool_descriptors(
+            config,
+            ensure_unique_name=self._ensure_unique_name,
+        )
 
     def _internal_descriptor(
         self,
@@ -609,31 +469,19 @@ class MCPToolManager:
         capability: str,
         required: list[str] | None = None,
     ) -> MCPToolDescriptor:
-        return MCPToolDescriptor(
-            local_name=self._ensure_unique_name(local_name),
-            remote_name=remote_name,
-            server_name=config.name,
-            description=description,
-            param_schema={"type": "object", "properties": properties, "required": required or []},
-            allowed_agents=list(config.allowed_agents),
-            risk_level=config.risk_level,
-            require_hitl=config.require_hitl,
-            timeout_sec=config.timeout_sec,
-            rate_limit_per_min=config.rate_limit_per_min,
-            capability=capability,
+        return mcp_capabilities._internal_descriptor(
+            config,
+            self._ensure_unique_name(local_name),
+            remote_name,
+            description,
+            properties,
+            capability,
+            required,
         )
 
     @staticmethod
     def _build_http_client_kwargs(factory, config: MCPServerConfig, http_client: httpx.AsyncClient) -> dict:
-        params = inspect.signature(factory).parameters
-        kwargs = {}
-        if "url" in params:
-            kwargs["url"] = config.url
-        else:
-            kwargs["server_url"] = config.url
-        if "http_client" in params:
-            kwargs["http_client"] = http_client
-        return kwargs
+        return mcp_connection.build_http_client_kwargs(factory, config, http_client)
 
     def _build_descriptor(self, config: MCPServerConfig, tool: Any) -> MCPToolDescriptor | None:
         remote_name = getattr(tool, "name", None)
@@ -642,32 +490,14 @@ class MCPToolManager:
         local_name = self._build_local_tool_name(config, remote_name)
         if not self._should_import_tool(config, remote_name, local_name):
             return None
-
-        description = (getattr(tool, "description", "") or "").strip()
-        if description:
-            description = f"[MCP:{config.name}] {description}"
-        else:
-            description = f"[MCP:{config.name}] 远端工具 {remote_name}"
-
-        return MCPToolDescriptor(
+        return mcp_descriptors.build_tool_descriptor(
+            config,
+            tool,
             local_name=self._ensure_unique_name(local_name),
-            remote_name=remote_name,
-            server_name=config.name,
-            description=description,
-            param_schema=self._normalize_param_schema(
-                getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None)
-            ),
-            allowed_agents=list(config.allowed_agents),
-            risk_level=config.risk_level,
-            require_hitl=config.require_hitl,
-            timeout_sec=config.timeout_sec,
-            rate_limit_per_min=config.rate_limit_per_min,
         )
 
     def _build_local_tool_name(self, config: MCPServerConfig, remote_name: str) -> str:
-        server_part = _sanitize_name(config.tool_prefix or config.name)
-        tool_part = _sanitize_name(remote_name)
-        return f"mcp_{server_part}__{tool_part}"
+        return mcp_descriptors.build_local_tool_name(config, remote_name)
 
     def _ensure_unique_name(self, local_name: str) -> str:
         if local_name not in self._tool_descriptors:
@@ -679,107 +509,57 @@ class MCPToolManager:
 
     @staticmethod
     def _normalize_param_schema(schema: dict | None) -> dict:
-        if not isinstance(schema, dict):
-            return {"type": "object", "properties": {}}
-        normalized = dict(schema)
-        normalized.setdefault("type", "object")
-        normalized.setdefault("properties", {})
-        return normalized
+        return mcp_descriptors.normalize_param_schema(schema)
 
     @staticmethod
     def _should_import_tool(config: MCPServerConfig, remote_name: str, local_name: str) -> bool:
-        includes = set(config.include_tools)
-        excludes = set(config.exclude_tools)
-        if includes and remote_name not in includes and local_name not in includes:
-            return False
-        if remote_name in excludes or local_name in excludes:
-            return False
-        return True
+        return mcp_descriptors.should_import_tool(config, remote_name, local_name)
 
     async def _call_descriptor_async(self, descriptor: MCPToolDescriptor, params: dict) -> str:
         runtime = self._server_runtimes.get(descriptor.server_name)
         state = self._runtime_state(descriptor.server_name, runtime)
         if runtime is None or state not in {MCPServerState.HEALTHY, MCPServerState.DEGRADED}:
             raise RuntimeError(f"MCP server '{descriptor.server_name}' is not connected")
-        limiter = getattr(runtime, "semaphore", None) or getattr(runtime, "call_lock", None)
-        if limiter is None:
-            limiter = asyncio.Semaphore(1)
-            try:
-                runtime.semaphore = limiter
-            except Exception:
-                pass
-        async with limiter:
-            try:
-                if descriptor.capability == "tool":
-                    result = await asyncio.wait_for(
-                        runtime.session.call_tool(descriptor.remote_name, arguments=params),
-                        timeout=descriptor.timeout_sec,
-                    )
-                    text = _normalize_tool_result(result)
-                    if getattr(result, "isError", False) or getattr(result, "is_error", False):
-                        raise RuntimeError(text or f"MCP tool '{descriptor.remote_name}' returned an error")
-                    return text
-                if descriptor.remote_name == "list_resources":
-                    resources = self._resource_descriptors.get(descriptor.server_name, [])
-                    return _json_text([item.__dict__ for item in resources])
-                if descriptor.remote_name == "list_resource_templates":
-                    return _json_text(self._resource_template_descriptors.get(descriptor.server_name, []))
-                if descriptor.remote_name == "read_resource":
-                    result = await asyncio.wait_for(runtime.session.read_resource(params["uri"]),
-                                                    timeout=descriptor.timeout_sec)
-                    return _normalize_resource_result(result)
-                if descriptor.remote_name == "list_prompts":
-                    prompts = self._prompt_descriptors.get(descriptor.server_name, [])
-                    return _json_text([item.__dict__ for item in prompts])
-                if descriptor.remote_name == "get_prompt":
-                    result = await asyncio.wait_for(
-                        runtime.session.get_prompt(params["name"], arguments=params.get("arguments") or None),
-                        timeout=descriptor.timeout_sec,
-                    )
-                    return _normalize_prompt_result(result)
-                raise RuntimeError(f"Unsupported MCP capability: {descriptor.remote_name}")
-            except Exception as exc:
-                await self._mark_runtime_failure(runtime, exc)
-                raise
+        try:
+            return await mcp_call.run_with_limiter(
+                runtime,
+                lambda: mcp_call.call_descriptor(
+                    runtime,
+                    descriptor,
+                    params,
+                    resource_descriptors=self._resource_descriptors,
+                    resource_template_descriptors=self._resource_template_descriptors,
+                    prompt_descriptors=self._prompt_descriptors,
+                ),
+            )
+        except Exception as exc:
+            await self._mark_runtime_failure(runtime, exc)
+            raise
 
     async def _call_tool_async(self, descriptor: MCPToolDescriptor, params: dict) -> str:
         return await self._call_descriptor_async(descriptor, params)
 
     async def _mark_runtime_failure(self, runtime: _ServerRuntime, exc: Exception) -> None:
-        server_name = getattr(getattr(runtime, "config", None), "name", None)
-        try:
-            runtime.consecutive_failures = getattr(runtime, "consecutive_failures", 0) + 1
-            runtime.last_failure = str(exc)
-            runtime.state = MCPServerState.DEGRADED
-        except Exception:
-            pass
+        server_name, failure = mcp_health.mark_runtime_failure(runtime, exc)
         if server_name is None:
             return
         self._server_states[server_name] = MCPServerState.DEGRADED
-        self._failures[server_name] = str(exc)
+        self._failures[server_name] = failure
         await self._schedule_reconnect(runtime.config, runtime)
 
     async def _schedule_reconnect(self, server: MCPServerConfig, runtime: _ServerRuntime | None) -> None:
-        if runtime is None:
-            return
-        attempts = runtime.reconnect_attempts
-        if server.reconnect_max_attempts and attempts >= server.reconnect_max_attempts:
-            return
-        delay = min(server.reconnect_max_delay_sec, server.reconnect_initial_delay_sec * (2 ** attempts))
-        runtime.reconnect_attempts += 1
-        runtime.next_reconnect_at = time.time() + delay
+        mcp_health.schedule_reconnect(server, runtime)
 
     def _should_attempt_reconnect(
         self, server: MCPServerConfig, runtime: _ServerRuntime | None, now: float
     ) -> bool:
-        if self._closing:
-            return False
-        if runtime is None:
-            return server.name in self._failures
-        next_reconnect_at = getattr(runtime, "next_reconnect_at", None)
-        if next_reconnect_at is None:
-            return False
-        return now >= next_reconnect_at
+        return mcp_health.should_attempt_reconnect(
+            server,
+            runtime,
+            now,
+            closing=self._closing,
+            has_failure=server.name in self._failures,
+        )
 
     async def _reconnect_server(
         self, server: MCPServerConfig, runtime: _ServerRuntime | None = None, force: bool = False
@@ -799,12 +579,11 @@ class MCPToolManager:
             raise
 
     async def _disconnect_server(self, server_name: str) -> None:
-        runtime = self._server_runtimes.pop(server_name, None)
-        self._clear_server_descriptors(server_name)
-        if runtime is None:
-            return
-        runtime.state = MCPServerState.CLOSED
-        await runtime.exit_stack.aclose()
+        await mcp_lifecycle.disconnect_server(
+            server_name,
+            server_runtimes=self._server_runtimes,
+            clear_descriptors=self._clear_server_descriptors,
+        )
 
     def _clear_server_descriptors(self, server_name: str) -> None:
         for name, descriptor in list(self._tool_descriptors.items()):
@@ -816,22 +595,17 @@ class MCPToolManager:
         self._prompt_descriptors.pop(server_name, None)
 
     async def _close_all(self) -> None:
-        if self._health_task is not None:
-            self._health_task.cancel()
-            await asyncio.gather(self._health_task, return_exceptions=True)
-            self._health_task = None
-        runtimes = list(self._server_runtimes.values())
-        self._server_runtimes.clear()
-        self._tool_descriptors.clear()
-        self._resource_descriptors.clear()
-        self._resource_template_descriptors.clear()
-        self._prompt_descriptors.clear()
-        self._callable_cache.clear()
-        for server in self._servers:
-            self._server_states[server.name] = MCPServerState.CLOSED
-        for runtime in runtimes:
-            runtime.state = MCPServerState.CLOSED
-            await runtime.exit_stack.aclose()
+        self._health_task = await mcp_lifecycle.close_all(
+            servers=self._servers,
+            health_task=self._health_task,
+            server_runtimes=self._server_runtimes,
+            server_states=self._server_states,
+            tool_descriptors=self._tool_descriptors,
+            resource_descriptors=self._resource_descriptors,
+            resource_template_descriptors=self._resource_template_descriptors,
+            prompt_descriptors=self._prompt_descriptors,
+            callable_cache=self._callable_cache,
+        )
 
     def _runtime_state(self, server_name: str, runtime: Any) -> MCPServerState:
         state = getattr(runtime, "state", None)
@@ -863,10 +637,7 @@ class MCPToolManager:
 
     @staticmethod
     def _ensure_sdk_available() -> None:
-        try:
-            import mcp  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError("MCP SDK 未安装，请先安装依赖 'mcp'") from exc
+        return mcp_connection.ensure_sdk_available()
 
 
 def create_mcp_manager_from_settings(settings) -> MCPToolManager | None:
@@ -882,9 +653,9 @@ def create_mcp_manager_from_settings(settings) -> MCPToolManager | None:
 
 def _apply_capability_mcp_enabled(servers: list[MCPServerConfig]) -> list[MCPServerConfig]:
     try:
-        from agentnexus.core.config import _load_yaml
+        from agentnexus.core.config import load_config_yaml
 
-        data = _load_yaml()
+        data = load_config_yaml()
         capabilities = data.get("capabilities") if isinstance(data, dict) else {}
         enabled_map = capabilities.get("mcp_servers") if isinstance(capabilities, dict) else {}
         enabled_map = enabled_map if isinstance(enabled_map, dict) else {}
@@ -903,115 +674,36 @@ def _apply_capability_mcp_enabled(servers: list[MCPServerConfig]) -> list[MCPSer
 
 
 def _sanitize_name(value: str) -> str:
-    cleaned = _NAME_SANITIZER.sub("_", (value or "").strip().lower()).strip("_")
-    return cleaned or "tool"
+    return mcp_result.sanitize_name(value)
 
 
 def _json_text(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)
+    return mcp_result.json_text(value)
 
 
 def _dump_sdk_object(value: Any) -> dict:
-    if hasattr(value, "model_dump"):
-        try:
-            return value.model_dump(mode="json")
-        except TypeError:
-            return value.model_dump()
-    if isinstance(value, dict):
-        return dict(value)
-    data = {}
-    for attr in ("name", "uri", "uriTemplate", "uri_template", "description", "mimeType", "mime_type", "arguments"):
-        if hasattr(value, attr):
-            data[attr] = getattr(value, attr)
-    return data or {"value": str(value)}
+    return mcp_result.dump_sdk_object(value)
 
 
 def _resource_descriptor_from_sdk(server_name: str, item: Any) -> MCPResourceDescriptor:
-    data = _dump_sdk_object(item)
-    return MCPResourceDescriptor(
-        name=str(data.get("name") or data.get("uri") or ""),
-        uri=str(data.get("uri") or ""),
-        server_name=server_name,
-        description=str(data.get("description") or ""),
-        mime_type=str(data.get("mimeType") or data.get("mime_type") or ""),
-    )
+    return mcp_descriptors.resource_descriptor_from_sdk(server_name, item)
 
 
 def _prompt_descriptor_from_sdk(server_name: str, item: Any) -> MCPPromptDescriptor:
-    data = _dump_sdk_object(item)
-    args = data.get("arguments") or []
-    if not isinstance(args, list):
-        args = []
-    return MCPPromptDescriptor(
-        name=str(data.get("name") or ""),
-        server_name=server_name,
-        description=str(data.get("description") or ""),
-        arguments=[_dump_sdk_object(arg) for arg in args],
-    )
+    return mcp_descriptors.prompt_descriptor_from_sdk(server_name, item)
 
 
 def _normalize_tool_result(result: Any) -> str:
-    parts: list[str] = []
-    structured = getattr(result, "structuredContent", None)
-    if structured is None:
-        structured = getattr(result, "structured_content", None)
-    if structured is not None:
-        parts.append(json.dumps(structured, ensure_ascii=False, default=str))
-
-    for block in getattr(result, "content", []) or []:
-        text = _content_block_to_text(block)
-        if text:
-            parts.append(text)
-
-    return "\n".join(part for part in parts if part).strip() or "[mcp] 工具未返回文本内容"
+    return mcp_result.normalize_tool_result(result)
 
 
 def _normalize_resource_result(result: Any) -> str:
-    parts = []
-    for block in getattr(result, "contents", None) or getattr(result, "content", []) or []:
-        text = _content_block_to_text(block)
-        if text:
-            parts.append(text)
-    if not parts and hasattr(result, "model_dump"):
-        return _json_text(result.model_dump())
-    return "\n".join(parts).strip() or "[mcp] 资源未返回文本内容"
+    return mcp_result.normalize_resource_result(result)
 
 
 def _normalize_prompt_result(result: Any) -> str:
-    messages = getattr(result, "messages", []) or []
-    if messages:
-        return _json_text([_dump_sdk_object(message) for message in messages])
-    if hasattr(result, "model_dump"):
-        return _json_text(result.model_dump())
-    return str(result)
+    return mcp_result.normalize_prompt_result(result)
 
 
 def _content_block_to_text(block: Any) -> str:
-    text = getattr(block, "text", None)
-    if text:
-        return str(text)
-
-    resource = getattr(block, "resource", None)
-    if resource is not None:
-        resource_text = getattr(resource, "text", None)
-        if resource_text:
-            return str(resource_text)
-        blob = getattr(resource, "blob", None)
-        mime_type = getattr(resource, "mimeType", None) or getattr(resource, "mime_type", None) or "unknown"
-        if blob is not None:
-            return f"[embedded resource: {mime_type}]"
-        uri = getattr(resource, "uri", None)
-        if uri:
-            return f"[embedded resource] {uri}"
-
-    mime_type = getattr(block, "mimeType", None) or getattr(block, "mime_type", None)
-    data = getattr(block, "data", None)
-    if mime_type and data is not None:
-        return f"[binary content: {mime_type}]"
-
-    if hasattr(block, "model_dump"):
-        try:
-            return json.dumps(block.model_dump(), ensure_ascii=False, default=str)
-        except Exception:
-            return str(block)
-    return str(block)
+    return mcp_result.content_block_to_text(block)

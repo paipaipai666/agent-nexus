@@ -4,13 +4,11 @@ Validates that all security-relevant operations are logged in the audit trail.
 """
 import json
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentnexus.tools.shell import _check_blacklist
-from agentnexus.tools.tool_executor import ToolExecutor
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
+from agentnexus.tools.shell import _check_blacklist
 
 
 class TestAuditTrailCompleteness:
@@ -31,7 +29,7 @@ class TestAuditTrailCompleteness:
             )
             reg.register(meta, lambda x=i: x)
 
-        result = reg.invoke("tool_0", {}, caller="test")
+        reg.invoke("tool_0", {}, caller="test")
         audit_entries.append({"tool": "tool_0", "caller": "test", "status": "ok"})
 
         assert len(audit_entries) == 1

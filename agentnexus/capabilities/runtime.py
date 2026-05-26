@@ -254,16 +254,16 @@ class CapabilityRuntime:
 
     @staticmethod
     def _capability_config() -> dict:
-        from agentnexus.core.config import _load_yaml
+        from agentnexus.core.config import load_config_yaml
 
-        data = _load_yaml()
+        data = load_config_yaml()
         cfg = data.get("capabilities")
         return dict(cfg) if isinstance(cfg, dict) else {}
 
     @staticmethod
     def _write_capability_config(cfg: dict) -> None:
-        from agentnexus.core.config import _load_yaml, _write_yaml_config
+        from agentnexus.core.config import load_config_yaml, write_config_yaml
 
-        data = _load_yaml()
+        data = load_config_yaml()
         data["capabilities"] = cfg
-        _write_yaml_config(data)
+        write_config_yaml(data)
