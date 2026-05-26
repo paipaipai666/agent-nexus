@@ -30,13 +30,15 @@ _ltm_collection = None
 
 def _get_ltm_collection():
     global _ltm_collection
-    if _ltm_collection is None:
-        from agentnexus.rag.chroma_client import get_chroma_client
-        _ltm_collection = get_chroma_client().get_or_create_collection(
-            name=LTM_COLLECTION,
-            metadata={"hnsw:space": "cosine"},
-        )
-    return _ltm_collection
+    from agentnexus.rag.chroma_client import chroma_operation_lock, get_collection
+
+    with chroma_operation_lock():
+        if _ltm_collection is None:
+            _ltm_collection = get_collection(
+                name=LTM_COLLECTION,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return _ltm_collection
 
 
 _ltm_instances: dict[str, "LongTermMemory"] = {}
@@ -53,12 +55,14 @@ def get_long_term_memory():
 
 def _reset_long_term_memory():
     """Close connections and clear the singleton cache. Used by tests."""
+    global _ltm_collection
     for inst in _ltm_instances.values():
         try:
             inst._conn.close()
         except Exception:
             pass
     _ltm_instances.clear()
+    _ltm_collection = None
 
 
 class LongTermMemory:

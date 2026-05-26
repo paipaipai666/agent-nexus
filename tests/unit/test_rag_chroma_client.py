@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -6,6 +7,32 @@ from agentnexus.rag.models import ChunkRecord, SourceDocument
 
 
 class TestChromaClient:
+    def test_thread_safe_collection_wraps_method_calls_with_lock(self, monkeypatch):
+        events = []
+
+        @contextmanager
+        def fake_lock():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        class FakeCollection:
+            name = "documents"
+
+            def add(self, **kwargs):
+                events.append(("add", kwargs["ids"]))
+                return "ok"
+
+        monkeypatch.setattr(chroma_client, "chroma_operation_lock", fake_lock)
+
+        wrapped = chroma_client._ThreadSafeChromaCollection(FakeCollection())
+
+        assert wrapped.name == "documents"
+        assert wrapped.add(ids=["doc-1"]) == "ok"
+        assert events == ["enter", ("add", ["doc-1"]), "exit"]
+
     def test_insert_documents_passes_metadata_and_ids(self, monkeypatch):
         mock_collection = MagicMock()
         mock_model = MagicMock()

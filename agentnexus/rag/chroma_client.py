@@ -1,7 +1,10 @@
 import json
 import os
 import re
+import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from hashlib import blake2b
 from typing import Any
 
@@ -21,6 +24,35 @@ _model_name: str | None = None
 _model_device: str | None = None
 _EMBED_BATCH_SIZE = 1024
 _EMBED_TORCH_THREADS_CAP = 12
+_chroma_lock = threading.RLock()
+
+
+@contextmanager
+def chroma_operation_lock() -> Iterator[None]:
+    """Serialize ChromaDB Rust binding calls within this process.
+
+    ChromaDB 1.5.8 can fail under concurrent PersistentClient/collection
+    access from multiple threads. Keep this lock at the boundary where code
+    enters ChromaDB so RAG and LTM share the same synchronization primitive.
+    """
+    with _chroma_lock:
+        yield
+
+
+class _ThreadSafeChromaCollection:
+    def __init__(self, collection):
+        self._collection = collection
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._collection, name)
+        if not callable(attr):
+            return attr
+
+        def _locked_call(*args, **kwargs):
+            with chroma_operation_lock():
+                return attr(*args, **kwargs)
+
+        return _locked_call
 
 
 class _FallbackEmbeddingModel:
@@ -90,13 +122,14 @@ def resolve_collection_name(name: str | None = None, namespace: str | None = Non
 def get_chroma_client():
     global _client, _client_path, _collections
     settings = get_settings()
-    if _client is None or _client_path != settings.chroma_persist_dir:
-        import chromadb
+    with chroma_operation_lock():
+        if _client is None or _client_path != settings.chroma_persist_dir:
+            import chromadb
 
-        _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-        _client_path = settings.chroma_persist_dir
-        _collections = {}
-    return _client
+            _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+            _client_path = settings.chroma_persist_dir
+            _collections = {}
+        return _client
 
 
 def _resolve_embedding_device() -> str:
@@ -155,13 +188,15 @@ def get_collection(
     metadata: dict | None = None,
 ):
     collection_name = resolve_collection_name(name=name, namespace=namespace)
-    if collection_name not in _collections:
-        client = get_chroma_client()
-        _collections[collection_name] = client.get_or_create_collection(
-            name=collection_name,
-            metadata=metadata or DEFAULT_COLLECTION_METADATA,
-        )
-    return _collections[collection_name]
+    with chroma_operation_lock():
+        if collection_name not in _collections:
+            client = get_chroma_client()
+            collection = client.get_or_create_collection(
+                name=collection_name,
+                metadata=metadata or DEFAULT_COLLECTION_METADATA,
+            )
+            _collections[collection_name] = _ThreadSafeChromaCollection(collection)
+        return _collections[collection_name]
 
 
 def _validate_payload_lengths(
@@ -325,13 +360,14 @@ def search(
 def delete_collection(name: str | None = None, namespace: str | None = None):
     collection_name = resolve_collection_name(name=name, namespace=namespace)
     client = get_chroma_client()
-    try:
-        client.delete_collection(collection_name)
-    except Exception as e:
-        from rich.console import Console
+    with chroma_operation_lock():
+        try:
+            client.delete_collection(collection_name)
+        except Exception as e:
+            from rich.console import Console
 
-        Console().print(f"[yellow]ChromaDB 删除集合异常: {e}[/yellow]")
-    _collections.pop(collection_name, None)
+            Console().print(f"[yellow]ChromaDB 删除集合异常: {e}[/yellow]")
+        _collections.pop(collection_name, None)
 
 
 def delete_documents(
@@ -348,10 +384,11 @@ def delete_documents(
 
 def _reset_chroma_client(reset_model: bool = False):
     global _client, _client_path, _collections, _model, _model_name, _model_device
-    _client = None
-    _client_path = None
-    _collections = {}
-    if reset_model:
-        _model = None
-        _model_name = None
-        _model_device = None
+    with chroma_operation_lock():
+        _client = None
+        _client_path = None
+        _collections = {}
+        if reset_model:
+            _model = None
+            _model_name = None
+            _model_device = None
