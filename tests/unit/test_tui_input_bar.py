@@ -29,6 +29,10 @@ class TestInputBar:
         msg = InputBar.AppSubmit("")
         assert msg.text == ""
 
+    def test_app_input_changed_message(self):
+        msg = InputBar.AppInputChanged("/d")
+        assert msg.text == "/d"
+
     def test_on_input_submitted(self):
         bar = InputBar()
         bar._inp = MagicMock()
@@ -47,6 +51,15 @@ class TestInputBar:
         bar.post_message = lambda m: posted.append(m)
         bar.on_input_submitted(Input.Submitted(bar._inp, "   "))
         assert len(posted) == 0
+
+    def test_on_input_changed_posts_message(self):
+        bar = InputBar()
+        bar._inp = MagicMock()
+        posted = []
+        bar.post_message = lambda m: posted.append(m)
+        bar.on_input_changed(Input.Changed(bar._inp, "/d"))
+        assert len(posted) == 1
+        assert posted[0].text == "/d"
 
     def test_focus_input_ignores_error(self):
         bar = InputBar()

@@ -10,7 +10,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Input, Label, Static
@@ -29,6 +29,31 @@ from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
+
+COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
+    ("/help", "显示命令帮助"),
+    ("/clear", "清屏；--all 同时清除检查点"),
+    ("/undo", "回退到上一个检查点"),
+    ("/redo", "重做到下一个检查点"),
+    ("/log", "查看检查点日志"),
+    ("/branch", "创建或切换分支"),
+    ("/checkout", "切换检查点或分支"),
+    ("/diff", "比较检查点"),
+    ("/status", "查看分支状态"),
+    ("/compact", "压缩当前上下文"),
+    ("/stats", "查看运行统计"),
+    ("/skill", "管理 Skill"),
+    ("/mcp", "管理 MCP server"),
+    ("/plugin", "管理插件"),
+)
+
+COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
+    "/skill": ("status", "list", "use", "enable", "disable", "default", "validate", "reset"),
+    "/mcp": ("status", "tools", "resources", "prompts", "failures", "retry", "enable", "disable", "reload"),
+    "/plugin": ("status", "list", "enable", "disable", "reload"),
+    "/log": ("--all",),
+    "/clear": ("--all",),
+}
 
 
 class ChatArea(Widget):
@@ -96,10 +121,13 @@ class ChatScreen(Screen):
             yield self._chat_area
             self._side_panel = SidePanel(id="side-panel")
             yield self._side_panel
-        self._hud = HUD(id="hud")
+        self._command_palette_content = Static("", id="command-palette-content")
+        with VerticalScroll(id="command-palette"):
+            yield self._command_palette_content
         self._chat_input = InputBar(id="input-area")
-        yield self._hud
         yield self._chat_input
+        self._hud = HUD(id="hud")
+        yield self._hud
 
     def _render_top_bar(self) -> str:
         model = getattr(self._agent, "model_id", "v4-flash") if self._agent else "v4-flash"
@@ -160,6 +188,7 @@ class ChatScreen(Screen):
         text = event.text
         inp = self.query_one("#chat-input", Input)
         inp.value = ""
+        self._update_command_suggestions("")
         self._chat_area.add_message("user", text)
         if text.startswith("/"):
             self._handle_command(text)
@@ -167,18 +196,22 @@ class ChatScreen(Screen):
             self._running = True
             self._run_agent(text)
 
+    def on_input_bar_app_input_changed(self, event: InputBar.AppInputChanged):
+        self._update_command_suggestions(event.text)
+
     # ── keybindings ────────────────────────────────────────────
 
     def action_clear_screen(self):
         self._chat_area.clear_all()
 
     def action_show_help(self):
+        commands = "  ".join(command for command, _ in COMMAND_DEFINITIONS)
         self._chat_area.add_system(
-            "[dim]命令:[/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
-            "       /checkout <ref>  /diff [ref1] [ref2]  /status  /mcp  /plugin\n"
+            f"[dim]命令:[/] {commands}\n"
             "       /skill [status|list|use <id> [--default]|enable <id>|disable <id>|"
-            "default <id>|validate [id]|reset]  "
-            "/clear [--all]  /compact [指令]  /stats"
+            "default <id>|validate [id]|reset]\n"
+            "       /mcp [status|tools|resources|prompts|failures|retry|enable|disable|reload]\n"
+            "       /plugin [status|list|enable|disable|reload]"
         )
 
     def action_focus_input(self):
@@ -343,9 +376,69 @@ class ChatScreen(Screen):
         elif cmd == "/skill":
             self._handle_skill_command(arg)
         else:
+            if self._handle_dynamic_skill_command(cmd, arg, short_form=True):
+                return
             if self._handle_dynamic_skill_command(cmd, arg):
                 return
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
+
+    def _update_command_suggestions(self, text: str):
+        suggestions = self._match_command_suggestions(text)
+        try:
+            palette = self.query_one("#command-palette", VerticalScroll)
+            self.query_one("#command-palette-content", Static).update(suggestions)
+            palette.styles.display = "block" if suggestions else "none"
+            if suggestions:
+                palette.scroll_home(animate=False)
+        except Exception:
+            pass
+
+    def _match_command_suggestions(self, text: str) -> str:
+        raw = text.strip()
+        if not raw.startswith("/"):
+            return ""
+        prefix = raw.lower()
+        matches = []
+        needle = prefix[1:]
+        for command, description, aliases in self._command_catalog():
+            command_lower = command.lower()
+            if " " in prefix and not command_lower.startswith(prefix.split(maxsplit=1)[0] + " "):
+                continue
+            alias_matches = needle and " " not in prefix and any(alias.startswith(needle) for alias in aliases)
+            if command_lower.startswith(prefix) or alias_matches:
+                matches.append((command, description))
+        if not matches:
+            return "[dim]无匹配命令[/]"
+        rendered = "\n".join(f"  [#70a6e8]{command:<18}[/] [dim]{description}[/]" for command, description in matches)
+        return "[bold]Commands[/]\n" + rendered
+
+    def _command_catalog(self) -> list[tuple[str, str, tuple[str, ...]]]:
+        commands = [(command, description, ()) for command, description in COMMAND_DEFINITIONS]
+        for command, subcommands in COMMAND_SUBCOMMANDS.items():
+            for subcommand in subcommands:
+                commands.append((f"{command} {subcommand}", "子命令", (subcommand.lower(),)))
+        for qualified_id, display_name, _description in self._available_skill_summary():
+            short_id = qualified_id.rsplit("/", 1)[-1].replace("_", "-")
+            aliases = self._skill_command_aliases(qualified_id, display_name, _description)
+            commands.append((f"/{short_id}", f"Skill: {display_name}", aliases))
+            legacy = f"/{short_id}-skill"
+            if legacy != f"/{short_id}":
+                commands.append((legacy, f"Skill: {display_name}", aliases))
+        return commands
+
+    @staticmethod
+    def _skill_command_aliases(qualified_id: str, display_name: str, description: str) -> tuple[str, ...]:
+        text = f"{qualified_id} {display_name} {description}".lower()
+        aliases = set()
+        if any(word in text for word in ("doc", "docx", "pdf", "document", "word")):
+            aliases.update({"d", "doc", "document"})
+        if any(word in text for word in ("image", "photo", "picture")):
+            aliases.update({"i", "image"})
+        if any(word in text for word in ("sheet", "spreadsheet", "excel", "xlsx", "csv")):
+            aliases.update({"s", "sheet"})
+        if any(word in text for word in ("slide", "ppt", "pptx", "presentation")):
+            aliases.update({"p", "ppt", "presentation"})
+        return tuple(sorted(aliases))
 
     def _init_skill_registry(self):
         if self._skill_service is not None:
@@ -734,19 +827,25 @@ class ChatScreen(Screen):
             if entry.source_kind == "skill"
         ]
 
-    def _handle_dynamic_skill_command(self, cmd: str, arg: str) -> bool:
-        if not cmd.startswith("/") or not cmd.endswith("-skill"):
+    def _handle_dynamic_skill_command(self, cmd: str, arg: str, short_form: bool = False) -> bool:
+        if not cmd.startswith("/"):
             return False
-        target = cmd[1:-6].strip()
+        if short_form:
+            target = cmd[1:].strip()
+        else:
+            if not cmd.endswith("-skill"):
+                return False
+            target = cmd[1:-6].strip()
         if not target:
             return False
-        instruction = arg.strip()
-        if not instruction:
-            self._chat_area.add_system(f"[dim]用法: /{target}-skill <指令>[/]")
-            return True
         entry = self._resolve_dynamic_skill(target)
         if entry is None:
             return False
+        instruction = arg.strip()
+        if not instruction:
+            command = f"/{target}" if short_form else f"/{target}-skill"
+            self._chat_area.add_system(f"[dim]用法: {command} <指令>[/]")
+            return True
         if self._skill_service is not None:
             try:
                 self._skill_service.use(entry.qualified_id)

@@ -278,11 +278,13 @@ class TestAgentNexusTUIPilot:
             )
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
+                from textual.containers import VerticalScroll
                 from textual.widgets import Input
                 chat_input = app.screen.query_one("#chat-input", Input)
                 assert chat_input is not None
                 assert chat_input.styles.height.value == 1
                 assert app.screen.query_one("#input-area").styles.height.value == 3
+                assert app.screen.query_one("#command-palette", VerticalScroll) is not None
 
     async def test_app_has_hud(self):
         """HUD widget is present after launch."""
@@ -298,6 +300,22 @@ class TestAgentNexusTUIPilot:
                 await pilot.pause()
                 from agentnexus.tui.widgets.hud import HUD
                 assert app.screen.query_one("#hud", HUD) is not None
+
+    async def test_hud_is_below_input_bar(self):
+        """HUD should render after the input bar at the bottom."""
+        with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
+            mock_settings.return_value.llm_model_id = "n/a"
+            from agentnexus.tui.app import AgentNexusTUI
+            app = AgentNexusTUI(
+                agent=_make_mock_agent(),
+                memory=MagicMock(),
+                version=_make_mock_version(),
+            )
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                input_bar = app.screen.query_one("#input-area")
+                hud = app.screen.query_one("#hud")
+                assert input_bar.region.y < hud.region.y
 
     async def test_app_has_side_panel(self):
         """Runtime side panel is present after launch."""

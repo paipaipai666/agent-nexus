@@ -870,6 +870,37 @@ class TestSkillCommandHelpers:
         service.use.assert_called_once_with("default/docx")
         screen._run_agent.assert_called_once_with("生成一份word文档")
 
+    def test_handle_short_dynamic_skill_command_runs_instruction(self):
+        workflow = Workflow.model_validate({
+            "id": "pdf",
+            "version": "1",
+            "display_name": "PDF",
+            "description": "Work with PDF documents.",
+            "prompt_profile": {"system": "react"},
+            "tool_policy": {"max_risk": "low"},
+            "steps": [{"type": "prompt", "id": "pdf", "prompt": "Use PDF skill."}],
+            "success_criteria": ["Done."],
+        })
+        entry = SkillEntry("default", "pdf", "PDF", workflow.description, MagicMock(), workflow)
+        registry = SkillRegistry([])
+        registry._entries = [entry]
+        service = MagicMock()
+        service.registry = registry
+        service.current = None
+        service.use.return_value = entry
+        service.snapshot.return_value.status = "selected"
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None, skill_service=service)
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = registry
+        screen._run_agent = MagicMock()
+
+        handled = screen._handle_dynamic_skill_command("/pdf", "提取表格", short_form=True)
+
+        assert handled is True
+        service.use.assert_called_once_with("default/pdf")
+        screen._run_agent.assert_called_once_with("提取表格")
+
     def test_handle_dynamic_skill_command_without_instruction_shows_usage(self):
         screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
         screen._chat_area = MagicMock()
@@ -878,6 +909,62 @@ class TestSkillCommandHelpers:
 
         assert handled is True
         assert "用法" in screen._chat_area.add_system.call_args[0][0]
+
+    def test_command_suggestions_include_matching_skills(self):
+        entries = []
+        for skill_id, display_name in (("docx", "DOCX"), ("pdf", "PDF")):
+            workflow = Workflow.model_validate({
+                "id": skill_id,
+                "version": "1",
+                "display_name": display_name,
+                "description": f"Use {display_name}.",
+                "prompt_profile": {"system": "react"},
+                "tool_policy": {"max_risk": "low"},
+                "steps": [{"type": "prompt", "id": skill_id, "prompt": f"Use {display_name}."}],
+                "success_criteria": ["Done."],
+            })
+            entries.append(SkillEntry("default", skill_id, display_name, workflow.description, MagicMock(), workflow))
+        registry = SkillRegistry([])
+        registry._entries = entries
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._skill_registry = registry
+
+        suggestions = screen._match_command_suggestions("/d")
+
+        assert "\n" in suggestions
+        assert "/docx" in suggestions
+        assert "/pdf" in suggestions
+
+    def test_command_suggestions_are_not_truncated(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        screen._command_catalog = MagicMock(
+            return_value=[
+                (f"/demo-{index:02d}", f"Demo {index}", ())
+                for index in range(25)
+            ]
+        )
+
+        suggestions = screen._match_command_suggestions("/demo")
+
+        assert "/demo-00" in suggestions
+        assert "/demo-24" in suggestions
+
+    def test_update_command_suggestions_updates_scroll_container(self):
+        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
+        palette = MagicMock()
+        content = MagicMock()
+
+        def query_one(selector, _type=None):
+            return palette if selector == "#command-palette" else content
+
+        screen.query_one = query_one
+        screen._match_command_suggestions = MagicMock(return_value="[bold]Commands[/]\n/demo")
+
+        screen._update_command_suggestions("/demo")
+
+        content.update.assert_called_once_with("[bold]Commands[/]\n/demo")
+        assert palette.styles.display == "block"
+        palette.scroll_home.assert_called_once_with(animate=False)
 
 class TestPluginCommands:
     def test_handle_plugin_enable_uses_capability_runtime(self):

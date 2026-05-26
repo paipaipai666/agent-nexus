@@ -21,6 +21,11 @@ class InputBar(Widget):
             super().__init__()
             self.text = text
 
+    class AppInputChanged(Message):
+        def __init__(self, text: str):
+            super().__init__()
+            self.text = text
+
     def compose(self) -> ComposeResult:
         self._inp = Input(
             placeholder="输入消息... (Enter 发送, /help 命令)",
@@ -42,6 +47,9 @@ class InputBar(Widget):
     def on_input_submitted(self, event: Input.Submitted):
         if event.value.strip():
             self.post_message(self.AppSubmit(event.value.strip()))
+
+    def on_input_changed(self, event: Input.Changed):
+        self.post_message(self.AppInputChanged(event.value))
 
     def on_button_pressed(self, event: Button.Pressed):
         if self._inp.value.strip():

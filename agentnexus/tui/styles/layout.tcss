@@ -38,6 +38,22 @@ Screen {
     height: 1;
 }
 
+#command-palette {
+    display: none;
+    height: 12;
+    padding: 1 2;
+    background: $surface;
+    border-top: tall $border;
+    color: $text;
+    overflow-y: auto;
+    scrollbar-size-vertical: 1;
+}
+
+#command-palette-content {
+    width: 100%;
+    height: auto;
+}
+
 #input-area {
     height: 3;
 }
