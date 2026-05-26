@@ -190,6 +190,43 @@ class TestConversationVersionManager:
         assert msgs[1]["content"] == "hi there"
         assert stm2._summary == "test summary"
 
+    def test_session_metadata_latest_for_workspace(self, temp_agentnexus_home):
+        from agentnexus.core.config import get_settings
+
+        workspace = temp_agentnexus_home / "project"
+        workspace.mkdir()
+        settings = get_settings()
+
+        mgr1 = ConversationVersionManager(
+            "tui_old",
+            settings.memory_db_path,
+            workspace_path=str(workspace),
+            profile="tui",
+        )
+        mgr1.commit(_make_stm([{"role": "user", "content": "old"}]), question="old")
+        mgr2 = ConversationVersionManager(
+            "tui_new",
+            settings.memory_db_path,
+            workspace_path=str(workspace),
+            profile="tui",
+        )
+        mgr2.commit(_make_stm([{"role": "user", "content": "new"}]), question="new")
+
+        assert ConversationVersionManager.find_latest_session(settings.memory_db_path, str(workspace)) == "tui_new"
+        assert ConversationVersionManager.session_belongs_to_workspace(
+            settings.memory_db_path,
+            "tui_new",
+            str(workspace),
+        )
+        assert not ConversationVersionManager.session_belongs_to_workspace(
+            settings.memory_db_path,
+            "tui_new",
+            str(temp_agentnexus_home),
+        )
+
+        mgr1._conn.close()
+        mgr2._conn.close()
+
 
 class TestShortTermMemorySerialization:
     def test_to_json_empty(self):

@@ -9,6 +9,7 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -40,39 +41,55 @@ class TraceSpan:
 # ── TraceContext ─────────────────────────────────────────────────────
 
 class TraceContext:
-    """单次任务的完整 trace，包含所有 span"""
+    """鍗曟浠诲姟鐨勫畬鏁?trace锛屽寘鍚墍鏈?span"""
 
-    def __init__(self, trace_id: Optional[str] = None):
+    def __init__(
+        self,
+        trace_id: Optional[str] = None,
+        on_span_end: Callable[["TraceContext", TraceSpan], None] | None = None,
+    ):
         self.trace_id = trace_id or str(uuid.uuid4())[:8]
         self.spans: list[TraceSpan] = []
         self._span_stack: list[TraceSpan] = []
+        self._lock = threading.RLock()
+        self._on_span_end = on_span_end
 
     def start_span(self, name: str, input_data: Optional[dict] = None) -> TraceSpan:
-        """创建子 span 并推入栈顶"""
-        parent_id = self._span_stack[-1].span_id if self._span_stack else ""
-        span = TraceSpan(
-            span_id=str(uuid.uuid4())[:8],
-            parent_span_id=parent_id,
-            name=name,
-            start_time=time.time(),
-            input=input_data or {},
-        )
-        self._span_stack.append(span)
-        return span
+        """鍒涘缓瀛?span 骞舵帹鍏ユ爤椤?"""
+        with self._lock:
+            parent_id = self._span_stack[-1].span_id if self._span_stack else ""
+            span = TraceSpan(
+                span_id=str(uuid.uuid4())[:8],
+                parent_span_id=parent_id,
+                name=name,
+                start_time=time.time(),
+                input=input_data or {},
+            )
+            self._span_stack.append(span)
+            return span
 
     def end_span(self, span: TraceSpan, output_data: Optional[dict] = None,
                  metadata: Optional[dict] = None):
-        """结束 span 并记录到 spans 列表"""
-        span.end_time = time.time()
-        if output_data:
-            span.output = _truncate_dict(output_data)
-        if metadata:
-            span.metadata = metadata
-        self.spans.append(span)
+        """缁撴潫 span 骞惰褰曞埌 spans 鍒楄〃"""
+        should_flush = False
+        with self._lock:
+            if span in self.spans:
+                return
+            span.end_time = time.time()
+            if output_data:
+                span.output = _truncate_dict(output_data)
+            if metadata:
+                span.metadata = metadata
+            self.spans.append(span)
+            should_flush = True
 
-        # 从栈中移除（保持 LIFO 弹出）
-        if self._span_stack and self._span_stack[-1].span_id == span.span_id:
-            self._span_stack.pop()
+            # 浠庢爤涓Щ闄わ紙淇濇寔 LIFO 寮瑰嚭锛?
+            if self._span_stack and self._span_stack[-1].span_id == span.span_id:
+                self._span_stack.pop()
+            else:
+                self._span_stack = [s for s in self._span_stack if s.span_id != span.span_id]
+        if should_flush and self._on_span_end:
+            self._on_span_end(self, span)
 
 
 # ── TraceManager (Singleton, Thread-Safe) ────────────────────────────
@@ -103,7 +120,7 @@ class TraceManager:
 
     def start_trace(self, task: str) -> TraceContext:
         """开始一次新 trace"""
-        ctx = TraceContext()
+        ctx = TraceContext(on_span_end=self._flush_span)
         root_span = ctx.start_span("task", {"task": _truncate(task)})
         # 根 span 不入栈，作为隐式上下文
         ctx._span_stack.clear()

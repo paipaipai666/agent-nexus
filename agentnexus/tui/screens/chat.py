@@ -112,6 +112,7 @@ class ChatScreen(Screen):
 
     def on_mount(self):
         self._chat_area.add_system("[#6ba5f2]AgentNexus ready[/] [dim]Ask a question or type /help.[/]")
+        self._render_restored_history()
         self._init_skill_registry()
         self._refresh_version_display()
         if hasattr(self, "_side_panel"):
@@ -130,6 +131,27 @@ class ChatScreen(Screen):
             except Exception:
                 pass
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
+
+    def _render_restored_history(self):
+        if not self._memory or not getattr(self._memory, "short_term", None):
+            return
+        try:
+            messages = self._memory.short_term.get_all()
+        except Exception:
+            return
+        visible = [m for m in messages if m.get("role") in {"system", "user", "assistant"}]
+        if not visible:
+            return
+        self._chat_area.add_system(f"[dim]Restored {len(visible)} messages from this session.[/]")
+        for msg in visible:
+            role = msg.get("role", "")
+            content = str(msg.get("content", "") or "")
+            if not content:
+                continue
+            if role == "system":
+                self._chat_area.add_system(content)
+            else:
+                self._chat_area.add_message(role, content)
 
     # ── custom submit ──────────────────────────────────────────
 

@@ -2,6 +2,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 from typer.testing import CliRunner
 
+import agentnexus.cli as cli
 from agentnexus.cli import app
 
 runner = CliRunner()
@@ -37,7 +38,11 @@ class TestTuiCommand:
             assert result.exit_code == 0
             mock_tui_app.run.assert_called_once()
             mock_reg.assert_called_once_with(
-                mock_executor, llm_client=mock_llm, subagent_confirm=mock_confirm, mcp_manager=None
+                mock_executor,
+                llm_client=mock_llm,
+                subagent_confirm=mock_confirm,
+                mcp_manager=None,
+                extra_providers=ANY,
             )
             mock_tui_cls.assert_called_once_with(
                 agent=mock_agent,
@@ -101,7 +106,12 @@ class TestTuiCommand:
             session_id = mock_mm.call_args[0][0]
             assert session_id.startswith("tui_")
             assert len(session_id) == 4 + 12
-            mock_cv.assert_called_once_with(session_id, mock_settings.memory_db_path)
+            mock_cv.assert_called_once_with(
+                session_id,
+                mock_settings.memory_db_path,
+                workspace_path=ANY,
+                profile="tui",
+            )
 
     def test_tui_creates_react_agent_with_conversation_mode(self):
         mock_llm = MagicMock()
@@ -164,3 +174,51 @@ class TestTuiCommand:
                 skill_service=ANY,
             )
             mock_manager.close.assert_called_once()
+
+    def test_continue_latest_session_launches_tui(self):
+        mock_settings = MagicMock()
+        mock_settings.memory_db_path = "/tmp/test.db"
+
+        with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
+             patch(
+                 "agentnexus.memory.versioned.ConversationVersionManager.find_latest_session",
+                 return_value="tui_latest",
+             ) as mock_find, \
+            patch("agentnexus.cli.tui_cmd.launch_tui") as mock_launch:
+            cli.main(["--continue"])
+
+        mock_find.assert_called_once_with("/tmp/test.db", ANY)
+        mock_launch.assert_called_once_with(session_id="tui_latest", restore_session=True)
+
+    def test_continue_specific_session_requires_current_workspace(self):
+        mock_settings = MagicMock()
+        mock_settings.memory_db_path = "/tmp/test.db"
+
+        with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
+             patch(
+                 "agentnexus.memory.versioned.ConversationVersionManager.session_belongs_to_workspace",
+                 return_value=True,
+             ) as mock_belongs, \
+             patch("agentnexus.cli.tui_cmd.launch_tui") as mock_launch:
+            cli.main(["--continue", "tui_123"])
+
+        mock_belongs.assert_called_once_with("/tmp/test.db", "tui_123", ANY)
+        mock_launch.assert_called_once_with(session_id="tui_123", restore_session=True)
+
+    def test_continue_specific_session_rejects_other_workspace(self):
+        mock_settings = MagicMock()
+        mock_settings.memory_db_path = "/tmp/test.db"
+
+        with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
+             patch(
+                 "agentnexus.memory.versioned.ConversationVersionManager.session_belongs_to_workspace",
+                 return_value=False,
+             ), \
+             patch("agentnexus.cli.tui_cmd.launch_tui") as mock_launch:
+            try:
+                cli.main(["--continue", "tui_123"])
+            except SystemExit as exc:
+                exit_code = exc.code
+
+        assert exit_code == 1
+        mock_launch.assert_not_called()

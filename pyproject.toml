@@ -28,7 +28,7 @@ dependencies = [
 Changelog = "https://github.com/agentnexus/agentnexus/releases"
 
 [project.scripts]
-nexus = "agentnexus.cli:app"
+nexus = "agentnexus.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3", "pytest-cov>=5", "ruff>=0.3"]

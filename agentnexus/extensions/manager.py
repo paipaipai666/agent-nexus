@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -9,7 +12,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from agentnexus.tools.providers import default_tool_providers
+from agentnexus.tools.providers import ToolProvider, default_tool_providers
 
 PLUGIN_API_VERSION = "1"
 
@@ -55,6 +58,7 @@ class ExtensionDescriptor:
     manifest: PluginManifest | None = None
     enabled: bool = False
     errors: list[str] = field(default_factory=list)
+    providers: tuple[ToolProvider, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -110,7 +114,9 @@ class ExtensionManager:
             if not enabled_globally:
                 disabled.append(descriptor)
                 continue
-            errors = self._validate_manifest(descriptor.manifest, known_providers)
+            plugin_providers, provider_errors = self._load_plugin_providers(descriptor)
+            provider_names = known_providers | {provider.metadata().name for provider in plugin_providers}
+            errors = [*provider_errors, *self._validate_manifest(descriptor.manifest, provider_names)]
             if errors:
                 failed.append(
                     ExtensionDescriptor(
@@ -119,6 +125,7 @@ class ExtensionManager:
                         manifest=descriptor.manifest,
                         enabled=False,
                         errors=errors,
+                        providers=tuple(plugin_providers),
                     )
                 )
             else:
@@ -129,6 +136,7 @@ class ExtensionManager:
                         manifest=descriptor.manifest,
                         enabled=True,
                         errors=[],
+                        providers=tuple(plugin_providers),
                     )
                 )
 
@@ -137,6 +145,13 @@ class ExtensionManager:
 
     def status(self) -> ExtensionStatusReport:
         return ExtensionStatusReport(discovered=self._discovered, load_report=self._load_report)
+
+    def loaded_providers(self) -> list[ToolProvider]:
+        """Return dynamically loaded providers from enabled plugins."""
+        providers: list[ToolProvider] = []
+        for descriptor in self._load_report.loaded:
+            providers.extend(descriptor.providers)
+        return providers
 
     def _extension_dirs(self) -> list[Path]:
         return [self.built_in_dir, *self.extra_dirs, self.user_dir]
@@ -161,3 +176,74 @@ class ExtensionManager:
         if missing_required:
             errors.append(f"missing required providers: {', '.join(missing_required)}")
         return errors
+
+    def _load_plugin_providers(self, descriptor: ExtensionDescriptor) -> tuple[list[ToolProvider], list[str]]:
+        manifest = descriptor.manifest
+        if manifest is None:
+            return [], []
+        entrypoints = manifest.packaging.get("provider_entrypoints", [])
+        if isinstance(entrypoints, str):
+            entrypoints = [entrypoints]
+        if not entrypoints:
+            return [], []
+        if not isinstance(entrypoints, list):
+            return [], ["packaging.provider_entrypoints must be a string or list of strings"]
+
+        providers: list[ToolProvider] = []
+        errors: list[str] = []
+        for entrypoint in entrypoints:
+            if not isinstance(entrypoint, str) or not entrypoint.strip():
+                errors.append("provider entrypoint must be a non-empty string")
+                continue
+            try:
+                provider = self._load_provider_entrypoint(descriptor.path, entrypoint.strip())
+                metadata = provider.metadata()
+                if not metadata.name:
+                    errors.append(f"provider entrypoint {entrypoint} returned an unnamed provider")
+                    continue
+                providers.append(provider)
+            except Exception as exc:
+                errors.append(f"failed to load provider {entrypoint}: {exc}")
+        return providers, errors
+
+    def _load_provider_entrypoint(self, plugin_dir: Path, entrypoint: str) -> ToolProvider:
+        module_name, sep, attr_path = entrypoint.partition(":")
+        if not sep or not module_name or not attr_path:
+            raise ValueError("entrypoint must use 'module:attribute' format")
+
+        module = self._load_provider_module(plugin_dir, module_name)
+        target: Any = module
+        for part in attr_path.split("."):
+            target = getattr(target, part)
+        provider = target() if isinstance(target, type) else target
+        if callable(provider) and not (hasattr(provider, "metadata") and hasattr(provider, "register")):
+            provider = provider()
+        if not (hasattr(provider, "metadata") and hasattr(provider, "register")):
+            raise TypeError("entrypoint must resolve to a ToolProvider object")
+        return provider
+
+    def _load_provider_module(self, plugin_dir: Path, module_name: str):
+        module_path = Path(module_name)
+        candidate = module_path if module_path.is_absolute() else plugin_dir / module_path
+        if candidate.suffix == ".py" or candidate.exists():
+            if candidate.suffix != ".py":
+                candidate = candidate.with_suffix(".py")
+            if not candidate.exists():
+                raise FileNotFoundError(candidate)
+            safe_name = f"agentnexus_plugin_{plugin_dir.name}_{candidate.stem}"
+            spec = importlib.util.spec_from_file_location(safe_name, candidate)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"cannot create import spec for {candidate}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[safe_name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        sys.path.insert(0, str(plugin_dir))
+        try:
+            return importlib.import_module(module_name)
+        finally:
+            try:
+                sys.path.remove(str(plugin_dir))
+            except ValueError:
+                pass

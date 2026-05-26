@@ -1,4 +1,4 @@
 """Entry point for PyInstaller / python -m agentnexus"""
-from agentnexus.cli import app
+from agentnexus.cli import main
 
-app()
+main()

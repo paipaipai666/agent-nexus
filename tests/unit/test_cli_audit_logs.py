@@ -2,6 +2,7 @@
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -85,6 +86,27 @@ class TestAudit:
         assert len(copy_log) == 1
         copy_log.clear()
         assert len(get_audit_log()) == 1
+
+    def test_concurrent_append_and_snapshot(self):
+        def write_entries(worker: int):
+            for i in range(100):
+                append_audit(AuditEntry(
+                    tool_name=f"tool_{worker}",
+                    caller="agent",
+                    params="{}",
+                    result_summary=f"ok_{i}",
+                    duration_ms=1.0,
+                    hitl_triggered=False,
+                    error=None,
+                ))
+                _ = get_audit_log()
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(write_entries, range(8)))
+
+        entries = get_audit_log()
+        assert len(entries) == 800
+        assert {e.tool_name for e in entries} == {f"tool_{i}" for i in range(8)}
 
 
 class TestLogs:

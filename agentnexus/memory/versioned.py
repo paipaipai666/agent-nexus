@@ -9,6 +9,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,17 @@ CREATE TABLE IF NOT EXISTS conversation_branches (
     PRIMARY KEY (session_id, branch_name)
 );
 
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+    session_id TEXT PRIMARY KEY,
+    workspace_path TEXT NOT NULL,
+    profile TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_cp_session ON conversation_checkpoints(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cp_ltm ON checkpoint_ltm_refs(checkpoint_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON conversation_sessions(workspace_path, updated_at);
 """
 
 
@@ -55,7 +65,13 @@ class ConversationVersionManager:
         mgr.branch("experiment")  # fork from current position
     """
 
-    def __init__(self, session_id: str, db_path: str):
+    def __init__(
+        self,
+        session_id: str,
+        db_path: str,
+        workspace_path: str | None = None,
+        profile: str | None = None,
+    ):
         self.session_id = session_id
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -63,6 +79,10 @@ class ConversationVersionManager:
         self._conn.commit()
         self._redo_stack: list[str] = []
         self._current_branch_name: str = ""  # lazy-init from DB
+        self._workspace_path = self.normalize_workspace_path(workspace_path) if workspace_path else ""
+        self._profile = profile or ""
+        if self._workspace_path:
+            self.register_session(self._workspace_path, self._profile)
 
     # ── public API ─────────────────────────────────────────────────
 
@@ -86,12 +106,82 @@ class ConversationVersionManager:
             )
 
         self._upsert_branch_head(branch, cp_id)
+        self._touch_session()
         self._conn.commit()
 
         # New commit after undo → clear redo stack (like git)
         self._redo_stack.clear()
 
         return cp_id
+
+    def register_session(self, workspace_path: str, profile: str = "") -> None:
+        """Record the workspace that owns this conversation session."""
+        normalized = self.normalize_workspace_path(workspace_path)
+        self._workspace_path = normalized
+        self._profile = profile or self._profile
+        self._conn.execute(
+            "INSERT INTO conversation_sessions (session_id, workspace_path, profile) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "workspace_path = excluded.workspace_path, "
+            "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile), "
+            "updated_at = datetime('now')",
+            (self.session_id, normalized, self._profile),
+        )
+        self._conn.commit()
+
+    @staticmethod
+    def normalize_workspace_path(workspace_path: str | None = None) -> str:
+        """Normalize workspace paths so session ownership checks are stable."""
+        path = Path(workspace_path or Path.cwd()).expanduser().resolve()
+        normalized = str(path)
+        return normalized.casefold() if Path(normalized).drive else normalized
+
+    @classmethod
+    def find_latest_session(cls, db_path: str, workspace_path: str) -> str | None:
+        """Return the most recently updated session for a workspace, if any."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            normalized = cls.normalize_workspace_path(workspace_path)
+            row = conn.execute(
+                "SELECT s.session_id FROM conversation_sessions s "
+                "WHERE s.workspace_path = ? "
+                "AND EXISTS ("
+                "  SELECT 1 FROM conversation_checkpoints c "
+                "  WHERE c.session_id = s.session_id"
+                ") "
+                "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
+                "LIMIT 1",
+                (normalized,),
+            ).fetchone()
+            return row["session_id"] if row else None
+        finally:
+            conn.close()
+
+    @classmethod
+    def session_belongs_to_workspace(cls, db_path: str, session_id: str, workspace_path: str) -> bool:
+        """Return True only when a session is registered for the given workspace."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return False
+            normalized = cls.normalize_workspace_path(workspace_path)
+            row = conn.execute(
+                "SELECT 1 FROM conversation_sessions "
+                "WHERE session_id = ? AND workspace_path = ?",
+                (session_id, normalized),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
 
     def undo(self) -> dict | None:
         """Move HEAD to parent checkpoint. Returns the new current checkpoint, or None."""
@@ -330,6 +420,14 @@ class ConversationVersionManager:
             "INSERT OR REPLACE INTO conversation_branches (session_id, branch_name, head_checkpoint_id) "
             "VALUES (?, ?, ?)",
             (self.session_id, branch, cp_id),
+        )
+
+    def _touch_session(self):
+        if not self._workspace_path:
+            return
+        self._conn.execute(
+            "UPDATE conversation_sessions SET updated_at = datetime('now') WHERE session_id = ?",
+            (self.session_id,),
         )
 
     def _delete_ltm_refs(self, cp_id: str):

@@ -2,14 +2,46 @@
 hallucination, tool-selection, coherence, and run (all-fail branch)."""
 
 import json
+from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
+from agentnexus.rag.ingestion import ChunkStrategy
 
 runner = CliRunner()
+
+
+@dataclass
+class FakeRAGEvalRun:
+    label: str = "fixed-256-dense"
+    strategy: ChunkStrategy = ChunkStrategy.FIXED
+    chunk_size: int = 256
+    use_hybrid: bool = False
+    faithfulness: float = 0.91
+    answer_relevancy: float = 0.92
+    answer_correctness: float = 0.93
+    context_precision: float = 0.94
+    context_recall: float = 0.95
+    context_relevancy: float = 0.96
+    hit_rate: float = 0.97
+    mrr: float = 0.98
+    avg_latency_ms: float = 12.5
+    p95_latency_ms: float = 34.0
+    rejection_rate: float = 0.0
+    faithfulness_ci: tuple[float, float] = (0.9, 0.92)
+    answer_relevancy_ci: tuple[float, float] = (0.91, 0.93)
+    answer_correctness_ci: tuple[float, float] = (0.92, 0.94)
+    context_precision_ci: tuple[float, float] = (0.93, 0.95)
+    context_recall_ci: tuple[float, float] = (0.94, 0.96)
+    context_relevancy_ci: tuple[float, float] = (0.95, 0.97)
+    hit_rate_ci: tuple[float, float] = (0.96, 0.98)
+    mrr_ci: tuple[float, float] = (0.97, 0.99)
+
+    def check_passed(self, thresholds=None):
+        return True
 
 
 @pytest.fixture
@@ -498,3 +530,39 @@ class TestEvalRun:
         result = runner.invoke(app, ["eval", "run", "--dataset", str(dataset)])
 
         assert result.exit_code != 0
+
+    def test_exports_json_report(self, temp_agentnexus_home):
+        report_path = temp_agentnexus_home / "reports" / "eval.json"
+        with patch("agentnexus.cli.eval_cmd.RAGEvaluator") as mock_cls:
+            mock_cls.return_value.run_combination.return_value = FakeRAGEvalRun()
+
+            result = runner.invoke(app, ["eval", "run", "--output", str(report_path), "--format", "json"])
+
+        assert result.exit_code == 0
+        assert report_path.exists()
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert report["top_k"] == 10
+        assert report["configs"][0]["label"] == "fixed-256-dense"
+        assert report["configs"][0]["faithfulness"] == 0.91
+
+    def test_exports_csv_report(self, temp_agentnexus_home):
+        report_path = temp_agentnexus_home / "reports" / "eval.csv"
+        with patch("agentnexus.cli.eval_cmd.RAGEvaluator") as mock_cls:
+            mock_cls.return_value.run_combination.return_value = FakeRAGEvalRun()
+
+            result = runner.invoke(app, ["eval", "run", "--output", str(report_path), "--format", "csv"])
+
+        assert result.exit_code == 0
+        csv_text = report_path.read_text(encoding="utf-8")
+        assert csv_text.startswith("dataset_version,top_k,label,strategy")
+        assert "fixed-256-dense" in csv_text
+        assert ",0.91,0.92,0.93," in csv_text
+
+    def test_export_rejects_unsupported_format(self, temp_agentnexus_home):
+        report_path = temp_agentnexus_home / "eval.xml"
+
+        result = runner.invoke(app, ["eval", "run", "--output", str(report_path), "--format", "xml"])
+
+        assert result.exit_code != 0
+        assert not report_path.exists()
+        assert "Unsupported export format" in result.output

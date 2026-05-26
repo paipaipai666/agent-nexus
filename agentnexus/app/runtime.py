@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService, SkillService
@@ -24,7 +25,13 @@ class AppRuntime:
     session_id: str
 
     @classmethod
-    def build(cls, profile: str | None = None) -> "AppRuntime":
+    def build(
+        cls,
+        profile: str | None = None,
+        session_id: str | None = None,
+        workspace_path: str | None = None,
+        restore_session: bool = False,
+    ) -> "AppRuntime":
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.core.config import get_settings
         from agentnexus.core.llm import AgentLLM
@@ -47,12 +54,14 @@ class AppRuntime:
         extension_manager = ExtensionManager(settings)
         extension_manager.discover()
         extension_manager.load_enabled(runtime=None)
+        extension_providers = extension_manager.loaded_providers()
 
         register_all_tools(
             executor,
             llm_client=llm,
             subagent_confirm=subagent_confirm,
             mcp_manager=mcp_manager,
+            extra_providers=extension_providers,
         )
 
         try:
@@ -63,9 +72,17 @@ class AppRuntime:
             pass
 
         prefix = profile or "runtime"
-        session_id = f"{prefix}_{uuid.uuid4().hex[:12]}"
+        session_id = session_id or f"{prefix}_{uuid.uuid4().hex[:12]}"
+        workspace_path = workspace_path or str(Path.cwd())
         memory = MemoryManager(session_id, llm=llm)
-        version = ConversationVersionManager(session_id, settings.memory_db_path)
+        version = ConversationVersionManager(
+            session_id,
+            settings.memory_db_path,
+            workspace_path=workspace_path,
+            profile=profile or "",
+        )
+        if restore_session:
+            cls._restore_memory_from_version(memory, version)
         agent = ReActAgent(llm, executor, conversation_mode=True)
         if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
             agent.set_mcp_context(mcp_manager.auto_context())
@@ -103,6 +120,20 @@ class AppRuntime:
             subagent_confirm=subagent_confirm,
             session_id=session_id,
         )
+
+    @staticmethod
+    def _restore_memory_from_version(memory: Any, version: Any) -> None:
+        try:
+            snapshot = version.get_head_stm()
+        except Exception:
+            snapshot = ""
+        if not snapshot:
+            return
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        restored = ShortTermMemory.from_json(snapshot)
+        memory.short_term._messages = restored._messages
+        memory.short_term._summary = restored._summary
 
     def close(self) -> None:
         if self.mcp_manager is not None:

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 
 def test_runtime_build_assembles_core_services():
@@ -34,6 +34,54 @@ def test_runtime_build_assembles_core_services():
     assert runtime.services.eval is not None
     assert runtime.services.config is not None
     mock_trace.configure.assert_called_once_with("/tmp/traces")
+
+
+def test_runtime_build_uses_supplied_session_id_and_restores_stm():
+    mock_settings = MagicMock()
+    mock_settings.memory_db_path = "/tmp/memory.db"
+    mock_settings.traces_dir = "/tmp/traces"
+    mock_settings.extensions_dirs = []
+    mock_settings.extensions_enabled = True
+    mock_settings.default_skill = ""
+
+    from agentnexus.memory.short_term import ShortTermMemory
+
+    stm = ShortTermMemory()
+    stm.append("user", "previous question")
+    snapshot = stm.to_json()
+
+    memory = MagicMock()
+    memory.short_term = ShortTermMemory()
+    version = MagicMock()
+    version.get_head_stm.return_value = snapshot
+
+    with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
+         patch("agentnexus.core.llm.AgentLLM", return_value=MagicMock()), \
+         patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=MagicMock()), \
+         patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=MagicMock()), \
+         patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
+         patch("agentnexus.tools.register_all_tools"), \
+         patch("agentnexus.memory.manager.MemoryManager", return_value=memory) as mock_memory_cls, \
+         patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=version) as mock_version_cls, \
+         patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=MagicMock()), \
+         patch("agentnexus.skills.SkillRegistry.from_settings") as mock_skill_registry, \
+         patch("agentnexus.observability.tracer.trace_manager"):
+        registry = MagicMock()
+        registry.discover.return_value = []
+        mock_skill_registry.return_value = registry
+        from agentnexus.app import AppRuntime
+
+        runtime = AppRuntime.build(profile="tui", session_id="tui_existing", restore_session=True)
+
+    assert runtime.session_id == "tui_existing"
+    mock_memory_cls.assert_called_once_with("tui_existing", llm=ANY)
+    mock_version_cls.assert_called_once_with(
+        "tui_existing",
+        "/tmp/memory.db",
+        workspace_path=ANY,
+        profile="tui",
+    )
+    assert memory.short_term.get_all()[0]["content"] == "previous question"
 
 
 def test_close_method(mocker):

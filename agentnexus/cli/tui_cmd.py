@@ -1,15 +1,18 @@
-"""CLI command: nexus tui — launch terminal-native chat with real ReActAgent."""
+"""CLI command: nexus tui - launch terminal-native chat with real ReActAgent."""
 
 from . import app
 
 
-@app.command("tui")
-def tui():
-    """启动终端原生对话界面（Textual TUI + ReActAgent 后端）"""
+def launch_tui(session_id: str | None = None, restore_session: bool = False):
+    """Launch terminal-native chat with the shared app runtime."""
     from agentnexus.app import AppRuntime
     from agentnexus.tui.app import AgentNexusTUI
 
-    runtime = AppRuntime.build(profile="tui")
+    runtime = AppRuntime.build(
+        profile="tui",
+        session_id=session_id,
+        restore_session=restore_session,
+    )
     tui_app = AgentNexusTUI(
         agent=runtime.agent,
         memory=runtime.memory_manager,
@@ -22,3 +25,9 @@ def tui():
         tui_app.run()
     finally:
         runtime.close()
+
+
+@app.command("tui")
+def tui():
+    """Start the terminal-native chat interface."""
+    launch_tui()

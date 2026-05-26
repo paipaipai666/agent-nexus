@@ -88,10 +88,10 @@ class AuditEntry:
 class ToolRegistry:
     """Unified tool governance — all tool calls go through this."""
 
-    def __init__(self, audit_log: list[AuditEntry] | None = None):
+    def __init__(self, audit_log: Any | None = None):
         self._tools: dict[str, tuple[ToolMeta, Callable]] = {}
         self._rate_counters: dict[str, list[float]] = defaultdict(list)
-        self._audit_log: list[AuditEntry] = audit_log or []
+        self._audit_log = audit_log if audit_log is not None else []
         self._param_validators: dict[str, Any] = {}
         self._output_validators: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=4)

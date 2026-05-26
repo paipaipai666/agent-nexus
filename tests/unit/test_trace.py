@@ -112,6 +112,25 @@ class TestTraceManager:
         content = jsonl_files[0].read_text(encoding="utf-8")
         assert "operation" in content
 
+    def test_span_flushed_before_end_trace(self, tmp_path):
+        tm = TraceManager()
+        tm.configure(str(tmp_path))
+        tm.start_trace("crash safe test")
+
+        with tm.span("operation", {"in": "data"}):
+            pass
+
+        jsonl_files = list(tmp_path.glob("*.jsonl"))
+        assert len(jsonl_files) == 1
+        content = jsonl_files[0].read_text(encoding="utf-8")
+        assert "operation" in content
+        assert "crash safe test" not in content
+
+        tm.end_trace()
+        content_after_end = jsonl_files[0].read_text(encoding="utf-8")
+        assert content_after_end.count("operation") == 1
+        assert "crash safe test" in content_after_end
+
     def test_span_context_manager_outside_trace(self):
         tm = TraceManager()
         # reset active trace
