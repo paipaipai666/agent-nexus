@@ -61,3 +61,14 @@ McpBridgeToolProvider  → MCP 动态导入
 | `subagent_run` | `task`, `role?`, `allowed_tools?`, `max_steps?` | 10/min | LOW |
 
 > 见 [Code-Execution](Code-Execution.md) 了解沙箱细节，[MCP-Integration](MCP-Integration.md) 了解外部工具集成。
+
+## grep_search glob 模式
+
+| 模式 | 说明 |
+|------|------|
+| `*.py` | 匹配所有 .py 文件（包括子目录） |
+| `**/*.py` | 等同于 `*.py` |
+| `test_*` | 匹配所有以 test_ 开头的文件（包括子目录） |
+| `**/test_*` | 等同于 `test_*` |
+| `[abc].py` | 匹配 a.py, b.py, c.py |
+| `[!abc].py` | 匹配非 a.py, b.py, c.py 的文件 |

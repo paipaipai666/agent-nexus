@@ -1,9 +1,74 @@
 """grep_search tool — ripgrep code search for exact symbol/pattern matching."""
 
-import fnmatch
 import re
 import subprocess
 from pathlib import Path
+
+
+def _normalize_glob_pattern(pattern: str) -> str:
+    """Normalize glob pattern to match ripgrep behavior.
+
+    ripgrep treats ** as 'match any directory component', so:
+    - **/*.py is equivalent to *.py (match all .py files)
+    - **/test_* is equivalent to test_* (match all test_* files)
+    """
+    if pattern.startswith("**/"):
+        pattern = pattern[3:]
+    if pattern.endswith("/**"):
+        pattern = pattern[:-3]
+    return pattern
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern:
+    """Convert glob pattern to regex, matching ripgrep's glob semantics.
+
+    ripgrep matches glob patterns against the full relative path, so:
+    - ``*``  matches any characters including ``/`` (not just filename)
+    - ``?``  matches a single character including ``/``
+    - ``[seq]`` / ``[!seq]`` character class
+
+    The ``**`` prefix/suffix is already handled by ``_normalize_glob_pattern``.
+    We prepend ``(?:.*/)?`` so patterns like ``test_*`` match ``src/test_file.py``.
+    """
+    parts: list[str] = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if i + 1 < n and pattern[i + 1] == "*":
+                parts.append(".*")
+                i += 2
+                if i < n and pattern[i] == "/":
+                    i += 1
+            else:
+                parts.append(".*")
+                i += 1
+        elif c == "?":
+            parts.append(".")
+            i += 1
+        elif c == "[":
+            j = i + 1
+            if j < n and pattern[j] == "!":
+                # Convert [!seq] to [^seq] for regex
+                parts.append("[^")
+                j += 1
+            else:
+                parts.append("[")
+            while j < n and pattern[j] != "]":
+                parts.append(pattern[j])
+                j += 1
+            if j < n:
+                parts.append("]")
+                i = j + 1
+            else:
+                # No closing ], treat as literal
+                parts[-1] = re.escape(c)
+                i += 1
+        else:
+            parts.append(re.escape(c))
+            i += 1
+    return re.compile("(?:.*/)?" + "".join(parts) + "\\Z", re.DOTALL)
 
 
 def grep_available() -> bool:
@@ -109,9 +174,12 @@ def _python_grep_search(
     matcher = None if literal else re.compile(pattern)
     output_lines = [f"grep 搜索结果 (模式: '{pattern}'):"]
     files = [root] if root.is_file() else sorted(item for item in root.rglob("*") if item.is_file())
+
+    glob_regex = _glob_to_regex(_normalize_glob_pattern(glob))
+
     for file_path in files:
         rel = str(file_path if root.is_file() else file_path.relative_to(root))
-        if not fnmatch.fnmatch(file_path.name, glob) and not fnmatch.fnmatch(rel, glob):
+        if not glob_regex.match(rel) and not glob_regex.match(file_path.name):
             continue
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as handle:

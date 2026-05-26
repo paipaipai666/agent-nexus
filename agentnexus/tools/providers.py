@@ -144,7 +144,7 @@ class SearchToolProvider:
                 "直接搜函数名、类名、导入、错误消息等即可，无需转义。"
                 "参数: pattern(搜索文本,必填), "
                 "path(搜索目录,默认当前目录), "
-                "glob(文件过滤,如 '*.py'), "
+                "glob(文件过滤,如 '*.py' 或 '**/*.py', 默认 '*'), "
                 "max_results(最大结果数,1-50,默认10), "
                 "literal(字面量匹配,默认true; 设为false启用正则)",
                 grep_search,
@@ -153,7 +153,15 @@ class SearchToolProvider:
                     "properties": {
                         "pattern": {"type": "string", "description": "搜索文本（默认字面量匹配）"},
                         "path": {"type": "string", "description": "搜索目录", "default": "."},
-                        "glob": {"type": "string", "description": "文件过滤模式 (如 *.py, *.yaml)", "default": "*"},
+                        "glob": {
+                            "type": "string",
+                            "description": (
+                                "文件过滤模式。支持: *.py (所有py文件), **/*.py (同*.py), "
+                                "test_* (所有test_开头的文件), **/test_* (同test_*), "
+                                "[abc].py (字符类), [!abc].py (排除字符类)"
+                            ),
+                            "default": "*",
+                        },
                         "max_results": {"type": "integer", "description": "最大结果数 (1-50)", "default": 10},
                         "literal": {
                             "type": "boolean",
