@@ -39,8 +39,45 @@ compatibility: {}
         report = manager.load_enabled()
 
         assert [item.name for item in discovered] == ["demo"]
-        assert [item.name for item in report.loaded] == ["demo"]
+        assert [item.name for item in report.disabled] == ["demo"]
         assert report.failed == []
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_extension_manager_loads_explicitly_enabled_plugin(temp_agentnexus_home):
+    tmp_path = _workspace_tmp()
+    plugin_dir = tmp_path / "plugins" / "demo"
+    plugin_dir.mkdir(parents=True)
+    try:
+        (plugin_dir / "plugin.yaml").write_text(
+            """
+name: demo
+version: "0.1"
+api_version: "1"
+providers:
+  - filesystem
+compatibility: {}
+""".strip(),
+            encoding="utf-8",
+        )
+        (temp_agentnexus_home / "config.yaml").write_text(
+            "capabilities:\n  plugins:\n    demo: true\n",
+            encoding="utf-8",
+        )
+
+        from agentnexus.extensions import ExtensionManager
+
+        settings = SimpleNamespace(
+            memory_db_path=str(tmp_path / "memory.db"),
+            extensions_dirs=[],
+            extensions_enabled=True,
+        )
+        manager = ExtensionManager(settings, built_in_dir=tmp_path / "builtin", user_dir=tmp_path / "plugins")
+        manager.discover()
+        report = manager.load_enabled()
+
+        assert [item.name for item in report.loaded] == ["demo"]
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
@@ -69,7 +106,7 @@ def test_extension_manager_reports_invalid_manifest():
         shutil.rmtree(tmp_path, ignore_errors=True)
 
 
-def test_extension_manager_rejects_unknown_provider():
+def test_extension_manager_rejects_unknown_provider(temp_agentnexus_home):
     tmp_path = _workspace_tmp()
     plugin_dir = tmp_path / "plugins" / "bad_provider"
     plugin_dir.mkdir(parents=True)
@@ -83,6 +120,10 @@ providers:
   - unknown-provider
 compatibility: {}
 """.strip(),
+            encoding="utf-8",
+        )
+        (temp_agentnexus_home / "config.yaml").write_text(
+            "capabilities:\n  plugins:\n    bad_provider: true\n",
             encoding="utf-8",
         )
 
@@ -117,7 +158,7 @@ def test_default_builtin_extensions_dir_exists():
     assert manager.built_in_dir.name == "builtin_extensions"
 
 
-def test_extension_manager_loads_python_provider():
+def test_extension_manager_loads_python_provider(temp_agentnexus_home):
     tmp_path = _workspace_tmp()
     plugin_dir = tmp_path / "plugins" / "demo_dynamic"
     plugin_dir.mkdir(parents=True)
@@ -156,6 +197,10 @@ class DemoProvider:
         )
         context.mark_registered(executor, before)
 """.strip(),
+            encoding="utf-8",
+        )
+        (temp_agentnexus_home / "config.yaml").write_text(
+            "capabilities:\n  plugins:\n    demo_dynamic: true\n",
             encoding="utf-8",
         )
 

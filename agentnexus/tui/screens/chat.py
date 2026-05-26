@@ -66,13 +66,14 @@ class ChatScreen(Screen):
         ("escape", "focus_input", "输入"),
     ]
 
-    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None):
+    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None, capability_runtime=None):
         super().__init__()
         self._agent = agent
         self._memory = memory
         self._version = version
         self._mcp_manager = mcp_manager
         self._skill_service = skill_service
+        self._capability_runtime = capability_runtime
         self._running = False
         self._spinner_timer = None
         self._spinner_frames = None
@@ -174,8 +175,9 @@ class ChatScreen(Screen):
     def action_show_help(self):
         self._chat_area.add_system(
             "[dim]命令:[/] /help  /undo  /redo  /log [--all]  /branch <名>\n"
-            "       /checkout <ref>  /diff [ref1] [ref2]  /status  /mcp\n"
-            "       /skill [status|list|use <id> [--default]|default <id>|validate [id]|reset]  "
+            "       /checkout <ref>  /diff [ref1] [ref2]  /status  /mcp  /plugin\n"
+            "       /skill [status|list|use <id> [--default]|enable <id>|disable <id>|"
+            "default <id>|validate [id]|reset]  "
             "/clear [--all]  /compact [指令]  /stats"
         )
 
@@ -336,6 +338,8 @@ class ChatScreen(Screen):
             self._chat_area.add_system(self._hud._build_text())
         elif cmd == "/mcp":
             self._handle_mcp_command(arg)
+        elif cmd == "/plugin":
+            self._handle_plugin_command(arg)
         elif cmd == "/skill":
             self._handle_skill_command(arg)
         else:
@@ -418,6 +422,22 @@ class ChatScreen(Screen):
                         "selected" if self._current_skill is not None else "idle"
                     )
                 self._chat_area.add_system(self._format_skill_validation(registry, errors, rest.strip() or None))
+                self._refresh_skill_panel()
+            elif subcmd in {"enable", "disable"}:
+                target = rest.strip()
+                if not target:
+                    self._chat_area.add_system("[dim]用法: /skill enable|disable <skill_id>[/]")
+                    return
+                if self._capability_runtime is not None:
+                    result = (
+                        self._capability_runtime.enable("skills", target)
+                        if subcmd == "enable"
+                        else self._capability_runtime.disable("skills", target)
+                    )
+                    self._chat_area.add_system(f"[dim]Skill {subcmd}: {target} - {result.get('skills')}[/]")
+                elif self._skill_service is not None:
+                    self._skill_service.set_enabled(target, subcmd == "enable")
+                    self._chat_area.add_system(f"[dim]Skill {subcmd}: {target}[/]")
                 self._refresh_skill_panel()
             elif subcmd == "use":
                 target, persist_default = self._parse_skill_use_args(rest)
@@ -820,6 +840,34 @@ class ChatScreen(Screen):
                     if hasattr(self._agent, "set_mcp_context"):
                         self._agent.set_mcp_context(self._mcp_manager.auto_context())
                 self._chat_area.add_system(self._format_mcp_retry_result(result))
+            elif subcmd in {"enable", "disable", "reload"}:
+                server_name = rest[0] if rest else None
+                if self._capability_runtime is not None:
+                    if subcmd == "enable":
+                        result = self._capability_runtime.enable("mcp", server_name)
+                    elif subcmd == "disable":
+                        result = self._capability_runtime.disable("mcp", server_name)
+                    else:
+                        result = self._capability_runtime.reload("mcp")
+                    self._chat_area.add_system(f"[dim]MCP {subcmd}: {server_name or 'all'} - {result.get('mcp')}[/]")
+                else:
+                    if not server_name and subcmd != "reload":
+                        self._chat_area.add_system("[dim]用法: /mcp enable|disable <server>[/]")
+                        return
+                    if subcmd == "enable":
+                        result = self._mcp_manager.enable_server(server_name)
+                    elif subcmd == "disable":
+                        result = self._mcp_manager.disable_server(server_name)
+                    else:
+                        result = self._mcp_manager.reload_server(server_name)
+                    if getattr(self._agent, "tool_executor", None) is not None:
+                        self._agent.tool_executor.registry.unregister_source_prefix("mcp:", source_type="mcp")
+                        self._mcp_manager.register_tools(self._agent.tool_executor)
+                    if hasattr(self._agent, "set_mcp_context"):
+                        self._agent.set_mcp_context(self._mcp_manager.auto_context())
+                    self._chat_area.add_system(f"[dim]MCP {subcmd}: {result}[/]")
+                self._refresh_mcp_panel()
+                self._refresh_tools_panel()
             else:
                 self._chat_area.add_system(
                     "[dim]用法: /mcp [status|tools [server]|resources [server]|"
@@ -838,6 +886,42 @@ class ChatScreen(Screen):
             self._side_panel.update_mcp(snapshot)
         except Exception:
             pass
+
+    def _handle_plugin_command(self, arg: str):
+        if self._capability_runtime is None:
+            self._chat_area.add_system("[dim]Plugin runtime unavailable.[/]")
+            return
+        parts = arg.strip().split()
+        subcmd = parts[0] if parts else "status"
+        name = parts[1] if len(parts) > 1 else None
+        try:
+            if subcmd in {"status", "list"}:
+                status = self._capability_runtime.extension_manager.status()
+                lines = ["[bold]Plugins[/]"]
+                enabled = self._capability_runtime.snapshot().plugin_enabled
+                for descriptor in status.discovered:
+                    state = "enabled" if enabled.get(descriptor.name, False) else "disabled"
+                    errors = f" errors={len(descriptor.errors)}" if descriptor.errors else ""
+                    lines.append(f"- {descriptor.name}: {state}{errors}")
+                if not status.discovered:
+                    lines.append("[dim]No plugins discovered.[/]")
+                self._chat_area.add_system("\n".join(lines))
+            elif subcmd == "enable" and name:
+                result = self._capability_runtime.enable("plugins", name)
+                self._chat_area.add_system(f"[dim]Plugin enabled: {name} - {result.get('plugins')}[/]")
+                self._refresh_tools_panel()
+            elif subcmd == "disable" and name:
+                result = self._capability_runtime.disable("plugins", name)
+                self._chat_area.add_system(f"[dim]Plugin disabled: {name} - {result.get('plugins')}[/]")
+                self._refresh_tools_panel()
+            elif subcmd == "reload":
+                result = self._capability_runtime.reload("plugins")
+                self._chat_area.add_system(f"[dim]Plugins reloaded: {result.get('plugins')}[/]")
+                self._refresh_tools_panel()
+            else:
+                self._chat_area.add_system("[dim]用法: /plugin [status|list|enable <name>|disable <name>|reload][/]")
+        except Exception as exc:
+            self._chat_area.add_system(f"[dim]Plugin command failed: {exc}[/]")
 
     def _refresh_tools_panel(self):
         try:
@@ -1164,6 +1248,12 @@ class ChatScreen(Screen):
 
     @work(exclusive=True)
     async def _run_agent(self, text: str):
+        if self._capability_runtime is not None:
+            self._capability_runtime.refresh_if_stale()
+            self._refresh_tools_panel()
+            self._refresh_mcp_panel()
+            self._refresh_skill_panel()
+
         # ── Thread-safe confirmation bridge ──
         # agent thread calls _confirm(params) → this sets up a
         # threading.Event, pushes ConfirmDialog on the main Textual

@@ -48,6 +48,23 @@ class TestRegister:
         r.register(meta, lambda x: x)
         assert "already registered" in caplog.text
 
+    def test_unregister_source_removes_tools(self):
+        r = ToolRegistry()
+        r.register(_make_meta("a", source_type="plugin", source_id="plugin:x"), lambda: "a")
+        r.register(_make_meta("b", source_type="plugin", source_id="plugin:x"), lambda: "b")
+
+        removed = r.unregister_source("plugin:x", source_type="plugin")
+
+        assert removed == ["a", "b"]
+        assert r.list_tools() == []
+
+    def test_register_same_name_from_different_source_fails(self):
+        r = ToolRegistry()
+        r.register(_make_meta("a", source_type="builtin", source_id="search"), lambda: "a")
+
+        with pytest.raises(ValueError, match="already registered"):
+            r.register(_make_meta("a", source_type="plugin", source_id="plugin:x"), lambda: "b")
+
 
 class TestInvoke:
     def test_tool_not_found(self):

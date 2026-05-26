@@ -302,6 +302,25 @@ class TestMcpCommandHelpers:
         screen._handle_mcp_command("retry")
         manager.register_tools.assert_not_called()
 
+    def test_handle_mcp_enable_uses_capability_runtime(self):
+        manager = MagicMock()
+        runtime = MagicMock()
+        runtime.enable.return_value = {"mcp": "reloaded"}
+        screen = ChatScreen(
+            agent=MagicMock(),
+            memory=None,
+            version=None,
+            mcp_manager=manager,
+            capability_runtime=runtime,
+        )
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+
+        screen._handle_mcp_command("enable docs")
+
+        runtime.enable.assert_called_once_with("mcp", "docs")
+        assert "MCP enable" in screen._chat_area.add_system.call_args[0][0]
+
     def test_handle_mcp_no_reconnect_skips_register(self):
         """retry with no reconnected servers should not call register_tools."""
         manager = MagicMock()
@@ -659,6 +678,24 @@ class TestSkillCommandHelpers:
         assert screen._current_skill == entry
         assert screen._skill_status == "selected"
 
+    def test_handle_skill_disable_delegates_to_capability_runtime(self):
+        runtime = MagicMock()
+        runtime.disable.return_value = {"skills": "reloaded 1 skills"}
+        screen = ChatScreen(
+            agent=MagicMock(),
+            memory=None,
+            version=None,
+            capability_runtime=runtime,
+        )
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+        screen._skill_registry = SkillRegistry([])
+
+        screen._handle_skill_command("disable default/docx")
+
+        runtime.disable.assert_called_once_with("skills", "default/docx")
+        assert "Skill disable" in screen._chat_area.add_system.call_args[0][0]
+
     def test_handle_skill_use_default_persists_config(self, temp_agentnexus_home):
         workflow = _workflow()
         entry = SkillEntry("review", "code_review", "Code Review", "Review code changes", MagicMock(), workflow)
@@ -841,3 +878,21 @@ class TestSkillCommandHelpers:
 
         assert handled is True
         assert "用法" in screen._chat_area.add_system.call_args[0][0]
+
+class TestPluginCommands:
+    def test_handle_plugin_enable_uses_capability_runtime(self):
+        runtime = MagicMock()
+        runtime.enable.return_value = {"plugins": "reloaded 1 plugin providers"}
+        screen = ChatScreen(
+            agent=MagicMock(),
+            memory=None,
+            version=None,
+            capability_runtime=runtime,
+        )
+        screen._chat_area = MagicMock()
+        screen._side_panel = MagicMock()
+
+        screen._handle_plugin_command("enable demo")
+
+        runtime.enable.assert_called_once_with("plugins", "demo")
+        assert "Plugin enabled" in screen._chat_area.add_system.call_args[0][0]

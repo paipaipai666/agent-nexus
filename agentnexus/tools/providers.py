@@ -32,6 +32,9 @@ class ToolProviderContext:
     mcp_manager: Any = None
     runtime: Any = None
     extension_context: Any = None
+    source_type: str = "builtin"
+    source_id: str = ""
+    generation: int = 0
     registered_tools: list[str] = field(default_factory=list)
 
     def want(self, name: str) -> bool:
@@ -39,7 +42,36 @@ class ToolProviderContext:
 
     def mark_registered(self, executor: ToolExecutor, before: set[str]) -> None:
         after = set(executor.registry.list_tools())
-        self.registered_tools.extend(sorted(after - before))
+        added = sorted(after - before)
+        source_id = self.source_id or self.source_type
+        for name in added:
+            entry = executor.registry._tools.get(name)
+            if entry is None:
+                continue
+            meta, func = entry
+            if meta.source_type != "unknown" or meta.source_id != "unknown":
+                continue
+            meta.source_type = self.source_type
+            meta.source_id = source_id
+            meta.generation = self.generation
+            executor.registry._tools[name] = (meta, func)
+        self.registered_tools.extend(added)
+
+    def for_provider(self, provider_name: str, source_type: str | None = None, generation: int | None = None):
+        return ToolProviderContext(
+            non_interactive=self.non_interactive,
+            llm_client=self.llm_client,
+            include_tools=self.include_tools,
+            enable_subagent=self.enable_subagent,
+            subagent_confirm=self.subagent_confirm,
+            mcp_manager=self.mcp_manager,
+            runtime=self.runtime,
+            extension_context=self.extension_context,
+            source_type=source_type or self.source_type,
+            source_id=provider_name,
+            generation=self.generation if generation is None else generation,
+            registered_tools=self.registered_tools,
+        )
 
 
 class ToolProvider(Protocol):
@@ -450,5 +482,5 @@ def register_tool_providers(
 
     ctx = context or ToolProviderContext()
     for provider in providers or default_tool_providers():
-        provider.register(executor, ctx)
+        provider.register(executor, ctx.for_provider(provider.metadata().name))
     return ctx.registered_tools

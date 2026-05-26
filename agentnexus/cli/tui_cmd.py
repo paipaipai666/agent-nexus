@@ -19,6 +19,7 @@ def launch_tui(session_id: str | None = None, restore_session: bool = False):
         version=runtime.version_manager,
         mcp_manager=runtime.mcp_manager,
         skill_service=runtime.services.skill,
+        capability_runtime=runtime.capability_runtime,
     )
     tui_app._subagent_confirm = runtime.subagent_confirm
     try:

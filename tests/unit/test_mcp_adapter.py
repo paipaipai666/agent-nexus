@@ -1160,15 +1160,25 @@ class TestCreateMcpManagerFromSettings:
         settings = SimpleNamespace(mcp_enabled=True, mcp_startup_timeout=15, mcp_servers=[])
         assert create_mcp_manager_from_settings(settings) is None
 
-    def test_returns_none_when_all_servers_disabled(self):
+    def test_returns_manager_when_all_servers_disabled(self, monkeypatch):
+        started = False
+
+        def fake_start(self):
+            nonlocal started
+            started = True
+
+        monkeypatch.setattr(MCPToolManager, "start", fake_start)
         settings = SimpleNamespace(
             mcp_enabled=True,
             mcp_startup_timeout=15,
             mcp_servers=[MCPServerConfig(name="x", transport="stdio", command="python", enabled=False)],
         )
-        assert create_mcp_manager_from_settings(settings) is None
+        manager = create_mcp_manager_from_settings(settings)
+        assert manager is not None
+        assert started is True
+        assert manager.server_names() == ["x"]
 
-    def test_returns_manager_for_enabled_servers(self, monkeypatch):
+    def test_returns_manager_for_configured_servers(self, monkeypatch):
         started = False
 
         def fake_start(self):
@@ -1184,6 +1194,29 @@ class TestCreateMcpManagerFromSettings:
         manager = create_mcp_manager_from_settings(settings)
         assert manager is not None
         assert started is True
+        assert manager.server_names() == ["x"]
+
+    def test_capability_config_controls_initial_enabled_servers(self, monkeypatch, temp_agentnexus_home):
+        captured = {}
+
+        def fake_start(self):
+            captured["servers"] = [server.name for server in self._servers]
+
+        monkeypatch.setattr(MCPToolManager, "start", fake_start)
+        (temp_agentnexus_home / "config.yaml").write_text(
+            "capabilities:\n  mcp_servers:\n    x: true\n",
+            encoding="utf-8",
+        )
+        settings = SimpleNamespace(
+            mcp_enabled=True,
+            mcp_startup_timeout=15,
+            mcp_servers=[MCPServerConfig(name="x", transport="stdio", command="python")],
+        )
+
+        manager = create_mcp_manager_from_settings(settings)
+
+        assert manager is not None
+        assert captured["servers"] == ["x"]
 
 
 # ── _run_loop 生命周期测试 ──────────────────────────────────

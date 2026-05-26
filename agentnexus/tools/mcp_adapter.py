@@ -85,6 +85,7 @@ class _ServerRuntime:
 
 class MCPToolManager:
     def __init__(self, servers: list[MCPServerConfig], startup_timeout: int = 15):
+        self._all_servers = list(servers)
         self._servers = [server for server in servers if server.enabled]
         self._startup_timeout = startup_timeout
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -155,6 +156,9 @@ class MCPToolManager:
             "servers": servers,
         }
 
+    def server_names(self) -> list[str]:
+        return [server.name for server in self._all_servers]
+
     def auto_context(self) -> str:
         parts = []
         for server in self._servers:
@@ -200,7 +204,7 @@ class MCPToolManager:
     def start(self) -> None:
         if self._started:
             return
-        if not self._servers:
+        if not self._all_servers:
             self._started = True
             return
         self._closing = False
@@ -208,7 +212,8 @@ class MCPToolManager:
         self._thread = threading.Thread(target=self._run_loop, name="agentnexus-mcp", daemon=True)
         self._thread.start()
         try:
-            self._submit(self._connect_all(), timeout=max(5, self._startup_timeout * max(1, len(self._servers))))
+            if self._servers:
+                self._submit(self._connect_all(), timeout=max(5, self._startup_timeout * max(1, len(self._servers))))
             self._submit(self._start_health_loop(), timeout=5)
         except Exception:
             if self._loop is not None and self._thread is not None:
@@ -235,6 +240,24 @@ class MCPToolManager:
         self._health_task = None
         self._started = False
         self._closing = False
+
+    def enable_server(self, server_name: str) -> dict:
+        if not self._started or self._loop is None:
+            self.start()
+        return self._submit(self._enable_server_async(server_name), timeout=max(5, self._startup_timeout))
+
+    def disable_server(self, server_name: str) -> dict:
+        if not self._started or self._loop is None:
+            self.start()
+        return self._submit(self._disable_server_async(server_name), timeout=10)
+
+    def reload_server(self, server_name: str | None = None) -> dict:
+        if server_name is None:
+            results = {}
+            for name in self.server_names():
+                results[name] = self.reload_server(name)
+            return results
+        return self._submit(self._reload_server_async(server_name), timeout=max(5, self._startup_timeout))
 
     def tool_descriptors(self) -> list[MCPToolDescriptor]:
         return list(self._tool_descriptors.values())
@@ -270,6 +293,8 @@ class MCPToolManager:
                 require_hitl=tool.require_hitl,
                 timeout_sec=tool.timeout_sec,
                 rate_limit_per_min=tool.rate_limit_per_min,
+                source_type="mcp",
+                source_id=f"mcp:{tool.server_name}",
             )
             self._registered_signatures[cache_key] = signature
             registered.append(tool.local_name)
@@ -390,6 +415,42 @@ class MCPToolManager:
             "failed": failed,
             "snapshot": self.status_snapshot(),
         }
+
+    async def _enable_server_async(self, server_name: str) -> dict:
+        config = self._find_server_config(server_name)
+        if config is None:
+            raise KeyError(f"Unknown MCP server: {server_name}")
+        if config not in self._servers:
+            self._servers.append(config)
+        if self._loop is None:
+            self._ensure_sdk_available()
+        runtime = self._server_runtimes.get(config.name)
+        if runtime is None:
+            await self._connect_server(config)
+        return {"enabled": config.name, "snapshot": self.status_snapshot()}
+
+    async def _disable_server_async(self, server_name: str) -> dict:
+        config = self._find_server_config(server_name)
+        if config is None:
+            raise KeyError(f"Unknown MCP server: {server_name}")
+        runtime = self._server_runtimes.pop(config.name, None)
+        if runtime is not None:
+            await runtime.exit_stack.aclose()
+        self._servers = [server for server in self._servers if server.name != config.name]
+        self._clear_server_descriptors(config.name)
+        self._server_states[config.name] = MCPServerState.DISCONNECTED
+        self._failures.pop(config.name, None)
+        return {"disabled": config.name, "snapshot": self.status_snapshot()}
+
+    async def _reload_server_async(self, server_name: str) -> dict:
+        await self._disable_server_async(server_name)
+        return await self._enable_server_async(server_name)
+
+    def _find_server_config(self, server_name: str) -> MCPServerConfig | None:
+        for server in self._all_servers:
+            if server.name == server_name:
+                return server
+        return None
 
     async def _connect_server(self, config: MCPServerConfig) -> None:
         from mcp import ClientSession, StdioServerParameters
@@ -811,13 +872,34 @@ class MCPToolManager:
 def create_mcp_manager_from_settings(settings) -> MCPToolManager | None:
     if getattr(settings, "mcp_enabled", False) is not True:
         return None
-    servers = list(getattr(settings, "mcp_servers", []) or [])
-    enabled_servers = [server for server in servers if getattr(server, "enabled", True)]
-    if not enabled_servers:
+    servers = _apply_capability_mcp_enabled(list(getattr(settings, "mcp_servers", []) or []))
+    if not servers:
         return None
-    manager = MCPToolManager(enabled_servers, startup_timeout=getattr(settings, "mcp_startup_timeout", 15))
+    manager = MCPToolManager(servers, startup_timeout=getattr(settings, "mcp_startup_timeout", 15))
     manager.start()
     return manager
+
+
+def _apply_capability_mcp_enabled(servers: list[MCPServerConfig]) -> list[MCPServerConfig]:
+    try:
+        from agentnexus.core.config import _load_yaml
+
+        data = _load_yaml()
+        capabilities = data.get("capabilities") if isinstance(data, dict) else {}
+        enabled_map = capabilities.get("mcp_servers") if isinstance(capabilities, dict) else {}
+        enabled_map = enabled_map if isinstance(enabled_map, dict) else {}
+    except Exception:
+        enabled_map = {}
+
+    result = []
+    for server in servers:
+        enabled = bool(enabled_map.get(server.name, False))
+        if hasattr(server, "model_copy"):
+            result.append(server.model_copy(update={"enabled": enabled}))
+        else:
+            server.enabled = enabled
+            result.append(server)
+    return result
 
 
 def _sanitize_name(value: str) -> str:

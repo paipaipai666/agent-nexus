@@ -20,6 +20,7 @@ class AppRuntime:
     version_manager: Any
     mcp_manager: Any
     extension_manager: Any
+    capability_runtime: Any
     services: AppServices
     subagent_confirm: Any
     session_id: str
@@ -33,6 +34,7 @@ class AppRuntime:
         restore_session: bool = False,
     ) -> "AppRuntime":
         from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.capabilities.runtime import CapabilityRuntime
         from agentnexus.core.config import get_settings
         from agentnexus.core.llm import AgentLLM
         from agentnexus.extensions import ExtensionManager
@@ -54,14 +56,13 @@ class AppRuntime:
         extension_manager = ExtensionManager(settings)
         extension_manager.discover()
         extension_manager.load_enabled(runtime=None)
-        extension_providers = extension_manager.loaded_providers()
 
         register_all_tools(
             executor,
             llm_client=llm,
             subagent_confirm=subagent_confirm,
             mcp_manager=mcp_manager,
-            extra_providers=extension_providers,
+            extra_providers=[],
         )
 
         try:
@@ -98,10 +99,28 @@ class AppRuntime:
         skill_service.router.min_score = getattr(settings, "skill_auto_route_min_score", 2.0)
         skill_service.router.margin = getattr(settings, "skill_auto_route_margin", 0.75)
         skill_service.use_default(getattr(settings, "default_skill", ""))
+        capability_runtime = CapabilityRuntime(
+            settings=settings,
+            executor=executor,
+            agent=agent,
+            skill_service=skill_service,
+            mcp_manager=mcp_manager,
+            extension_manager=extension_manager,
+            register_tools=register_all_tools,
+            llm_client=llm,
+            subagent_confirm=subagent_confirm,
+        )
         trace_manager.configure(settings.traces_dir)
 
         services = AppServices(
-            chat=ChatService(agent, memory, version, skill_service=skill_service, tool_executor=executor),
+            chat=ChatService(
+                agent,
+                memory,
+                version,
+                skill_service=skill_service,
+                tool_executor=executor,
+                capability_runtime=capability_runtime,
+            ),
             skill=skill_service,
             knowledge_base=KnowledgeBaseService(settings),
             eval=EvalService(settings),
@@ -116,6 +135,7 @@ class AppRuntime:
             version_manager=version,
             mcp_manager=mcp_manager,
             extension_manager=extension_manager,
+            capability_runtime=capability_runtime,
             services=services,
             subagent_confirm=subagent_confirm,
             session_id=session_id,

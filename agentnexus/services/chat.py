@@ -44,12 +44,14 @@ class ChatService:
         version_manager: Any = None,
         skill_service: Any = None,
         tool_executor: Any = None,
+        capability_runtime: Any = None,
     ):
         self._agent = agent
         self._memory = memory_manager
         self._version = version_manager
         self._skill_service = skill_service
         self._tool_executor = tool_executor or getattr(agent, "tool_executor", None)
+        self._capability_runtime = capability_runtime
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
 
@@ -66,6 +68,8 @@ class ChatService:
         self._run_events[run.id] = events
         events.put(AgentEvent("message_started", {"text": text}, run_id=run.id, session_id=session_id))
         try:
+            if self._capability_runtime is not None:
+                self._capability_runtime.refresh_if_stale()
             agent_text = self._prepare_message(text, events, run.id, session_id)
             result = self._agent.run(agent_text, memory_manager=self._memory)
             answer = getattr(result, "answer", result)

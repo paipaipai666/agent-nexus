@@ -56,6 +56,7 @@ class SkillService:
         self.last_run = None
         self.last_route: SkillRoute | None = None
         self.selection_source = "none"
+        self.enabled_skills: dict[str, bool] = {}
         self._rebuild_router_index()
 
     def refresh(self) -> list[SkillEntry]:
@@ -65,7 +66,25 @@ class SkillService:
         return entries
 
     def list(self) -> list[SkillEntry]:
-        return self.registry.list()
+        return [entry for entry in self.registry.list() if self.is_enabled(entry)]
+
+    def is_enabled(self, entry: SkillEntry | str) -> bool:
+        qualified_id = entry if isinstance(entry, str) else entry.qualified_id
+        return self.enabled_skills.get(qualified_id, True)
+
+    def set_enabled(self, target: str, enabled: bool) -> None:
+        entry = self.registry.get(target)
+        qualified_id = entry.qualified_id if entry is not None else target
+        self.enabled_skills[qualified_id] = enabled
+        if not enabled and self.current is not None and self.current.qualified_id == qualified_id:
+            self.reset()
+        self._rebuild_router_index()
+
+    def set_enabled_map(self, enabled_map: dict[str, bool]) -> None:
+        self.enabled_skills = dict(enabled_map or {})
+        if self.current is not None and not self.is_enabled(self.current):
+            self.reset()
+        self._rebuild_router_index()
 
     def validate(self, target: str | None = None) -> list[str]:
         errors = self.registry.validate(target)
@@ -81,6 +100,9 @@ class SkillService:
         if entry is None:
             self.status = "error"
             raise ValueError(f"Skill not found: {target}")
+        if not self.is_enabled(entry):
+            self.status = "error"
+            raise ValueError(f"Skill disabled: {entry.qualified_id}")
         profile = entry.workflow.to_session_profile()
         try:
             validate_session_profile(profile)
@@ -123,7 +145,7 @@ class SkillService:
     def maybe_auto_select(self, text: str) -> SkillRoute | None:
         if not self.auto_route_enabled or self.current is not None:
             return None
-        entries = [entry for entry in self.registry.list() if entry.source_kind == "skill"]
+        entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         llm_client = self.llm_client if self.auto_route_llm_fallback else None
         route = self.router.route_with_llm(text, entries, llm_client=llm_client)
         if route is None:
@@ -139,7 +161,7 @@ class SkillService:
         return route
 
     def _rebuild_router_index(self) -> None:
-        entries = [entry for entry in self.registry.list() if entry.source_kind == "skill"]
+        entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         self.router.rebuild(entries)
 
     def prepare_message(
@@ -171,7 +193,7 @@ class SkillService:
         return SkillStatus(
             current=current,
             status=self.status,
-            available=len(self.registry.list()),
+            available=len(self.list()),
             errors=tuple(self.registry.errors),
             last_run_id=getattr(last_run, "run_id", "") or "",
             last_run_status=getattr(last_run, "status", "") or "",
@@ -188,13 +210,13 @@ class SkillService:
             auto_route_source=getattr(self.last_route, "source", "") or "",
             available_skills=tuple(
                 (entry.qualified_id, entry.display_name, entry.description)
-                for entry in self.registry.list()
+                for entry in self.list()
                 if entry.source_kind == "skill"
             ),
         )
 
     def available_skill_context(self, limit: int = 20) -> str:
-        entries = [entry for entry in self.registry.list() if entry.source_kind == "skill"]
+        entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         if not entries:
             return ""
         lines = [

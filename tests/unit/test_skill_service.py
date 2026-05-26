@@ -227,6 +227,22 @@ def test_skill_service_available_skill_context_lists_metadata():
     assert "Create and edit Word documents" in context
 
 
+def test_skill_service_disable_current_skill_resets_agent_profile():
+    entry = _skill_entry("docx", "DOCX", "Create and edit Word documents.")
+    registry = SkillRegistry([])
+    registry._entries = [entry]
+    agent = MagicMock()
+    service = SkillService(registry, agent=agent)
+    service.use("docx")
+    agent.set_session_profile.reset_mock()
+
+    service.set_enabled("default/docx", False)
+
+    assert service.current is None
+    agent.set_session_profile.assert_called_once_with(None)
+    assert "default/docx" not in service.available_skill_context()
+
+
 def test_skill_service_auto_route_ignores_ambiguous_matches():
     first = _skill_entry("draft-one", "Draft One", "Write concise release notes.")
     second = _skill_entry("draft-two", "Draft Two", "Write concise release notes.")

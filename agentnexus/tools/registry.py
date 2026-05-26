@@ -71,6 +71,10 @@ class ToolMeta:
     rate_limit_per_min: int = 0          # 0 = unlimited
     output_schema: dict | None = None    # JSON Schema for output validation
     audit_enabled: bool = True
+    source_type: str = "unknown"
+    source_id: str = "unknown"
+    enabled: bool = True
+    generation: int = 0
 
 
 @dataclass
@@ -100,10 +104,57 @@ class ToolRegistry:
 
     def register(self, meta: ToolMeta, func: Callable) -> None:
         if meta.name in self._tools:
+            existing_meta, _ = self._tools[meta.name]
+            existing_source = f"{existing_meta.source_type}:{existing_meta.source_id}"
+            incoming_source = f"{meta.source_type}:{meta.source_id}"
+            if existing_source != incoming_source:
+                raise ValueError(
+                    f"Tool '{meta.name}' already registered by {existing_source}; "
+                    f"cannot replace from {incoming_source}"
+                )
             logger.warning("Tool '%s' already registered — overwriting", meta.name)
         self._tools[meta.name] = (meta, func)
         self._param_validators[meta.name] = self._build_validator(meta.param_schema)
         self._output_validators[meta.name] = self._build_validator(meta.output_schema)
+
+    def unregister(self, name: str) -> bool:
+        existed = name in self._tools
+        self._tools.pop(name, None)
+        self._param_validators.pop(name, None)
+        self._output_validators.pop(name, None)
+        self._rate_counters.pop(name, None)
+        return existed
+
+    def unregister_source(self, source_id: str, source_type: str | None = None) -> list[str]:
+        removed: list[str] = []
+        for name, (meta, _) in list(self._tools.items()):
+            if meta.source_id != source_id:
+                continue
+            if source_type is not None and meta.source_type != source_type:
+                continue
+            if self.unregister(name):
+                removed.append(name)
+        return removed
+
+    def unregister_source_prefix(self, source_prefix: str, source_type: str | None = None) -> list[str]:
+        removed: list[str] = []
+        for name, (meta, _) in list(self._tools.items()):
+            if not meta.source_id.startswith(source_prefix):
+                continue
+            if source_type is not None and meta.source_type != source_type:
+                continue
+            if self.unregister(name):
+                removed.append(name)
+        return removed
+
+    def unregister_source_type(self, source_type: str) -> list[str]:
+        removed: list[str] = []
+        for name, (meta, _) in list(self._tools.items()):
+            if meta.source_type != source_type:
+                continue
+            if self.unregister(name):
+                removed.append(name)
+        return removed
 
     # ── call path (the governance gate) ───────────────────────────
 
@@ -129,6 +180,8 @@ class ToolRegistry:
                     f"Agent '{caller}' is not allowed to call tool '{name}' "
                     f"(allowed: {meta.allowed_agents})"
                 )
+            if not meta.enabled:
+                raise PermissionError(f"Tool '{name}' is disabled")
 
             # 2. Skill tool policy hard gate
             if not filter_tool_meta(name, meta, tool_policy):
@@ -209,7 +262,7 @@ class ToolRegistry:
         lines = []
         for name, (meta, _) in self._tools.items():
             allowed = "*" in meta.allowed_agents or agent in meta.allowed_agents
-            if allowed and filter_tool_meta(name, meta, tool_policy):
+            if meta.enabled and allowed and filter_tool_meta(name, meta, tool_policy):
                 risk_tag = f"[{meta.risk_level.value}]"
                 lines.append(f"- {name}: {meta.description} {risk_tag}")
         return "\n".join(lines) if lines else "(no tools available)"
@@ -222,10 +275,15 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
 
+    def list_tools_with_meta(self) -> list[ToolMeta]:
+        return [meta for meta, _ in self._tools.values()]
+
     def to_openai_tools(self, agent: str = "*", tool_policy: Any = None) -> list[dict]:
         """Convert registered tools to OpenAI function-calling format."""
         tools = []
         for name, (meta, _) in self._tools.items():
+            if not meta.enabled:
+                continue
             if "*" not in meta.allowed_agents and agent not in meta.allowed_agents:
                 continue
             if not filter_tool_meta(name, meta, tool_policy):

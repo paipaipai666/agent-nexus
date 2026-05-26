@@ -17,7 +17,11 @@ class ToolExecutor:
                      timeout_sec: int = 30,
                      rate_limit_per_min: int = 0,
                      output_schema: dict | None = None,
-                     audit_enabled: bool = True):
+                     audit_enabled: bool = True,
+                     source_type: str = "unknown",
+                     source_id: str = "unknown",
+                     enabled: bool = True,
+                     generation: int = 0):
         """Register a tool with full metadata. Extra kwargs map to ToolMeta fields.
 
         Legacy signature (name, description, func) still works — metadata defaults apply.
@@ -34,6 +38,10 @@ class ToolExecutor:
             rate_limit_per_min=rate_limit_per_min,
             output_schema=output_schema,
             audit_enabled=audit_enabled,
+            source_type=source_type,
+            source_id=source_id,
+            enabled=enabled,
+            generation=generation,
         )
         self.registry.register(meta, func)
 
