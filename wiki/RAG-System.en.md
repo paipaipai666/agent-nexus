@@ -1,3 +1,5 @@
+> **[中文](RAG-System.md) | [English](RAG-System.en.md)**
+
 # 📚 RAG Retrieval System
 
 ## Retrieval Pipeline

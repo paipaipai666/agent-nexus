@@ -1,3 +1,5 @@
+> **[中文](Configuration.md) | [English](Configuration.en.md)**
+
 # ⚙ Configuration Reference
 
 ## Priority

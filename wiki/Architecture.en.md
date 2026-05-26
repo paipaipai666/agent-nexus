@@ -1,3 +1,5 @@
+> **[中文](Architecture.md) | [English](Architecture.en.md)**
+
 # 🏗 Overall Architecture
 
 ## Layered Architecture

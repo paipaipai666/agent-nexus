@@ -1,3 +1,5 @@
+> **[中文](Getting-Started.md) | [English](Getting-Started.en.md)**
+
 # 🚀 快速开始
 
 ## 安装

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from threading import RLock
+from typing import TYPE_CHECKING, Any
 
-from agentnexus.tools.registry import AuditEntry
+if TYPE_CHECKING:
+    from agentnexus.tools.registry import AuditEntry
+else:
+    AuditEntry = Any
 
 
 class ThreadSafeAuditLog:

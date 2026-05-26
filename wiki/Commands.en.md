@@ -1,3 +1,5 @@
+> **[中文](Commands.md) | [English](Commands.en.md)**
+
 # ⌨ Commands Reference
 
 31 command entry points, 6 top-level + 5 subcommand groups.

@@ -1,3 +1,5 @@
+> **[中文](Getting-Started.md) | [English](Getting-Started.en.md)**
+
 # 🚀 Getting Started
 
 ## Installation

@@ -5,41 +5,103 @@ import time
 import typer
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag import kb_service
-from agentnexus.rag.ingestion import ingest_document
-from agentnexus.rag.kb_service import (
-    default_kb_record,
-    delete_existing_source_versions,
-    finish_ingestion_run,
-    persist_ingested_document,
-    start_ingestion_run,
-)
 from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
-from agentnexus.rag.retriever import HybridRetriever, expand_queries, result_citation, result_display_text
-from agentnexus.rag.store import get_knowledge_base_catalog
-from agentnexus.storage.chroma import delete_documents, get_collection, upsert_documents
-from agentnexus.storage.chroma import search as chroma_search
-from agentnexus.tools.kb_search import _build_search_where
 
 from . import console, kb_app
 
 
+def ingest_document(*args, **kwargs):
+    from agentnexus.rag.ingestion import ingest_document as _ingest_document
+
+    return _ingest_document(*args, **kwargs)
+
+
+def delete_documents(*args, **kwargs):
+    from agentnexus.storage.chroma import delete_documents as _delete_documents
+
+    return _delete_documents(*args, **kwargs)
+
+
+def upsert_documents(*args, **kwargs):
+    from agentnexus.storage.chroma import upsert_documents as _upsert_documents
+
+    return _upsert_documents(*args, **kwargs)
+
+
+def get_collection(*args, **kwargs):
+    from agentnexus.storage.chroma import get_collection as _get_collection
+
+    return _get_collection(*args, **kwargs)
+
+
+def chroma_search(*args, **kwargs):
+    from agentnexus.storage.chroma import search as _chroma_search
+
+    return _chroma_search(*args, **kwargs)
+
+
+def expand_queries(*args, **kwargs):
+    from agentnexus.rag.retriever import expand_queries as _expand_queries
+
+    return _expand_queries(*args, **kwargs)
+
+
+def result_citation(*args, **kwargs):
+    from agentnexus.rag.retriever import result_citation as _result_citation
+
+    return _result_citation(*args, **kwargs)
+
+
+def result_display_text(*args, **kwargs):
+    from agentnexus.rag.retriever import result_display_text as _result_display_text
+
+    return _result_display_text(*args, **kwargs)
+
+
+def HybridRetriever(*args, **kwargs):
+    from agentnexus.rag.retriever import HybridRetriever as _HybridRetriever
+
+    return _HybridRetriever(*args, **kwargs)
+
+
+def get_knowledge_base_catalog(*args, **kwargs):
+    from agentnexus.rag.store import get_knowledge_base_catalog as _get_knowledge_base_catalog
+
+    return _get_knowledge_base_catalog(*args, **kwargs)
+
+
+def _build_search_where(*args, **kwargs):
+    from agentnexus.tools.kb_search import _build_search_where as _build_where
+
+    return _build_where(*args, **kwargs)
+
+
 def _default_kb_record(namespace: str) -> KnowledgeBaseRecord:
+    from agentnexus.rag.kb_service import default_kb_record
+
     return default_kb_record(namespace)
 
 
 def _delete_existing_source_versions(namespace: str, source_id: str) -> int:
+    from agentnexus.rag import kb_service
+    from agentnexus.rag.kb_service import delete_existing_source_versions
+
     kb_service.delete_documents = delete_documents
     return delete_existing_source_versions(namespace, source_id)
 
 
 def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict[str, int]:
+    from agentnexus.rag import kb_service
+    from agentnexus.rag.kb_service import persist_ingested_document
+
     kb_service.delete_documents = delete_documents
     kb_service.upsert_documents = upsert_documents
     return persist_ingested_document(artifacts, namespace)
 
 
 def _start_ingestion_run(namespace: str, source_uri: str) -> IngestionRunRecord:
+    from agentnexus.rag.kb_service import start_ingestion_run
+
     return start_ingestion_run(namespace, source_uri)
 
 
@@ -52,6 +114,8 @@ def _finish_ingestion_run(
     error_message: str = "",
     metadata: dict | None = None,
 ):
+    from agentnexus.rag.kb_service import finish_ingestion_run
+
     finish_ingestion_run(
         run,
         status=status,

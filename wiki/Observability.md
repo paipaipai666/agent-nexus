@@ -1,3 +1,5 @@
+> **[中文](Observability.md) | [English](Observability.en.md)**
+
 # 📈 可观测性
 
 ## Trace 系统

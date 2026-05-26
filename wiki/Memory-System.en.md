@@ -1,3 +1,5 @@
+> **[中文](Memory-System.md) | [English](Memory-System.en.md)**
+
 # 🧠 Memory System
 
 ## Dual-Layer Architecture

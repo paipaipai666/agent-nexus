@@ -1,3 +1,5 @@
+> **[中文](Skill-System.md) | [English](Skill-System.en.md)**
+
 # 🎯 Skill System
 
 Skills are reusable workflow templates defined via `SKILL.md` or `workflow.yaml`.

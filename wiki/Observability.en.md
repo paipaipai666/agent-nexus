@@ -1,3 +1,5 @@
+> **[中文](Observability.md) | [English](Observability.en.md)**
+
 # 📈 Observability
 
 ## Trace System

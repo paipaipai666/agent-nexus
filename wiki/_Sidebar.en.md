@@ -1,3 +1,5 @@
+> **[中文](_Sidebar.md) | [English](_Sidebar.en.md)**
+
 # 🧭 Navigation
 
 ### Getting Started

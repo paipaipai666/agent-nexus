@@ -1,4 +1,4 @@
-> **🌐 中文版请见 [README.zh.md](README.zh.md)**
+> **[中文](README.zh.md) | [English](README.md)**
 
 # AgentNexus — ReAct Single-Agent Task Collaboration CLI
 

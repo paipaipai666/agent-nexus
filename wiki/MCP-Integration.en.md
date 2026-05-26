@@ -1,3 +1,5 @@
+> **[中文](MCP-Integration.md) | [English](MCP-Integration.en.md)**
+
 # 🔌 MCP Integration
 
 MCP (Model Context Protocol) supports importing tools, resources, and prompts from external services.

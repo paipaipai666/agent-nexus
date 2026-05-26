@@ -1,3 +1,5 @@
+> **[中文](Home.md) | [English](Home.en.md)**
+
 # 🏠 AgentNexus
 
 **ReAct 单智能体任务协同 CLI** — 纯本地运行，生产就绪。

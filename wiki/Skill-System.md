@@ -1,3 +1,5 @@
+> **[中文](Skill-System.md) | [English](Skill-System.en.md)**
+
 # 🎯 Skill 系统
 
 Skill 是通过 `SKILL.md` 或 `workflow.yaml` 定义的可复用工作流模板。

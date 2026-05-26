@@ -1,3 +1,5 @@
+> **[中文](Tool-Governance.md) | [English](Tool-Governance.en.md)**
+
 # 🔧 Tool Governance System
 
 All tool invocations pass through `ToolRegistry.invoke()`, executing 7 security gates sequentially.

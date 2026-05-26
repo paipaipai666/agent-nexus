@@ -1,3 +1,5 @@
+> **[中文](Contributing.md) | [English](Contributing.en.md)**
+
 # 🤝 Contributing Guide
 
 ## Issue Guidelines

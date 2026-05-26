@@ -511,6 +511,7 @@ class HybridRetriever:
 
 
 _retriever: HybridRetriever | None = None
+_retriever_reranker_requested: dict[str, bool] = {}
 
 
 def _get_retriever(namespace: str = "default", docs: list[str] | None = None) -> HybridRetriever:
@@ -589,6 +590,7 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
     retriever = HybridRetriever(namespace=namespace)
     retriever._chunks = {chunk.chunk_id: chunk for chunk in chunk_records}
     retriever._bm25.build(chunk_records)
+    _retriever_reranker_requested[namespace] = load_reranker
     if load_reranker:
         retriever.load_reranker()
     _retriever = retriever
@@ -598,7 +600,8 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
     retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "知识库为空，请先用 `nexus kb add` 添加文档。"
-    if retriever._reranker is None:
+    should_load_reranker = _retriever_reranker_requested.get(namespace, True)
+    if should_load_reranker and retriever._reranker is None:
         retriever.load_reranker()
     queries = expand_queries(query)
     hypothetical_document = generate_hypothetical_document(query)

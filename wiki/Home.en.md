@@ -1,3 +1,5 @@
+> **[中文](Home.md) | [English](Home.en.md)**
+
 # 🏠 AgentNexus
 
 **ReAct Single-Agent Task Collaboration CLI** — Fully local, production-ready.

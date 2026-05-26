@@ -1,3 +1,5 @@
+> **[中文](Security.md) | [English](Security.en.md)**
+
 # 🔒 安全模型
 
 ## 工具安全 (7 道关卡)

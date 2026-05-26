@@ -1,3 +1,5 @@
+> **[中文](Evaluation.md) | [English](Evaluation.en.md)**
+
 # 📊 Evaluation
 
 All evaluators read from JSONL Traces (except Coherence, which does not depend on LLM).

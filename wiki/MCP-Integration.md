@@ -1,3 +1,5 @@
+> **[中文](MCP-Integration.md) | [English](MCP-Integration.en.md)**
+
 # 🔌 MCP 集成
 
 MCP（Model Context Protocol）支持从外部服务导入工具、资源和提示词。

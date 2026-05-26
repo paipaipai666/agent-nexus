@@ -1,3 +1,5 @@
+> **[中文](README.zh.md) | [English](README.md)**
+
 # AgentNexus — ReAct 单智能体任务协同 CLI
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)

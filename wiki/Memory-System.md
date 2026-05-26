@@ -1,3 +1,5 @@
+> **[中文](Memory-System.md) | [English](Memory-System.en.md)**
+
 # 🧠 记忆系统
 
 ## 双层架构

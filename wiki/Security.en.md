@@ -1,3 +1,5 @@
+> **[中文](Security.md) | [English](Security.en.md)**
+
 # 🔒 Security Model
 
 ## Tool Security (7 Gates)

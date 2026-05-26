@@ -14,7 +14,6 @@ from rich.table import Table
 from agentnexus.cli import console, eval_app
 from agentnexus.cli.eval.common import _fmt_ci, _print_eval_runtime_summary
 from agentnexus.core.config import get_settings
-from agentnexus.rag.ingestion import ChunkStrategy
 
 EXPORT_FORMATS = {"json", "csv"}
 
@@ -22,7 +21,7 @@ EXPORT_FORMATS = {"json", "csv"}
 def _rag_evaluator_cls():
     from agentnexus.cli import eval_cmd
 
-    return getattr(eval_cmd, "RAGEvaluator")
+    return eval_cmd.get_rag_evaluator_cls()
 
 # ── RAG evaluation ────────────────────────────────────────────────
 
@@ -78,6 +77,8 @@ def eval_run(
     _print_eval_runtime_summary(output_console)
 
     evaluator = _rag_evaluator_cls()(kb, samples)
+
+    from agentnexus.rag.ingestion import ChunkStrategy
 
     combinations: list[tuple[ChunkStrategy, int, int, bool]] = [
         (ChunkStrategy.FIXED, 256, 64, False),

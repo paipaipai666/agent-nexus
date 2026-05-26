@@ -1,3 +1,5 @@
+> **[中文](Evaluation.md) | [English](Evaluation.en.md)**
+
 # 📊 评估体系
 
 评估器全部从 JSONL Trace 读取数据（除 Coherence 外不依赖 LLM）。

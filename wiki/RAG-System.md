@@ -1,3 +1,5 @@
+> **[中文](RAG-System.md) | [English](RAG-System.en.md)**
+
 # 📚 RAG 检索系统
 
 ## 检索流水线

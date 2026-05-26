@@ -1,3 +1,5 @@
+> **[中文](Tool-Governance.md) | [English](Tool-Governance.en.md)**
+
 # 🔧 工具治理系统
 
 所有工具调用必经 `ToolRegistry.invoke()`，顺序执行 7 道安全关卡。

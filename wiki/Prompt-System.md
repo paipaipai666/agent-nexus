@@ -1,3 +1,5 @@
+> **[中文](Prompt-System.md) | [English](Prompt-System.en.md)**
+
 # 📝 提示词系统
 
 所有提示词位于 `agentnexus/prompts/*.txt`，使用 `str.format()` 注入变量（非 Jinja2）。

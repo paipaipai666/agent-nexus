@@ -1,3 +1,5 @@
+> **[中文](Architecture.md) | [English](Architecture.en.md)**
+
 # 🏗 整体架构
 
 ## 分层架构

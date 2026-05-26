@@ -1,3 +1,5 @@
+> **[中文](Prompt-System.md) | [English](Prompt-System.en.md)**
+
 # 📝 Prompt System
 
 All prompts reside in `agentnexus/prompts/*.txt` and use `str.format()` for variable injection (not Jinja2).

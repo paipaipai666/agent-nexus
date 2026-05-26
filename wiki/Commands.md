@@ -1,3 +1,5 @@
+> **[中文](Commands.md) | [English](Commands.en.md)**
+
 # ⌨ 命令参考
 
 31 个命令入口，6 顶层 + 5 子命令组。

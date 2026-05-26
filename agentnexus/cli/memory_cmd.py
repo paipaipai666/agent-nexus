@@ -2,9 +2,13 @@
 import typer
 from rich.table import Table
 
-from agentnexus.memory.long_term import get_long_term_memory
-
 from . import console, memory_app
+
+
+def get_long_term_memory():
+    from agentnexus.memory.long_term import get_long_term_memory as _get_long_term_memory
+
+    return _get_long_term_memory()
 
 
 @memory_app.command("list")

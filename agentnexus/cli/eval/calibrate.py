@@ -7,13 +7,12 @@ import typer
 
 from agentnexus.cli import console, eval_app
 from agentnexus.cli.eval.stats import _compute_calibration
-from agentnexus.rag.ingestion import ChunkStrategy
 
 
 def _rag_evaluator_cls():
     from agentnexus.cli import eval_cmd
 
-    return getattr(eval_cmd, "RAGEvaluator")
+    return eval_cmd.get_rag_evaluator_cls()
 
 
 @eval_app.command("calibrate")
@@ -28,6 +27,7 @@ def eval_calibrate(
 ):
     """Judge 校准：导出样本供人工打分，计算 Judge 与人工评分的一致性"""
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
+    from agentnexus.rag.ingestion import ChunkStrategy
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
     from agentnexus.storage.chroma import delete_collection
 
