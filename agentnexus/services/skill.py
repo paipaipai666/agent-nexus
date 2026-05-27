@@ -160,6 +160,18 @@ class SkillService:
         self.selection_source = "auto"
         return route
 
+    def get_recommendations(self, text: str) -> list[SkillRoute]:
+        """Get ranked skill recommendations for the given text.
+
+        The router scores and ranks candidates, but does NOT decide
+        whether to activate a skill. The Agent makes that decision
+        using its full context (conversation history, LTM, etc.).
+        """
+        if not self.auto_route_enabled or self.current is not None:
+            return []
+        entries = [entry for entry in self.list() if entry.source_kind == "skill"]
+        return self.router.rank(text, entries)
+
     def _rebuild_router_index(self) -> None:
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         self.router.rebuild(entries)
@@ -215,7 +227,11 @@ class SkillService:
             ),
         )
 
-    def available_skill_context(self, limit: int = 20) -> str:
+    def available_skill_context(
+        self,
+        limit: int = 20,
+        recommendations: list[SkillRoute] | None = None,
+    ) -> str:
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         if not entries:
             return ""
@@ -223,9 +239,24 @@ class SkillService:
             "== Available Skills ==",
             "The following local skills may be selected automatically or invoked with /<skill-id>-skill <request>.",
         ]
+
+        # Highlight recommended skills
+        rec_ids = {r.entry.qualified_id for r in (recommendations or [])}
+        if recommendations:
+            lines.append("")
+            lines.append("Recommended for your request (ranked by relevance):")
+            for i, rec in enumerate(recommendations[:3], 1):
+                lines.append(
+                    f"  {i}. {rec.entry.qualified_id}: {rec.entry.display_name} "
+                    f"(score={rec.score:.1f}) — {', '.join(rec.matched_terms[:3]) or 'semantic match'}"
+                )
+            lines.append("")
+            lines.append("All available skills:")
+
         for entry in entries[:limit]:
             desc = " ".join((entry.description or "").split())[:180]
-            lines.append(f"- {entry.qualified_id}: {entry.display_name} — {desc}")
+            marker = " [recommended]" if entry.qualified_id in rec_ids else ""
+            lines.append(f"- {entry.qualified_id}: {entry.display_name} — {desc}{marker}")
         if len(entries) > limit:
             lines.append(f"- ... {len(entries) - limit} more skills available via /skill list")
         return "\n".join(lines) + "\n\n"

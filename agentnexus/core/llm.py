@@ -123,6 +123,7 @@ class AgentLLM:
                 "api_key": self.api_key,
                 "api_base": self.base_url,
                 "timeout": self.timeout,
+                "max_tokens": caps.max_output_tokens,
             }
 
             # ── Tool calling ──

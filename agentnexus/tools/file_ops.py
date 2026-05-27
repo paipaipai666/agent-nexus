@@ -16,6 +16,10 @@ INLINE_PATCH_MAX_LINES = 400
 INLINE_PATCH_MAX_CHARS = 32000
 DIFF_SOURCE_MAX_BYTES = 512 * 1024
 
+SMALL_FILE_LINES = 200
+LARGE_FILE_LINES = 1000
+LARGE_FILE_PREVIEW_LINES = 20
+
 
 def _resolve_safe(path: str) -> Path:
     """Resolve path and verify it stays within the workspace sandbox.
@@ -166,12 +170,18 @@ def _error_result(path: str, mode: str, message: str, error_code: str, **extra: 
 
 
 def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
-    """Read file content with line numbers. Large files are truncated.
+    """Read file content with line numbers. Three-tier strategy based on file size.
+
+    - Small files (<=200 lines): full content
+    - Medium files (201-1000 lines): header + first 200 lines + continuation hint
+    - Large files (>1000 lines): metadata + 20-line preview + range hint
+
+    When offset/limit are explicitly specified, returns the requested range directly.
 
     Args:
         path: File path relative to workspace root.
         offset: Starting line number (0-indexed).
-        limit: Max lines to read (None = all, up to 1000).
+        limit: Max lines to read (None = auto, up to 1000).
     """
     p = _resolve_safe(path)
     if not p.exists():
@@ -188,17 +198,48 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
         return f"错误: 无法读取文件: {e}"
 
     total = len(lines)
-    max_lines = min(limit or 1000, 1000)
-    sliced = lines[offset:offset + max_lines]
     version = _fingerprint_file(p)
+    file_size = p.stat().st_size
+    header = f"[文件] {path} ({total} 行, 共 {file_size:,} 字节, version={version})"
 
-    parts = [f"[文件] {path} ({total} 行, 共 {p.stat().st_size:,} 字节, version={version})"]
-    for i, line in enumerate(sliced, start=offset + 1):
+    # Explicit offset/limit: respect user intent directly
+    if offset > 0 or limit is not None:
+        max_lines = min(limit or LARGE_FILE_LINES, LARGE_FILE_LINES)
+        sliced = lines[offset:offset + max_lines]
+        parts = [header]
+        for i, line in enumerate(sliced, start=offset + 1):
+            parts.append(f"{i:>6} | {line.rstrip()}")
+        if offset + len(sliced) < total:
+            parts.append(f"... (省略 {total - offset - len(sliced)} 行，可用 offset={offset + len(sliced)} 继续读取)")
+        return "\n".join(parts)
+
+    # Auto mode: three-tier strategy
+    if total <= SMALL_FILE_LINES:
+        # Small file: full content
+        parts = [header]
+        for i, line in enumerate(lines, start=1):
+            parts.append(f"{i:>6} | {line.rstrip()}")
+        return "\n".join(parts)
+
+    if total <= LARGE_FILE_LINES:
+        # Medium file: first 200 lines + hint
+        sliced = lines[:SMALL_FILE_LINES]
+        parts = [header]
+        for i, line in enumerate(sliced, start=1):
+            parts.append(f"{i:>6} | {line.rstrip()}")
+        remaining = total - SMALL_FILE_LINES
+        parts.append(f"... (省略 {remaining} 行，可用 offset={SMALL_FILE_LINES} 继续读取)")
+        return "\n".join(parts)
+
+    # Large file: metadata + 20-line preview
+    preview = lines[:LARGE_FILE_PREVIEW_LINES]
+    parts = [header]
+    parts.append("[提示] 文件较大，请指定 offset 和 limit 参数读取具体内容。")
+    parts.append(f"示例: file_read(\"{path}\", offset=0, limit=200)")
+    parts.append("")
+    parts.append(f"--- 前 {LARGE_FILE_PREVIEW_LINES} 行预览 ---")
+    for i, line in enumerate(preview, start=1):
         parts.append(f"{i:>6} | {line.rstrip()}")
-
-    if offset + len(sliced) < total:
-        parts.append(f"... (省略 {total - offset - len(sliced)} 行)")
-
     return "\n".join(parts)
 
 

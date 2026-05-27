@@ -58,11 +58,39 @@ class ChatService:
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._turns: dict[str, TurnRuntime] = {}
         self._run_snapshots: dict[str, TurnRecord] = {}
+        self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._is_processing = False
 
     def start_session(self, skill: str | None = None, profile: str | None = None) -> SessionHandle:
         handle = SessionHandle(id=f"session_{uuid.uuid4().hex[:12]}", skill=skill, profile=profile)
         self._sessions[handle.id] = handle
         return handle
+
+    # ── Message Queue ──────────────────────────────────────────────
+
+    @property
+    def is_processing(self) -> bool:
+        return self._is_processing
+
+    @property
+    def queue_size(self) -> int:
+        return self._message_queue.qsize()
+
+    def enqueue_message(self, session_id: str, text: str) -> int:
+        """Enqueue a message for later processing. Returns queue position."""
+        self._message_queue.put((session_id, text))
+        return self._message_queue.qsize()
+
+    def dequeue_message(self) -> tuple[str, str] | None:
+        """Dequeue the next message. Returns (session_id, text) or None."""
+        try:
+            return self._message_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def mark_processing(self, processing: bool) -> None:
+        """Mark whether the agent is currently processing a message."""
+        self._is_processing = processing
 
     def send_message(self, session_id: str, text: str) -> RunHandle:
         if session_id not in self._sessions:
@@ -157,10 +185,24 @@ class ChatService:
         if service is None:
             return text
         session = self._sessions[session_id]
-        if hasattr(self._agent, "set_available_skill_context"):
-            self._agent.set_available_skill_context(service.available_skill_context())
         if session.skill:
             service.use(session.skill)
+
+        # Get router recommendations (fast, deterministic, ~45ms)
+        recommendations = service.get_recommendations(text)
+
+        # Inject skill context WITH recommendations into agent prompt
+        if hasattr(self._agent, "set_available_skill_context"):
+            self._agent.set_available_skill_context(
+                service.available_skill_context(recommendations=recommendations),
+            )
+
+        # Let the agent decide — it has conversation history + LTM context
+        # If agent decides to use a skill, it will call /<skill-id> or
+        # the maybe_auto_select will activate it
+        if not session.skill:
+            service.maybe_auto_select(text)
+
         result = service.prepare_message(
             text,
             tool_executor=self._tool_executor,

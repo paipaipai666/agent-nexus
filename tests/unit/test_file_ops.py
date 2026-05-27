@@ -63,6 +63,67 @@ class TestFileRead:
         assert "3 | c" in result or "3│c" in result
 
 
+class TestFileReadThreeTier:
+    def test_small_file_full_content(self, tmp_path: Path):
+        """Files <=200 lines return full content"""
+        import os
+        os.chdir(tmp_path)
+        lines = [f"line-{i}" for i in range(50)]
+        (tmp_path / "small.txt").write_text("\n".join(lines))
+        result = file_read("small.txt")
+        assert "line-1" in result
+        assert "line-49" in result
+        assert "省略" not in result
+
+    def test_medium_file_first_200_lines(self, tmp_path: Path):
+        """Files 201-1000 lines return first 200 + hint"""
+        import os
+        os.chdir(tmp_path)
+        lines = [f"line-{i}" for i in range(500)]
+        (tmp_path / "medium.txt").write_text("\n".join(lines))
+        result = file_read("medium.txt")
+        assert "line-0" in result
+        assert "line-199" in result
+        assert "省略 300 行" in result
+        assert "offset=200" in result
+
+    def test_large_file_metadata_only(self, tmp_path: Path):
+        """Files >1000 lines return metadata + 20-line preview"""
+        import os
+        os.chdir(tmp_path)
+        lines = [f"line-{i}" for i in range(2000)]
+        (tmp_path / "large.txt").write_text("\n".join(lines))
+        result = file_read("large.txt")
+        assert "2000 行" in result
+        assert "请指定 offset 和 limit" in result
+        assert "前 20 行预览" in result
+        assert "line-0" in result
+        assert "line-19" in result
+        # Should NOT contain line-100
+        assert "line-100" not in result
+
+    def test_explicit_offset_respected(self, tmp_path: Path):
+        """When offset is specified, three-tier is bypassed"""
+        import os
+        os.chdir(tmp_path)
+        lines = [f"line-{i}" for i in range(500)]
+        (tmp_path / "med.txt").write_text("\n".join(lines))
+        result = file_read("med.txt", offset=100, limit=50)
+        assert "line-100" in result
+        assert "line-149" in result
+        assert "offset=200" not in result
+
+    def test_explicit_limit_respected(self, tmp_path: Path):
+        """When limit is specified, three-tier is bypassed"""
+        import os
+        os.chdir(tmp_path)
+        lines = [f"line-{i}" for i in range(500)]
+        (tmp_path / "med2.txt").write_text("\n".join(lines))
+        result = file_read("med2.txt", limit=10)
+        assert "line-0" in result
+        assert "line-9" in result
+
+
 class TestFileWrite:
     def test_create_new_file(self, tmp_path: Path):
         import os

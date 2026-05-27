@@ -210,6 +210,10 @@ class ChatScreen(Screen):
         self._chat_area.add_message("user", text)
         if text.startswith("/"):
             self._handle_command(text)
+        elif self._running:
+            # Agent is busy — queue the message
+            pos = self._chat_service.enqueue_message(self._chat_session.id, text)
+            self._chat_area.add_system(f"[dim]消息已排队 (第 {pos} 位)[/]")
         else:
             self._running = True
             self._run_agent(text)
@@ -1585,6 +1589,7 @@ class ChatScreen(Screen):
             self._current_run_id = ""
             if hasattr(self._agent, "set_cancel_checker"):
                 self._agent.set_cancel_checker(None)
+            self._drain_message_queue()
             return
 
         if turn.cancel_checker():
@@ -1594,6 +1599,7 @@ class ChatScreen(Screen):
             self._current_run_id = ""
             if hasattr(self._agent, "set_cancel_checker"):
                 self._agent.set_cancel_checker(None)
+            self._drain_message_queue()
             return
 
         # ── Remove loading indicator ──
@@ -1651,6 +1657,17 @@ class ChatScreen(Screen):
         self._current_run_id = ""
         if hasattr(self._agent, "set_cancel_checker"):
             self._agent.set_cancel_checker(None)
+        self._drain_message_queue()
+
+    def _drain_message_queue(self) -> None:
+        """Process the next queued message if available."""
+        if self._chat_service.queue_size > 0:
+            next_item = self._chat_service.dequeue_message()
+            if next_item is not None:
+                _session_id, text = next_item
+                self._chat_area.add_system("[dim]处理排队消息...[/]")
+                self._running = True
+                self._run_agent(text)
 
 
 def _plain_summary(text: str, limit: int) -> str:

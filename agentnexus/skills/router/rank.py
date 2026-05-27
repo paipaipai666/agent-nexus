@@ -1,10 +1,13 @@
-"""Scoring, metadata alignment, fuzzy matching, and reranking."""
+"""Scoring, metadata alignment, fuzzy matching, and reranking.
+
+All scoring is driven by structured skill metadata (verbs, objects, aliases,
+domains, examples, negative_hints). No case-by-case hardcoded rules.
+"""
 
 from __future__ import annotations
 
 from agentnexus.skills.router.normalize import fuzzy_match_term, tokenize
 from agentnexus.skills.router.types import (
-    _OBJECT_PRIORITY_OVERRIDES,
     _PRODUCT_ALIASES,
     _VERB_FORMS,
     IndexedSkillMetadata,
@@ -38,19 +41,29 @@ def score_metadata_alignment(
     fuzzy: bool = False,
     intent: IntentSignals | None = None,
 ) -> float:
-    """Score alignment between query terms and structured metadata."""
+    """Score alignment between query terms and structured metadata.
+
+    All signals come from the skill's own metadata fields — no hardcoded
+    per-skill or per-keyword rules.
+    """
     bonus = 0.0
     q_lower = {t.lower() for t in query_terms}
 
-    # Verb alignment (high signal)
+    # Verb alignment (high signal — verbs are the strongest intent indicator)
     verb_hits = q_lower & item.verb_terms
     if verb_hits:
         bonus += 2.0 * sum(idf.get(t, 1.0) for t in verb_hits)
 
-    # Object alignment (high signal)
+    # Object alignment
     obj_hits = q_lower & item.object_terms
     if obj_hits:
         bonus += 2.0 * sum(idf.get(t, 1.0) for t in obj_hits)
+
+    # Verb+Object combo bonus: when both verb and object match the same skill,
+    # that skill is a much stronger candidate than one matching only the object.
+    if verb_hits and obj_hits:
+        combo_bonus = min(len(verb_hits), len(obj_hits)) * 2.0
+        bonus += combo_bonus
 
     # Alias alignment
     alias_hits = q_lower & item.alias_terms
@@ -65,7 +78,7 @@ def score_metadata_alignment(
                 if pt.lower() in item.terms or pt.lower() in item.alias_terms:
                     bonus += 1.5 * idf.get(pt.lower(), 1.0)
 
-    # Intent-aware direct bonus
+    # Intent-aware alignment (generic — uses skill metadata, not hardcoded rules)
     if intent is not None:
         bonus += _score_intent_alignment(q_lower, item, idf, intent)
 
@@ -97,109 +110,42 @@ def _score_intent_alignment(
     idf: dict[str, float],
     intent: IntentSignals,
 ) -> float:
-    """Score intent-specific alignment bonuses."""
+    """Score intent alignment using structured skill metadata only.
+
+    No hardcoded per-keyword or per-skill rules.
+    """
     bonus = 0.0
 
+    # Primary action matches skill's declared verbs
     if intent.primary_action and intent.primary_action.lower() in item.verb_terms:
         bonus += 2.0
+
+    # Primary object matches skill's declared objects/aliases/terms
     if intent.primary_object:
         object_lower = intent.primary_object.lower()
-        if (
-            object_lower in item.object_terms
-            or object_lower in item.alias_terms
-            or object_lower in item.terms
-        ):
+        if object_lower in item.object_terms:
             bonus += 2.0
-    override_object = _OBJECT_PRIORITY_OVERRIDES.get(
-        (intent.primary_action, intent.primary_object),
-    )
-    if override_object is not None and override_object.lower() in (
-        item.object_terms | item.alias_terms | item.terms
-    ):
-        bonus += 2.0
+        if object_lower in item.alias_terms or object_lower in item.terms:
+            bonus += 1.5
 
-    action_set = {action for action, _ in intent.action_verbs}
-
-    if {"读取", "编辑"} <= action_set or {"读取", "修改"} <= action_set:
-        if "code" in item.terms:
-            bonus += 8.0
-        if "pdf" in item.terms:
-            bonus -= 3.0
-        if "xlsx" in item.terms or "spreadsheet" in item.terms:
-            bonus -= 2.0
-    if {"下载", "转换"} <= action_set:
-        if "translate" in item.terms or "code" in item.terms:
-            bonus += 3.0
-        if "pdf" in item.terms:
-            bonus -= 1.0
-    if {"分析", "总结"} <= action_set:
-        if "summarize" in item.terms:
-            bonus += 4.0
-        if "database" in item.terms:
-            bonus -= 1.0
-    if {"分析", "导出"} <= action_set and "数据" in q_lower:
-        if "xlsx" in item.terms or "spreadsheet" in item.terms:
-            bonus += 6.0
-        if "database" in item.terms:
-            bonus -= 2.0
+    # Verb+Object combo: when both primary action and object match this skill,
+    # it's a strong signal that this skill handles the full intent.
     if (
-        intent.priority_mode == "conditional"
-        and intent.primary_action == "分析"
-        and "数据" in q_lower
+        intent.primary_action
+        and intent.primary_object
+        and intent.primary_action.lower() in item.verb_terms
+        and (
+            intent.primary_object.lower() in item.object_terms
+            or intent.primary_object.lower() in item.alias_terms
+        )
     ):
-        if "xlsx" in item.terms or "spreadsheet" in item.terms:
-            bonus += 7.0
-        if "database" in item.terms:
-            bonus -= 3.0
-    if intent.primary_action in {"编写", "写", "发送"} and intent.primary_object == "文档":
-        if intent.primary_action == "发送" and "email" in item.terms:
-            bonus += 7.0
-        elif intent.primary_action in {"编写", "写"} and "code" in item.terms:
-            bonus += 7.0
-    if intent.primary_action == "创建" and intent.primary_object == "文档" and "搜索" in q_lower:
-        if "docx" in item.terms or "document" in item.terms:
-            bonus += 12.0
-        if "search" in item.terms:
-            bonus -= 5.0
-    if intent.primary_action == "部署":
-        if "code" in item.terms:
-            bonus += 6.0
-    if intent.primary_action == "备份":
-        if "backup" in item.terms:
-            bonus += 6.0
-        if "database" in item.terms and "backup" not in item.terms:
-            bonus -= 2.0
-    if intent.primary_action == "搜索":
-        if "search" in item.terms:
-            bonus += 4.0
-        if "code" in item.terms and "search" not in item.terms:
-            bonus -= 1.0
-        if "database" in item.terms and intent.primary_object == "数据库":
-            bonus += 5.0
-            if "search" in item.terms:
-                bonus -= 2.0
-    if "代理" in q_lower and "服务器" in q_lower and "proxy" in item.terms:
-        bonus += 6.0
-    if "洞察" in q_lower or "报告" in q_lower:
-        if "analyze" in item.terms or "insight" in item.terms or "report" in item.terms:
-            bonus += 5.0
-        if "database" in item.terms:
-            bonus -= 2.0
-    if "源码" in q_lower or "仓库" in q_lower:
-        if "code" in item.terms or "source" in item.terms or "repository" in item.terms:
-            bonus += 6.0
-        if "knowledge" in item.terms and "code" not in item.terms:
-            bonus -= 2.0
-    if "search" in q_lower and "search" in item.terms:
-        bonus += 6.0
-    if "codde" in q_lower and "code" in item.terms:
-        bonus += 4.0
-    if "spreadsheet" in q_lower and ("xlsx" in item.terms or "spreadsheet" in item.terms):
         bonus += 3.0
-    if "excel" in q_lower and ("xlsx" in item.terms or "spreadsheet" in item.terms):
-        bonus += 3.0
-    if "信息" in q_lower and "search" in item.terms:
-        bonus += 3.0
+
+    # Multiple verbs matching (composite intent)
+    action_set = {action for action, _ in intent.action_verbs}
+    verb_overlap = {a.lower() for a in action_set} & item.verb_terms
+    if len(verb_overlap) > 1:
+        bonus += 2.0 * (len(verb_overlap) - 1)
 
     return bonus
 
@@ -262,7 +208,11 @@ def rerank_with_intent(
     intent: IntentSignals,
     index: SkillRouterIndex,
 ) -> list[SkillRoute]:
-    """Rerank candidates using intent alignment signals."""
+    """Rerank candidates using generic intent-metadata alignment.
+
+    No hardcoded per-skill or per-keyword rules — all signals come from
+    the skill's declared verbs, objects, and aliases.
+    """
     if not intent.primary_action and not intent.primary_object:
         return scored
 
@@ -273,15 +223,13 @@ def rerank_with_intent(
         adjustment = 0.0
         item = metadata_map.get(route.entry.qualified_id)
         if item is not None:
-            action_set = {action for action, _ in intent.action_verbs}
-            query_in_route = set()
-            for matched_term in route.matched_terms:
-                clean = matched_term.replace("fuzzy(", "").split("→")[0]
-                query_in_route.add(clean.lower())
+            # Primary action alignment
             if intent.primary_action:
                 action_lower = intent.primary_action.lower()
                 if action_lower in item.verb_terms:
                     adjustment += 2.0
+
+            # Primary object alignment
             if intent.primary_object:
                 object_lower = intent.primary_object.lower()
                 object_weight = 1.0 if intent.priority_mode == "parallel" else 3.0
@@ -290,53 +238,28 @@ def rerank_with_intent(
                     adjustment += object_weight
                 if object_lower in item.alias_terms or object_lower in item.terms:
                     adjustment += alias_weight
-            if intent.primary_action == "搜索":
-                if "search" in item.terms:
-                    adjustment += 6.0
-                if "code" in item.terms and "search" not in item.terms:
-                    adjustment -= 2.0
-                if "database" in item.terms and intent.primary_object == "数据库":
-                    adjustment += 6.0
-                    if "search" in item.terms:
-                        adjustment -= 2.0
-                if ("源码" in query_in_route or "仓库" in query_in_route) and (
-                    "code" in item.terms or "source" in item.terms or "repository" in item.terms
-                ):
-                    adjustment += 4.0
-                if ("源码" in query_in_route or "仓库" in query_in_route) and (
-                    "knowledge" in item.terms and "code" not in item.terms
-                ):
-                    adjustment -= 2.0
-            if intent.primary_action == "创建" and intent.primary_object == "文档":
-                if "docx" in item.terms or "document" in item.terms:
-                    adjustment += 6.0
-                if "search" in item.terms:
-                    adjustment -= 4.0
-            if intent.primary_action == "备份":
-                if "backup" in item.terms:
-                    adjustment += 4.0
-                if "database" in item.terms and "backup" not in item.terms:
-                    adjustment -= 2.0
-            if {"分析", "总结"} <= action_set:
-                if "summarize" in item.terms:
-                    adjustment += 3.0
-                if "database" in item.terms:
-                    adjustment -= 1.0
-            if {"分析", "导出"} <= action_set and "数据" in {clean for clean in query_in_route}:
-                if "xlsx" in item.terms or "spreadsheet" in item.terms:
-                    adjustment += 3.0
-                if "database" in item.terms:
-                    adjustment -= 1.0
-            if {"读取", "编辑"} <= action_set or {"读取", "修改"} <= action_set:
-                if "code" in item.terms:
-                    adjustment += 5.0
-                if "pdf" in item.terms:
-                    adjustment -= 3.0
-                if "xlsx" in item.terms or "spreadsheet" in item.terms:
-                    adjustment -= 2.0
+
+            # Verb+Object combo: strong signal when both match
+            if (
+                intent.primary_action
+                and intent.primary_object
+                and intent.primary_action.lower() in item.verb_terms
+                and (
+                    intent.primary_object.lower() in item.object_terms
+                    or intent.primary_object.lower() in item.alias_terms
+                )
+            ):
+                adjustment += 4.0
+
+            # Alias hits from matched terms
+            query_in_route = set()
+            for matched_term in route.matched_terms:
+                clean = matched_term.replace("fuzzy(", "").split("→")[0]
+                query_in_route.add(clean.lower())
             alias_hits = query_in_route & item.alias_terms
             if alias_hits:
                 adjustment += 1.0 * len(alias_hits)
+
         reranked.append((route.score + adjustment, route))
 
     reranked.sort(key=lambda x: x[0], reverse=True)
@@ -358,7 +281,10 @@ def best_candidate_is_intent_confident(
     intent: IntentSignals,
     index: SkillRouterIndex,
 ) -> bool:
-    """Allow close scores when top candidate strongly matches primary intent."""
+    """Allow close scores when top candidate strongly matches primary intent.
+
+    Generic comparison — no hardcoded per-keyword rules.
+    """
     metadata_map = {item.entry.qualified_id: item for item in index.items}
     best_item = metadata_map.get(best.entry.qualified_id)
     runner_item = metadata_map.get(runner_up.entry.qualified_id)
@@ -367,6 +293,8 @@ def best_candidate_is_intent_confident(
 
     best_hits = 0
     runner_hits = 0
+
+    # Primary object alignment
     if intent.primary_object:
         object_lower = intent.primary_object.lower()
         if (
@@ -381,21 +309,26 @@ def best_candidate_is_intent_confident(
             or object_lower in runner_item.terms
         ):
             runner_hits += 2
-    if intent.primary_action == "备份":
-        if best_item is not None and "backup" in best_item.terms:
-            best_hits += 3
-        if runner_item is not None and "backup" in runner_item.terms:
-            runner_hits += 3
-    if {action for action, _ in intent.action_verbs} & {"分析", "总结"} == {"分析", "总结"}:
-        if best_item is not None and "summarize" in best_item.terms:
+
+    # Primary action alignment
+    if intent.primary_action:
+        action_lower = intent.primary_action.lower()
+        if action_lower in best_item.verb_terms:
             best_hits += 2
-        if runner_item is not None and "summarize" in runner_item.terms:
+        if runner_item is not None and action_lower in runner_item.verb_terms:
             runner_hits += 2
-    if intent.primary_action == "搜索" and intent.primary_object is None:
-        if best_item is not None and ({"源码", "仓库"} & best_item.terms):
-            best_hits += 3
-        if runner_item is not None and ({"源码", "仓库"} & runner_item.terms):
-            runner_hits += 1
+
+    # Verb+Object combo on best
+    if (
+        intent.primary_action
+        and intent.primary_object
+        and intent.primary_action.lower() in best_item.verb_terms
+        and (
+            intent.primary_object.lower() in best_item.object_terms
+            or intent.primary_object.lower() in best_item.alias_terms
+        )
+    ):
+        best_hits += 2
 
     matched_text = " ".join(best.matched_terms).lower()
     if intent.primary_object and intent.primary_object.lower() in matched_text:

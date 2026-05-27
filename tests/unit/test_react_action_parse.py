@@ -92,6 +92,37 @@ class TestJsonAutoFix:
         assert result == {"answer": "最终答案", "note": "ok"}
 
 
+class TestJsonStringInternalFix:
+    def test_literal_newline_in_answer(self):
+        """Literal newline inside answer string should be fixed"""
+        raw = '{"answer": "第一行\n第二行\n第三行"}'
+        result = ReActAgent._parse_json_response(raw)
+        assert result["type"] == "answer"
+        assert "第一行" in result["text"]
+        assert "第二行" in result["text"]
+
+    def test_unescaped_quote_in_answer(self):
+        """Unescaped double quote inside answer should be fixed"""
+        # The string has a literal " inside the value (not escaped)
+        raw = '{"answer": "他说\\"你好\\""}'
+        result = ReActAgent._parse_json_response(raw)
+        assert result["type"] == "answer"
+
+    def test_tab_in_answer(self):
+        """Literal tab inside answer string should be fixed"""
+        raw = '{"answer": "col1\tcol2\tcol3"}'
+        result = ReActAgent._parse_json_response(raw)
+        assert result["type"] == "answer"
+        assert "col1" in result["text"]
+
+    def test_multiline_chinese_answer(self):
+        """Chinese answer with literal newlines"""
+        raw = '{"answer": "项目结构如下：\nagentnexus/\n  core/\n  agents/"}'
+        result = ReActAgent._parse_json_response(raw)
+        assert result["type"] == "answer"
+        assert "项目结构" in result["text"]
+
+
 class TestJsonFormatPrompt:
     def test_format_section_not_empty(self):
         section = ReActAgent._build_json_format_section()

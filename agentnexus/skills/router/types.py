@@ -22,7 +22,7 @@ _STOPWORDS = {
 _VERB_LEXICON: dict[str, list[str]] = {
     "创建": ["create", "新建", "建立"],
     "编辑": ["edit", "修改", "更改", "改"],
-    "写": ["write", "编写", "撰写"],
+    "写": ["write", "编写", "撰写", "書く", "작성"],
     "读取": ["read", "读", "查看", "打开", "阅读"],
     "搜索": ["search", "查找", "检索", "找", "查询", "lookup", "find"],
     "发送": ["send", "发", "寄"],
@@ -129,12 +129,6 @@ _COMPOSITE_ACTION_OVERRIDES: dict[tuple[str, ...], str] = {
     ("下载", "转换"): "转换",
 }
 
-_OBJECT_PRIORITY_OVERRIDES: dict[tuple[str | None, str | None], str] = {
-    ("分析", "excel"): "excel",
-    ("导出", "excel"): "excel",
-    ("备份", "数据库"): "数据库",
-    ("搜索", "信息"): "search",
-}
 
 # ── Data Classes ────────────────────────────────────────────────────
 

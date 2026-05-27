@@ -1,17 +1,20 @@
-"""Router v2 — modular skill routing with structured retrieval and scoring.
+"""Router v2 — modular skill recommendation and LLM-based decision.
 
 Submodules:
-    types      — dataclasses, constants, lexicons
-    normalize  — tokenization, fuzzy matching, text normalization
-    parse      — query understanding and intent extraction
-    retrieve   — index building and candidate retrieval
-    rank       — scoring, metadata alignment, reranking
-    decide     — SkillRouter orchestrator and decision logic
-    llm_fallback — LLM-based disambiguation
+    types        — dataclasses, constants, lexicons
+    normalize    — tokenization, fuzzy matching, text normalization
+    parse        — query understanding and intent extraction
+    retrieve     — index building and candidate retrieval
+    rank         — scoring, metadata alignment, reranking
+    decide       — SkillRecommender (ranks skills, does NOT decide)
+    llm_decider  — LLM-based decision with context and preferences
+    llm_fallback — legacy LLM disambiguation (backward compat)
+    telemetry    — route event logging
 """
 
 from agentnexus.skills.registry import SkillEntry
-from agentnexus.skills.router.decide import SkillRouter, format_reason
+from agentnexus.skills.router.decide import SkillRecommender, SkillRouter, format_reason
+from agentnexus.skills.router.llm_decider import LLMDecision, decide_with_llm
 from agentnexus.skills.router.llm_fallback import parse_llm_skill_id, route_with_llm
 from agentnexus.skills.router.normalize import (
     augment_tokens_with_known_phrases,
@@ -48,7 +51,7 @@ from agentnexus.skills.router.types import (
     SkillRouterIndex,
 )
 
-# Backward-compatible aliases for functions that tests import from the package root
+# Backward-compatible aliases
 _score_indexed_entry = score_indexed_entry
 _score_metadata_alignment = score_metadata_alignment
 _score_fuzzy_match = score_fuzzy_match
@@ -95,9 +98,13 @@ __all__ = [
     "IntentSignals",
     "IndexedSkillMetadata",
     "SkillRouterIndex",
-    # Main class
-    "SkillRouter",
+    "LLMDecision",
+    # Main classes
+    "SkillRecommender",
+    "SkillRouter",  # backward-compat alias
     # Functions
+    "decide_with_llm",
+    "route_with_llm",  # backward-compat
     "tokenize",
     "extract_intent_signals",
     "score_indexed_entry",
@@ -116,7 +123,6 @@ __all__ = [
     "infer_aliases",
     "format_reason",
     "parse_llm_skill_id",
-    "route_with_llm",
     "levenshtein_distance",
     "fuzzy_match_term",
     "split_mixed_script_boundaries",

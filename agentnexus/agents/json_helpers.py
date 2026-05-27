@@ -34,6 +34,16 @@ def robust_json_parse(raw_text: str) -> dict:
     data = try_fix_json(normalized)
     if data:
         return classify_parsed(data)
+    fixed = _fix_string_internals(normalized)
+    if fixed != normalized:
+        try:
+            data = json.loads(fixed)
+            return classify_parsed(data)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    data = try_fix_json(fixed)
+    if data:
+        return classify_parsed(data)
     return {
         "type": "error",
         "reason": "JSON parse failed after all repair attempts",
@@ -104,6 +114,38 @@ def normalize_jsonish_text(text: str) -> str:
     return text.translate(translation)
 
 
+def _fix_string_internals(text: str) -> str:
+    """Fix literal newlines and unescaped quotes inside JSON string values."""
+    result = []
+    i = 0
+    in_string = False
+    while i < len(text):
+        ch = text[i]
+        if not in_string:
+            result.append(ch)
+            if ch == '"':
+                in_string = True
+        else:
+            if ch == '\\' and i + 1 < len(text):
+                result.append(ch)
+                result.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                result.append(ch)
+                in_string = False
+            elif ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def extract_answer_from_text(text: str) -> str:
     if not text:
         return ""
@@ -128,6 +170,11 @@ def parse_json_response(text: str) -> dict:
     if not text or not text.strip():
         return {"type": "error", "reason": "empty response"}
     data = try_fix_json(text)
-    if not data:
-        return {"type": "error", "reason": "not valid JSON"}
-    return classify_parsed(data)
+    if data:
+        return classify_parsed(data)
+    fixed = _fix_string_internals(text.strip())
+    if fixed != text.strip():
+        data = try_fix_json(fixed)
+        if data:
+            return classify_parsed(data)
+    return {"type": "error", "reason": "not valid JSON"}

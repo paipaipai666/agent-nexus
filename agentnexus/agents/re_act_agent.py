@@ -343,6 +343,12 @@ class ReActAgent:
 
     def _on_has_content(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """CHECK_EMPTY + HAS_CONTENT -> JSON parse the response."""
+        if self.llm_client.last_truncated:
+            ctx.last_answer = json_helpers.extract_answer_from_text(ctx.last_response_text)
+            self._output("[截断检测] LLM 输出被截断，直接提取答案文本")
+            return [ReActEvent(ReActEventType.PARSE_SUCCESS, {
+                "parsed": {"type": "answer", "text": ctx.last_answer}
+            })]
         parsed = self._robust_json_parse(ctx.last_response_text)
         if parsed["type"] == "error":
             ctx.last_answer = None  # signal parse error for retry gate
@@ -416,7 +422,9 @@ class ReActAgent:
                 {"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
         else:
             self._output(f"[JSON 重试 {ctx.json_retries}/{ctx.max_json_retries}] {reason}")
-            ctx.messages.append({"role": "assistant", "content": ctx.last_response_text})
+            raw = ctx.last_response_text
+            truncated = (raw[:2000] + "\n...[响应截断]...") if len(raw) > 2000 else raw
+            ctx.messages.append({"role": "assistant", "content": truncated})
             ctx.messages.append({"role": "user", "content":
                 f"你的上一次回复不是合法的 JSON。错误: {reason}。\n"
                 f"{self._build_json_format_section()}"})

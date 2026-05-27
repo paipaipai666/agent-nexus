@@ -84,6 +84,7 @@ class LLMSettings(BaseModel):
     model_json_mode: bool | None
     model_thinking: bool | None
     model_thinking_budget: int
+    max_output_tokens: int = 8192
     judge_model_id: str
     judge_api_key: SecretStr
     judge_base_url: str

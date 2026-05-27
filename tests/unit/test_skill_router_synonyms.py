@@ -23,6 +23,9 @@ def _make_skill(
     display_name: str,
     description: str,
     namespace: str = "default",
+    verbs: list[str] | None = None,
+    objects: list[str] | None = None,
+    aliases: list[str] | None = None,
 ) -> SkillEntry:
     """Create a SkillEntry for testing."""
     workflow = Workflow.model_validate({
@@ -34,6 +37,9 @@ def _make_skill(
         "tool_policy": {"max_risk": "low"},
         "steps": [{"type": "prompt", "id": "guide", "prompt": f"Use {display_name}."}],
         "success_criteria": ["Done."],
+        "verbs": verbs or [],
+        "objects": objects or [],
+        "aliases": aliases or [],
     })
     return SkillEntry(
         namespace=namespace,
@@ -43,65 +49,76 @@ def _make_skill(
         path=Path(f"/tmp/{skill_id}.yaml"),
         workflow=workflow,
         source_kind="skill",
+        aliases=tuple(aliases or []),
+        verbs=tuple(verbs or []),
+        objects=tuple(objects or []),
     )
 
 
 def _create_office_skills() -> list[SkillEntry]:
-    """Create Office document skills with rich metadata."""
+    """Create Office document skills with structured metadata."""
     return [
         _make_skill(
-            "docx",
-            "DOCX",
-            "Create edit inspect and format Microsoft Word docx documents. "
-            "生成 word 文档。支持 document document 文档 文件 编辑 格式化",
+            "docx", "DOCX",
+            "Create edit inspect and format Microsoft Word docx documents.",
+            verbs=["创建", "编辑", "写", "格式化", "create", "edit"],
+            objects=["文档", "word", "docx", "文件", "document"],
+            aliases=["word", "docx", "document", "文档"],
         ),
         _make_skill(
-            "pdf",
-            "PDF",
-            "Read split merge rotate and extract content from PDF documents. "
-            "读取 pdf 文件。支持 提取 合并 拆分 旋转 阅读",
+            "pdf", "PDF",
+            "Read split merge rotate and extract content from PDF documents.",
+            verbs=["读取", "提取", "合并", "拆分", "read", "extract"],
+            objects=["pdf", "文件"],
+            aliases=["pdf", "pdf文件"],
         ),
         _make_skill(
-            "xlsx",
-            "XLSX",
-            "Analyze edit calculate formulas and charts in spreadsheets. "
-            "分析 excel 表格。支持 spreadsheet 电子表格 公式 图表 计算",
+            "xlsx", "XLSX",
+            "Analyze edit calculate formulas and charts in spreadsheets.",
+            verbs=["分析", "编辑", "计算", "analyze", "edit"],
+            objects=["表格", "excel", "电子表格", "spreadsheet"],
+            aliases=["excel", "xlsx", "spreadsheet", "表格"],
         ),
         _make_skill(
-            "pptx",
-            "PPTX",
-            "Create edit and inspect PowerPoint presentations and slides. "
-            "创建 ppt 演示文稿。支持 presentation 幻灯片 演示 slides",
+            "pptx", "PPTX",
+            "Create edit and inspect PowerPoint presentations and slides.",
+            verbs=["创建", "编辑", "制作", "create", "edit"],
+            objects=["ppt", "演示文稿", "幻灯片", "presentation", "slides"],
+            aliases=["powerpoint", "pptx", "slides", "演示"],
         ),
     ]
 
 
 def _create_tech_skills() -> list[SkillEntry]:
-    """Create technical skills with rich metadata."""
+    """Create technical skills with structured metadata."""
     return [
         _make_skill(
-            "code",
-            "Code",
-            "Write review debug and refactor source code. "
-            "编写 代码 程序 脚本。支持 coding programming script 开发 调试 重构",
+            "code", "Code",
+            "Write review debug and refactor source code.",
+            verbs=["编写", "写", "调试", "重构", "review", "debug", "refactor", "write"],
+            objects=["代码", "程序", "脚本", "code", "script", "source"],
+            aliases=["code", "代码", "脚本", "programming", "script"],
         ),
         _make_skill(
-            "search",
-            "Search",
-            "Full text web search with query expansion. "
-            "搜索 查找 检索。支持 search lookup find 查询 资料 文档",
+            "search", "Search",
+            "Full text web search with query expansion.",
+            verbs=["搜索", "查找", "检索", "search", "lookup", "find", "查询"],
+            objects=["信息", "资料", "文档", "information"],
+            aliases=["search", "搜索", "检索", "lookup", "find"],
         ),
         _make_skill(
-            "email",
-            "Email",
-            "Send receive and organize email messages. "
-            "发送 邮件 电子邮件。支持 mail 信件 消息 收件",
+            "email", "Email",
+            "Send receive and organize email messages.",
+            verbs=["发送", "写", "send", "receive"],
+            objects=["邮件", "信件", "email", "mail"],
+            aliases=["email", "邮件", "mail"],
         ),
         _make_skill(
-            "database",
-            "Database",
-            "Query manage and optimize database operations. "
-            "数据库 查询 管理。支持 db sql 数据 存储 表",
+            "database", "Database",
+            "Query manage and optimize database operations.",
+            verbs=["查询", "管理", "query", "manage"],
+            objects=["数据库", "数据", "database", "db", "sql"],
+            aliases=["database", "db", "sql", "数据库"],
         ),
     ]
 

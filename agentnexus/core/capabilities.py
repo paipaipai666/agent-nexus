@@ -22,7 +22,7 @@ class ModelCapabilities:
 
     # Token limits
     max_context_tokens: int = 128_000
-    max_output_tokens: int = 4_096
+    max_output_tokens: int = 8_192
 
     # Thinking tuning
     thinking_budget_tokens: int = 4_000       # for Anthropic Claude 3.5/4.5
