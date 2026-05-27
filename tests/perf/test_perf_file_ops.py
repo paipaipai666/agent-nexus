@@ -48,7 +48,7 @@ def test_file_write_10k(benchmark, perf_env, monkeypatch):
         return file_write("write_test.txt", content, "create")
 
     result = benchmark(_write)
-    assert "已创建" in result or "created" in result.lower()
+    assert result["status"] == "ok"
     assert Path("write_test.txt").stat().st_size == 10240
 
 

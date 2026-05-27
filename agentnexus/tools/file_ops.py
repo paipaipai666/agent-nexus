@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import hashlib
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+PREVIEW_MAX_LINES = 120
+PREVIEW_MAX_CHARS = 8000
+INLINE_PATCH_MAX_LINES = 400
+INLINE_PATCH_MAX_CHARS = 32000
+DIFF_SOURCE_MAX_BYTES = 512 * 1024
 
 
 def _resolve_safe(path: str) -> Path:
@@ -51,6 +59,111 @@ def _fingerprint_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _read_text_if_possible(path: Path) -> tuple[str | None, bool]:
+    """Read UTF-8 text when possible.
+
+    Returns:
+        (text, is_binary_like)
+    """
+    if not path.exists() or not path.is_file():
+        return None, False
+    try:
+        return path.read_text(encoding="utf-8"), False
+    except UnicodeDecodeError:
+        return None, True
+    except Exception:
+        return None, True
+
+
+def _build_unified_diff(path: str, before: str, after: str) -> str:
+    before_lines = before.splitlines(keepends=True)
+    after_lines = after.splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            n=3,
+        )
+    )
+
+
+def _count_diff_stats(diff_text: str) -> dict[str, int]:
+    added = 0
+    removed = 0
+    hunks = 0
+    for line in diff_text.splitlines():
+        if line.startswith("@@"):
+            hunks += 1
+        elif line.startswith("+") and not line.startswith("+++"):
+            added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            removed += 1
+    return {
+        "added_lines": added,
+        "removed_lines": removed,
+        "hunks": hunks,
+    }
+
+
+def _truncate_diff_preview(diff_text: str) -> dict[str, Any]:
+    lines = diff_text.splitlines()
+    out_lines: list[str] = []
+    chars = 0
+    shown_hunks = 0
+    total_hunks = sum(1 for line in lines if line.startswith("@@"))
+
+    for line in lines:
+        if line.startswith("@@"):
+            shown_hunks += 1
+        next_len = chars + len(line) + 1
+        if len(out_lines) >= PREVIEW_MAX_LINES or next_len > PREVIEW_MAX_CHARS:
+            break
+        out_lines.append(line)
+        chars = next_len
+
+    truncated = len(out_lines) < len(lines)
+    text = "\n".join(out_lines)
+    if truncated:
+        remaining_hunks = max(0, total_hunks - shown_hunks)
+        suffix = "\n... [diff truncated"
+        if remaining_hunks:
+            suffix += f", remaining hunks={remaining_hunks}"
+        suffix += "]"
+        text += suffix
+
+    return {
+        "format": "unified_diff",
+        "text": text,
+        "truncated": truncated,
+        "max_lines": PREVIEW_MAX_LINES,
+        "max_chars": PREVIEW_MAX_CHARS,
+        "shown_hunks": shown_hunks,
+        "total_hunks": total_hunks,
+    }
+
+
+def _write_patch_artifact(diff_text: str) -> str:
+    artifact_dir = Path(os.getcwd()) / ".agentnexus" / "tool_results"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(datetime.now().timestamp() * 1000)
+    patch_path = artifact_dir / f"patch_{timestamp}.diff"
+    patch_path.write_text(diff_text, encoding="utf-8")
+    return str(patch_path)
+
+
+def _error_result(path: str, mode: str, message: str, error_code: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "message": message,
+        "path": path,
+        "mode": mode,
+        "changed": False,
+        "error_code": error_code,
+        **extra,
+    }
+
 
 def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
     """Read file content with line numbers. Large files are truncated.
@@ -90,7 +203,7 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
 
 
 
-def file_write(path: str, content: str, mode: str = "create", expected_version: str | None = None) -> str:
+def file_write(path: str, content: str, mode: str = "create", expected_version: str | None = None) -> dict[str, Any]:
     """Write content to a file.
 
     Args:
@@ -102,47 +215,142 @@ def file_write(path: str, content: str, mode: str = "create", expected_version: 
                           If provided and the current on-disk fingerprint differs,
                           the write is rejected to avoid blind overwrites.
 
-    Returns confirmation or error message.
+    Returns structured result with compact diff preview.
     """
     if mode not in ("create", "overwrite", "append"):
-        return f"错误: 不支持的写入模式 '{mode}'，可选: create / overwrite / append"
+        return _error_result(
+            path, mode,
+            f"错误: 不支持的写入模式 '{mode}'，可选: create / overwrite / append",
+            "invalid_mode",
+        )
 
     p = _resolve_safe(path)
     exists = p.exists()
     current_version = _fingerprint_file(p)
 
     if expected_version is not None and current_version != expected_version:
-        return (
-            f"错误: 文件版本冲突: {path}。"
-            f" 期望版本={expected_version}，当前版本={current_version}。"
-            " 请先重新读取文件再决定是否覆盖。"
+        return _error_result(
+            path, mode,
+            (
+                f"错误: 文件版本冲突: {path}。"
+                f" 期望版本={expected_version}，当前版本={current_version}。"
+                " 请先重新读取文件再决定是否覆盖。"
+            ),
+            "version_conflict",
+            version_before=current_version,
         )
 
     if mode == "create" and exists:
-        return f"错误: 文件已存在: {path}。使用 mode='overwrite' 覆盖，或 mode='append' 追加。"
+        return _error_result(
+            path, mode,
+            f"错误: 文件已存在: {path}。使用 mode='overwrite' 覆盖，或 mode='append' 追加。",
+            "file_exists",
+        )
     if mode == "append" and not exists:
-        return f"错误: 文件不存在，无法追加: {path}。使用 mode='create' 新建。"
+        return _error_result(
+            path, mode,
+            f"错误: 文件不存在，无法追加: {path}。使用 mode='create' 新建。",
+            "file_missing",
+        )
 
-    # Create parent directories
+    before_bytes = p.stat().st_size if exists else 0
+    before_text = None
+    before_binary = False
+    if exists:
+        before_text, before_binary = _read_text_if_possible(p)
+
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        return f"错误: 无法创建父目录: {e}"
+        return _error_result(path, mode, f"错误: 无法创建父目录: {e}", "mkdir_failed")
 
     mode_flag = "w" if mode in ("create", "overwrite") else "a"
     try:
         with open(p, mode_flag, encoding="utf-8") as f:
             f.write(content)
-        size = p.stat().st_size
-        action = {
-            "create": "已创建",
-            "overwrite": "已覆盖",
-            "append": "已追加",
-        }[mode]
-        new_version = _fingerprint_file(p)
-        return f"[file_write] {action} {path} ({size:,} 字节, version={new_version})"
     except Exception as e:
-        return f"错误: 写入失败: {e}"
+        return _error_result(path, mode, f"错误: 写入失败: {e}", "write_failed")
+
+    after_bytes = p.stat().st_size
+    new_version = _fingerprint_file(p)
+    after_text, after_binary = _read_text_if_possible(p)
+    is_binary = before_binary or after_binary
+
+    if mode == "create" and not exists:
+        change_type = "added"
+    elif mode == "append":
+        change_type = "appended"
+    else:
+        change_type = "modified"
+
+    notes: list[str] = []
+    patch = None
+    patch_ref = None
+
+    if is_binary:
+        stats = {
+            "added_lines": 0,
+            "removed_lines": 0,
+            "hunks": 0,
+            "before_bytes": before_bytes,
+            "after_bytes": after_bytes,
+        }
+        preview = {
+            "format": "summary",
+            "text": f"Binary file changed: {path} ({before_bytes} -> {after_bytes} bytes)",
+            "truncated": False,
+        }
+        notes.append("Binary file diff preview is not available.")
+    elif max(before_bytes, after_bytes) > DIFF_SOURCE_MAX_BYTES:
+        stats = {
+            "added_lines": 0,
+            "removed_lines": 0,
+            "hunks": 0,
+            "before_bytes": before_bytes,
+            "after_bytes": after_bytes,
+        }
+        preview = {
+            "format": "summary",
+            "text": f"Diff preview omitted for large file: {path} ({before_bytes} -> {after_bytes} bytes)",
+            "truncated": False,
+        }
+        notes.append("Full diff omitted because file exceeds preview source size threshold.")
+    else:
+        diff_text = _build_unified_diff(path, before_text or "", after_text or "")
+        stats = {
+            **_count_diff_stats(diff_text),
+            "before_bytes": before_bytes,
+            "after_bytes": after_bytes,
+        }
+        preview = _truncate_diff_preview(diff_text)
+        if len(diff_text) <= INLINE_PATCH_MAX_CHARS and len(diff_text.splitlines()) <= INLINE_PATCH_MAX_LINES:
+            patch = diff_text
+        else:
+            patch_ref = _write_patch_artifact(diff_text)
+            notes.append("Full diff stored externally; use patch_ref to inspect complete patch.")
+
+    action = {"create": "已创建", "overwrite": "已覆盖", "append": "已追加"}[mode]
+    message = (
+        f"[file_write] {action} {path} "
+        f"(+{stats['added_lines']}/-{stats['removed_lines']}, version={new_version})"
+    )
+
+    return {
+        "status": "ok",
+        "message": message,
+        "path": path,
+        "mode": mode,
+        "change_type": change_type,
+        "changed": True,
+        "version_before": current_version,
+        "version_after": new_version,
+        "stats": stats,
+        "preview": preview,
+        "patch": patch,
+        "patch_ref": patch_ref,
+        "is_binary": is_binary,
+        "notes": notes,
+    }
 
 
 

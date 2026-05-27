@@ -68,7 +68,11 @@ class TestFileWrite:
         import os
         os.chdir(tmp_path)
         result = file_write("new.txt", "hello", mode="create")
-        assert "已创建" in result
+        assert result["status"] == "ok"
+        assert result["change_type"] == "added"
+        assert result["changed"] is True
+        assert result["path"] == "new.txt"
+        assert "已创建" in result["message"]
         assert (tmp_path / "new.txt").exists()
 
     def test_create_existing_fails(self, tmp_path: Path):
@@ -76,14 +80,20 @@ class TestFileWrite:
         os.chdir(tmp_path)
         (tmp_path / "existing.txt").write_text("data")
         result = file_write("existing.txt", "hello", mode="create")
-        assert "文件已存在" in result
+        assert result["status"] == "error"
+        assert result["error_code"] == "file_exists"
+        assert "文件已存在" in result["message"]
 
     def test_overwrite(self, tmp_path: Path):
         import os
         os.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("old")
         result = file_write("f.txt", "new", mode="overwrite")
-        assert "已覆盖" in result
+        assert result["status"] == "ok"
+        assert result["change_type"] == "modified"
+        assert "已覆盖" in result["message"]
+        assert "preview" in result
+        assert "stats" in result
         assert (tmp_path / "f.txt").read_text() == "new"
 
     def test_append(self, tmp_path: Path):
@@ -91,25 +101,53 @@ class TestFileWrite:
         os.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("base")
         result = file_write("f.txt", "+more", mode="append")
-        assert "已追加" in result
+        assert result["status"] == "ok"
+        assert result["change_type"] == "appended"
+        assert "已追加" in result["message"]
         assert (tmp_path / "f.txt").read_text() == "base+more"
 
     def test_append_nonexistent_fails(self, tmp_path: Path):
         import os
         os.chdir(tmp_path)
         result = file_write("nope.txt", "x", mode="append")
-        assert "文件不存在" in result
+        assert result["status"] == "error"
+        assert result["error_code"] == "file_missing"
 
     def test_invalid_mode(self, tmp_path: Path):
         result = file_write("f.txt", "x", mode="invalid")
-        assert "不支持的写入模式" in result
+        assert result["status"] == "error"
+        assert result["error_code"] == "invalid_mode"
 
     def test_version_conflict(self, tmp_path: Path):
         import os
         os.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("data")
         result = file_write("f.txt", "new", mode="overwrite", expected_version="wrong")
-        assert "版本冲突" in result
+        assert result["status"] == "error"
+        assert result["error_code"] == "version_conflict"
+
+    def test_large_diff_uses_patch_ref(self, tmp_path: Path):
+        import os
+        os.chdir(tmp_path)
+        original = "\n".join(f"line-{i}" for i in range(2000))
+        updated = "\n".join(f"updated-{i}" for i in range(2000))
+        (tmp_path / "big.txt").write_text(original, encoding="utf-8")
+        result = file_write("big.txt", updated, mode="overwrite")
+        assert result["status"] == "ok"
+        assert result["patch"] is None or isinstance(result["patch"], str)
+        if result["patch"] is None:
+            assert result["patch_ref"]
+
+    def test_preview_truncates_large_diff(self, tmp_path: Path):
+        import os
+        os.chdir(tmp_path)
+        original = "\n".join(f"before-{i}" for i in range(400))
+        updated = "\n".join(f"after-{i}" for i in range(400))
+        (tmp_path / "truncate.txt").write_text(original, encoding="utf-8")
+        result = file_write("truncate.txt", updated, mode="overwrite")
+        assert result["status"] == "ok"
+        assert "preview" in result
+        assert isinstance(result["preview"]["text"], str)
 
 
 class TestFileList:

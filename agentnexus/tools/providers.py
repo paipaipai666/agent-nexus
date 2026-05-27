@@ -353,6 +353,47 @@ class FilesystemToolProvider:
                 require_hitl=not context.non_interactive,
                 timeout_sec=10,
                 rate_limit_per_min=20,
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string", "enum": ["ok", "error"]},
+                        "message": {"type": "string"},
+                        "path": {"type": "string"},
+                        "mode": {"type": "string"},
+                        "change_type": {"type": "string"},
+                        "changed": {"type": "boolean"},
+                        "version_before": {"type": "string"},
+                        "version_after": {"type": "string"},
+                        "stats": {
+                            "type": "object",
+                            "properties": {
+                                "added_lines": {"type": "integer"},
+                                "removed_lines": {"type": "integer"},
+                                "hunks": {"type": "integer"},
+                                "before_bytes": {"type": "integer"},
+                                "after_bytes": {"type": "integer"},
+                            },
+                        },
+                        "preview": {
+                            "type": "object",
+                            "properties": {
+                                "format": {"type": "string"},
+                                "text": {"type": "string"},
+                                "truncated": {"type": "boolean"},
+                                "max_lines": {"type": "integer"},
+                                "max_chars": {"type": "integer"},
+                                "shown_hunks": {"type": "integer"},
+                                "total_hunks": {"type": "integer"},
+                            },
+                        },
+                        "patch": {"type": ["string", "null"]},
+                        "patch_ref": {"type": ["string", "null"]},
+                        "is_binary": {"type": "boolean"},
+                        "notes": {"type": "array", "items": {"type": "string"}},
+                        "error_code": {"type": "string"},
+                    },
+                    "required": ["status", "message", "path", "mode", "changed"],
+                },
             )
         context.mark_registered(executor, before)
 

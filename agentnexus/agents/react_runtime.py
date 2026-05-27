@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agentnexus.agents.react_types import AgentStep, CallingStrategy, ExecutionContext, ReActEvent, ReActEventType
+from agentnexus.tools.result_format import summarize_tool_result
 
 
 def record_llm_response(
@@ -86,13 +87,18 @@ def record_tool_done(ctx: ExecutionContext, payload: dict) -> None:
     memory_state = ctx.memory_state
     tool_state = ctx.tool_state
     step = ctx.steps[-1]
+    rendered_result = summarize_tool_result(payload.get("result", ""))
     step.tool_outputs.append({
         "tool": payload.get("name", ""),
-        "output": payload.get("result", ""),
+        "output": rendered_result,
     })
     if payload.get("name") == "subagent_run":
         try:
-            tool_state.last_subagent_payload = json.loads(payload.get("result", ""))
+            raw_result = payload.get("result", "")
+            if isinstance(raw_result, str):
+                tool_state.last_subagent_payload = json.loads(raw_result)
+            else:
+                tool_state.last_subagent_payload = raw_result
         except Exception:
             tool_state.last_subagent_payload = None
 
@@ -105,7 +111,7 @@ def record_tool_done(ctx: ExecutionContext, payload: dict) -> None:
     memory_state.memory_manager.append(
         "tool",
         f"Action: {tool_name}[{json.dumps(arguments, ensure_ascii=False)}]\n"
-        f"Observation: {result}",
+        f"Observation: {rendered_result}",
     )
     if tool_name in ("read", "file_read", "file_read_text"):
         filepath = arguments.get("file_path", arguments.get("path", ""))
@@ -132,12 +138,13 @@ def execute_pending_tool(
     output(f"行动: {tool_call['name']}({', '.join(f'{k}={v}' for k, v in tool_call['arguments'].items())})")
     ctx.emit(ReActEventType.TOOL_START, name=tool_call["name"], arguments=tool_call["arguments"])
     observation = execute_tool(tool_call["name"], tool_call["arguments"])
-    output(f"观察: {observation}")
+    rendered_observation = summarize_tool_result(observation)
+    output(f"观察: {rendered_observation}")
 
     ctx.messages.append({
         "role": "tool",
         "tool_call_id": tool_call.get("id", ""),
-        "content": str(observation),
+        "content": rendered_observation,
     })
 
     return ReActEvent(
@@ -172,13 +179,17 @@ def execute_json_tool_call(
     output(f"行动: {parsed['tool']}({', '.join(f'{k}={v}' for k, v in parsed['params'].items())})")
     ctx.emit(ReActEventType.TOOL_START, name=parsed["tool"], arguments=parsed["params"])
     observation = execute_tool(parsed["tool"], parsed["params"])
-    output(f"观察: {observation}")
+    rendered_observation = summarize_tool_result(observation)
+    output(f"观察: {rendered_observation}")
     ctx.emit(ReActEventType.TOOL_DONE, name=parsed["tool"], arguments=parsed["params"], result=observation, id="")
 
-    step.tool_outputs.append({"tool": parsed["tool"], "output": observation})
+    step.tool_outputs.append({"tool": parsed["tool"], "output": rendered_observation})
     if parsed["tool"] == "subagent_run":
         try:
-            tool_state.last_subagent_payload = json.loads(observation)
+            if isinstance(observation, str):
+                tool_state.last_subagent_payload = json.loads(observation)
+            else:
+                tool_state.last_subagent_payload = observation
         except Exception:
             tool_state.last_subagent_payload = None
 
@@ -186,7 +197,7 @@ def execute_json_tool_call(
     ctx.messages.append({
         "role": "user",
         "content": (
-            f"工具执行结果:\n{observation}\n\n请根据结果继续。如果信息充分，输出最终答案。\n"
+            f"工具执行结果:\n{rendered_observation}\n\n请根据结果继续。如果信息充分，输出最终答案。\n"
             f"格式: {{\"answer\": \"你的回答\"}}"
         ),
     })
@@ -196,7 +207,7 @@ def execute_json_tool_call(
         memory_state.memory_manager.append(
             "tool",
             f"Action: {parsed['tool']}[{json.dumps(parsed['params'], ensure_ascii=False)}]\n"
-            f"Observation: {observation}",
+            f"Observation: {rendered_observation}",
         )
         if memory_state.memory_manager.has_new_memories():
             memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)

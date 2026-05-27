@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.profile import filter_tool_meta
+from agentnexus.tools.result_format import summarize_tool_result
 
 try:
     import jsonschema
@@ -227,7 +228,7 @@ class ToolRegistry:
                 except FutureTimeout:
                     error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
                     raise TimeoutError(error)
-                result_str = str(result)[:500]
+                result_str = summarize_tool_result(result)[:500]
                 # 7. Output schema validation
                 if meta.output_schema:
                     self._validate_output(name, result, self._output_validators.get(name))
