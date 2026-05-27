@@ -83,6 +83,10 @@ class Workflow(BaseModel):
     retrieval_policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
     fallbacks: list[str] = Field(default_factory=list)
     resources: list[SkillResource] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    verbs: list[str] = Field(default_factory=list)
+    objects: list[str] = Field(default_factory=list)
+
 
     def to_session_profile(self) -> "SessionProfile":
         return SessionProfile(

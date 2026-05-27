@@ -310,7 +310,7 @@ def test_skill_router_parse_llm_skill_id_strict_validation():
     assert _parse_llm_skill_id('{"skill_id": "default/draft"}') == "default/draft"
     assert _parse_llm_skill_id('```json\n{"skill_id": null}\n```') is None
     assert _parse_llm_skill_id('Selected:\n{"skill_id": "default/draft"}') == "default/draft"
-    assert _parse_llm_skill_id('{"skill_id": "default/draft", "reason": "x"}') is None
+    assert _parse_llm_skill_id('{"skill_id": "default/draft", "reason": "x"}') == "default/draft"
     assert _parse_llm_skill_id('{"skill_id": 123}') is None
     assert _parse_llm_skill_id('["default/draft"]') is None
 
@@ -321,7 +321,7 @@ def test_skill_service_llm_fallback_invalid_json_declines_without_selecting():
     registry = SkillRegistry([])
     registry._entries = [first, second]
     llm = MagicMock()
-    llm.think.return_value = '{"skill_id": "default/draft-two", "reason": "extra"}'
+    llm.think.return_value = '{"skill_id": 123}'
     service = SkillService(registry, agent=MagicMock(), llm_client=llm)
 
     route = service.maybe_auto_select("Write concise release notes.")

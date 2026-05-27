@@ -53,6 +53,9 @@ class SkillEntry:
     path: Path
     workflow: Workflow
     source_kind: str = "skill"
+    aliases: tuple[str, ...] = ()
+    verbs: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
 
     @property
     def qualified_id(self) -> str:
@@ -139,6 +142,9 @@ class SkillRegistry:
                     path=path,
                     workflow=workflow,
                     source_kind="skill" if path.name == SKILL_MD_NAME else "workflow",
+                    aliases=tuple(workflow.aliases),
+                    verbs=tuple(workflow.verbs),
+                    objects=tuple(workflow.objects),
                 )
                 seen_ids[qualified_id] = entry
                 entries.append(entry)

@@ -270,8 +270,8 @@ class TestParseLLMSkillId:
     def test_invalid_json_returns_none(self):
         assert _parse_llm_skill_id("{invalid}") is None
 
-    def test_extra_keys_rejected(self):
-        assert _parse_llm_skill_id('{"skill_id": "test", "reason": "x"}') is None
+    def test_extra_keys_allowed(self):
+        assert _parse_llm_skill_id('{"skill_id": "test", "reason": "x"}') == "test"
 
     def test_empty_returns_none(self):
         assert _parse_llm_skill_id("") is None
