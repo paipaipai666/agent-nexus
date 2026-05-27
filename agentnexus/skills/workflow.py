@@ -86,6 +86,9 @@ class Workflow(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     verbs: list[str] = Field(default_factory=list)
     objects: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+    negative_hints: list[str] = Field(default_factory=list)
 
 
     def to_session_profile(self) -> "SessionProfile":

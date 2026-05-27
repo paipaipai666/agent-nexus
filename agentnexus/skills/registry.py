@@ -56,6 +56,9 @@ class SkillEntry:
     aliases: tuple[str, ...] = ()
     verbs: tuple[str, ...] = ()
     objects: tuple[str, ...] = ()
+    domains: tuple[str, ...] = ()
+    examples: tuple[str, ...] = ()
+    negative_hints: tuple[str, ...] = ()
 
     @property
     def qualified_id(self) -> str:
@@ -145,6 +148,9 @@ class SkillRegistry:
                     aliases=tuple(workflow.aliases),
                     verbs=tuple(workflow.verbs),
                     objects=tuple(workflow.objects),
+                    domains=tuple(workflow.domains),
+                    examples=tuple(workflow.examples),
+                    negative_hints=tuple(workflow.negative_hints),
                 )
                 seen_ids[qualified_id] = entry
                 entries.append(entry)
@@ -297,6 +303,12 @@ def _load_skill_markdown(path: Path) -> Workflow:
             "Follow the skill instructions in SKILL.md."
         ],
         resources=resources,
+        aliases=_as_str_list(metadata.get("aliases")),
+        verbs=_as_str_list(metadata.get("verbs")),
+        objects=_as_str_list(metadata.get("objects")),
+        domains=_as_str_list(metadata.get("domains")),
+        examples=_as_str_list(metadata.get("examples")),
+        negative_hints=_as_str_list(metadata.get("negative_hints")),
     )
 
 

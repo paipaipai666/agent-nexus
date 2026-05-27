@@ -166,7 +166,7 @@ def test_skill_router_builds_cached_index_and_routes_from_it():
     assert route is not None
     assert route.entry == entry
     assert router.index.signature == (
-        "default/draft-writer\0Draft Writer\0Write concise product release notes and drafts.",
+        "default/draft-writer\0Draft Writer\0Write concise product release notes and drafts.\0\0\0",
     )
 
 
