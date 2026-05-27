@@ -104,7 +104,6 @@ class ChatScreen(Screen):
         self._mcp_manager = mcp_manager
         self._skill_service = skill_service
         self._capability_runtime = capability_runtime
-        self._running = False
         self._spinner_timer = None
         self._spinner_frames = None
         self._current_tool_name: str = ""
@@ -126,6 +125,7 @@ class ChatScreen(Screen):
             capability_runtime=capability_runtime,
         )
         self._chat_session = self._chat_service.start_session()
+        self._chat_service.mark_processing(False)
         self._current_run_id: str = ""
         self._current_turn = None
         # Hook compact events for TUI visibility
@@ -210,12 +210,11 @@ class ChatScreen(Screen):
         self._chat_area.add_message("user", text)
         if text.startswith("/"):
             self._handle_command(text)
-        elif self._running:
+        elif self._chat_service.is_processing:
             # Agent is busy — queue the message
-            pos = self._chat_service.enqueue_message(self._chat_session.id, text)
-            self._chat_area.add_system(f"[dim]消息已排队 (第 {pos} 位)[/]")
+            self._chat_service.enqueue_message(self._chat_session.id, text)
         else:
-            self._running = True
+            self._chat_service.mark_processing(True)
             self._run_agent(text)
 
     def on_input_bar_app_input_changed(self, event: InputBar.AppInputChanged):
@@ -907,7 +906,7 @@ class ChatScreen(Screen):
             self._skill_status = "selected"
         self._refresh_skill_panel()
         self._chat_area.add_system(f"[green]已使用 skill[/] {entry.qualified_id} [dim]执行指令。[/]")
-        self._running = True
+        self._chat_service.mark_processing(True)
         self._run_agent(instruction)
         return True
 
@@ -1170,7 +1169,7 @@ class ChatScreen(Screen):
                 worker.cancel()
             except Exception:
                 pass
-        self._running = False
+        self._chat_service.mark_processing(False)
         self._stop_spinner()
         self._current_tool_widget = None
         try:
@@ -1583,7 +1582,7 @@ class ChatScreen(Screen):
             except Exception:
                 pass
             self._record_turn_summary(text, answer)
-            self._running = False
+            self._chat_service.mark_processing(False)
             self._agent_worker = None
             self._current_turn = None
             self._current_run_id = ""
@@ -1593,7 +1592,7 @@ class ChatScreen(Screen):
             return
 
         if turn.cancel_checker():
-            self._running = False
+            self._chat_service.mark_processing(False)
             self._agent_worker = None
             self._current_turn = None
             self._current_run_id = ""
@@ -1651,8 +1650,8 @@ class ChatScreen(Screen):
             answer = turn.finish("").answer
             self._chat_area.add_system("[dim]Agent 未能得出答案，已记录本轮执行摘要。[/]")
             self._record_turn_summary(text, answer)
-        self._running = False
-        self._agent_worker = None
+            self._chat_service.mark_processing(False)
+            self._agent_worker = None
         self._current_turn = None
         self._current_run_id = ""
         if hasattr(self._agent, "set_cancel_checker"):
@@ -1666,8 +1665,9 @@ class ChatScreen(Screen):
             if next_item is not None:
                 _session_id, text = next_item
                 self._chat_area.add_system("[dim]处理排队消息...[/]")
-                self._running = True
-                self._run_agent(text)
+                self._chat_service.mark_processing(True)
+                # Defer to allow the current @work(exclusive=True) worker to finish
+                self.set_timer(0, lambda: self._run_agent(text))
 
 
 def _plain_summary(text: str, limit: int) -> str:
