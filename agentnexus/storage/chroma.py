@@ -8,6 +8,7 @@ compatibility layer for older imports and tests.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import uuid
@@ -17,6 +18,8 @@ from typing import Any
 
 from agentnexus.core.config import get_settings
 from agentnexus.rag import embeddings as embedding_service
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "documents"
 DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
@@ -137,9 +140,7 @@ def delete_collection(name: str | None = None, namespace: str | None = None):
         try:
             client.delete_collection(collection_name)
         except Exception as exc:
-            from rich.console import Console
-
-            Console().print(f"[yellow]ChromaDB 删除集合异常: {exc}[/yellow]")
+            logger.warning(f"ChromaDB 删除集合异常: {exc}")
         _collections.pop(collection_name, None)
 
 

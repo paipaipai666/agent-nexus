@@ -57,11 +57,6 @@ def record_native_tool_calls(
     step = ctx.steps[-1]
     step.tool_calls = list(tool_state.pending_tool_calls)
     output(f"思考: {thought}")
-    ctx.emit(
-        ReActEventType.TOOLS_FOUND,
-        thought=thought,
-        tool_calls=list(tool_state.pending_tool_calls),
-    )
     if memory_state.memory_manager:
         memory_state.memory_manager.append("assistant", thought)
 

@@ -11,6 +11,40 @@ def _safe(text: str) -> Text:
     return Text(text or "")
 
 
+def render_diff_with_colors(diff_text: str) -> str:
+    """Render unified diff with Rich markup background colors for TUI display.
+
+    - Lines starting with '-' (removed) have red background
+    - Lines starting with '+' (added) have green background
+    - Lines starting with '@@' (hunk headers) have cyan background
+    - Other lines are kept as-is
+    """
+    lines = diff_text.split('\n')
+    colored_lines = []
+
+    for line in lines:
+        # Escape Rich markup special characters in the content
+        escaped_line = line.replace('[', '\\[').replace(']', '\\]')
+
+        if line.startswith('---') or line.startswith('+++'):
+            # File headers - bold
+            colored_lines.append(f"[bold]{escaped_line}[/bold]")
+        elif line.startswith('-'):
+            # Removed lines - red background
+            colored_lines.append(f"[white on red]{escaped_line}[/white on red]")
+        elif line.startswith('+'):
+            # Added lines - green background
+            colored_lines.append(f"[white on green]{escaped_line}[/white on green]")
+        elif line.startswith('@@'):
+            # Hunk headers - cyan background
+            colored_lines.append(f"[white on dark_cyan]{escaped_line}[/white on dark_cyan]")
+        else:
+            # Context lines - default
+            colored_lines.append(escaped_line)
+
+    return '\n'.join(colored_lines)
+
+
 class ChatMessage(Widget):
     """A single chat message with colored left border."""
 
@@ -71,11 +105,14 @@ class ToolCall(Widget):
     def on_mount(self):
         self.query_one("#tool-result", Static).styles.height = "auto"
 
-    def update_result(self, result: str, duration_ms: float = 0):
+    def update_result(self, result: str, duration_ms: float = 0, *, markup: bool = False):
         self.result = result
         self.duration_ms = duration_ms
         widget = self.query_one("#tool-result", Static)
-        widget.update(_safe(result or ""))
+        if markup:
+            widget.update(result or "")
+        else:
+            widget.update(_safe(result or ""))
         widget.styles.height = "auto"
         if duration_ms:
             try:

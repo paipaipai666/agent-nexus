@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agentnexus.prompts import load_prompt
 
 from .chunking import ChunkStrategy, chunk_structured_document
@@ -86,11 +88,21 @@ def enrich_chunks_with_context(
     chunks: list[str],
     document: str,
     llm_client,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[dict[str, str]]:
-    from rich.progress import track
+    """Enrich chunks with context for retrieval and generation.
 
+    Args:
+        chunks: List of text chunks to enrich
+        document: Full document text
+        llm_client: LLM client for generating context
+        progress_callback: Optional callback(current, total) for progress reporting
+    """
     enriched: list[dict[str, str]] = []
-    for chunk in track(chunks, description="生成上下文摘要..."):
+    total = len(chunks)
+    for i, chunk in enumerate(chunks):
+        if progress_callback:
+            progress_callback(i + 1, total)
         retrieval_context = generate_chunk_context(document, chunk, llm_client, mode="retrieval")
         generation_context = generate_chunk_context(document, chunk, llm_client, mode="generation")
         enriched.append(

@@ -1,7 +1,6 @@
 """ChatScreen — main chat interface with real ReActAgent backend."""
 
 import asyncio
-import re
 import threading
 import time
 from itertools import cycle
@@ -27,10 +26,17 @@ from agentnexus.skills import (
     format_tool_policy_summary,
     validate_session_profile,
 )
+from agentnexus.tools.result_format import (
+    condense_file_result,
+    condense_search_result,
+    extract_diff_parts,
+    format_subagent_result,
+    summarize_tool_result,
+)
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
-from agentnexus.tui.widgets.message import ChatMessage, ToolCall
+from agentnexus.tui.widgets.message import ChatMessage, ToolCall, render_diff_with_colors
 from agentnexus.tui.widgets.side_panel import SidePanel
 
 COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
@@ -39,10 +45,7 @@ COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("/undo", "回退到上一个检查点"),
     ("/redo", "重做到下一个检查点"),
     ("/log", "查看检查点日志"),
-    ("/branch", "创建或切换分支"),
-    ("/checkout", "切换检查点或分支"),
-    ("/diff", "比较检查点"),
-    ("/status", "查看分支状态"),
+    ("/status", "查看状态"),
     ("/compact", "压缩当前上下文"),
     ("/stats", "查看运行统计"),
     ("/skill", "管理 Skill"),
@@ -55,7 +58,6 @@ COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
     "/skill": ("status", "list", "use", "enable", "disable", "default", "validate", "reset"),
     "/mcp": ("status", "tools", "resources", "prompts", "failures", "retry", "enable", "disable", "reload"),
     "/plugin": ("status", "list", "enable", "disable", "reload"),
-    "/log": ("--all",),
     "/clear": ("--all",),
 }
 
@@ -279,14 +281,12 @@ class ChatScreen(Screen):
             return
         st = self._version.status()
         self._hud.update_version(
-            st.get("branch", "main"),
             st["head"]["id"] if st.get("head") else "---",
             st.get("can_undo", False),
             st.get("can_redo", False),
         )
         try:
             self._side_panel.update_version(
-                st.get("branch", "main"),
                 st["head"]["id"] if st.get("head") else "---",
                 st.get("can_undo", False),
                 st.get("can_redo", False),
@@ -336,63 +336,24 @@ class ChatScreen(Screen):
                 self._chat_area.add_system("[dim]无可重做[/]")
             self._refresh_version_display()
         elif cmd == "/log" and self._version:
-            show_all = arg.strip() == "--all"
-            entries = self._version.log(all_branches=show_all)
+            entries = self._version.log()
             if entries:
-                lines = ["[bold]Checkpoints:[/]" + (" (全部)" if show_all else "")]
+                lines = ["[bold]Checkpoints:[/]"]
                 for e in entries[:10]:
                     m = "[green]● HEAD[/]" if e.get("is_head") else ""
-                    branch = f"[#a78bfa]{e.get('branch', '')}[/]" if e.get("branch") else ""
-                    lines.append(f"  [dim]{e['id']}[/] {e.get('question', '')[:40]} {branch} {m}")
+                    lines.append(f"  [dim]{e['id']}[/] {e.get('question', '')[:40]} {m}")
                 self._chat_area.add_system("\n".join(lines))
             else:
                 self._chat_area.add_system("[dim]暂无检查点[/]")
         elif cmd == "/status" and self._version:
             st = self._version.status()
             lines = [
-                f"[bold]分支:[/] [#a78bfa]{st['branch']}[/]",
                 f"[dim]HEAD: {st['head']['id'] if st['head'] else '---'}[/]",
                 f"undo: {'[green]可用[/]' if st['can_undo'] else '[dim]不可用[/]'}  "
                 f"redo: {'[green]可用[/]' if st['can_redo'] else '[dim]不可用[/]'}",
             ]
             self._chat_area.add_system("\n".join(lines))
             self._refresh_version_display()
-        elif cmd == "/branch" and self._version:
-            name = arg.strip()
-            if not name:
-                self._chat_area.add_system("[dim]用法: /branch <分支名>[/]")
-                return
-            cp = self._version.branch(name)
-            self._restore_stm_from_version()
-            self._chat_area.add_system(f"[green]已创建/切换至分支 [#a78bfa]{name}[/][/]")
-            self._refresh_version_display()
-        elif cmd == "/checkout" and self._version:
-            ref = arg.strip()
-            if not ref:
-                self._chat_area.add_system("[dim]用法: /checkout <检查点ID | 分支名>[/]")
-                return
-            cp = self._version.checkout(ref)
-            if cp:
-                self._restore_stm_from_version()
-                self._chat_area.add_system(f"[green]已切换至 [{cp['id']}][/]")
-                self._refresh_version_display()
-            else:
-                self._chat_area.add_system(f"[dim]未找到: {ref}[/]")
-        elif cmd == "/diff" and self._version:
-            refs = arg.strip().split()
-            r1 = refs[0] if len(refs) > 0 else None
-            r2 = refs[1] if len(refs) > 1 else None
-            result = self._version.diff(r1, r2)
-            if result:
-                lines = ["[bold]Diff:[/]"]
-                for k, v in result.items():
-                    if isinstance(v, list):
-                        lines.append(f"  [dim]{k}:[/] {len(v)} 条变更")
-                    else:
-                        lines.append(f"  [dim]{k}:[/] {v}")
-                self._chat_area.add_system("\n".join(lines))
-            else:
-                self._chat_area.add_system("[dim]无法比较（可能缺参数或无可比检查点）[/]")
         elif cmd == "/compact" and self._memory:
             tokens_before = self._memory.estimate_stm_tokens()
             saved = self._memory.maybe_compact(custom_instructions=arg, is_auto=False)
@@ -1062,9 +1023,9 @@ class ChatScreen(Screen):
             registry = getattr(getattr(self._agent, "tool_executor", None), "registry", None)
             tools = []
             if registry is not None:
-                for name, (meta, _) in registry._tools.items():
+                for meta in registry.list_tools_with_meta():
                     risk = getattr(meta.risk_level, "value", str(meta.risk_level))
-                    tools.append({"name": name, "risk": risk})
+                    tools.append({"name": meta.name, "risk": risk})
             self._side_panel.update_tools(tools)
         except Exception:
             pass
@@ -1192,69 +1153,6 @@ class ChatScreen(Screen):
         frame = next(self._spinner_frames)
         label = self._current_tool_widget.query_one("#tool-name", Label)
         label.update(f"{frame} {self._current_tool_widget.tool_name}")
-
-    @staticmethod
-    def _condense_search_result(text: str) -> str:
-        """Show only title/score/URL from web_search; skip full content body.
-
-        Input format (from web_search.py):
-          [N] Title (date) [相关度: X.XX]
-          URL: https://...
-          <multi-line content body>
-        """
-        lines = text.split("\n")
-        out = []
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if re.match(r"^\[\d+\]", stripped) or stripped.startswith("URL:"):
-                out.append(line)
-        return "\n".join(out) if out else text[:500]
-
-    @staticmethod
-    def _condense_file_result(text: str) -> str:
-        """Show only file metadata line from file_read; skip full file content.
-
-        Input format (from file_ops.py):
-          [文件] path (N 行, 共 X 字节)
-          1 | line content...
-          2 | line content...
-        """
-        first_line = text.split("\n")[0] if text else ""
-        if first_line.startswith("[文件]"):
-            return first_line
-        return text[:200]
-
-    @staticmethod
-    def _format_subagent_result(text: str) -> str:
-        """Format subagent_run JSON output into a readable delegation summary."""
-        import json
-
-        try:
-            payload = json.loads(text)
-        except Exception:
-            return text[:500]
-
-        if not isinstance(payload, dict):
-            return text[:500]
-
-        role = payload.get("role", "general")
-        status = payload.get("status", "unknown")
-        steps_used = payload.get("steps_used", 0)
-        allowed_tools = payload.get("allowed_tools", []) or []
-        answer = str(payload.get("answer", "") or "").strip()
-        summary = str(payload.get("summary", "") or "").strip()
-
-        lines = [
-            f"[子代理] role={role} status={status} steps={steps_used}",
-            f"tools: {', '.join(allowed_tools) if allowed_tools else '-'}",
-        ]
-        if answer:
-            lines.append(f"answer: {answer[:400]}")
-        elif summary:
-            lines.append(f"summary: {summary[:400]}")
-        return "\n".join(lines)
 
     @staticmethod
     def _format_mcp_status(snapshot: dict) -> str:
@@ -1517,13 +1415,24 @@ class ChatScreen(Screen):
                     self._current_tool_started_at = 0.0
                 if self._current_tool_widget:
                     tool_lower = self._current_tool_widget.tool_name.strip().lower()
+                    use_markup = False
                     if tool_lower == "web_search":
-                        result = self._condense_search_result(result)
+                        result = condense_search_result(result)
                     elif tool_lower == "file_read":
-                        result = self._condense_file_result(result)
+                        result = condense_file_result(result)
                     elif tool_lower == "subagent_run":
-                        result = self._format_subagent_result(result)
-                    self._current_tool_widget.update_result(result)
+                        result = format_subagent_result(result)
+                    else:
+                        # Try to extract and render diff with colors for structured results
+                        diff_parts = extract_diff_parts(result)
+                        if diff_parts:
+                            message, diff_text = diff_parts
+                            colored_diff = render_diff_with_colors(diff_text)
+                            result = f"{message}\n\n[dim]Diff preview:[/dim]\n{colored_diff}"
+                            use_markup = True
+                        else:
+                            result = summarize_tool_result(result)
+                    self._current_tool_widget.update_result(result, markup=use_markup)
                     self._current_tool_widget = None
                 if self._memory:
                     stm_tokens = self._memory.estimate_stm_tokens()
@@ -1646,6 +1555,8 @@ class ChatScreen(Screen):
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
             self._record_turn_summary(text, answer)
+            self._chat_service.mark_processing(False)
+            self._agent_worker = None
         else:
             answer = turn.finish("").answer
             self._chat_area.add_system("[dim]Agent 未能得出答案，已记录本轮执行摘要。[/]")

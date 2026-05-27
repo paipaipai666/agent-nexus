@@ -127,7 +127,7 @@ class TestSubagentApiKeyLeakage:
 
         child = _clone_llm(parent)
         assert child.api_key == "sk-test-secret-key-12345"
-        assert child.model == "test-model"
+        assert child.model == "openai/test-model"  # normalized with default provider
 
     @patch("agentnexus.tools.subagent.trace_manager")
     def test_subagent_span_metadata_no_raw_key(self, mock_trace):

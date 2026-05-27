@@ -2,6 +2,7 @@
 from agentnexus.core.capabilities import (
     SessionCapabilityTracker,
     _lookup_registry,
+    _normalize_model_id,
     detect_capabilities,
 )
 
@@ -49,6 +50,32 @@ class TestDetectCapabilities:
         caps = detect_capabilities("deepseek/deepseek-v4-pro")
         assert caps.supports_tool_calling is False  # overridden
         assert caps.supports_thinking is True       # overridden
+
+    def test_normalize_model_id_deepseek(self):
+        """Test that model ID without prefix gets normalized correctly for deepseek."""
+        caps = detect_capabilities("deepseek-v4-flash", "https://api.deepseek.com")
+        assert caps.supports_tool_calling is True
+        assert caps.supports_thinking is True
+
+    def test_normalize_model_id_openai(self):
+        """Test that model ID without prefix gets normalized correctly for openai."""
+        caps = detect_capabilities("gpt-4o", "https://api.openai.com")
+        assert caps.supports_tool_calling is True
+
+    def test_normalize_model_id_anthropic(self):
+        """Test that model ID without prefix gets normalized correctly for anthropic."""
+        caps = detect_capabilities("claude-4.6-sonnet", "https://api.anthropic.com")
+        assert caps.supports_tool_calling is True
+
+    def test_normalize_model_id_unknown_provider(self):
+        """Test that model ID without prefix defaults to openai for unknown providers."""
+        caps = detect_capabilities("some-model", "https://unknown-provider.com")
+        assert caps.supports_tool_calling is True  # openai/* has tool calling
+
+    def test_normalize_model_id_with_prefix(self):
+        """Test that model ID with prefix is not changed."""
+        normalized = _normalize_model_id("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
+        assert normalized == "deepseek/deepseek-v4-flash"
 
 
 class TestSessionCapabilityTracker:

@@ -1,21 +1,23 @@
 import json
+import logging
 import time
 from collections.abc import Callable
 from typing import Dict, List
 
 from rich.console import Console
 from rich.live import Live
-from rich.markup import escape as _e
 from rich.text import Text
 
 from agentnexus.core.capabilities import (
     ModelCapabilities,
     SessionCapabilityTracker,
+    _normalize_model_id,
     detect_capabilities,
 )
 from agentnexus.core.config import get_settings
 from agentnexus.observability.tracer import trace_manager
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 LLM_MAX_RETRIES = 3
@@ -34,9 +36,9 @@ def get_default_llm() -> "AgentLLM":
 class AgentLLM:
     def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
         settings = get_settings()
-        self.model = model or settings.llm_model_id
-        self.api_key = apiKey or settings.llm_api_key.get_secret_value()
         self.base_url = baseUrl or settings.llm_base_url
+        self.model = _normalize_model_id(model or settings.llm_model_id, self.base_url)
+        self.api_key = apiKey or settings.llm_api_key.get_secret_value()
         self.timeout = timeout or settings.llm_timeout
         self.last_error: str = ""
         self.last_truncated: bool = False
@@ -90,13 +92,6 @@ class AgentLLM:
     def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None) -> str:
         import litellm
         model = self.model
-        if "/" not in model:
-            if "deepseek.com" in (self.base_url or ""):
-                model = f"deepseek/{model}"
-            elif "openai.com" in (self.base_url or ""):
-                model = f"openai/{model}"
-            else:
-                model = f"openai/{model}"
 
         ctx = trace_manager.active
         span = None
@@ -290,7 +285,7 @@ class AgentLLM:
                 is_transient = True
 
             retry_tag = f"[retry {attempt + 1}/{LLM_MAX_RETRIES}]" if attempt < LLM_MAX_RETRIES - 1 else "[exhausted]"
-            console.print(f"[red]LLM 错误{retry_tag}: {_e(error_msg)}[/red]")
+            logger.error(f"LLM 错误{retry_tag}: {error_msg}")
 
             if ctx and span:
                 ctx.end_span(span, metadata={

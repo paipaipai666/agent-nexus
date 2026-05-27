@@ -19,7 +19,7 @@ class SidePanel(Widget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._version_info = ("main", "---", False, False)
+        self._version_info = ("---", False, False)
         self._timeline_items: list[dict] = []
         self._tool_items: list[dict] = []
         self._model_info = {
@@ -35,8 +35,8 @@ class SidePanel(Widget):
             "available": [],
         }
 
-    def update_version(self, branch: str, head: str, can_undo: bool, can_redo: bool):
-        self._version_info = (branch, head, can_undo, can_redo)
+    def update_version(self, head: str, can_undo: bool, can_redo: bool):
+        self._version_info = (head, can_undo, can_redo)
         self._refresh_section("version-card", self._render_version())
 
     def update_timeline(self, items: list[dict]):
@@ -98,7 +98,7 @@ class SidePanel(Widget):
             pass
 
     def _render_version(self) -> str:
-        branch, head, can_undo, can_redo = self._version_info
+        head, can_undo, can_redo = self._version_info
         head_short = head[:8] if head and head not in {"---", "—"} else head
         actions = []
         if can_undo:
@@ -106,7 +106,7 @@ class SidePanel(Widget):
         if can_redo:
             actions.append("/redo")
         action_text = f"\n[dim]{'  '.join(actions)}[/]" if actions else ""
-        return f"[#6ba5f2]{branch}[/] [dim]@ {head_short}[/]{action_text}"
+        return f"[dim]@ {head_short}[/]{action_text}"
 
     def _render_timeline(self) -> str:
         if not self._timeline_items:

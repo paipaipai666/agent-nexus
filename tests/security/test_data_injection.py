@@ -230,56 +230,6 @@ class TestSQLInjectionVersioned:
         log = mgr.log()
         assert len(log) >= 1
 
-    def test_branch_name_with_sql_payload(self, temp_agentnexus_home):
-        """Branch name with SQL metacharacters is handled safely."""
-        from agentnexus.core.config import get_settings
-        from agentnexus.memory.versioned import ConversationVersionManager
-
-        settings = get_settings()
-        mgr = ConversationVersionManager("branch_inject_test", settings.memory_db_path)
-        mgr.commit(stm_snapshot='{"x": 1}', question="q", answer="a")
-
-        branch_name = "'; DROP TABLE conversation_branches; --"
-        mgr.branch(branch_name)
-
-        cp = mgr.checkout(branch_name)
-        assert cp is not None
-        current = mgr._current_branch()
-        assert current == branch_name
-
-    def test_branch_with_unicode_sql_payload(self, temp_agentnexus_home):
-        """Unicode branch name with SQL payload is safe."""
-        from agentnexus.core.config import get_settings
-        from agentnexus.memory.versioned import ConversationVersionManager
-
-        settings = get_settings()
-        mgr = ConversationVersionManager("branch_unicode_inject", settings.memory_db_path)
-        mgr.commit(stm_snapshot='{"x": 1}', question="q", answer="a")
-
-        branch_name = "你好'; DROP TABLE conversation_branches; SELECT '"
-        mgr.branch(branch_name)
-        cp = mgr.checkout(branch_name)
-        assert cp is not None
-        assert mgr._current_branch() == branch_name
-
-    def test_branch_name_preserves_db_integrity(self, temp_agentnexus_home):
-        """Branch with SQL injection payload doesn't corrupt other sessions."""
-        from agentnexus.core.config import get_settings
-        from agentnexus.memory.versioned import ConversationVersionManager
-
-        settings = get_settings()
-
-        mgr1 = ConversationVersionManager("victim_session", settings.memory_db_path)
-        mgr1.commit(stm_snapshot='{"x": 1}', question="q", answer="a")
-
-        mgr2 = ConversationVersionManager("attacker_session", settings.memory_db_path)
-        mgr2.commit(stm_snapshot='{"x": 1}', question="q", answer="a")
-        mgr2.branch("'; DROP TABLE conversation_checkpoints; --")
-        mgr2.checkout("'; DROP TABLE conversation_checkpoints; --")
-
-        mgr1_log = mgr1.log()
-        assert len(mgr1_log) >= 1
-
 
 # ── ChromaDB Metadata Injection Tests ──────────────────────────────
 

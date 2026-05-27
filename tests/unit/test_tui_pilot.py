@@ -203,11 +203,10 @@ class TestHUDWidgetPilot:
                 await pilot.pause()
                 from agentnexus.tui.widgets.hud import HUD
                 hud = app.query_one("#test-hud", HUD)
-                hud.update_version("feature", "deadbeef1234", can_undo=True, can_redo=False)
+                hud.update_version("deadbeef1234", can_undo=True, can_redo=False)
                 await pilot.pause()
                 text = app.query_one("#hud-text", Static)
                 rendered = text.content
-                assert "feature" in rendered
                 assert "deadbeef" in rendered
                 assert "undo" in rendered
 
@@ -218,7 +217,6 @@ class TestHUDWidgetPilot:
 def _make_mock_version():
     v = MagicMock()
     v.status.return_value = {
-        "branch": "main",
         "head": {"id": "abc123"},
         "can_undo": False,
         "can_redo": False,

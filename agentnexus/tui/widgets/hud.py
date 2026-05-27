@@ -1,60 +1,13 @@
 """HUD — bottom status bar: model, context, tokens."""
 
-from fnmatch import fnmatch
 from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 
+from agentnexus.core.capabilities import resolve_ctx_max
 from agentnexus.core.config import get_settings
-
-
-def _model_candidates(model_id: str, base_url: str = "") -> list[str]:
-    candidates = [model_id]
-    if "/" not in model_id:
-        base = (base_url or "").lower()
-        if "deepseek" in base:
-            candidates.append(f"deepseek/{model_id}")
-        elif "openai" in base:
-            candidates.append(f"openai/{model_id}")
-        elif "anthropic" in base or "claude" in model_id.lower():
-            candidates.append(f"anthropic/{model_id}")
-        elif "bigmodel" in base or model_id.lower().startswith("glm"):
-            candidates.append(f"zhipu/{model_id}")
-    return list(dict.fromkeys(candidates))
-
-
-def _registry_ctx_max(model_id: str, base_url: str = "") -> int | None:
-    try:
-        from agentnexus.core.capabilities import CAPABILITY_REGISTRY
-    except Exception:
-        return None
-
-    for candidate in _model_candidates(model_id, base_url):
-        for pattern, caps in CAPABILITY_REGISTRY.items():
-            if pattern == "*":
-                continue
-            if fnmatch(candidate, pattern):
-                return caps.max_context_tokens
-    return None
-
-
-def _resolve_ctx_max(model_id: str, base_url: str = "") -> int | None:
-    for candidate in _model_candidates(model_id, base_url):
-        value = _resolve_ctx_max_from_litellm(candidate)
-        if value:
-            return value
-    return _registry_ctx_max(model_id, base_url)
-
-
-def _resolve_ctx_max_from_litellm(model_id: str) -> int | None:
-    try:
-        from litellm import get_model_info
-        info = get_model_info(model_id)
-        return info.get("max_input_tokens") or info.get("max_context_tokens") or None
-    except Exception:
-        return None
 
 
 def _format_k(tokens: int | float) -> str:
@@ -83,7 +36,7 @@ class HUD(Widget):
         full_id = settings.llm_model_id
         self.model = full_id
         self._display_model = full_id.split("/")[-1] if "/" in full_id else full_id
-        self.ctx_max = _resolve_ctx_max(full_id, getattr(settings, "llm_base_url", ""))
+        self.ctx_max = resolve_ctx_max(full_id, getattr(settings, "llm_base_url", ""))
         # Current context (STM) size — shown in the context bar
         self.current_tokens = 0
         # Cumulative usage
@@ -94,8 +47,7 @@ class HUD(Widget):
         # Capability indicators
         self._supports_thinking = False
         self._strategy = ""
-        # Version / workspace indicators
-        self._branch = "main"
+        # Version indicators
         self._head = "---"
         self._can_undo = False
         self._can_redo = False
@@ -124,8 +76,7 @@ class HUD(Widget):
         self._compacting = active
         self._refresh()
 
-    def update_version(self, branch: str, head: str, can_undo: bool, can_redo: bool):
-        self._branch = branch
+    def update_version(self, head: str, can_undo: bool, can_redo: bool):
         self._head = head
         self._can_undo = can_undo
         self._can_redo = can_redo
@@ -169,7 +120,7 @@ class HUD(Widget):
         if self._can_redo:
             version_actions.append("redo")
         actions_seg = f" {'/'.join(version_actions)}" if version_actions else ""
-        version_seg = f"{self._branch}@{head_short}{actions_seg}"
+        version_seg = f"{head_short}{actions_seg}"
 
         parts = [
             f"[#6ba5f2]{self._display_model}[/]{caps_seg}",

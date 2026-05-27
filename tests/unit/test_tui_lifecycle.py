@@ -56,16 +56,16 @@ class TestChatScreenLifecycle:
             assert len(bars) >= 0
 
     async def test_chat_screen_static_condense_search(self):
-        from agentnexus.tui.screens.chat import ChatScreen
+        from agentnexus.tools.result_format import condense_search_result
         text = "[1] Test Title (2024) [相关度: 0.95]\nURL: https://example.com\ncontent body here"
-        result = ChatScreen._condense_search_result(text)
+        result = condense_search_result(text)
         assert "Test Title" in result
         assert "example.com" in result
 
     async def test_chat_screen_static_condense_file(self):
-        from agentnexus.tui.screens.chat import ChatScreen
+        from agentnexus.tools.result_format import condense_file_result
         text = "[文件] /path/to/file.py (100 行, 共 2048 字节)\n1 | line content\n2 | line content"
-        result = ChatScreen._condense_file_result(text)
+        result = condense_file_result(text)
         assert "file.py" in result
         assert "100" in result
 
@@ -93,8 +93,8 @@ class TestSidePanelRendering:
     async def test_side_panel_update_version(self):
         from agentnexus.tui.widgets.side_panel import SidePanel
         panel = SidePanel(id="test-side-panel")
-        panel.update_version("feature-branch", "abc1234", True, False)
-        assert panel._version_info == ("feature-branch", "abc1234", True, False)
+        panel.update_version("abc1234", True, False)
+        assert panel._version_info == ("abc1234", True, False)
 
     async def test_side_panel_update_tools(self):
         from agentnexus.tui.widgets.side_panel import SidePanel

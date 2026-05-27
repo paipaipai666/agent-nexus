@@ -62,7 +62,7 @@ class TestAgentLLMInit:
         mock_settings.return_value.llm_timeout = 60
 
         llm = AgentLLM()
-        assert llm.model == "default-model"
+        assert llm.model == "openai/default-model"  # normalized with default provider
         assert llm.api_key == "key"
         assert llm.base_url == "https://default.url"
         assert llm.timeout == 60
@@ -75,7 +75,7 @@ class TestAgentLLMInit:
         mock_settings.return_value.llm_timeout = 60
 
         llm = AgentLLM(model="custom", apiKey="custom-key", baseUrl="https://custom.url", timeout=30)
-        assert llm.model == "custom"
+        assert llm.model == "openai/custom"  # normalized with default provider
         assert llm.api_key == "custom-key"
         assert llm.base_url == "https://custom.url"
         assert llm.timeout == 30

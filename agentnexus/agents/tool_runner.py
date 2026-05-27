@@ -18,12 +18,16 @@ def execute_tool(
     try:
         if cancel_checker is not None and cancel_checker():
             raise RuntimeError("cancelled")
-        return str(tool_executor.registry.invoke(
+        result = tool_executor.registry.invoke(
             name=name,
             params=arguments,
             caller=caller,
             hitl_approver=hitl_approver,
             tool_policy=tool_policy,
-        ))
+        )
+        # Preserve dict structure for tools that return structured data (e.g., file_write)
+        if isinstance(result, dict):
+            return result
+        return str(result)
     except Exception as exc:
         return f"错误: 工具 '{name}' 执行失败: {exc}"

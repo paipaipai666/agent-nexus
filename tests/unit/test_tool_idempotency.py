@@ -17,7 +17,11 @@ class TestFileWriteIdempotency:
     def test_write_then_read_then_write_same_version(self, tmp_path):
         with patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(tmp_path)):
             r1 = file_write("plan.txt", "version 1", mode="create")
-            assert "成功" in r1 or "version" in r1
+            assert isinstance(r1, dict)
+            assert r1.get("status") == "ok"
+            assert r1.get("changed") is True
+            message = r1.get("message", "")
+            assert "成功" in message or "version" in message
             assert (tmp_path / "plan.txt").exists()
 
             content = file_read("plan.txt")
@@ -30,7 +34,11 @@ class TestFileWriteIdempotency:
             # Wrong hash should be rejected
             result = file_write("conflict.txt", "replaced",
                                 mode="overwrite", expected_version="wrong")
-            assert "冲突" in result or "版本" in result
+            assert isinstance(result, dict)
+            assert result.get("status") == "error"
+            assert result.get("error_code") == "version_conflict"
+            message = result.get("message", "")
+            assert "冲突" in message or "版本" in message
             assert (tmp_path / "conflict.txt").read_text(encoding="utf-8") == "original"
 
     def test_correct_version_allows_write(self, tmp_path):
@@ -41,7 +49,11 @@ class TestFileWriteIdempotency:
 
             result = file_write("correct.txt", "updated",
                                 mode="overwrite", expected_version=real_hash)
-            assert "成功" in result or "version" in result
+            assert isinstance(result, dict)
+            assert result.get("status") == "ok"
+            assert result.get("changed") is True
+            message = result.get("message", "")
+            assert "成功" in message or "version" in message
             assert fp.read_text(encoding="utf-8") == "updated"
 
     def test_create_mode_idempotent_fails_on_existing(self, tmp_path):
@@ -49,7 +61,11 @@ class TestFileWriteIdempotency:
         with patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(tmp_path)):
             file_write("existing.txt", "first", mode="create")
             result = file_write("existing.txt", "second", mode="create")
-            assert "已存在" in result or "exist" in result.lower()
+            assert isinstance(result, dict)
+            assert result.get("status") == "error"
+            assert result.get("error_code") == "file_exists"
+            message = result.get("message", "")
+            assert "已存在" in message or "exist" in message.lower()
 
 
 class TestToolRegistryIdempotency:

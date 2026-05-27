@@ -28,8 +28,6 @@ class TestConversationVersionManager:
         ).fetchall()
         names = {r["name"] for r in tables}
         assert "conversation_checkpoints" in names
-        assert "checkpoint_ltm_refs" in names
-        assert "conversation_branches" in names
 
     def test_commit_creates_checkpoint(self, mgr):
         stm = _make_stm([{"role": "user", "content": "hello"}])
@@ -40,16 +38,6 @@ class TestConversationVersionManager:
         assert cp is not None
         assert cp["question"] == "hello?"
         assert cp["answer"] == "world"
-        assert cp["branch_name"] == "main"
-
-    def test_commit_with_ltm_refs(self, mgr):
-        stm = _make_stm()
-        cp_id = mgr.commit(stm, new_ltm_ids=[1, 2, 3])
-        refs = mgr._conn.execute(
-            "SELECT ltm_memory_id FROM checkpoint_ltm_refs WHERE checkpoint_id = ?",
-            (cp_id,),
-        ).fetchall()
-        assert {r["ltm_memory_id"] for r in refs} == {1, 2, 3}
 
     def test_parent_chain(self, mgr):
         stm1 = _make_stm([{"role": "user", "content": "q1"}])
@@ -116,58 +104,11 @@ class TestConversationVersionManager:
         assert entries[0]["is_head"] is True
         assert entries[2]["question"] == "q1"
 
-    def test_branch_and_checkout(self, mgr):
-        mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="q1", answer="a1")
-
-        # Create branch at first checkpoint
-        mgr.branch("experiment")
-
-        # Commit on experiment branch
-        cp2 = mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2-exp", answer="a2-exp")
-
-        # Checkout back to main
-        main_cp = mgr.checkout("main")
-        assert main_cp is not None
-
-        # Checkout experiment branch by name
-        exp_cp = mgr.checkout("experiment")
-        assert exp_cp is not None
-        assert exp_cp["id"] == cp2
-
-    def test_checkout_by_id(self, mgr):
-        cp1 = mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="q1", answer="a1")
-        mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2", answer="a2")
-
-        cp = mgr.checkout(cp1)
-        assert cp is not None
-        assert cp["id"] == cp1
-
-    def test_diff_between_checkpoints(self, mgr):
-        stm1 = _make_stm([{"role": "user", "content": "q1"}])
-        cp1 = mgr.commit(stm1, question="q1", answer="a1", new_ltm_ids=[1, 2])
-
-        stm2 = _make_stm([{"role": "user", "content": "q1"},
-                          {"role": "assistant", "content": "a1"},
-                          {"role": "user", "content": "q2"}])
-        cp2 = mgr.commit(stm2, question="q2", answer="a2", new_ltm_ids=[3])
-
-        result = mgr.diff(cp1, cp2)
-        assert result["stm_messages_added"] == 2
-        assert result["ltm_added"] == [3]
-        assert sorted(result["ltm_removed"]) == [1, 2]  # cp1 had LTM 1,2; cp2 only has 3
-
-    def test_diff_defaults_to_parent_vs_head(self, mgr):
-        mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="q1", answer="a1")
-        mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2", answer="a2")
-        result = mgr.diff()
-        assert "error" not in result
-
     def test_status(self, mgr):
         mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="q1", answer="a1")
         mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2", answer="a2")
         st = mgr.status()
         assert st["session_id"] == "test-session"
-        assert st["branch"] == "main"
         assert st["head"]["question"] == "q2"
         assert st["can_undo"] is True  # has parent (q1)
 

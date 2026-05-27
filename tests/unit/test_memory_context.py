@@ -762,7 +762,7 @@ class TestChatScreenAnswerRender:
 
         class FakeVersion:
             def status(self):
-                return {"branch": "main", "head": None, "can_undo": False, "can_redo": False}
+                return {"head": None, "can_undo": False, "can_redo": False}
 
             def commit(self, *args, **kwargs):
                 return None

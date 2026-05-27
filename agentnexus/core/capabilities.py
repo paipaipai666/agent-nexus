@@ -126,6 +126,24 @@ CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
 }
 
 
+def _normalize_model_id(model_id: str, base_url: str = "") -> str:
+    """Add provider prefix if missing, based on base_url."""
+    if "/" in model_id:
+        return model_id
+    base = (base_url or "").lower()
+    if "deepseek.com" in base:
+        return f"deepseek/{model_id}"
+    elif "anthropic.com" in base:
+        return f"anthropic/{model_id}"
+    elif "zhipu.com" in base or "bigmodel.cn" in base:
+        return f"zhipu/{model_id}"
+    elif "openai.com" in base:
+        return f"openai/{model_id}"
+    else:
+        # Default to openai for unknown providers
+        return f"openai/{model_id}"
+
+
 def _lookup_registry(model_id: str) -> ModelCapabilities:
     """Match model_id against the static registry. First match wins (ordered)."""
     for pattern, caps in CAPABILITY_REGISTRY.items():
@@ -139,7 +157,8 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
 
     Priority: config override > litellm runtime > static registry > defaults.
     """
-    caps = _lookup_registry(model_id)
+    normalized_id = _normalize_model_id(model_id, base_url)
+    caps = _lookup_registry(normalized_id)
 
     # ── Dynamic detection via litellm ──
     try:
@@ -207,3 +226,49 @@ class SessionCapabilityTracker:
         """Clear failure tracking for a feature (e.g., after model switch)."""
         self.disabled_features.discard(feature)
         self.failed_counts.pop(feature, None)
+
+
+def model_candidates(model_id: str, base_url: str = "") -> list[str]:
+    """Generate candidate model IDs for capability lookup."""
+    candidates = [model_id]
+    if "/" not in model_id:
+        base = (base_url or "").lower()
+        if "deepseek" in base:
+            candidates.append(f"deepseek/{model_id}")
+        elif "openai" in base:
+            candidates.append(f"openai/{model_id}")
+        elif "anthropic" in base or "claude" in model_id.lower():
+            candidates.append(f"anthropic/{model_id}")
+        elif "bigmodel" in base or model_id.lower().startswith("glm"):
+            candidates.append(f"zhipu/{model_id}")
+    return list(dict.fromkeys(candidates))
+
+
+def registry_ctx_max(model_id: str, base_url: str = "") -> int | None:
+    """Look up max context tokens from the static capability registry."""
+    for candidate in model_candidates(model_id, base_url):
+        for pattern, caps in CAPABILITY_REGISTRY.items():
+            if pattern == "*":
+                continue
+            if fnmatch(candidate, pattern):
+                return caps.max_context_tokens
+    return None
+
+
+def resolve_ctx_max_from_litellm(model_id: str) -> int | None:
+    """Query LiteLLM for a model's max input tokens."""
+    try:
+        from litellm import get_model_info
+        info = get_model_info(model_id)
+        return info.get("max_input_tokens") or info.get("max_context_tokens") or None
+    except Exception:
+        return None
+
+
+def resolve_ctx_max(model_id: str, base_url: str = "") -> int | None:
+    """Resolve max context tokens from LiteLLM or static registry."""
+    for candidate in model_candidates(model_id, base_url):
+        value = resolve_ctx_max_from_litellm(candidate)
+        if value:
+            return value
+    return registry_ctx_max(model_id, base_url)

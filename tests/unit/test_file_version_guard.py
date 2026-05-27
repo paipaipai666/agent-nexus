@@ -23,9 +23,13 @@ class TestFileVersionGuard:
         file_path.write_text("changed by someone else", encoding="utf-8")
         result = file_write("sample.txt", "new content", mode="overwrite", expected_version=expected_version)
 
-        assert "文件版本冲突" in result
-        assert "期望版本=" in result
-        assert "当前版本=" in result
+        assert isinstance(result, dict)
+        assert result.get("status") == "error"
+        assert result.get("error_code") == "version_conflict"
+        message = result.get("message", "")
+        assert "文件版本冲突" in message
+        assert "期望版本=" in message
+        assert "当前版本=" in message
 
     def test_file_write_accepts_matching_expected_version(self, temp_agentnexus_home):
         file_path = Path("sample.txt")
@@ -36,6 +40,10 @@ class TestFileVersionGuard:
 
         result = file_write("sample.txt", "new content", mode="overwrite", expected_version=expected_version)
 
-        assert result.startswith("[file_write] 已覆盖 sample.txt")
-        assert "version=" in result
+        assert isinstance(result, dict)
+        assert result.get("status") == "ok"
+        assert result.get("changed") is True
+        message = result.get("message", "")
+        assert "[file_write] 已覆盖 sample.txt" in message
+        assert "version=" in message
         assert file_path.read_text(encoding="utf-8") == "new content"
