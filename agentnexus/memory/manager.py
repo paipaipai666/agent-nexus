@@ -209,6 +209,15 @@ class MemoryManager:
         return self.init_session(question)
 
     def append(self, role: str, content: str):
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+
+        # ── before memory hook ───────────────────────────────────
+        hook_mgr.fire(HookType.BEFORE_MEMORY_OP, {
+            "op": "append", "role": role, "content": content,
+        })
+
         # Layer 1: offload large tool results to disk
         if role == "tool" and self._settings.offload_enabled:
             threshold = self._settings.large_result_threshold
@@ -218,6 +227,11 @@ class MemoryManager:
         # Recursive guard: don't trigger compaction from within compaction
         if not self._compacting:
             self.maybe_compact()
+
+        # ── after memory hook ────────────────────────────────────
+        hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
+            "op": "append", "role": role, "content": content,
+        })
 
     def _offload_large_result(self, content: str) -> str:
         """Write large tool result to disk, return a stub with preview."""
