@@ -105,6 +105,16 @@ class ReActAgent:
 
     def run(self, question: str, memory_manager=None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+
+        # ── agent start hook ─────────────────────────────────────
+        hook_mgr.fire(HookType.AGENT_START, {
+            "question": question,
+            "agent_id": self.agent_id,
+        })
+
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
 
         ctx = ExecutionContext(
@@ -131,6 +141,14 @@ class ReActAgent:
             self._get_handlers(),
         )
         self._total_usage = ctx._total_usage
+
+        # ── agent end hook ───────────────────────────────────────
+        hook_mgr.fire(HookType.AGENT_END, {
+            "answer": answer,
+            "steps": len(steps),
+            "agent_id": self.agent_id,
+        })
+
         return ReActResult(answer=answer, steps=steps)
 
     def _get_handlers(self) -> dict:
