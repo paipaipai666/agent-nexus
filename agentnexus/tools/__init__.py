@@ -21,6 +21,7 @@ def register_all_tools(
     subagent_confirm=None,
     mcp_manager=None,
     extra_providers: list[ToolProvider] | None = None,
+    todo_list=None,
 ):
     """Register all available tools on the given executor.
 
@@ -36,6 +37,7 @@ def register_all_tools(
         enable_subagent=enable_subagent,
         subagent_confirm=subagent_confirm,
         mcp_manager=mcp_manager,
+        todo_list=todo_list,
     )
     providers = [*default_tool_providers(), *(extra_providers or [])]
     return register_tool_providers(executor, providers, context)

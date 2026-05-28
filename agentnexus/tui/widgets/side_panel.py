@@ -34,6 +34,7 @@ class SidePanel(Widget):
             "status": "idle",
             "available": [],
         }
+        self._todo_items: list[dict] = []
 
     def update_version(self, head: str, can_undo: bool, can_redo: bool):
         self._version_info = (head, can_undo, can_redo)
@@ -82,6 +83,10 @@ class SidePanel(Widget):
         if runtime:
             self._skill_info["runtime"] = runtime
         self._refresh_section("skill-card", self._render_skill())
+
+    def update_todo(self, items: list[dict]):
+        self._todo_items = list(items)
+        self._refresh_section("todo-card", self._render_todo())
 
     # Backward-compatible shim for old tests/callers.
     def update_memory(self, items: list[str]):
@@ -207,12 +212,29 @@ class SidePanel(Widget):
             f"[dim]Status[/] {status}{runtime_line}{available_line}"
         )
 
+    def _render_todo(self) -> str:
+        if not self._todo_items:
+            return "[dim]无任务[/]"
+        lines = []
+        for item in self._todo_items:
+            status = str(item.get("status", "pending"))
+            desc = _truncate(str(item.get("description", "")), 28)
+            marker = {
+                "done": "[#7fd88f]✓[/]",
+                "in_progress": "[#fab283]→[/]",
+                "pending": "[dim]·[/]",
+            }.get(status, "[dim]·[/]")
+            lines.append(f"{marker} {desc}")
+        return "\n".join(lines)
+
     def compose(self) -> ComposeResult:
         yield Label("RUN", classes="panel-eyebrow")
         yield Label("Model", classes="section-title")
         yield Static(self._render_model(), id="model-card", classes="section-body")
         yield Label("Task Timeline", classes="section-title")
         yield Static(self._render_timeline(), id="timeline-card", classes="section-body")
+        yield Label("Todo List", classes="section-title")
+        yield Static(self._render_todo(), id="todo-card", classes="section-body")
         yield Label("Available Tools", classes="section-title")
         yield Static(self._render_tools(), id="tool-card", classes="section-body")
         yield Label("MCP", classes="section-title")

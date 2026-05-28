@@ -53,6 +53,9 @@ class AppRuntime:
         subagent_confirm = ConfirmBridge()
         mcp_manager = create_mcp_manager_from_settings(settings)
 
+        from agentnexus.memory.todo import SessionTodoList
+        todo_list = SessionTodoList()
+
         extension_manager = ExtensionManager(settings)
         extension_manager.discover()
         extension_manager.load_enabled(runtime=None)
@@ -63,6 +66,7 @@ class AppRuntime:
             subagent_confirm=subagent_confirm,
             mcp_manager=mcp_manager,
             extra_providers=[],
+            todo_list=todo_list,
         )
 
         try:
@@ -85,6 +89,7 @@ class AppRuntime:
         if restore_session:
             cls._restore_memory_from_version(memory, version)
         agent = ReActAgent(llm, executor, conversation_mode=True)
+        agent._todo_list = todo_list
         if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
             agent.set_mcp_context(mcp_manager.auto_context())
         skill_registry = SkillRegistry.from_settings(settings)

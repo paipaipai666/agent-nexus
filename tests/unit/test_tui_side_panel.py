@@ -129,3 +129,34 @@ class TestSidePanelRendering:
         panel = SidePanel()
         panel.update_memory(["a", "b"])
         assert panel._skill_info["status"] == "2 memories"
+
+    def test_render_todo_empty(self):
+        panel = SidePanel()
+        assert "无任务" in panel._render_todo()
+
+    def test_render_todo_with_items(self):
+        panel = SidePanel()
+        panel.update_todo([
+            {"id": 1, "description": "build auth", "status": "in_progress"},
+            {"id": 2, "description": "write tests", "status": "pending"},
+            {"id": 3, "description": "deploy", "status": "done"},
+        ])
+        text = panel._render_todo()
+        assert "build auth" in text
+        assert "write tests" in text
+        assert "deploy" in text
+        assert "→" in text
+        assert "✓" in text
+
+    def test_update_todo_sets_state(self):
+        panel = SidePanel()
+        panel.update_todo([{"id": 1, "description": "task", "status": "pending"}])
+        assert len(panel._todo_items) == 1
+        assert panel._todo_items[0]["description"] == "task"
+
+    def test_render_todo_truncates_long_description(self):
+        panel = SidePanel()
+        long_desc = "a" * 100
+        panel.update_todo([{"id": 1, "description": long_desc, "status": "pending"}])
+        text = panel._render_todo()
+        assert "…" in text

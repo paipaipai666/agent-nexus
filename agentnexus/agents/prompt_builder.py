@@ -16,10 +16,13 @@ def build_react_prompt(
     available_skill_context: str = "",
     mcp_context: str = "",
     compiled_profile: Any = None,
+    todo_context: str = "",
 ) -> str:
     blocks = [available_skill_context, mcp_context]
     if compiled_profile:
         blocks.extend([compiled_profile.fragments_text, compiled_profile.workflow_guidance])
+    if todo_context:
+        blocks.append(todo_context)
     extra_context = "\n\n".join(block for block in blocks if block)
     if extra_context:
         extra_context += "\n\n"

@@ -64,6 +64,7 @@ class ReActAgent:
         self._available_skill_context: str = ""
         self._mcp_context: str = ""
         self._cancel_checker: Callable[[], bool] | None = None
+        self._todo_list = None  # Set externally after construction
 
     # ================================================================
     # Public API (unchanged)
@@ -585,6 +586,7 @@ class ReActAgent:
                        memory_context: str, conversation_context: str) -> str:
         compiled = self._compiled_session_profile
         template = compiled.prompt_template if compiled else REACT_PROMPT_TEMPLATE
+        todo_context = self._todo_list.format_context() if self._todo_list else ""
         return build_react_prompt(
             template=template,
             tools_desc=tools_desc,
@@ -595,6 +597,7 @@ class ReActAgent:
             available_skill_context=self._available_skill_context,
             mcp_context=self._mcp_context,
             compiled_profile=compiled,
+            todo_context=todo_context,
         )
 
     def _build_conversation_context(self, memory_manager, per_msg_limit: int = 500) -> str:

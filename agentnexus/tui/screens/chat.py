@@ -1031,14 +1031,30 @@ class ChatScreen(Screen):
             pass
 
     def _refresh_model_panel(self, strategy: str = ""):
+        if not hasattr(self, '_side_panel') or not self._agent:
+            return
         try:
             model = getattr(self._agent, "model_id", "unknown") if self._agent else "unknown"
-            max_tokens = getattr(getattr(self, "_hud", None), "ctx_max", None)
-            if not isinstance(max_tokens, int) or max_tokens <= 0:
-                caps = getattr(getattr(self._agent, "llm_client", None), "capabilities", None)
-                max_tokens = getattr(caps, "max_context_tokens", None)
-            ctx = _format_ctx_window(max_tokens)
-            self._side_panel.update_model(model=model, ctx=ctx, strategy=strategy)
+            ctx = "?"
+            caps = getattr(getattr(self._agent, "llm_client", None), "capabilities", None)
+            if caps and hasattr(caps, "context_window"):
+                ctx = f"{caps.context_window // 1000}k" if caps.context_window else "?"
+            self._side_panel.update_model(model, ctx, strategy)
+        except Exception:
+            pass
+
+    def _refresh_todo_panel(self):
+        if not hasattr(self, '_side_panel') or not self._agent:
+            return
+        try:
+            todo_list = getattr(self._agent, '_todo_list', None)
+            if todo_list is None:
+                return
+            items = todo_list.list_items()
+            self._side_panel.update_todo([
+                {"id": t.id, "description": t.description, "status": t.status}
+                for t in items
+            ])
         except Exception:
             pass
 
@@ -1434,6 +1450,8 @@ class ChatScreen(Screen):
                             result = summarize_tool_result(result)
                     self._current_tool_widget.update_result(result, markup=use_markup)
                     self._current_tool_widget = None
+                if tool_lower in ("todo_add", "todo_update"):
+                    self._refresh_todo_panel()
                 if self._memory:
                     stm_tokens = self._memory.estimate_stm_tokens()
                     self._hud.update_context(current_tokens=stm_tokens)
@@ -1497,6 +1515,7 @@ class ChatScreen(Screen):
             self._current_run_id = ""
             if hasattr(self._agent, "set_cancel_checker"):
                 self._agent.set_cancel_checker(None)
+            self._refresh_todo_panel()
             self._drain_message_queue()
             return
 
@@ -1555,6 +1574,7 @@ class ChatScreen(Screen):
             # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
             self._record_turn_summary(text, answer)
+            self._refresh_todo_panel()
             self._chat_service.mark_processing(False)
             self._agent_worker = None
         else:
