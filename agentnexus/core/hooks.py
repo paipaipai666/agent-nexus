@@ -17,6 +17,7 @@ SLOW_HOOK_THRESHOLD_MS = 100
 class HookType(str, Enum):
     """Supported hook points in the agent lifecycle."""
 
+    # ── agent-level tool/model lifecycle ──────────────────────────
     BEFORE_TOOL_CALL = "before_tool_call"
     AFTER_TOOL_CALL = "after_tool_call"
     ON_TOOL_ERROR = "on_tool_error"
@@ -27,12 +28,54 @@ class HookType(str, Enum):
     BEFORE_MEMORY_OP = "before_memory_op"
     AFTER_MEMORY_OP = "after_memory_op"
 
+    # ── Tier 1: core governance paths ────────────────────────────
+    BEFORE_LLM_CALL = "before_llm_call"
+    AFTER_LLM_CALL = "after_llm_call"
+    BEFORE_LTM_SAVE = "before_ltm_save"
+    AFTER_LTM_SAVE = "after_ltm_save"
+    BEFORE_LTM_SEARCH = "before_ltm_search"
+    AFTER_LTM_SEARCH = "after_ltm_search"
+    BEFORE_SHELL_EXEC = "before_shell_exec"
+    AFTER_SHELL_EXEC = "after_shell_exec"
+    BEFORE_REGISTRY_INVOKE = "before_registry_invoke"
+    AFTER_REGISTRY_INVOKE = "after_registry_invoke"
+
+    # ── Tier 2: operational lifecycle ────────────────────────────
+    BEFORE_MCP_CONNECT = "before_mcp_connect"
+    AFTER_MCP_CONNECT = "after_mcp_connect"
+    BEFORE_MCP_CALL_TOOL = "before_mcp_call_tool"
+    AFTER_MCP_CALL_TOOL = "after_mcp_call_tool"
+    BEFORE_SUBAGENT_RUN = "before_subagent_run"
+    AFTER_SUBAGENT_RUN = "after_subagent_run"
+    BEFORE_RAG_SEARCH = "before_rag_search"
+    AFTER_RAG_SEARCH = "after_rag_search"
+    BEFORE_KB_INGEST = "before_kb_ingest"
+    AFTER_KB_INGEST = "after_kb_ingest"
+    BEFORE_CHECKPOINT = "before_checkpoint"
+    AFTER_CHECKPOINT = "after_checkpoint"
+
+    # ── Tier 3: infrastructure lifecycle ─────────────────────────
+    BEFORE_PLUGIN_LOAD = "before_plugin_load"
+    AFTER_PLUGIN_LOAD = "after_plugin_load"
+    BEFORE_APP_BUILD = "before_app_build"
+    AFTER_APP_BUILD = "after_app_build"
+    BEFORE_COMPACT = "before_compact"
+    AFTER_COMPACT = "after_compact"
+    BEFORE_WORKFLOW_STEP = "before_workflow_step"
+    AFTER_WORKFLOW_STEP = "after_workflow_step"
+    BEFORE_EVAL_RUN = "before_eval_run"
+    AFTER_EVAL_RUN = "after_eval_run"
+
 
 _MUTABLE_HOOKS: frozenset[HookType] = frozenset(
     {
         HookType.BEFORE_TOOL_CALL,
         HookType.BEFORE_MODEL_CALL,
         HookType.AFTER_MODEL_CALL,
+        HookType.BEFORE_LLM_CALL,
+        HookType.BEFORE_SHELL_EXEC,
+        HookType.BEFORE_MCP_CALL_TOOL,
+        HookType.BEFORE_RAG_SEARCH,
     }
 )
 

@@ -51,6 +51,14 @@ async def connect_server(
 
     stack = AsyncExitStack()
     server_states[config.name] = MCPServerState.CONNECTING
+
+    # ── before mcp connect hook ──────────────────────────────
+    from agentnexus.core.hooks import HookType, get_hook_manager
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_MCP_CONNECT, {
+        "server_name": config.name, "transport": config.transport,
+    })
+
     try:
         if config.transport == "stdio":
             server_params = StdioServerParameters(
@@ -86,11 +94,23 @@ async def connect_server(
         server_states[config.name] = MCPServerState.HEALTHY
         await import_capabilities(runtime)
         failures.pop(config.name, None)
+
+        # ── after mcp connect hook (success) ─────────────────
+        hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
+            "server_name": config.name, "transport": config.transport,
+            "success": True, "state": server_states[config.name].value,
+        })
     except Exception:
         server_runtimes.pop(config.name, None)
         clear_descriptors(config.name)
         await stack.aclose()
         server_states[config.name] = MCPServerState.DISCONNECTED
+
+        # ── after mcp connect hook (error) ───────────────────
+        hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
+            "server_name": config.name, "transport": config.transport,
+            "success": False, "state": "disconnected",
+        })
         raise
 
 
@@ -100,12 +120,28 @@ async def disconnect_server(
     server_runtimes: dict[str, ServerRuntime],
     clear_descriptors: DescriptorClearer,
 ) -> None:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_MCP_CONNECT, {
+        "server_name": server_name, "action": "disconnect",
+    })
+
     runtime = server_runtimes.pop(server_name, None)
     clear_descriptors(server_name)
     if runtime is None:
+        hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
+            "server_name": server_name, "action": "disconnect",
+            "success": True, "had_runtime": False,
+        })
         return
     runtime.state = MCPServerState.CLOSED
     await runtime.exit_stack.aclose()
+
+    hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
+        "server_name": server_name, "action": "disconnect",
+        "success": True, "had_runtime": True,
+    })
 
 
 async def close_all(

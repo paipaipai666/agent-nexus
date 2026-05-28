@@ -168,6 +168,15 @@ class ToolRegistry:
         tool_policy: Any = None,
     ) -> Any:
         """Execute a tool with full governance checks. Raises on violation."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+
+        # ── before registry invoke hook ────────────────────────
+        hook_mgr.fire(HookType.BEFORE_REGISTRY_INVOKE, {
+            "name": name, "params": params, "caller": caller,
+        })
+
         meta, func = self._get_tool(name)
         start = time.time()
         hitl_triggered = False
@@ -244,6 +253,13 @@ class ToolRegistry:
             raise
         finally:
             duration = (time.time() - start) * 1000
+
+            # ── after registry invoke hook ─────────────────────
+            hook_mgr.fire(HookType.AFTER_REGISTRY_INVOKE, {
+                "name": name, "params": params, "caller": caller,
+                "duration_ms": round(duration, 1), "error": error,
+            })
+
             # 7. Audit
             if meta.audit_enabled:
                 self._audit_log.append(AuditEntry(

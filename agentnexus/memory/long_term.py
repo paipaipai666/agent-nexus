@@ -102,6 +102,14 @@ class LongTermMemory:
     def save(self, session_id: str, content: str, category: str = "general",
              importance: float = 0.5, metadata: dict | None = None,
              embedding: list[float] | None = None):
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_LTM_SAVE, {
+            "session_id": session_id, "content": content,
+            "category": category, "importance": importance,
+        })
+
         with self._lock:
             cur = self._conn.execute(
             "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
@@ -149,6 +157,14 @@ class LongTermMemory:
                 logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
 
         count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+
+        # ── after ltm save hook ────────────────────────────────
+        hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
+            "session_id": session_id, "content": content,
+            "category": category, "importance": importance,
+            "chroma_id": chroma_id, "total_count": count_row["cnt"],
+        })
+
         if count_row["cnt"] > self._max_memories:
             self._evict_if_needed()
 
@@ -260,6 +276,13 @@ class LongTermMemory:
 
     def search(self, query_embedding: list[float] | None = None, category: str | None = None,
                limit: int = 5, min_similarity: float = 0.3) -> list[dict]:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_LTM_SEARCH, {
+            "category": category, "limit": limit, "min_similarity": min_similarity,
+        })
+
         if query_embedding is None:
             sql = "SELECT * FROM long_term_memories"
             params = []
@@ -320,6 +343,12 @@ class LongTermMemory:
             d = s[1]
             d["_score"] = round(s[0], 3)
             results.append(d)
+
+        # ── after ltm search hook ──────────────────────────────
+        hook_mgr.fire(HookType.AFTER_LTM_SEARCH, {
+            "category": category, "limit": limit,
+            "result_count": len(results),
+        })
         return results
 
     def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,

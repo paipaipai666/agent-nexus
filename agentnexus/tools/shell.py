@@ -81,6 +81,8 @@ def _apply_timeout(command: str, timeout: int) -> str:
 
 def shell_exec(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     """Execute a shell command through E2B/native/Docker/local fallback."""
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
     settings = get_settings()
 
     if not getattr(settings, "shell_enabled", True):
@@ -90,35 +92,49 @@ def shell_exec(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     if blocked:
         return blocked
 
+    hook_mgr = get_hook_manager()
+    hook_ctx = hook_mgr.fire(HookType.BEFORE_SHELL_EXEC, {
+        "command": command, "cwd": cwd, "timeout": timeout,
+    })
+    if hook_ctx.aborted:
+        return f"[{hook_ctx.abort_code}] {hook_ctx.abort_reason}"
+
     from agentnexus.tools.file_ops import _resolve_safe
 
     work_dir = str(_resolve_safe(cwd)) if cwd else str(_resolve_safe("."))
     timeout_sec = timeout if timeout > 0 else getattr(settings, "shell_timeout", 30)
     backend = getattr(settings, "shell_execution_backend", "auto")
 
+    result = ""
     try:
         if backend == "disabled":
-            return "[blocked] Shell execution is disabled by shell_execution_backend=disabled."
-        if backend == "auto":
-            return _execute_shell_auto(command, work_dir, settings, timeout_sec)
-        if backend == "e2b":
-            return _execute_shell_e2b(command, work_dir, settings, timeout_sec)
-        if backend == "native":
-            return _execute_shell_native(command, work_dir, timeout_sec)
-        if backend == "docker":
-            return _execute_shell_docker(command, work_dir, settings, timeout_sec)
-        if backend == "local_unsafe":
-            return _execute_shell_locally(command, work_dir, timeout_sec)
+            result = "[blocked] Shell execution is disabled by shell_execution_backend=disabled."
+        elif backend == "auto":
+            result = _execute_shell_auto(command, work_dir, settings, timeout_sec)
+        elif backend == "e2b":
+            result = _execute_shell_e2b(command, work_dir, settings, timeout_sec)
+        elif backend == "native":
+            result = _execute_shell_native(command, work_dir, timeout_sec)
+        elif backend == "docker":
+            result = _execute_shell_docker(command, work_dir, settings, timeout_sec)
+        elif backend == "local_unsafe":
+            result = _execute_shell_locally(command, work_dir, timeout_sec)
+        else:
+            result = _shell_unavailable_message([f"{backend}: unsupported backend"])
     except subprocess.TimeoutExpired:
-        return f"错误: 命令超时 (>{timeout_sec}秒): {command[:200]}"
+        result = f"错误: 命令超时 (>{timeout_sec}秒): {command[:200]}"
     except FileNotFoundError:
-        return f"错误: 命令解释器未找到。当前系统: {_SYSTEM}。请检查命令是否正确。"
+        result = f"错误: 命令解释器未找到。当前系统: {_SYSTEM}。请检查命令是否正确。"
     except ShellSandboxUnavailable as e:
-        return _shell_unavailable_message([f"{backend}: {e}"])
+        result = _shell_unavailable_message([f"{backend}: {e}"])
     except Exception as e:
-        return f"错误: 命令执行失败: {e}"
+        result = f"错误: 命令执行失败: {e}"
 
-    return _shell_unavailable_message([f"{backend}: unsupported backend"])
+    hook_mgr.fire(HookType.AFTER_SHELL_EXEC, {
+        "command": command, "cwd": cwd, "timeout": timeout,
+        "result": result[:500], "backend": backend,
+    })
+    return result
 
 
 def _execute_shell_auto(command: str, work_dir: str, settings, timeout_sec: int) -> str:

@@ -597,6 +597,13 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
 
 
 def search_knowledge_base(query: str, namespace: str = "default") -> str:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_RAG_SEARCH, {
+        "query": query, "namespace": namespace,
+    })
+
     retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "知识库为空，请先用 `nexus kb add` 添加文档。"
@@ -621,7 +628,13 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
     if not results:
         return "未找到相关知识。"
     results = retriever.expand_contexts(results)
-    return "\n\n".join(
+    result_text = "\n\n".join(
         f"[{index + 1}] {result_citation(result)} (相关度:{result.score:.2f}) {result_display_text(result)}"
         for index, result in enumerate(results)
     )
+
+    hook_mgr.fire(HookType.AFTER_RAG_SEARCH, {
+        "query": query, "namespace": namespace,
+        "result_count": len(results),
+    })
+    return result_text

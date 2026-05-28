@@ -76,6 +76,13 @@ class ConversationVersionManager:
 
     def commit(self, stm_snapshot: str, question: str = "", answer: str = "") -> str:
         """Create a checkpoint. Returns the new checkpoint ID."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_CHECKPOINT, {
+            "session_id": self.session_id, "question": question,
+        })
+
         cp_id = uuid.uuid4().hex[:8]
         parent_id = self._current_head_id()
 
@@ -92,6 +99,10 @@ class ConversationVersionManager:
         # New commit after undo → clear redo stack
         self._redo_stack.clear()
 
+        hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
+            "session_id": self.session_id, "cp_id": cp_id,
+            "parent_id": parent_id, "question": question,
+        })
         return cp_id
 
     def register_session(self, workspace_path: str, profile: str = "") -> None:

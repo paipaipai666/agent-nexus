@@ -254,13 +254,33 @@ class MCPToolManager:
         return registered
 
     def call_tool(self, local_name: str, params: dict | None = None) -> str:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_MCP_CALL_TOOL, {
+            "local_name": local_name, "params": params,
+        })
+
         descriptor = self._tool_descriptors.get(local_name)
         if descriptor is None:
             raise KeyError(f"Unknown MCP tool: {local_name}")
-        return self._submit(
-            self._call_descriptor_async(descriptor, params or {}),
-            timeout=descriptor.timeout_sec + 5,
-        )
+
+        try:
+            result = self._submit(
+                self._call_descriptor_async(descriptor, params or {}),
+                timeout=descriptor.timeout_sec + 5,
+            )
+            hook_mgr.fire(HookType.AFTER_MCP_CALL_TOOL, {
+                "local_name": local_name, "server_name": descriptor.server_name,
+                "result": str(result)[:500],
+            })
+            return result
+        except Exception as exc:
+            hook_mgr.fire(HookType.AFTER_MCP_CALL_TOOL, {
+                "local_name": local_name, "server_name": descriptor.server_name,
+                "error": str(exc),
+            })
+            raise
 
     def _make_tool_callable(self, local_name: str):
         if local_name in self._callable_cache:

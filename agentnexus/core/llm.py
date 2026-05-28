@@ -71,23 +71,48 @@ class AgentLLM:
               projection_fn: Callable | None = None,
               thinking: bool | None = None,
               max_attempts: int | None = None) -> str:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
         if not self.api_key or not self.base_url:
             return ""
 
         self.last_tool_calls = []
         self._tool_call_mode = tools is not None and len(tools) > 0
 
+        # ── before llm hook ────────────────────────────────────
+        hook_mgr = get_hook_manager()
+        hook_ctx = hook_mgr.fire(HookType.BEFORE_LLM_CALL, {
+            "messages": messages,
+            "model": self.model,
+            "tools": tools,
+            "temperature": temperature,
+        })
+        if hook_ctx.aborted:
+            return hook_ctx.payload.get("response_text", "")
+
         effective_messages = projection_fn(messages) if projection_fn else messages
 
         attempts = max(1, min(max_attempts or LLM_MAX_RETRIES, LLM_MAX_RETRIES))
+        result = ""
         for attempt in range(attempts):
-            result = self._call(effective_messages, temperature, silent, attempt, tools, response_format, thinking)
+            result = self._call(
+                effective_messages, temperature, silent, attempt,
+                tools, response_format, thinking,
+            ) or ""
             if result:
-                return result
+                break
             if attempt < attempts - 1:
                 delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
                 time.sleep(delay)
-        return ""
+
+        # ── after llm hook ─────────────────────────────────────
+        hook_mgr.fire(HookType.AFTER_LLM_CALL, {
+            "messages": messages,
+            "model": self.model,
+            "response_text": result,
+            "tool_calls": self.last_tool_calls,
+        })
+        return result
 
     def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None) -> str:
         import litellm

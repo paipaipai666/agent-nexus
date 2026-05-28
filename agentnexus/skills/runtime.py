@@ -111,6 +111,14 @@ class WorkflowRuntime:
         tool_executor: Any = None,
         memory_manager: Any = None,
     ) -> WorkflowRunResult:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_WORKFLOW_STEP, {
+            "method": "prepare", "question": question[:200],
+            "has_profile": profile is not None,
+        })
+
         if profile is None:
             return WorkflowRunResult(question=question, workflow_context="", events=[])
 
@@ -129,6 +137,10 @@ class WorkflowRuntime:
             )
             for event in state.events
         ]
+        hook_mgr.fire(HookType.AFTER_WORKFLOW_STEP, {
+            "method": "prepare", "step_count": len(events),
+            "event_count": len(events),
+        })
         return WorkflowRunResult(question=question, workflow_context=context, events=events, state=state)
 
     def start(self, question: str, profile: SessionProfile) -> WorkflowRunState:
@@ -249,24 +261,38 @@ class WorkflowRuntime:
         tool_executor: Any,
         memory_manager: Any,
     ) -> str:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_WORKFLOW_STEP, {
+            "method": "_run_step", "step_type": step.type, "step_id": step.id,
+        })
+
+        result = ""
         if step.type == "prompt":
             prompt = _format_with_variables(step.prompt or "", ctx.variables)
-            return f"[prompt:{step.id or '-'}]\n{prompt}" if prompt else ""
-        if step.type == "retrieve":
-            return self._run_retrieve(step, ctx, profile, tool_executor=tool_executor, memory_manager=memory_manager)
-        if step.type == "tool_call":
-            return self._run_tool_call(step, ctx, profile, tool_executor=tool_executor)
-        if step.type == "checkpoint":
+            result = f"[prompt:{step.id or '-'}]\n{prompt}" if prompt else ""
+        elif step.type == "retrieve":
+            result = self._run_retrieve(step, ctx, profile, tool_executor=tool_executor, memory_manager=memory_manager)
+        elif step.type == "tool_call":
+            result = self._run_tool_call(step, ctx, profile, tool_executor=tool_executor)
+        elif step.type == "checkpoint":
             text = _format_with_variables(step.prompt or "checkpoint", ctx.variables)
-            return f"[checkpoint:{step.id or '-'}]\n{text}"
-        if step.type == "finalize":
+            result = f"[checkpoint:{step.id or '-'}]\n{text}"
+        elif step.type == "finalize":
             lines = [f"[finalize:{step.id or '-'}]"]
             if step.prompt:
                 lines.append(_format_with_variables(step.prompt, ctx.variables))
             if profile.success_criteria:
                 lines.append("Success criteria:")
                 lines.extend(f"- {_format_with_variables(item, ctx.variables)}" for item in profile.success_criteria)
-            return "\n".join(lines)
+            result = "\n".join(lines)
+
+        hook_mgr.fire(HookType.AFTER_WORKFLOW_STEP, {
+            "method": "_run_step", "step_type": step.type,
+            "step_id": step.id, "result_length": len(result),
+        })
+        return result
         return ""
 
     def _run_retrieve(

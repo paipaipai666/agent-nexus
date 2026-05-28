@@ -140,6 +140,14 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                           retry_reason: str | None = None,
                           subagent_confirm: Callable[[str], bool] | None = None,
                           mcp_manager: "MCPToolManager | None" = None) -> tuple[dict | None, Exception | None]:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_SUBAGENT_RUN, {
+        "task": task, "role": role, "tool_names": tool_names,
+        "max_steps": max_steps, "retry_reason": retry_reason,
+    })
+
     child_llm = _clone_llm(parent_llm)
     child_executor = ToolExecutor()
     _register_child_tools(
@@ -189,6 +197,9 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                 "result": result,
             }, None
     except Exception as exc:
+        hook_mgr.fire(HookType.AFTER_SUBAGENT_RUN, {
+            "task": task, "role": role, "success": False, "error": str(exc),
+        })
         return None, exc
 
 

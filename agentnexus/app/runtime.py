@@ -33,6 +33,14 @@ class AppRuntime:
         workspace_path: str | None = None,
         restore_session: bool = False,
     ) -> "AppRuntime":
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_APP_BUILD, {
+            "profile": profile, "session_id": session_id,
+            "restore_session": restore_session,
+        })
+
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.capabilities.runtime import CapabilityRuntime
         from agentnexus.core.config import get_settings
@@ -123,6 +131,11 @@ class AppRuntime:
             subagent_confirm=subagent_confirm,
         )
         trace_manager.configure(settings.traces_dir)
+
+        hook_mgr.fire(HookType.AFTER_APP_BUILD, {
+            "profile": profile, "session_id": session_id,
+            "mcp_enabled": mcp_manager is not None,
+        })
 
         services = AppServices(
             chat=ChatService(

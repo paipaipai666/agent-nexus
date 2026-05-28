@@ -101,6 +101,11 @@ class ExtensionManager:
         return descriptors
 
     def load_enabled(self, runtime: Any = None) -> ExtensionLoadReport:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_PLUGIN_LOAD, {})
+
         enabled_globally = bool(getattr(self.settings, "extensions_enabled", True))
         plugin_enabled = self._plugin_enabled_map()
         known_providers = {provider.metadata().name for provider in default_tool_providers()}
@@ -145,6 +150,12 @@ class ExtensionManager:
                 )
 
         self._load_report = ExtensionLoadReport(loaded=loaded, disabled=disabled, failed=failed)
+
+        hook_mgr.fire(HookType.AFTER_PLUGIN_LOAD, {
+            "loaded_count": len(loaded), "disabled_count": len(disabled),
+            "failed_count": len(failed),
+            "loaded_names": [d.name for d in loaded],
+        })
         return self._load_report
 
     def status(self) -> ExtensionStatusReport:

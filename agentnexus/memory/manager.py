@@ -369,6 +369,13 @@ class MemoryManager:
         is_auto=False enables manual /compact mode (accepts custom_instructions,
         does not suppress follow-up questions).
         """
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_COMPACT, {
+            "is_auto": is_auto, "threshold": threshold,
+        })
+
         if self._circuit_open:
             self.microcompact()
             self._microcompacts_since_open += 1
@@ -456,8 +463,14 @@ class MemoryManager:
                     pass
 
             tokens_after = self.short_term.estimate_tokens()
+            tokens_saved = max(0, tokens_before - tokens_after)
             self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
-            return max(0, tokens_before - tokens_after)
+
+            hook_mgr.fire(HookType.AFTER_COMPACT, {
+                "is_auto": is_auto, "tokens_saved": tokens_saved,
+                "tokens_before": tokens_before, "tokens_after": tokens_after,
+            })
+            return tokens_saved
         except Exception:
             self._compact_failures += 1
             if self._compact_failures >= 3:
@@ -469,6 +482,14 @@ class MemoryManager:
             self._compacting = False
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True):
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
+            "op": "conclude", "question": question[:200],
+            "allow_memory": allow_memory,
+        })
+
         try:
             self._conclude_impl(question, answer, allow_memory)
         except Exception:

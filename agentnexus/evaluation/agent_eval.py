@@ -169,6 +169,13 @@ class AgentEvaluator:
 
     def evaluate_all(self, traces_dir: str, days: int | None = None) -> AgentReport:
         """Evaluate all traces in a directory, optionally filtered by recency."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_EVAL_RUN, {
+            "traces_dir": traces_dir, "days": days,
+        })
+
         traces: dict[str, list[dict]] = defaultdict(list)
         cutoff = (time.time() - days * 86400) if days else 0
 
@@ -187,7 +194,13 @@ class AgentEvaluator:
                     traces[span.get("trace_id", "unknown")].append(span)
 
         records = [self._evaluate_trace(tid, spans) for tid, spans in traces.items()]
-        return self._aggregate(records)
+        report = self._aggregate(records)
+
+        hook_mgr.fire(HookType.AFTER_EVAL_RUN, {
+            "traces_dir": traces_dir, "days": days,
+            "trace_count": len(traces), "record_count": len(records),
+        })
+        return report
 
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> TraceRecord | None:
         """Evaluate a single trace by ID."""

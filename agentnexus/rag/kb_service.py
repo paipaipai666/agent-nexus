@@ -111,6 +111,14 @@ def ingest_one_document(
     enable_contextual: bool,
     llm_client=None,
 ) -> IngestedDocument:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_KB_INGEST, {
+        "filepath": filepath, "namespace": namespace,
+        "enable_contextual": enable_contextual,
+    })
+
     run = start_ingestion_run(namespace, filepath)
     started_at = time.perf_counter()
     try:
@@ -141,6 +149,12 @@ def ingest_one_document(
             "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
         },
     )
+
+    hook_mgr.fire(HookType.AFTER_KB_INGEST, {
+        "filepath": filepath, "namespace": namespace,
+        "written_chunks": stats["written_chunks"],
+        "replaced_chunks": stats["replaced_chunks"],
+    })
     return artifacts
 
 
