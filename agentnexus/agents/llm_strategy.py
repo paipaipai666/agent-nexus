@@ -39,9 +39,23 @@ def prepare_llm_call(
 
 
 def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None) -> str:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
     run_state = ctx.run_state
     memory_state = ctx.memory_state
     tool_state = ctx.tool_state
+
+    # ── before model hook (can modify messages) ──────────────
+    hook_ctx = hook_mgr.fire(HookType.BEFORE_MODEL_CALL, {
+        "messages": ctx.messages,
+        "tools": tool_state.tools,
+        "strategy": run_state.strategy.name,
+    })
+    if hook_ctx.aborted:
+        return hook_ctx.payload.get("response_text", "")
+    ctx.messages = hook_ctx.payload.get("messages", ctx.messages)
+
     think_tools, think_rfmt = prepare_llm_call(
         run_state.strategy,
         ctx.messages,
@@ -49,10 +63,17 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None) ->
         json_format_section=json_format_section,
     )
     projection_fn = memory_state.memory_manager.build_projection if memory_state.memory_manager else None
-    return llm_client.think(
+    result = llm_client.think(
         messages=ctx.messages,
         tools=think_tools,
         response_format=think_rfmt,
         projection_fn=projection_fn,
         thinking=run_state.thinking_enabled,
     )
+
+    # ── after model hook (can modify response text) ──────────
+    hook_ctx = hook_mgr.fire(HookType.AFTER_MODEL_CALL, {
+        "messages": ctx.messages,
+        "response_text": result,
+    })
+    return hook_ctx.payload.get("response_text", result)
