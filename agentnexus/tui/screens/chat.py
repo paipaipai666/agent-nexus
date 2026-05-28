@@ -118,6 +118,9 @@ class ChatScreen(Screen):
         self._skill_status = "idle"
         self._last_escape_at = 0.0
         self._agent_worker = None
+        self._streaming_msg_widget = None
+        self._streaming_buffer = ""
+        self._last_stream_update = 0.0
         self._chat_service = ChatService(
             agent=agent,
             memory_manager=memory,
@@ -1324,6 +1327,9 @@ class ChatScreen(Screen):
     @work(exclusive=True)
     async def _run_agent(self, text: str):
         self._agent_worker = get_current_worker()
+        self._streaming_msg_widget = None
+        self._streaming_buffer = ""
+        self._last_stream_update = 0.0
         run, _events, turn = self._chat_service.begin_turn(self._chat_session.id, text)
         self._current_run_id = run.id
         self._current_turn = turn
@@ -1399,13 +1405,36 @@ class ChatScreen(Screen):
                     self._refresh_model_panel(STRATEGY_LABELS.get(strategy, strategy))
                 except Exception:
                     pass
-            if etype == E.TOOLS_FOUND:
+            if etype == E.STREAM_TOKEN:
+                token = event.payload.get("token", "")
+                if not self._streaming_msg_widget:
+                    msg = ChatMessage("assistant", "")
+                    self._chat_area.mount(msg)
+                    self._streaming_msg_widget = msg
+                    self._streaming_buffer = ""
+                    self._last_stream_update = 0.0
+                self._streaming_buffer += token
+                now = time.monotonic()
+                if now - self._last_stream_update >= 0.05:
+                    content_w = self._streaming_msg_widget.query_one("#msg-content", Static)
+                    content_w.update(Text(self._streaming_buffer))
+                    self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+                    self._last_stream_update = now
+            elif etype == E.TOOLS_FOUND:
+                if self._streaming_msg_widget:
+                    self._streaming_msg_widget.remove()
+                    self._streaming_msg_widget = None
+                    self._streaming_buffer = ""
                 thought = event.payload.get("thought")
                 if thought:
                     self._chat_area.add_system(
                         f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
                     self._turn_thought_count += 1
             elif etype == E.ANSWER_THOUGHT:
+                if self._streaming_msg_widget:
+                    self._streaming_msg_widget.remove()
+                    self._streaming_msg_widget = None
+                    self._streaming_buffer = ""
                 thought = event.payload.get("thought")
                 if thought:
                     self._chat_area.add_system(
@@ -1490,6 +1519,10 @@ class ChatScreen(Screen):
         except Exception as e:
             self._stop_spinner()
             self._current_tool_widget = None
+            if self._streaming_msg_widget:
+                self._streaming_msg_widget.remove()
+                self._streaming_msg_widget = None
+                self._streaming_buffer = ""
             try:
                 self._chat_area.query_one("#loading-indicator").remove()
             except Exception:
@@ -1520,6 +1553,10 @@ class ChatScreen(Screen):
             return
 
         if turn.cancel_checker():
+            if self._streaming_msg_widget:
+                self._streaming_msg_widget.remove()
+                self._streaming_msg_widget = None
+                self._streaming_buffer = ""
             self._chat_service.mark_processing(False)
             self._agent_worker = None
             self._current_turn = None
@@ -1536,32 +1573,37 @@ class ChatScreen(Screen):
             pass
 
         if answer:
-            # ── Streaming typing effect ──
-            msg_widget = ChatMessage("assistant", "")
-            await self._chat_area.mount(msg_widget)
-            self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-
-            msg_content = msg_widget.query_one("#msg-content", Static)
-
-            # Time-throttled streaming: 20fps cap, update at sentence boundaries
-            THROTTLE_MS = 0.05
-            displayed = ""
-            last_update = 0.0
-            for char in answer:
-                displayed += char
-                now = time.monotonic()
-                if now - last_update >= THROTTLE_MS and char in ".!?。！？\n":
-                    msg_content.update(Text(displayed))
-                    last_update = now
-                    await asyncio.sleep(0.01)
-            # Final flush
-            if displayed:
-                msg_content.update(Text(displayed))
-
-            # Rich Markdown final render — parse off-thread to keep UI responsive
             loop = asyncio.get_running_loop()
-            rendered = await loop.run_in_executor(None, Markdown, answer)
-            msg_content.update(rendered)
+            if self._streaming_msg_widget:
+                # ── Real streaming: finalize with Markdown render ──
+                content_w = self._streaming_msg_widget.query_one("#msg-content", Static)
+                rendered = await loop.run_in_executor(None, Markdown, answer)
+                content_w.update(rendered)
+                self._streaming_msg_widget = None
+                self._streaming_buffer = ""
+            else:
+                # ── Fallback: simulated typing effect ──
+                msg_widget = ChatMessage("assistant", "")
+                await self._chat_area.mount(msg_widget)
+                self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+
+                msg_content = msg_widget.query_one("#msg-content", Static)
+
+                THROTTLE_MS = 0.05
+                displayed = ""
+                last_update = 0.0
+                for char in answer:
+                    displayed += char
+                    now = time.monotonic()
+                    if now - last_update >= THROTTLE_MS and char in ".!?。！？\n":
+                        msg_content.update(Text(displayed))
+                        last_update = now
+                        await asyncio.sleep(0.01)
+                if displayed:
+                    msg_content.update(Text(displayed))
+
+                rendered = await loop.run_in_executor(None, Markdown, answer)
+                msg_content.update(rendered)
 
             stm_tokens = self._memory.estimate_stm_tokens() if self._memory else 0
             usage = getattr(self._agent, "total_usage", None)

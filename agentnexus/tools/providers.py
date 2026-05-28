@@ -583,6 +583,88 @@ class TodoToolProvider:
         context.mark_registered(executor, before)
 
 
+class CodeGraphToolProvider:
+    """Code knowledge graph search and query tools."""
+
+    def metadata(self) -> ProviderSpec:
+        return ProviderSpec("codegraph", description="Code knowledge graph search and query tools.")
+
+    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+        from agentnexus.codegraph.queries import (
+            codegraph_context,
+            codegraph_relations,
+            codegraph_search,
+        )
+
+        before = set(executor.registry.list_tools())
+
+        if context.want("codegraph_search"):
+            executor.registerTool(
+                "codegraph_search",
+                "语义搜索代码实体。参数: query(搜索词,必填), kind(节点类型过滤,可选), limit(返回条数,默认10)",
+                codegraph_search,
+                param_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "搜索关键词（必填）"},
+                        "kind": {
+                            "type": "string",
+                            "enum": ["function", "method", "class", "file"],
+                            "description": "节点类型过滤",
+                            "default": None,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "返回结果数量",
+                            "default": 10,
+                        },
+                    },
+                    "required": ["query"],
+                },
+                risk_level="low",
+                rate_limit_per_min=20,
+            )
+
+        if context.want("codegraph_relations"):
+            executor.registerTool(
+                "codegraph_relations",
+                "查询代码实体的关系。参数: symbol(实体名,必填), relation(关系类型:callers/callees/inherits/imports)",
+                codegraph_relations,
+                param_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string", "description": "实体名称（必填）"},
+                        "relation": {
+                            "type": "string",
+                            "enum": ["callers", "callees", "inherits", "imports"],
+                            "description": "关系类型",
+                        },
+                    },
+                    "required": ["symbol", "relation"],
+                },
+                risk_level="low",
+                rate_limit_per_min=20,
+            )
+
+        if context.want("codegraph_context"):
+            executor.registerTool(
+                "codegraph_context",
+                "获取代码实体的完整上下文。参数: symbol(实体名,必填)",
+                codegraph_context,
+                param_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string", "description": "实体名称（必填）"},
+                    },
+                    "required": ["symbol"],
+                },
+                risk_level="low",
+                rate_limit_per_min=20,
+            )
+
+        context.mark_registered(executor, before)
+
+
 def default_tool_providers() -> list[ToolProvider]:
     """Return the built-in provider order used by legacy registration."""
 
@@ -594,6 +676,7 @@ def default_tool_providers() -> list[ToolProvider]:
         McpBridgeToolProvider(),
         SubagentToolProvider(),
         TodoToolProvider(),
+        CodeGraphToolProvider(),
     ]
 
 

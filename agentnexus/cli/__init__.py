@@ -27,8 +27,12 @@ app.add_typer(eval_app, name="eval")
 skill_app = typer.Typer(help="Skill / workflow management")
 app.add_typer(skill_app, name="skill")
 
+codegraph_app = typer.Typer(help="Code knowledge graph management")
+app.add_typer(codegraph_app, name="codegraph")
+
 from agentnexus.cli import (
     audit,  # noqa: E402
+    codegraph,  # noqa: E402
     config,  # noqa: E402
     eval_cmd,  # noqa: E402
     kb,  # noqa: E402

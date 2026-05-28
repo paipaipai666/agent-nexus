@@ -7,15 +7,13 @@ class TestSidePanelRendering:
     def test_render_version_default(self):
         panel = SidePanel()
         text = panel._render_version()
-        assert "main" in text
         assert "---" in text
 
     def test_render_version_with_undo_redo(self):
         panel = SidePanel()
-        panel._version_info = ("feature", "abc123456789", True, True)
+        panel._version_info = ("feature", True, True)
         text = panel._render_version()
         assert "feature" in text
-        assert "abc12345" in text
         assert "/undo" in text
         assert "/redo" in text
 

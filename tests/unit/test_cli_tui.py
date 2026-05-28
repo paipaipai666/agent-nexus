@@ -43,6 +43,7 @@ class TestTuiCommand:
                 subagent_confirm=mock_confirm,
                 mcp_manager=None,
                 extra_providers=ANY,
+                todo_list=ANY,
             )
             mock_tui_cls.assert_called_once_with(
                 agent=mock_agent,

@@ -19,7 +19,7 @@ class TestToolSandboxIsolation:
         test_file = "test_iso.txt"
         with patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(tmp_path)):
             result = file_write(test_file, "hello world", mode="create")
-            assert "成功" in result or "version" in result
+            assert "已创建" in result.get("message", "") or "version" in result.get("message", "")
             assert (tmp_path / test_file).exists()
 
     def test_file_write_cannot_escape_via_dot_dot(self, tmp_path):
@@ -102,7 +102,7 @@ class TestToolSideEffectIdempotency:
             file_write("versioned.txt", "original", mode="create")
             result = file_write("versioned.txt", "replaced",
                                 mode="overwrite", expected_version="wrong_hash")
-            assert "冲突" in result or "版本" in result
+            assert "版本冲突" in result.get("message", "")
 
     def test_same_file_read_twice_same_result(self, tmp_path):
         """file_read is idempotent: same file, same result."""

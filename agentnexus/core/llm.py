@@ -70,7 +70,8 @@ class AgentLLM:
               response_format: dict | None = None,
               projection_fn: Callable | None = None,
               thinking: bool | None = None,
-              max_attempts: int | None = None) -> str:
+              max_attempts: int | None = None,
+              on_token: Callable[[str], None] | None = None) -> str:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         if not self.api_key or not self.base_url:
@@ -97,7 +98,7 @@ class AgentLLM:
         for attempt in range(attempts):
             result = self._call(
                 effective_messages, temperature, silent, attempt,
-                tools, response_format, thinking,
+                tools, response_format, thinking, on_token=on_token,
             ) or ""
             if result:
                 break
@@ -114,7 +115,8 @@ class AgentLLM:
         })
         return result
 
-    def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None) -> str:
+    def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None,
+              on_token=None) -> str:
         import litellm
         model = self.model
 
@@ -188,6 +190,8 @@ class AgentLLM:
                     delta = chunk.choices[0].delta
                     content = delta.content or ""
                     collected.append(content)
+                    if on_token and content:
+                        on_token(content)
                     text.append(content)
                     if live:
                         live.update(text)

@@ -86,6 +86,7 @@ class ReActEventType(Enum):
     THOUGHT_MISSING = auto()   # NATIVE: model returned tool_calls without Thought text
     TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
     ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
+    STREAM_TOKEN = auto()      # direct emit: LLM streaming token (real-time text)
 
 
 # ============================================================

@@ -254,10 +254,18 @@ class ReActAgent:
     def _on_llm_params_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """PREPARE_LLM_CALL + LLM_PARAMS_READY -> set params, call LLM."""
         ctx.run_state.current_step += 1
+
+        def _stream_token(token: str):
+            ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
+
+        _streamable = {CallingStrategy.NATIVE_TOOLS, CallingStrategy.PLAIN_TEXT}
+        on_token = _stream_token if ctx.run_state.strategy in _streamable else None
+
         response_text = call_llm(
             self.llm_client,
             ctx,
             json_format_section=self._build_json_format_section(),
+            on_token=on_token,
         )
 
         if self.llm_client.last_error and not response_text:
