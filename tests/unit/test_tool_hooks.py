@@ -75,7 +75,7 @@ class TestToolHooks:
             hitl_approver=lambda s: True,
         )
         executor.registry.invoke.assert_not_called()
-        assert "blocked" in result
+        assert "BLOCKED" in result
 
     def test_after_tool_call_fires(self):
         from agentnexus.agents.tool_runner import execute_tool

@@ -230,3 +230,167 @@ class TestSingleton:
             assert m1 is m2
         finally:
             _reset_hook_manager()
+
+
+class TestStructuredAbort:
+    def test_abort_string_backward_compat(self):
+        ctx = HookContext(HookType.BEFORE_TOOL_CALL, {})
+        ctx.abort("blocked by policy")
+        assert ctx.aborted
+        assert ctx.abort_reason == "blocked by policy"
+        assert ctx.abort_code == "BLOCKED"
+
+    def test_abort_structured_code_and_message(self):
+        ctx = HookContext(HookType.BEFORE_TOOL_CALL, {})
+        ctx.abort(code="PERMISSION_DENIED", message="rm -rf is forbidden")
+        assert ctx.aborted
+        assert ctx.abort_code == "PERMISSION_DENIED"
+        assert ctx.abort_reason == "rm -rf is forbidden"
+
+    def test_abort_structured_with_details(self):
+        ctx = HookContext(HookType.BEFORE_TOOL_CALL, {})
+        ctx.abort(code="RATE_LIMITED", message="too many calls", details={"limit": 10, "window": "1m"})
+        assert ctx.abort_code == "RATE_LIMITED"
+        assert ctx.abort_details == {"limit": 10, "window": "1m"}
+
+    def test_abort_code_default_empty(self):
+        ctx = HookContext(HookType.BEFORE_TOOL_CALL, {})
+        assert ctx.abort_code == ""
+        assert ctx.abort_reason == ""
+        assert ctx.abort_details == {}
+
+    def test_abort_empty_string_gives_blocked_code(self):
+        ctx = HookContext(HookType.BEFORE_TOOL_CALL, {})
+        ctx.abort()
+        assert ctx.abort_code == "BLOCKED"
+        assert ctx.abort_reason == ""
+
+
+class TestHookTiming:
+    def test_fire_records_elapsed_ms(self):
+        import time
+
+        mgr = HookManager()
+
+        def slow_hook(ctx):
+            time.sleep(0.02)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, slow_hook, name="slow")
+        ctx = mgr.fire(HookType.BEFORE_TOOL_CALL, {})
+        assert ctx.elapsed_ms > 0
+
+    def test_afire_records_elapsed_ms(self):
+        mgr = HookManager()
+
+        async def async_hook(ctx):
+            await asyncio.sleep(0.02)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, async_hook, name="ah")
+        ctx = asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert ctx.elapsed_ms > 0
+
+    def test_slow_hook_triggers_warning(self, caplog):
+        import logging
+        import time
+
+        mgr = HookManager()
+        mgr._slow_threshold_ms = 1  # 1ms threshold for test
+
+        def slow_hook(ctx):
+            time.sleep(0.01)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, slow_hook, name="slow_one")
+        with caplog.at_level(logging.WARNING, logger="agentnexus.core.hooks"):
+            mgr.fire(HookType.BEFORE_TOOL_CALL, {})
+        assert any("Slow hook chain" in r.message for r in caplog.records)
+
+    def test_fast_hook_no_warning(self, caplog):
+        import logging
+
+        mgr = HookManager()
+
+        def fast_hook(ctx):
+            pass
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, fast_hook, name="fast_one")
+        with caplog.at_level(logging.WARNING, logger="agentnexus.core.hooks"):
+            mgr.fire(HookType.BEFORE_TOOL_CALL, {})
+        assert not any("slow" in r.message.lower() for r in caplog.records)
+
+
+class TestAFireConcurrent:
+    def test_afire_priority_order_with_mixed_sync_async(self):
+        mgr = HookManager()
+        order = []
+
+        async def ah(ctx):
+            order.append("async_high")
+
+        def sh(ctx):
+            order.append("sync_low")
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, ah, name="ah", priority=100)
+        mgr.register(HookType.BEFORE_TOOL_CALL, sh, name="sh", priority=200)
+        asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert order == ["async_high", "sync_low"]
+
+    def test_afire_exception_isolation(self):
+        mgr = HookManager()
+        called = []
+
+        async def exploding(ctx):
+            raise RuntimeError("boom")
+
+        async def good(ctx):
+            called.append(True)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, exploding, name="bad", priority=100)
+        mgr.register(HookType.BEFORE_TOOL_CALL, good, name="good", priority=200)
+        asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert called == [True]
+
+    def test_afire_abort_stops_chain(self):
+        mgr = HookManager()
+        called = []
+
+        async def blocker(ctx):
+            ctx.abort(code="DENIED", message="nope")
+
+        async def after(ctx):
+            called.append(True)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, blocker, name="block", priority=100)
+        mgr.register(HookType.BEFORE_TOOL_CALL, after, name="after", priority=200)
+        ctx = asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert ctx.aborted
+        assert ctx.abort_code == "DENIED"
+        assert called == []
+
+    def test_afire_multiple_async_hooks_execute_sequentially(self):
+        mgr = HookManager()
+        order = []
+
+        async def h1(ctx):
+            await asyncio.sleep(0.01)
+            order.append(1)
+
+        async def h2(ctx):
+            await asyncio.sleep(0.01)
+            order.append(2)
+
+        async def h3(ctx):
+            order.append(3)
+
+        mgr.register(HookType.BEFORE_TOOL_CALL, h1, name="h1", priority=100)
+        mgr.register(HookType.BEFORE_TOOL_CALL, h2, name="h2", priority=200)
+        mgr.register(HookType.BEFORE_TOOL_CALL, h3, name="h3", priority=300)
+        asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert order == [1, 2, 3]
+
+    def test_afire_disabled_async_hook_skipped(self):
+        mgr = HookManager()
+        called = []
+        mgr.register(HookType.BEFORE_TOOL_CALL, lambda ctx: called.append(1), name="d", enabled=False)
+        mgr.register(HookType.BEFORE_TOOL_CALL, lambda ctx: called.append(2), name="e")
+        asyncio.run(mgr.afire(HookType.BEFORE_TOOL_CALL, {}))
+        assert called == [2]

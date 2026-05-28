@@ -26,7 +26,7 @@ def execute_tool(
         "caller": caller,
     })
     if hook_ctx.aborted:
-        return f"[blocked] {hook_ctx.abort_reason}"
+        return f"[{hook_ctx.abort_code}] {hook_ctx.abort_reason}"
     arguments = hook_ctx.payload.get("params", arguments)
 
     try:
