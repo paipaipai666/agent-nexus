@@ -157,7 +157,8 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
 
     Priority: config override > litellm runtime > static registry > defaults.
     """
-    normalized_id = _normalize_model_id(model_id, base_url)
+    # Registry uses provider/prefixed patterns, so normalize for lookup
+    normalized_id = _normalize_model_id(model_id, base_url) if "/" not in model_id else model_id
     caps = _lookup_registry(normalized_id)
 
     # ── Dynamic detection via litellm ──

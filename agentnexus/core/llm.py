@@ -11,7 +11,6 @@ from rich.text import Text
 from agentnexus.core.capabilities import (
     ModelCapabilities,
     SessionCapabilityTracker,
-    _normalize_model_id,
     detect_capabilities,
 )
 from agentnexus.core.config import get_settings
@@ -38,7 +37,7 @@ class AgentLLM:
     def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
         settings = get_settings()
         self.base_url = baseUrl or settings.llm_base_url
-        self.model = _normalize_model_id(model or settings.llm_model_id, self.base_url)
+        self.model = (model or settings.llm_model_id).strip()
         self.api_key = apiKey or settings.llm_api_key.get_secret_value()
         self.timeout = timeout or settings.llm_timeout
         self.last_error: str = ""

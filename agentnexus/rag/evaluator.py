@@ -65,6 +65,7 @@ EVAL_CORRECTNESS_PROMPT = load_prompt("eval_correctness")
 EVAL_ANSWER_RELEVANCY_PROMPT = load_prompt("eval_answer_relevancy")
 EVAL_PRECISION_PROMPT = load_prompt("eval_precision")
 EVAL_RECALL_PROMPT = load_prompt("eval_recall")
+EVAL_QUALITY_BATCH_PROMPT = load_prompt("eval_quality_batch")
 
 # Keywords for detecting refusal in negative samples (Change 4)
 _REFUSAL_KEYWORDS = [
@@ -72,6 +73,44 @@ _REFUSAL_KEYWORDS = [
     "i don't know", "not found", "cannot", "unable",
     "无可奉告", "无法回答", "暂无", "无相关信息",
 ]
+
+
+# ── Text-matching helpers for deterministic metrics ──
+
+
+def _text_contains_reference(retrieved_chunks: list[str], reference: str, threshold: float = 0.6) -> bool:
+    """Check if any retrieved chunk contains the reference context.
+
+    Uses substring match first, then falls back to token overlap.
+    """
+    if not reference or not retrieved_chunks:
+        return False
+    ref_stripped = reference.strip()
+    for chunk in retrieved_chunks:
+        if ref_stripped in chunk:
+            return True
+    # Fallback: token overlap
+    ref_tokens = set(_simple_tokenize(ref_stripped))
+    if not ref_tokens:
+        return False
+    for chunk in retrieved_chunks:
+        chunk_tokens = set(_simple_tokenize(chunk))
+        if not chunk_tokens:
+            continue
+        overlap = len(ref_tokens & chunk_tokens) / len(ref_tokens)
+        if overlap >= threshold:
+            return True
+    return False
+
+
+def _simple_tokenize(text: str) -> list[str]:
+    """Minimal tokenizer for text matching: splits on whitespace + CJK chars."""
+    import re
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return []
+    return re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
+
 
 # ── Default thresholds for CI gating ──
 DEFAULT_RAG_THRESHOLDS: dict[str, float] = {
@@ -177,17 +216,17 @@ class RAGEvaluator:
             if not full_ranked and not truncated:
                 return None
             ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
-                sample, full_ranked, top_k=top_k, _timeout=call_timeout,
+                sample, full_ranked, top_k=top_k,
             )
             recall = 0.0
             context_relevancy = 0.0
             if truncated:
-                recall = self._score_recall(sample, truncated, _timeout=call_timeout)
+                recall = self._score_recall(sample, truncated)
                 context_relevancy = self._score_context_relevancy(sample.question, truncated)
             answer = self._generate_answer(sample.question, truncated, _timeout=call_timeout)
-            faithfulness = self._score_faithfulness(answer, truncated, _timeout=call_timeout)
-            answer_relevancy = self._score_answer_relevancy(sample.question, answer, _timeout=call_timeout)
-            correctness = self._score_correctness(sample.question, answer, sample.ground_truth, _timeout=call_timeout)
+            faithfulness, answer_relevancy, correctness = self._score_quality_batch(
+                sample.question, answer, truncated, sample.ground_truth, _timeout=call_timeout,
+            )
             return {
                 "faithfulness": faithfulness,
                 "correctness": correctness,
@@ -379,6 +418,30 @@ class RAGEvaluator:
         prompt = EVAL_FAITHFULNESS_PROMPT.format(context=ctx, answer=answer)
         return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
 
+    def _score_quality_batch(
+        self, question: str, answer: str, contexts: list[str], ground_truth: str, _timeout: int = 0,
+    ) -> tuple[float, float, float]:
+        """Batch LLM call: faithfulness + answer_relevancy + answer_correctness in one request.
+
+        Returns (faithfulness, answer_relevancy, answer_correctness).
+        Falls back to individual calls if batch parsing fails.
+        """
+        if not answer:
+            return (0.0, 0.0, 0.0)
+        ctx = "\n".join(contexts)
+        prompt = EVAL_QUALITY_BATCH_PROMPT.format(
+            context=ctx, question=question, ground_truth=ground_truth, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        parsed = _parse_quality_batch(result)
+        if parsed is not None:
+            return parsed
+        # Fallback: individual calls
+        faith = self._score_faithfulness(answer, contexts, _timeout)
+        rel = self._score_answer_relevancy(question, answer, _timeout)
+        corr = self._score_correctness(question, answer, ground_truth, _timeout)
+        return (faith, rel, corr)
+
     def _score_correctness(self, question: str, answer: str, ground_truth: str, _timeout: int = 0) -> float:
         prompt = EVAL_CORRECTNESS_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
         return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
@@ -393,30 +456,29 @@ class RAGEvaluator:
     def _score_retrieval_ranked(
         self, sample: EvalSample, full_ranked: list[str], top_k: int = 10, _timeout: int = 0,
     ) -> tuple[float, float, float]:
-        """Compute context_precision, hit_rate@k, and MRR@k in one LLM pass.
+        """Compute precision, hit_rate@k, and MRR@k via text matching.
 
-        For each chunk in full_ranked[:k], asks Judge LLM whether it is relevant.
-        Returns (avg_precision, hit_rate, mrr).
+        Uses reference_contexts for deterministic matching instead of LLM calls.
         """
         if not full_ranked:
             return (0.0, 0.0, 0.0)
         candidates = full_ranked[:top_k] if top_k > 0 else full_ranked
-        relevant_flags: list[bool] = []
+
+        if not sample.reference_contexts:
+            return (0.0, 0.0, 0.0)
+
+        relevant_flags = []
         for chunk in candidates:
-            prompt = EVAL_PRECISION_PROMPT.format(chunk=chunk, question=sample.question)
-            try:
-                result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
-            except Exception:
-                result = None
-            score = _parse_score(result)
-            relevant_flags.append(score >= 0.5)
+            is_relevant = any(
+                _text_contains_reference([chunk], ref)
+                for ref in sample.reference_contexts
+            )
+            relevant_flags.append(is_relevant)
 
         total = len(candidates)
         n_relevant = sum(relevant_flags)
         precision = n_relevant / total if total > 0 else 0.0
-
         hit = 1.0 if n_relevant > 0 else 0.0
-
         first_rank = next((i + 1 for i, flag in enumerate(relevant_flags) if flag), None)
         mrr = 1.0 / first_rank if first_rank else 0.0
 
@@ -450,23 +512,17 @@ class RAGEvaluator:
         return hits / len(retrieved) if retrieved else 0.0
 
     def _score_recall(self, sample: EvalSample, retrieved: list[str], _timeout: int = 0) -> float:
-        """LLM-based context recall: what fraction of reference info is covered.
+        """Text-matching context recall: what fraction of references are covered.
 
-        For each reference passage, asks Judge whether its information is
-        covered by the retrieved chunks.
+        Uses substring / token-overlap matching instead of LLM calls.
         """
         if not sample.reference_contexts or not retrieved:
             return 0.0
-        scores = []
-        retrieved_text = "\n---\n".join(retrieved)
-        for reference in sample.reference_contexts:
-            prompt = EVAL_RECALL_PROMPT.format(reference=reference, retrieved=retrieved_text)
-            try:
-                result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
-            except Exception:
-                result = None
-            scores.append(_parse_score(result))
-        return sum(scores) / len(scores) if scores else 0.0
+        hits = sum(
+            1 for ref in sample.reference_contexts
+            if _text_contains_reference(retrieved, ref)
+        )
+        return hits / len(sample.reference_contexts)
 
     def _score_recall_keyword(self, sample: EvalSample, retrieved: list[str]) -> float:
         """Legacy keyword-matching recall (kept for reference)."""
@@ -495,6 +551,34 @@ class RAGEvaluator:
 
 
 # ── Module-level helpers ──
+
+
+def _parse_quality_batch(text: str | None) -> tuple[float, float, float] | None:
+    """Parse batch quality score JSON. Returns (faith, rel, corr) or None on failure."""
+    if not text:
+        return None
+    import json
+    import re
+    # Try direct JSON parse
+    stripped = text.strip()
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict):
+            f = float(obj.get("faithfulness", 0))
+            r = float(obj.get("answer_relevancy", 0))
+            c = float(obj.get("answer_correctness", 0))
+            return (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)), max(0.0, min(1.0, c)))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    # Fallback: extract three floats from text
+    nums = re.findall(r"(\d+\.?\d*)", stripped)
+    if len(nums) >= 3:
+        try:
+            f, r, c = float(nums[0]), float(nums[1]), float(nums[2])
+            return (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)), max(0.0, min(1.0, c)))
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 def _parse_score(text: str | None) -> float:

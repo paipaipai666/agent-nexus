@@ -1,0 +1,74 @@
+"""Memory API routes."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+
+router = APIRouter(tags=["memory"])
+
+
+@router.get("/list")
+def list_memories(limit: int = 20):
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    memories = ltm.list_recent(limit)
+    return {"memories": memories, "count": len(memories)}
+
+
+@router.get("/long")
+def list_long_term_memories(limit: int = 20):
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    memories = ltm.list_recent(limit)
+    return {"memories": memories, "count": len(memories)}
+
+
+@router.post("/search")
+def search_memories(query: str, limit: int = 5):
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    try:
+        results = ltm.search(query_text=query, limit=limit)
+        return {"results": results, "query": query}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/clear")
+def clear_memories():
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    ltm.clear_all()
+    return {"status": "cleared"}
+
+
+@router.delete("/{memory_id}")
+def delete_memory(memory_id: str):
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    try:
+        ltm.delete(memory_id)
+        return {"status": "deleted", "memory_id": memory_id}
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/short")
+def list_short_term_memories():
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    stm = runtime.memory_manager.short_term
+    messages = stm.get_all()
+    return {
+        "messages": [
+            {"role": m.get("role", ""), "content": m.get("content", "")}
+            for m in messages
+        ],
+        "count": len(messages),
+    }
