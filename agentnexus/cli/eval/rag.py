@@ -55,6 +55,11 @@ def eval_run(
     dataset: str = typer.Option("", "--dataset", "-d", help="外部 JSONL 评测集路径"),
     output: str = typer.Option("", "--output", "-o", help="Export report path, or '-' for stdout"),
     export_format: str = typer.Option("json", "--format", "-f", help="Export format: json or csv"),
+    quick: bool = typer.Option(False, "--quick", "-q", help="快速模式：仅运行 4 个代表性组合"),
+    parallel: bool = typer.Option(False, "--parallel", "-p", help="并行模式：多线程并发评估样本"),
+    jobs: int = typer.Option(8, "--jobs", "-j", help="并行线程数（需配合 --parallel 使用）"),
+    verbose: bool = typer.Option(False, "--verbose", "-V", help="详细模式：输出每步耗时和样本进度"),
+    timeout: int = typer.Option(120, "--timeout", "-T", help="单次 LLM 调用超时秒数 (0=不限)"),
 ):
     """运行 RAG 评估并输出指标报告"""
     from agentnexus.rag.eval_dataset import DATASET_VERSION, EVAL_SAMPLES, KNOWLEDGE_BASE, load_eval_dataset
@@ -80,7 +85,7 @@ def eval_run(
 
     from agentnexus.rag.ingestion import ChunkStrategy
 
-    combinations: list[tuple[ChunkStrategy, int, int, bool]] = [
+    all_combinations: list[tuple[ChunkStrategy, int, int, bool]] = [
         (ChunkStrategy.FIXED, 256, 64, False),
         (ChunkStrategy.FIXED, 512, 64, False),
         (ChunkStrategy.RECURSIVE, 256, 64, False),
@@ -95,12 +100,31 @@ def eval_run(
         (ChunkStrategy.SEMANTIC, 512, 64, True),
     ]
 
+    quick_combinations: list[tuple[ChunkStrategy, int, int, bool]] = [
+        (ChunkStrategy.FIXED, 512, 64, False),
+        (ChunkStrategy.RECURSIVE, 512, 64, False),
+        (ChunkStrategy.RECURSIVE, 512, 64, True),
+        (ChunkStrategy.SEMANTIC, 512, 64, True),
+    ]
+
+    combinations = quick_combinations if quick else all_combinations
+    max_workers = jobs if parallel else 1
+    if quick:
+        output_console.print("[yellow]⚡ 快速模式: 仅运行 4 个代表性组合[/yellow]")
+    if max_workers > 1:
+        output_console.print(f"[cyan]⚡ 并行模式: {max_workers} 线程[/cyan]")
+    output_console.print()
+
     results = []
     for strategy, chunk_size, overlap, use_hybrid in combinations:
         label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
         output_console.print(f"  [{len(results) + 1}/{len(combinations)}] 运行: {label}...", end=" ")
         try:
-            run = evaluator.run_combination(strategy, chunk_size, overlap, use_hybrid, top_k=top_k)
+            run = evaluator.run_combination(
+                strategy, chunk_size, overlap, use_hybrid,
+                top_k=top_k, max_workers=max_workers,
+                verbose=verbose, call_timeout=timeout,
+            )
             results.append(run)
             output_console.print(f"[green]✓[/green] faithfulness={run.faithfulness:.3f}")
         except Exception as e:

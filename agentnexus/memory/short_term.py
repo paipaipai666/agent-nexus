@@ -2,6 +2,22 @@ import json
 import time
 from collections import deque
 
+_tiktoken_encoding = None
+_tiktoken_loaded = False
+
+
+def _get_tiktoken_encoding():
+    global _tiktoken_encoding, _tiktoken_loaded
+    if _tiktoken_loaded:
+        return _tiktoken_encoding
+    _tiktoken_loaded = True
+    try:
+        import tiktoken
+        _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        _tiktoken_encoding = None
+    return _tiktoken_encoding
+
 
 class ShortTermMemory:
     def __init__(self, max_messages: int = 50):
@@ -58,17 +74,23 @@ class ShortTermMemory:
         return 0.0
 
     def estimate_tokens(self) -> int:
+        enc = _get_tiktoken_encoding()
+        if enc is None:
+            return self._estimate_tokens_fallback()
         total = 0
         for m in self._messages:
             content = m.get("content", "")
-            try:
-                import litellm
-                total += litellm.token_counter(text=content) or 0
-            except Exception:
-                import re
-                chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
-                other_chars = len(content) - chinese_chars
-                total += int(chinese_chars * 1.8 + other_chars * 0.3)
+            total += len(enc.encode(content))
+        return total
+
+    def _estimate_tokens_fallback(self) -> int:
+        import re
+        total = 0
+        for m in self._messages:
+            content = m.get("content", "")
+            chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
+            other_chars = len(content) - chinese_chars
+            total += int(chinese_chars * 1.8 + other_chars * 0.3)
         return total
 
     def get_summary(self) -> str:

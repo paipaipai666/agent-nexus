@@ -29,18 +29,7 @@ def _extract_xml_tag(text: str, tag: str) -> str | None:
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     return match.group(1) if match else None
 
-EXTRACT_PROMPT = load_prompt("memory_extract")
 SUMMARIZE_PROMPT = load_prompt("memory_summarize")
-
-MEMORY_CATEGORIES = {
-    "user_preference": 0.9,
-    "entity_fact": 0.7,
-    "conclusion": 0.8,
-    "conversation": 0.5,
-    "task_progress": 0.7,
-    "error_pattern": 0.8,
-    "tool_preference": 0.6,
-}
 
 CATEGORY_LABELS = {
     "user_preference": "偏好",
@@ -51,43 +40,6 @@ CATEGORY_LABELS = {
     "error_pattern": "错误模式",
     "tool_preference": "工具偏好",
 }
-
-def _legacy_mask_pii(text: str) -> str:
-    """Partially mask PII in text, preserving structure for memory extraction.
-
-    - Email: keep first char of local part + domain TLD
-    - Phone: keep first 3 + last 4 digits
-    - API key: keep 'sk-' prefix
-    - Credit card: keep first 4 + last 4 digits
-    """
-    if not text:
-        return text
-    # Mask email: user@example.com → u***@***.com
-    def _mask_email(m):
-        domain = m.group(2)
-        tld = domain.rsplit(".", 1)
-        masked = re.sub(r"[^.]", "*", tld[0])
-        return m.group(1) + "***@" + masked + "." + tld[1]
-    text = re.sub(r"([\w.-])[\w.-]+@([\w.-]+\.\w+)", _mask_email, text)
-    # Mask phone: keep first 3 + last 4
-    text = re.sub(
-        r"(1[3-9]\d)\d{4}(\d{4})\b",
-        lambda m: m.group(1) + "****" + m.group(2),
-        text,
-    )
-    # Mask API key: keep 'sk-' prefix
-    text = re.sub(
-        r"(sk-)[A-Za-z0-9]{32,}",
-        lambda m: m.group(1) + "*" * min(8, len(m.group(0)) - 3) + ("..." if len(m.group(0)) > 11 else ""),
-        text,
-    )
-    # Mask credit card: keep first 4 + last 4
-    text = re.sub(
-        r"\b(\d{4})\d{7,11}(\d{4})\b",
-        lambda m: m.group(1) + "****" + m.group(2),
-        text,
-    )
-    return text
 
 
 
@@ -236,7 +188,6 @@ class MemoryManager:
     def _offload_large_result(self, content: str) -> str:
         """Write large tool result to disk, return a stub with preview."""
         return offload_large_result(content, self._offload_dir, self.session_id)
-        return ""
 
     def bridge_read(self, filepath: str, content_preview: str = ""):
         self._recent_reads.append((filepath, content_preview[:5000], time.time()))
@@ -511,28 +462,3 @@ class MemoryManager:
             question=question,
             answer=answer,
         )
-        return
-
-        prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
-        response = self._llm.think([{"role": "user", "content": prompt}]) or "{}"
-
-        try:
-            data = json.loads(response.strip().lstrip("```json").rstrip("```").strip())
-        except Exception:
-            data = {}
-
-        for category, importance in MEMORY_CATEGORIES.items():
-            for item in data.get(category, []):
-                if isinstance(item, dict):
-                    item = item.get("content") or item.get("text") or ""
-                if not isinstance(item, str) or len(item.strip()) < 5:
-                    continue
-                item = item.strip()
-                vec = embedding_to_list(self._embed_model.encode(item, normalize_embeddings=True))
-                self.long_term.save(
-                    session_id=self.session_id,
-                    content=item,
-                    category=category,
-                    importance=importance,
-                    embedding=vec,
-                )

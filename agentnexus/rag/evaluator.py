@@ -1,5 +1,7 @@
 import random
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -92,6 +94,26 @@ class RAGEvaluator:
         self._llm = AgentLLM()
         self._judge_llm = get_judge_llm()
 
+    def _think_timeout(self, llm, messages, timeout=0):
+        """LLM call with timeout protection. timeout<=0 means no timeout."""
+        if timeout <= 0:
+            return llm.think(messages)
+        result = [None]
+        error = [None]
+        def _target():
+            try:
+                result[0] = llm.think(messages)
+            except Exception as e:
+                error[0] = e
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            return None
+        if error[0] is not None:
+            raise error[0]
+        return result[0]
+
     def run_combination(
         self,
         strategy: ChunkStrategy,
@@ -100,19 +122,33 @@ class RAGEvaluator:
         use_hybrid: bool,
         _token_budget: int | None = None,
         top_k: int = 10,
+        max_workers: int = 1,
+        verbose: bool = False,
+        call_timeout: int = 0,
     ) -> EvalRun:
         label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
         run = EvalRun(label=label, strategy=strategy, chunk_size=chunk_size, use_hybrid=use_hybrid)
 
-        chunks = self._chunk_all(strategy, chunk_size, chunk_overlap)
+        def _log(msg: str):
+            if verbose:
+                import sys
+                print(msg, file=sys.stderr, flush=True)
 
+        t_total = time.perf_counter()
+
+        _log(f"    [1/4] 分块中 (strategy={strategy.value}, size={chunk_size}, overlap={chunk_overlap})...")
+        t0 = time.perf_counter()
+        chunks = self._chunk_all(strategy, chunk_size, chunk_overlap)
+        _log(f"    [1/4] 分块完成: {len(chunks)} 个 chunk ({time.perf_counter() - t0:.1f}s)")
+
+        _log("    [2/4] 构建索引 (ChromaDB + BM25)...")
+        t0 = time.perf_counter()
         delete_collection(namespace="eval")
         build_knowledge_base(chunks, load_reranker=False, namespace="eval")
-
         retriever = HybridRetriever(namespace="eval")
         retriever.rebuild_from_catalog()
+        _log(f"    [2/4] 索引完成 ({time.perf_counter() - t0:.1f}s)")
 
-        # ── Change 4: Split positive / negative samples ──
         positive_samples = [
             s for s in self._samples
             if s.ground_truth and s.reference_contexts
@@ -121,6 +157,59 @@ class RAGEvaluator:
             s for s in self._samples
             if not s.ground_truth or not s.reference_contexts
         ]
+
+        effective_workers = max(1, max_workers)
+        token_budget = _token_budget
+
+        def _token_max(sample):
+            if token_budget is not None and token_budget > 0:
+                return token_budget
+            return max(len(sample.question) * 5, 100)
+
+        def _eval_positive(sample):
+            max_tokens = _token_max(sample)
+            t0 = time.perf_counter()
+            full_ranked, truncated = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
+            latency_ms = (time.perf_counter() - t0) * 1000
+            if not full_ranked and not truncated:
+                return None
+            ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
+                sample, full_ranked, top_k=top_k, _timeout=call_timeout,
+            )
+            recall = 0.0
+            context_relevancy = 0.0
+            if truncated:
+                recall = self._score_recall(sample, truncated, _timeout=call_timeout)
+                context_relevancy = self._score_context_relevancy(sample.question, truncated)
+            answer = self._generate_answer(sample.question, truncated, _timeout=call_timeout)
+            faithfulness = self._score_faithfulness(answer, truncated, _timeout=call_timeout)
+            answer_relevancy = self._score_answer_relevancy(sample.question, answer, _timeout=call_timeout)
+            correctness = self._score_correctness(sample.question, answer, sample.ground_truth, _timeout=call_timeout)
+            return {
+                "faithfulness": faithfulness,
+                "correctness": correctness,
+                "answer_relevancy": answer_relevancy,
+                "precision": ret_precision,
+                "recall": recall,
+                "context_relevancy": context_relevancy,
+                "hit_rate": ret_hit,
+                "mrr": ret_mrr,
+                "latency_ms": latency_ms,
+            }
+
+        def _eval_negative(sample):
+            max_tokens = _token_max(sample)
+            _, retrieved = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
+            if not retrieved:
+                return True
+            answer = self._generate_answer(sample.question, retrieved, _timeout=call_timeout)
+            return _is_refusal(answer)
 
         faithfulness_scores = []
         correctness_scores = []
@@ -132,64 +221,76 @@ class RAGEvaluator:
         mrrs = []
         latencies = []
 
-        # ── Evaluate positive samples ──
-        for sample in positive_samples:
-            if _token_budget is not None and _token_budget > 0:
-                max_tokens = _token_budget
-            else:
-                max_tokens = max(len(sample.question) * 5, 100)
+        _log(f"    [3/4] 评估正样本 ({len(positive_samples)} 个, workers={effective_workers})...")
+        t_eval = time.perf_counter()
 
-            t0 = time.perf_counter()
-            full_ranked, truncated = self._retrieve(
-                sample.question, retriever, use_hybrid,
-                max_tokens=max_tokens, top_k=top_k,
-            )
-            latencies.append((time.perf_counter() - t0) * 1000)
+        if effective_workers <= 1:
+            for idx, sample in enumerate(positive_samples, 1):
+                _log(f"      正样本 {idx}/{len(positive_samples)}: {sample.question[:40]}...")
+                result = _eval_positive(sample)
+                if result is None:
+                    _log(f"      正样本 {idx}: 跳过 (无检索结果)")
+                    continue
+                _log(f"      正样本 {idx}: faith={result['faithfulness']:.2f} "
+                     f"hit={result['hit_rate']:.0f} lat={result['latency_ms']:.0f}ms")
+                faithfulness_scores.append(result["faithfulness"])
+                correctness_scores.append(result["correctness"])
+                answer_relevancy_scores.append(result["answer_relevancy"])
+                precision_scores.append(result["precision"])
+                hit_rates.append(result["hit_rate"])
+                mrrs.append(result["mrr"])
+                recall_scores.append(result["recall"])
+                context_relevancy_scores.append(result["context_relevancy"])
+                latencies.append(result["latency_ms"])
+        else:
+            done_count = 0
+            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                futures = {pool.submit(_eval_positive, s): s for s in positive_samples}
+                for future in as_completed(futures):
+                    done_count += 1
+                    result = future.result()
+                    if result is None:
+                        _log(f"      正样本 {done_count}/{len(positive_samples)}: 跳过")
+                        continue
+                    _log(f"      正样本 {done_count}/{len(positive_samples)}: "
+                         f"faith={result['faithfulness']:.2f} hit={result['hit_rate']:.0f} "
+                         f"lat={result['latency_ms']:.0f}ms")
+                    faithfulness_scores.append(result["faithfulness"])
+                    correctness_scores.append(result["correctness"])
+                    answer_relevancy_scores.append(result["answer_relevancy"])
+                    precision_scores.append(result["precision"])
+                    hit_rates.append(result["hit_rate"])
+                    mrrs.append(result["mrr"])
+                    recall_scores.append(result["recall"])
+                    context_relevancy_scores.append(result["context_relevancy"])
+                    latencies.append(result["latency_ms"])
 
-            if not full_ranked and not truncated:
-                continue
+        _log(f"    [3/4] 正样本完成 ({time.perf_counter() - t_eval:.1f}s)")
 
-            # Retrieval metrics (on full ranked list)
-            ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
-                sample, full_ranked, top_k=top_k,
-            )
-            precision_scores.append(ret_precision)
-            hit_rates.append(ret_hit)
-            mrrs.append(ret_mrr)
-
-            # Recall / context relevancy (on truncated list)
-            if truncated:
-                recall_scores.append(self._score_recall(sample, truncated))
-                context_relevancy_scores.append(self._score_context_relevancy(sample.question, truncated))
-
-            # Generation
-            answer = self._generate_answer(sample.question, truncated)
-            faithfulness_scores.append(self._score_faithfulness(answer, truncated))
-            answer_relevancy_scores.append(self._score_answer_relevancy(sample.question, answer))
-            correctness_scores.append(self._score_correctness(sample.question, answer, sample.ground_truth))
-
-        # ── Evaluate negative samples (rejection rate) ──
+        _log(f"    [4/4] 评估负样本 ({len(negative_samples)} 个)...")
+        t_neg = time.perf_counter()
         correct_refusals = 0
-        for sample in negative_samples:
-            if _token_budget is not None and _token_budget > 0:
-                max_tokens = _token_budget
-            else:
-                max_tokens = max(len(sample.question) * 5, 100)
+        if effective_workers <= 1:
+            for idx, sample in enumerate(negative_samples, 1):
+                _log(f"      负样本 {idx}/{len(negative_samples)}: {sample.question[:40]}...")
+                if _eval_negative(sample):
+                    correct_refusals += 1
+                    _log(f"      负样本 {idx}: 正确拒绝")
+                else:
+                    _log(f"      负样本 {idx}: 未拒绝")
+        else:
+            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                futures_list = [pool.submit(_eval_negative, s) for s in negative_samples]
+                for idx, future in enumerate(as_completed(futures_list), 1):
+                    if future.result():
+                        correct_refusals += 1
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 正确拒绝")
+                    else:
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 未拒绝")
 
-            _, retrieved = self._retrieve(
-                sample.question, retriever, use_hybrid,
-                max_tokens=max_tokens, top_k=top_k,
-            )
-            if not retrieved:
-                # No chunks retrieved → treat as correct refusal (nothing to answer from)
-                correct_refusals += 1
-                continue
+        _log(f"    [4/4] 负样本完成 ({time.perf_counter() - t_neg:.1f}s)")
 
-            answer = self._generate_answer(sample.question, retrieved)
-            if _is_refusal(answer):
-                correct_refusals += 1
-
-        # ── Compute means ──
+        # Compute means
         run.faithfulness = _safe_mean(faithfulness_scores)
         run.answer_relevancy = _safe_mean(answer_relevancy_scores)
         run.answer_correctness = _safe_mean(correctness_scores)
@@ -205,7 +306,6 @@ class RAGEvaluator:
             run.p95_latency_ms = _percentile(sorted_lat, 95)
             run.p99_latency_ms = _percentile(sorted_lat, 99)
 
-        # ── Bootstrap confidence intervals ──
         run.faithfulness_ci = _bootstrap_ci(faithfulness_scores)
         run.answer_relevancy_ci = _bootstrap_ci(answer_relevancy_scores)
         run.answer_correctness_ci = _bootstrap_ci(correctness_scores)
@@ -215,12 +315,13 @@ class RAGEvaluator:
         run.hit_rate_ci = _bootstrap_ci(hit_rates)
         run.mrr_ci = _bootstrap_ci(mrrs)
 
-        # ── Rejection rate for negative samples ──
         if negative_samples:
             run.rejection_rate = correct_refusals / len(negative_samples)
 
-        return run
+        total_elapsed = time.perf_counter() - t_total
+        _log(f"    总耗时: {total_elapsed:.1f}s (faithfulness={run.faithfulness:.3f})")
 
+        return run
     def _chunk_all(self, strategy: ChunkStrategy, size: int, overlap: int) -> list[str]:
         if self._docs and all(self._looks_like_file_path(item) for item in self._docs):
             chunks: list[str] = []
@@ -268,29 +369,29 @@ class RAGEvaluator:
         expanded_contexts = [result_display_text(r) for r in expanded]
         return full_ranked, _fit_token_budget(expanded_contexts, max_tokens)
 
-    def _generate_answer(self, question: str, contexts: list[str]) -> str:
+    def _generate_answer(self, question: str, contexts: list[str], _timeout: int = 0) -> str:
         ctx = "\n---\n".join(contexts)
         prompt = EVAL_GENERATE_PROMPT.format(context=ctx, question=question)
-        return self._llm.think([{"role": "user", "content": prompt}]) or ""
+        return self._think_timeout(self._llm, [{"role": "user", "content": prompt}], _timeout) or ""
 
-    def _score_faithfulness(self, answer: str, contexts: list[str]) -> float:
+    def _score_faithfulness(self, answer: str, contexts: list[str], _timeout: int = 0) -> float:
         ctx = "\n".join(contexts)
         prompt = EVAL_FAITHFULNESS_PROMPT.format(context=ctx, answer=answer)
-        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
 
-    def _score_correctness(self, question: str, answer: str, ground_truth: str) -> float:
+    def _score_correctness(self, question: str, answer: str, ground_truth: str, _timeout: int = 0) -> float:
         prompt = EVAL_CORRECTNESS_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
-        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
 
-    def _score_answer_relevancy(self, question: str, answer: str) -> float:
+    def _score_answer_relevancy(self, question: str, answer: str, _timeout: int = 0) -> float:
         """Judge whether the answer addresses the question (no ground truth needed)."""
         if not answer:
             return 0.0
         prompt = EVAL_ANSWER_RELEVANCY_PROMPT.format(question=question, answer=answer)
-        return _parse_score(self._judge_llm.think([{"role": "user", "content": prompt}]))
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
 
     def _score_retrieval_ranked(
-        self, sample: EvalSample, full_ranked: list[str], top_k: int = 10,
+        self, sample: EvalSample, full_ranked: list[str], top_k: int = 10, _timeout: int = 0,
     ) -> tuple[float, float, float]:
         """Compute context_precision, hit_rate@k, and MRR@k in one LLM pass.
 
@@ -304,7 +405,7 @@ class RAGEvaluator:
         for chunk in candidates:
             prompt = EVAL_PRECISION_PROMPT.format(chunk=chunk, question=sample.question)
             try:
-                result = self._judge_llm.think([{"role": "user", "content": prompt}])
+                result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
             except Exception:
                 result = None
             score = _parse_score(result)
@@ -348,7 +449,7 @@ class RAGEvaluator:
         hits = sum(1 for r in retrieved if any(ref in r for ref in relevant))
         return hits / len(retrieved) if retrieved else 0.0
 
-    def _score_recall(self, sample: EvalSample, retrieved: list[str]) -> float:
+    def _score_recall(self, sample: EvalSample, retrieved: list[str], _timeout: int = 0) -> float:
         """LLM-based context recall: what fraction of reference info is covered.
 
         For each reference passage, asks Judge whether its information is
@@ -361,7 +462,7 @@ class RAGEvaluator:
         for reference in sample.reference_contexts:
             prompt = EVAL_RECALL_PROMPT.format(reference=reference, retrieved=retrieved_text)
             try:
-                result = self._judge_llm.think([{"role": "user", "content": prompt}])
+                result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
             except Exception:
                 result = None
             scores.append(_parse_score(result))

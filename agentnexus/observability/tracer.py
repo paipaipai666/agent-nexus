@@ -180,6 +180,21 @@ class TraceManager:
         except OSError:
             return
 
+    def _flush_orphan_span(self, span: TraceSpan):
+        """Write a standalone span (no trace context) to disk immediately."""
+        if not self._traces_dir or span._flushed:
+            return
+        date_str = time.strftime("%Y-%m-%d")
+        file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            record = self._span_record("orphan", span)
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            span._flushed = True
+        except OSError:
+            return
+
     @staticmethod
     def _span_record(trace_id: str, span: TraceSpan) -> dict:
         return {
@@ -245,6 +260,7 @@ class _SpanContext:
         if ctx is None:
             self.span.end_time = time.time()
             self.span.metadata = md
+            self._manager._flush_orphan_span(self.span)
             return
         ctx.end_span(self.span, metadata=md)
         return False  # 不吞掉异常

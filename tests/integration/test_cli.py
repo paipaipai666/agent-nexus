@@ -166,7 +166,10 @@ class TestCliEvaluation:
                 self.documents = documents
                 self.samples = samples
 
-            def run_combination(self, strategy, chunk_size, overlap, use_hybrid, _token_budget=None, top_k=10):
+            def run_combination(
+                self, strategy, chunk_size, overlap, use_hybrid,
+                _token_budget=None, top_k=10, max_workers=1, verbose=False, call_timeout=0,
+            ):
                 captured.append((strategy.value, chunk_size, use_hybrid))
                 return FakeRun()
 
@@ -287,7 +290,10 @@ class TestCliEvalRun:
                 self.documents = documents
                 self.samples = samples
 
-            def run_combination(self, strategy, chunk_size, overlap, use_hybrid, _token_budget=None, top_k=10):
+            def run_combination(
+                self, strategy, chunk_size, overlap, use_hybrid,
+                _token_budget=None, top_k=10, max_workers=1, verbose=False, call_timeout=0,
+            ):
                 return FakeRun()
 
         monkeypatch.setattr(eval_cmd, "RAGEvaluator", FakeEvaluator, raising=False)
@@ -341,7 +347,10 @@ class TestCliEvalRun:
                 self.documents = documents
                 self.samples = samples
 
-            def run_combination(self, strategy, chunk_size, overlap, use_hybrid, _token_budget=None, top_k=10):
+            def run_combination(
+                self, strategy, chunk_size, overlap, use_hybrid,
+                _token_budget=None, top_k=10, max_workers=1, verbose=False, call_timeout=0,
+            ):
                 return FakeRun()
 
         monkeypatch.setattr(eval_cmd, "RAGEvaluator", FakeEvaluator, raising=False)

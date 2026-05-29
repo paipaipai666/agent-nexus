@@ -7,7 +7,10 @@ e2b==2.20.2
 e2b-code-interpreter==2.6.1
 httpx==0.28.1
 jieba==0.42.1
+langchain-text-splitters==1.1.2
 litellm==1.83.14
+mcp==1.27.1
+openai==2.24.0
 prompt-toolkit==3.0.52
 pydantic==2.12.5
 pydantic-settings==2.10.1
@@ -17,4 +20,6 @@ rank-bm25==0.2.2
 rich==14.1.0
 sentence-transformers==5.2.0
 tavily-python==0.7.24
+textual==8.2.6
+tiktoken==0.12.0
 typer==0.16.1
