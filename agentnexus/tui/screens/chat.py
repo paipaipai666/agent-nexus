@@ -1040,8 +1040,8 @@ class ChatScreen(Screen):
             model = getattr(self._agent, "model_id", "unknown") if self._agent else "unknown"
             ctx = "?"
             caps = getattr(getattr(self._agent, "llm_client", None), "capabilities", None)
-            if caps and hasattr(caps, "context_window"):
-                ctx = f"{caps.context_window // 1000}k" if caps.context_window else "?"
+            if caps and hasattr(caps, "max_context_tokens"):
+                ctx = f"{caps.max_context_tokens // 1000}k" if caps.max_context_tokens else "?"
             self._side_panel.update_model(model, ctx, strategy)
         except Exception:
             pass

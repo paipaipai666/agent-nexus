@@ -228,6 +228,30 @@ def list_checkpoints(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/session/{session_id}/todos")
+def list_todos(session_id: str):
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    todo_list = getattr(runtime.agent, "_todo_list", None)
+    if todo_list is None:
+        return {"items": [], "count": 0}
+    items = todo_list.list_items()
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "description": item.description,
+                "status": item.status,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at,
+            }
+            for item in items
+        ],
+        "count": len(items),
+    }
+
+
 @router.get("/session/{session_id}")
 def get_session(session_id: str):
     from agentnexus.server.app import _get_runtime
