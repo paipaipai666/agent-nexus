@@ -1,6 +1,10 @@
 from unittest.mock import MagicMock
 
-from agentnexus.agents.prompt_builder import build_conversation_context, build_react_prompt
+from agentnexus.agents.prompt_builder import (
+    build_conversation_context,
+    build_react_messages,
+    build_react_prompt,
+)
 
 
 class TestBuildReactPrompt:
@@ -156,3 +160,102 @@ class TestBuildConversationContext:
         result = build_conversation_context(mm)
         assert "用户: ask" in result
         assert "助手: reply" in result
+
+
+class TestBuildReactMessages:
+    """Tests for build_react_messages — prompt caching optimized message structure."""
+
+    def test_basic_structure(self):
+        messages = build_react_messages(
+            system_rules="You are a helpful assistant.",
+            tools_desc="search, calculator",
+            question="What is 2+2?",
+        )
+        assert len(messages) == 3
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "You are a helpful assistant."
+        assert messages[1]["role"] == "system"
+        assert "search, calculator" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+        assert "What is 2+2?" in messages[2]["content"]
+
+    def test_stable_prefix_for_caching(self):
+        """First message should be identical across calls for cache hit."""
+        msg1 = build_react_messages(
+            system_rules="Fixed rules here",
+            tools_desc="tool_a",
+            question="question 1",
+        )
+        msg2 = build_react_messages(
+            system_rules="Fixed rules here",
+            tools_desc="tool_b",
+            question="question 2",
+        )
+        # First message (system rules) must be identical
+        assert msg1[0] == msg2[0]
+
+    def test_memory_context_included(self):
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="q",
+            memory_context="remember this fact",
+        )
+        # Should have: system_rules, tools, memory+context, user
+        assert len(messages) == 4
+        assert "remember this fact" in messages[2]["content"]
+
+    def test_conversation_context_included(self):
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="q",
+            conversation_context="recent chat history",
+        )
+        assert len(messages) == 4
+        assert "recent chat history" in messages[2]["content"]
+
+    def test_empty_contexts_skipped(self):
+        """Empty context blocks should not create extra messages."""
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="q",
+            memory_context="",
+            conversation_context="",
+        )
+        # Only: system_rules, tools, user
+        assert len(messages) == 3
+
+    def test_with_compiled_profile(self):
+        profile = MagicMock()
+        profile.fragments_text = "custom fragment"
+        profile.workflow_guidance = "workflow guide"
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="q",
+            compiled_profile=profile,
+        )
+        assert any("custom fragment" in m["content"] for m in messages)
+        assert any("workflow guide" in m["content"] for m in messages)
+
+    def test_with_todo_context(self):
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="q",
+            todo_context="- [ ] task 1\n- [ ] task 2",
+        )
+        assert any("task 1" in m["content"] for m in messages)
+
+    def test_user_message_format(self):
+        messages = build_react_messages(
+            system_rules="rules",
+            tools_desc="tools",
+            question="What is the capital of France?",
+        )
+        user_msg = messages[-1]
+        assert user_msg["role"] == "user"
+        assert "== 当前任务 ==" in user_msg["content"]
+        assert "What is the capital of France?" in user_msg["content"]

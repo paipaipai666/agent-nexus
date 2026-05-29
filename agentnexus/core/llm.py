@@ -35,15 +35,17 @@ def get_default_llm() -> "AgentLLM":
 
 class AgentLLM:
     def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
+        from agentnexus.core.capabilities import _normalize_model_id
         settings = get_settings()
         self.base_url = baseUrl or settings.llm_base_url
-        self.model = (model or settings.llm_model_id).strip()
+        raw_model = (model or settings.llm_model_id).strip()
+        self.model = _normalize_model_id(raw_model, self.base_url) if "/" not in raw_model else raw_model
         self.api_key = apiKey or settings.llm_api_key.get_secret_value()
         self.timeout = timeout or settings.llm_timeout
         self.last_error: str = ""
         self.last_truncated: bool = False
         self.last_usage: dict = {}
-        self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+        self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
         self.last_tool_calls: list[dict] = []
         self._tool_call_mode: bool = False
         self._capabilities: ModelCapabilities | None = None
@@ -139,7 +141,7 @@ class AgentLLM:
                 try:
                     result = self._call_via_provider(
                         provider, messages, temperature, tools,
-                        response_format, thinking,
+                        response_format, thinking, on_token,
                     )
                     # Sync state from provider result
                     self.last_tool_calls = result.tool_calls
@@ -148,11 +150,20 @@ class AgentLLM:
                     self.last_usage = result.usage or self._estimate_usage(model, messages, result.text)
                     self.total_usage["input_tokens"] += self.last_usage.get("input_tokens", 0)
                     self.total_usage["output_tokens"] += self.last_usage.get("output_tokens", 0)
+                    self.total_usage["cache_hit_tokens"] += self.last_usage.get("cache_hit_tokens", 0)
 
                     if ctx and span:
                         meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **self.last_usage}
                         if self.last_tool_calls:
                             meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
+                        # Cache hit rate metadata
+                        cache_hit = self.last_usage.get("cache_hit_tokens", 0)
+                        cache_miss = self.last_usage.get("cache_miss_tokens", 0)
+                        if cache_hit or cache_miss:
+                            meta["cache_hit_tokens"] = cache_hit
+                            meta["cache_miss_tokens"] = cache_miss
+                            total_cache = cache_hit + cache_miss
+                            meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
                         ctx.end_span(span,
                             output_data={"output_preview": _preview(result.text), "output_length": len(result.text)},
                             metadata=meta,
@@ -161,9 +172,6 @@ class AgentLLM:
                     if not silent and result.text:
                         text = Text(result.text)
                         console.print(text)
-
-                    if on_token and result.text:
-                        on_token(result.text)
 
                     return result.text
                 except Exception as provider_err:
@@ -179,6 +187,14 @@ class AgentLLM:
                 meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **self.last_usage}
                 if self.last_tool_calls:
                     meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
+                # Cache hit rate metadata
+                cache_hit = self.last_usage.get("cache_hit_tokens", 0)
+                cache_miss = self.last_usage.get("cache_miss_tokens", 0)
+                if cache_hit or cache_miss:
+                    meta["cache_hit_tokens"] = cache_hit
+                    meta["cache_miss_tokens"] = cache_miss
+                    total_cache = cache_hit + cache_miss
+                    meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
                 ctx.end_span(span,
                     output_data={"output_preview": _preview(result), "output_length": len(result)},
                     metadata=meta,
@@ -231,7 +247,7 @@ class AgentLLM:
 
             # transient error — outer retry loop continues
 
-    def _call_via_provider(self, provider, messages, temperature, tools, response_format, thinking):
+    def _call_via_provider(self, provider, messages, temperature, tools, response_format, thinking, on_token=None):
         """Call LLM via a direct provider (OpenAI SDK)."""
         caps = self.capabilities
         tracker = self.session_tracker
@@ -265,6 +281,7 @@ class AgentLLM:
             parallel_tool_calls=parallel,
             stream_options=stream_opts,
             reasoning_effort=reasoning_effort,
+            on_token=on_token,
         )
 
     def _call_via_litellm(self, messages, temperature, silent, tools, response_format, thinking,
@@ -336,6 +353,8 @@ class AgentLLM:
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
                     self._reasoning_buf += rc
+                    if on_token:
+                        on_token(rc, is_reasoning=True)
 
                 tc_list = getattr(delta, "tool_calls", None) or []
                 for tc in tc_list:
@@ -364,6 +383,15 @@ class AgentLLM:
                         "output_tokens": chunk.usage.completion_tokens or 0,
                         "total_tokens": chunk.usage.total_tokens or 0,
                     }
+                    # DeepSeek prompt cache hit/miss tokens
+                    if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
+                        usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
+                        usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
+                    # OpenAI cached_tokens (prompt_tokens_details.cached_tokens)
+                    elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
+                        usage["cache_hit_tokens"] = getattr(
+                            chunk.usage.prompt_tokens_details, "cached_tokens", 0
+                        ) or 0
                 fr = getattr(chunk.choices[0], "finish_reason", "")
                 if fr:
                     finish_reason = fr
@@ -394,6 +422,7 @@ class AgentLLM:
         self.last_usage = usage
         self.total_usage["input_tokens"] += usage.get("input_tokens", 0)
         self.total_usage["output_tokens"] += usage.get("output_tokens", 0)
+        self.total_usage["cache_hit_tokens"] += usage.get("cache_hit_tokens", 0)
 
         return result
 

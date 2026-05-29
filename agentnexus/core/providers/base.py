@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,5 +40,6 @@ class BaseLLMProvider(ABC):
         parallel_tool_calls: bool | None = None,
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> StreamResult:
         """Execute a streaming chat completion and return the unified result."""

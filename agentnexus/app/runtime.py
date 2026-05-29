@@ -96,7 +96,10 @@ class AppRuntime:
         )
         if restore_session:
             cls._restore_memory_from_version(memory, version)
-        agent = ReActAgent(llm, executor, conversation_mode=True)
+        agent_output = (lambda _: None) if profile == "server" else None
+        if profile == "server":
+            llm.silent = True
+        agent = ReActAgent(llm, executor, conversation_mode=True, output=agent_output)
         agent._todo_list = todo_list
         if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
             agent.set_mcp_context(mcp_manager.auto_context())

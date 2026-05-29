@@ -65,7 +65,7 @@ def extract_and_save_memories(
     answer: str,
 ) -> None:
     prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
-    response = llm.think([{"role": "user", "content": prompt}]) or "{}"
+    response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
     data = parse_memory_payload(response)
     for category, importance, item in iter_memory_items(data):
         vec = embedding_to_list(embed_model.encode(item, normalize_embeddings=True))

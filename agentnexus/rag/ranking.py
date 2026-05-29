@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import jieba
 from rank_bm25 import BM25Okapi
 
 from .models import ChunkRecord
 
 
 def tokenize(text: str) -> list[str]:
+    import jieba
     return list(jieba.cut(text))
 
 

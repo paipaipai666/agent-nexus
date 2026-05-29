@@ -23,6 +23,7 @@ def record_llm_response(
         step_id=run_state.current_step,
         strategy_used=run_state.strategy,
         reasoning_content=llm_client.last_reasoning_content,
+        reasoning_streamed=bool(llm_client.last_reasoning_content),
         content=response_text,
     )
     ctx.steps.append(step)

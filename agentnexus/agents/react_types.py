@@ -25,6 +25,7 @@ class AgentStep:
     step_id: int
     strategy_used: CallingStrategy = CallingStrategy.NATIVE_TOOLS
     reasoning_content: str = ""
+    reasoning_streamed: bool = False
     content: str = ""
     tool_calls: list[dict] = field(default_factory=list)
     tool_outputs: list[dict] = field(default_factory=list)
@@ -87,6 +88,7 @@ class ReActEventType(Enum):
     TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
     ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
     STREAM_TOKEN = auto()      # direct emit: LLM streaming token (real-time text)
+    STREAM_REASONING = auto()  # direct emit: LLM streaming reasoning content
 
 
 # ============================================================

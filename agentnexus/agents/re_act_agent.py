@@ -9,7 +9,7 @@ from typing import Callable
 from agentnexus.agents import json_helpers, react_runtime
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
-from agentnexus.agents.prompt_builder import build_conversation_context, build_react_prompt
+from agentnexus.agents.prompt_builder import build_conversation_context, build_react_messages, build_react_prompt
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
     AgentStep,
@@ -209,18 +209,13 @@ class ReActAgent:
         if self.conversation_mode and memory_manager:
             memory_state.conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
 
-        system_content = self._build_prompt(
+        # Build messages with stable prefix for prompt caching
+        ctx.messages = self._build_messages(
             tool_state.tools_desc,
             run_state.question,
-            "",
             memory_state.memory_context,
             memory_state.conv_ctx,
         )
-
-        ctx.messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": run_state.question},
-        ]
 
         if memory_manager:
             def rebuild():
@@ -231,14 +226,15 @@ class ReActAgent:
                 if self.conversation_mode:
                     new_conv = self._build_conversation_context(memory_manager, per_msg_limit=800)
                     memory_state.conv_ctx = new_conv
-                new_system = self._build_prompt(
+                # Rebuild messages with stable prefix structure
+                new_messages = self._build_messages(
                     new_tools_desc,
                     run_state.question,
-                    "",
                     memory_state.memory_context,
                     new_conv,
                 )
-                ctx.messages[0] = {"role": "system", "content": new_system}
+                # Preserve accumulated assistant/tool/user messages after the initial messages
+                ctx.messages[:len(new_messages)] = new_messages
             memory_manager._on_after_compact = rebuild
 
         if run_state.current_step >= run_state.max_steps:
@@ -255,11 +251,13 @@ class ReActAgent:
         """PREPARE_LLM_CALL + LLM_PARAMS_READY -> set params, call LLM."""
         ctx.run_state.current_step += 1
 
-        def _stream_token(token: str):
-            ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
+        def _stream_token(token: str, is_reasoning: bool = False):
+            if is_reasoning:
+                ctx.emit(ReActEventType.STREAM_REASONING, token=token)
+            else:
+                ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
 
-        _streamable = {CallingStrategy.NATIVE_TOOLS, CallingStrategy.PLAIN_TEXT}
-        on_token = _stream_token if ctx.run_state.strategy in _streamable else None
+        on_token = _stream_token
 
         response_text = call_llm(
             self.llm_client,
@@ -566,6 +564,10 @@ class ReActAgent:
         if not any(step.tool_outputs for step in ctx.steps):
             return
 
+        # Skip if reasoning_content was already streamed via STREAM_REASONING
+        if any(step.reasoning_streamed for step in ctx.steps):
+            return
+
         raw_text = (ctx.last_response_text or "").strip()
         if not raw_text:
             return
@@ -618,6 +620,23 @@ class ReActAgent:
             tools_desc=tools_desc,
             question=question,
             history_str=history_str,
+            memory_context=memory_context,
+            conversation_context=conversation_context,
+            available_skill_context=self._available_skill_context,
+            mcp_context=self._mcp_context,
+            compiled_profile=compiled,
+            todo_context=todo_context,
+        )
+
+    def _build_messages(self, tools_desc: str, question: str,
+                         memory_context: str, conversation_context: str) -> list[dict[str, str]]:
+        """Build messages array with stable prefix for prompt caching."""
+        compiled = self._compiled_session_profile
+        todo_context = self._todo_list.format_context() if self._todo_list else ""
+        return build_react_messages(
+            system_rules=REACT_PROMPT_TEMPLATE.split("== 可用工具 ==")[0].rstrip(),
+            tools_desc=tools_desc,
+            question=question,
             memory_context=memory_context,
             conversation_context=conversation_context,
             available_skill_context=self._available_skill_context,

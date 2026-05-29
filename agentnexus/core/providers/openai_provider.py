@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from openai import OpenAI
@@ -29,6 +30,7 @@ class OpenAIProvider(BaseLLMProvider):
         parallel_tool_calls: bool | None = None,
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> StreamResult:
         client = OpenAI(
             api_key=api_key,
@@ -37,7 +39,7 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         kwargs: dict[str, Any] = {
-            "model": model,
+            "model": model.split("/", 1)[1] if "/" in model else model,
             "messages": messages,
             "temperature": temperature,
             "stream": True,
@@ -71,6 +73,15 @@ class OpenAIProvider(BaseLLMProvider):
                     "output_tokens": chunk.usage.completion_tokens or 0,
                     "total_tokens": chunk.usage.total_tokens or 0,
                 }
+                # DeepSeek prompt cache hit/miss tokens
+                if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
+                    result.usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
+                    result.usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
+                # OpenAI cached_tokens (prompt_tokens_details.cached_tokens)
+                elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
+                    result.usage["cache_hit_tokens"] = getattr(
+                        chunk.usage.prompt_tokens_details, "cached_tokens", 0
+                    ) or 0
 
             if not chunk.choices:
                 continue
@@ -79,10 +90,15 @@ class OpenAIProvider(BaseLLMProvider):
             content = delta.content or ""
             result.text += content
 
+            if on_token and content:
+                on_token(content)
+
             # Reasoning / thinking content (DeepSeek, o-series)
             rc = getattr(delta, "reasoning_content", None)
             if rc:
                 result.reasoning_content += rc
+                if on_token:
+                    on_token(rc, is_reasoning=True)
 
             # Tool calls
             tc_list = getattr(delta, "tool_calls", None) or []

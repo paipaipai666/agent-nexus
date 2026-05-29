@@ -71,6 +71,7 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
         projection_fn=projection_fn,
         thinking=run_state.thinking_enabled,
         on_token=on_token,
+        silent=True,
     )
 
     # ── after model hook (can modify response text) ──────────

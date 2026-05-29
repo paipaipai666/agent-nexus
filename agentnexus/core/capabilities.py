@@ -164,11 +164,11 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
     # ── Dynamic detection via litellm ──
     try:
         import litellm
-        if litellm.supports_function_calling(model=model_id):
+        if litellm.supports_function_calling(model=normalized_id):
             caps.supports_tool_calling = True
-        if litellm.supports_response_schema(model=model_id):
+        if litellm.supports_response_schema(model=normalized_id):
             caps.supports_json_schema = True
-        params = litellm.get_supported_openai_params(model=model_id)
+        params = litellm.get_supported_openai_params(model=normalized_id)
         if params:
             if "response_format" in params:
                 caps.supports_json_mode = True
@@ -176,7 +176,7 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
                 caps.supports_thinking = True
             if "parallel_tool_calls" in params:
                 caps.supports_parallel_tool_calls = True
-        model_info = litellm.get_model_info(model=model_id)
+        model_info = litellm.get_model_info(model=normalized_id)
         caps.max_context_tokens = model_info.get(
             "max_input_tokens", caps.max_context_tokens
         )

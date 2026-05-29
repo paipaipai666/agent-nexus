@@ -277,3 +277,82 @@ class TestComputeStats:
         assert stats.by_date["2025-01-01"]["deepseek-v4-flash"]["output"] == 50
         assert stats.by_date["2025-01-02"]["deepseek-v3"]["input"] == 200
         assert stats.by_date["2025-01-02"]["deepseek-v3"]["output"] == 100
+
+    def test_cache_hit_tokens_tracked(self, temp_agentnexus_home):
+        traces_dir = temp_agentnexus_home / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        lines = [
+            json.dumps({
+                "trace_id": "trace-1", "name": "llm", "start_time": now,
+                "latency_ms": 100.0, "input": {}, "output": {},
+                "metadata": {
+                    "input_tokens": 1000, "output_tokens": 50,
+                    "model": "deepseek-v4-flash",
+                    "cache_hit_tokens": 800, "cache_miss_tokens": 200,
+                    "cache_hit_rate": 0.8,
+                },
+            }),
+        ]
+        (traces_dir / "2025-01-01.jsonl").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
+        stats = compute_stats(str(traces_dir))
+        assert stats.total_cache_hit_tokens == 800
+        assert stats.total_cache_miss_tokens == 200
+        assert stats.cache_hit_rate == 0.8
+
+    def test_cache_hit_rate_calculated(self, temp_agentnexus_home):
+        traces_dir = temp_agentnexus_home / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        lines = [
+            json.dumps({
+                "trace_id": "trace-1", "name": "llm", "start_time": now,
+                "latency_ms": 100.0, "input": {}, "output": {},
+                "metadata": {
+                    "input_tokens": 1000, "output_tokens": 50,
+                    "model": "deepseek-v4-flash",
+                    "cache_hit_tokens": 700, "cache_miss_tokens": 300,
+                },
+            }),
+            json.dumps({
+                "trace_id": "trace-2", "name": "llm", "start_time": now,
+                "latency_ms": 100.0, "input": {}, "output": {},
+                "metadata": {
+                    "input_tokens": 500, "output_tokens": 30,
+                    "model": "deepseek-v4-flash",
+                    "cache_hit_tokens": 400, "cache_miss_tokens": 100,
+                },
+            }),
+        ]
+        (traces_dir / "2025-01-01.jsonl").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
+        stats = compute_stats(str(traces_dir))
+        assert stats.total_cache_hit_tokens == 1100
+        assert stats.total_cache_miss_tokens == 400
+        # hit_rate = 1100 / (1100 + 400) = 0.7333...
+        assert abs(stats.cache_hit_rate - 1100 / 1500) < 0.001
+
+    def test_no_cache_data_defaults_to_zero(self, temp_agentnexus_home):
+        traces_dir = temp_agentnexus_home / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        lines = [
+            json.dumps({
+                "trace_id": "trace-1", "name": "llm", "start_time": now,
+                "latency_ms": 100.0, "input": {}, "output": {},
+                "metadata": {
+                    "input_tokens": 100, "output_tokens": 50,
+                    "model": "deepseek-v4-flash",
+                },
+            }),
+        ]
+        (traces_dir / "2025-01-01.jsonl").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
+        stats = compute_stats(str(traces_dir))
+        assert stats.total_cache_hit_tokens == 0
+        assert stats.total_cache_miss_tokens == 0
+        assert stats.cache_hit_rate == 0.0

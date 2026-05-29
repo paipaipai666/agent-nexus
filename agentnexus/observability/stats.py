@@ -38,6 +38,11 @@ class TokenStats:
     cost_per_query: float = 0.0
     by_model: dict[str, dict] = field(default_factory=dict)
     by_date: dict[str, dict] = field(default_factory=dict)
+    # Prompt cache metrics
+    total_cache_hit_tokens: int = 0
+    total_cache_miss_tokens: int = 0
+    cache_hit_rate: float = 0.0
+    cache_saved_cost_cny: float = 0.0
 
 
 def _cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -102,6 +107,13 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                     model = _short_model(meta.get("model", "deepseek-v4-flash"))
                     latency = span.get("latency_ms", 0)
 
+                    # Prompt cache metrics
+                    cache_hit = meta.get("cache_hit_tokens", 0)
+                    cache_miss = meta.get("cache_miss_tokens", 0)
+                    if cache_hit or cache_miss:
+                        stats.total_cache_hit_tokens += cache_hit
+                        stats.total_cache_miss_tokens += cache_miss
+
                     if tokens_in or tokens_out:
                         stats.total_input_tokens += tokens_in
                         stats.total_output_tokens += tokens_out
@@ -162,5 +174,15 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                 "input": date_model_tokens[d][model]["input"],
                 "output": date_model_tokens[d][model]["output"],
             }
+
+    # Calculate cache hit rate and saved cost
+    total_cache_tokens = stats.total_cache_hit_tokens + stats.total_cache_miss_tokens
+    if total_cache_tokens > 0:
+        stats.cache_hit_rate = stats.total_cache_hit_tokens / total_cache_tokens
+        # Estimate cost saved by cache (cache hit price is ~1/50 of cache miss price for DeepSeek)
+        # This is a rough estimate; actual savings depend on the provider's pricing
+        cache_miss_cost = _cost(stats.total_cache_miss_tokens, 0, "deepseek-v4-flash")
+        cache_hit_cost = _cost(stats.total_cache_hit_tokens, 0, "deepseek-v4-flash")
+        stats.cache_saved_cost_cny = round(cache_miss_cost - cache_hit_cost, 4)
 
     return stats

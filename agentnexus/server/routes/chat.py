@@ -75,6 +75,12 @@ def _map_to_gui_event(event, chat_service) -> dict | None:
 
         return None
 
+    elif event_type == "stream_token":
+        return {"type": "token", "content": payload.get("token", ""), "run_id": run_id}
+
+    elif event_type == "stream_reasoning":
+        return {"type": "reasoning", "content": payload.get("token", ""), "run_id": run_id}
+
     elif event_type == "message_delta":
         return {"type": "token", "content": payload.get("text", ""), "run_id": run_id}
 
@@ -284,12 +290,35 @@ async def ws_agent(ws: WebSocket, session_id: str):
         return
 
     current_run_id: str | None = None
+    confirm_result: asyncio.Future[bool] | None = None
+
+    # Set up HITL confirm bridge for this WebSocket connection
+    confirm_bridge = runtime.subagent_confirm
+    original_target = confirm_bridge._target
+
+    def ws_confirm(summary: str) -> bool:
+        """Send confirm request via WebSocket and wait for response."""
+        nonlocal confirm_result
+        loop = asyncio.get_event_loop()
+        confirm_result = loop.create_future()
+        asyncio.run_coroutine_threadsafe(
+            ws.send_json({"type": "confirm_request", "summary": summary}),
+            loop,
+        )
+        # Block until response
+        return confirm_result.result()
+
+    confirm_bridge.set_target(ws_confirm)
 
     async def stream_events(run_id: str):
+        """Stream events from chat service to WebSocket.
+
+        Uses async queue for real-time event delivery.
+        """
         nonlocal current_run_id
         current_run_id = run_id
         try:
-            for event in chat.stream_events(run_id):
+            async for event in chat.astream_events(run_id):
                 gui_event = _map_to_gui_event(event, chat)
                 if gui_event is not None:
                     await ws.send_json(gui_event)
@@ -307,23 +336,32 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     await ws.send_json({"type": "error", "message": "Empty content"})
                     continue
 
-                run_handle_ref = [None]
+                # Find the run_id that will be created by send_message.
+                # begin_turn() adds to _run_events before the agent runs,
+                # so we can detect the new key after starting the thread.
+                pre_run_ids = set(chat._run_events.keys())
 
                 def run_agent():
                     try:
-                        run = chat.send_message(session_id, content)
-                        run_handle_ref[0] = run
+                        chat.send_message(session_id, content)
                     except Exception:
                         pass
 
                 task = asyncio.create_task(asyncio.to_thread(run_agent))
+
+                # Wait for begin_turn to create the run (adds to _run_events)
+                new_run_id = None
                 for _ in range(500):
-                    if run_handle_ref[0] is not None:
+                    post_ids = set(chat._run_events.keys()) - pre_run_ids
+                    if post_ids:
+                        new_run_id = post_ids.pop()
                         break
                     await asyncio.sleep(0.01)
 
-                if run_handle_ref[0] is not None:
-                    await stream_events(run_handle_ref[0].id)
+                if new_run_id:
+                    # Run stream_events in thread to avoid blocking event loop
+                    stream_task = asyncio.create_task(asyncio.to_thread(stream_events, new_run_id))
+                    await stream_task
                 await task
 
             elif msg_type == "cancel":
@@ -333,10 +371,9 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     await ws.send_json({"type": "cancelled", "run_id": run_id})
 
             elif msg_type == "confirm":
-                run_id = data.get("run_id", "")
                 approved = data.get("approved", False)
-                if run_id:
-                    chat.confirm_tool_call(run_id, approved)
+                if confirm_result and not confirm_result.done():
+                    confirm_result.set_result(approved)
 
             elif msg_type == "ping":
                 await ws.send_json({"type": "pong"})
@@ -348,3 +385,6 @@ async def ws_agent(ws: WebSocket, session_id: str):
             await ws.send_json({"type": "error", "message": str(e)})
         except Exception:
             pass
+    finally:
+        # Restore original confirm target
+        confirm_bridge.set_target(original_target)

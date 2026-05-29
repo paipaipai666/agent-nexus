@@ -7,6 +7,7 @@ path that still consumes the raw ReActAgent directly.
 
 from __future__ import annotations
 
+import asyncio
 import queue
 import uuid
 from dataclasses import dataclass, field
@@ -56,6 +57,7 @@ class ChatService:
         self._capability_runtime = capability_runtime
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
+        self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
         self._turns: dict[str, TurnRuntime] = {}
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -92,11 +94,24 @@ class ChatService:
         """Mark whether the agent is currently processing a message."""
         self._is_processing = processing
 
+    def _put_event(self, run_id: str, event: AgentEvent) -> None:
+        """Put event into both sync and async queues."""
+        sync_q = self._run_events.get(run_id)
+        if sync_q is not None:
+            sync_q.put(event)
+        async_q = self._async_run_events.get(run_id)
+        if async_q is not None:
+            try:
+                async_q.put_nowait(event)
+            except Exception:
+                pass
+
     def send_message(self, session_id: str, text: str) -> RunHandle:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
         run, events, turn = self.begin_turn(session_id, text)
         old_on_event = getattr(self._agent, "_on_event", None)
+        old_output = getattr(self._agent, "_output", None)
         try:
             if self._capability_runtime is not None:
                 self._capability_runtime.refresh_if_stale()
@@ -104,18 +119,29 @@ class ChatService:
                 self._agent.set_cancel_checker(turn.cancel_checker)
             agent_text = self._prepare_message(text, events, run.id, session_id)
             self._install_agent_event_bridge(turn, events, run.id, session_id, old_on_event)
+            # Suppress agent _output (print) — events are sent via WebSocket
+            try:
+                self._agent._output = lambda _msg: None
+            except Exception:
+                pass
             result = self._agent.run(agent_text, memory_manager=self._memory)
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
             self._run_snapshots[run.id] = record
-            events.put(AgentEvent("message_delta", {"text": answer or ""}, run_id=run.id, session_id=session_id))
-            events.put(AgentEvent(
+            self._put_event(run.id, AgentEvent(
+                "message_delta", {"text": answer or ""},
+                run_id=run.id, session_id=session_id,
+            ))
+            self._put_event(run.id, AgentEvent(
                 "run_finished",
                 {"answer": answer or "", "status": record.status},
                 run_id=run.id,
                 session_id=session_id,
             ))
-            events.put(AgentEvent("run_persisted", {"status": record.status}, run_id=run.id, session_id=session_id))
+            self._put_event(run.id, AgentEvent(
+                "run_persisted", {"status": record.status},
+                run_id=run.id, session_id=session_id,
+            ))
         except Exception as exc:
             if turn.cancel_checker() or str(exc) == "cancelled":
                 record = turn.cancel("cancelled")
@@ -130,8 +156,14 @@ class ChatService:
                 "answer": record.answer,
                 "reason": record.reason,
             }
-            events.put(AgentEvent(event_type, payload, run_id=run.id, session_id=session_id))
-            events.put(AgentEvent("run_persisted", {"status": record.status}, run_id=run.id, session_id=session_id))
+            self._put_event(run.id, AgentEvent(
+                event_type, payload,
+                run_id=run.id, session_id=session_id,
+            ))
+            self._put_event(run.id, AgentEvent(
+                "run_persisted", {"status": record.status},
+                run_id=run.id, session_id=session_id,
+            ))
             raise
         finally:
             if hasattr(self._agent, "set_cancel_checker"):
@@ -140,7 +172,11 @@ class ChatService:
                 self._agent._on_event = old_on_event
             except Exception:
                 pass
-            events.put(None)
+            try:
+                self._agent._output = old_output
+            except Exception:
+                pass
+            self._put_event(run.id, None)
         return run
 
     def begin_turn(self, session_id: str, text: str) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
@@ -148,7 +184,9 @@ class ChatService:
             raise KeyError(f"Unknown session_id: {session_id}")
         run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
         events: queue.Queue[AgentEvent | None] = queue.Queue()
+        async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         self._run_events[run.id] = events
+        self._async_run_events[run.id] = async_events
         turn = TurnRuntime(
             run_id=run.id,
             session_id=session_id,
@@ -245,14 +283,31 @@ class ChatService:
         previous,
     ) -> None:
         def _on_event(event, from_state, to_state):
+            event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
+            payload = getattr(event, "payload", {}) or {}
+
+            # STREAM_TOKEN events are sent directly as token events for real-time streaming
+            if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
+                token = payload.get("token", "")
+                if token:
+                    evt_type = "stream_reasoning" if event_type == "STREAM_REASONING" else "stream_token"
+                    token_event = AgentEvent(
+                        evt_type,
+                        {"token": token},
+                        run_id=run_id,
+                        session_id=session_id,
+                    )
+                    self._put_event(run_id, token_event)
+                return
+
             self._record_agent_event(turn, event)
-            event_name = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
-            events.put(AgentEvent(
+            agent_event = AgentEvent(
                 "turn_journal",
-                {"event": event_name},
+                {"event": event_type},
                 run_id=run_id,
                 session_id=session_id,
-            ))
+            )
+            self._put_event(run_id, agent_event)
             if previous is not None:
                 previous(event, from_state, to_state)
 
@@ -287,6 +342,17 @@ class ChatService:
             raise KeyError(f"Unknown run_id: {run_id}")
         while True:
             event = events.get()
+            if event is None:
+                break
+            yield event
+
+    async def astream_events(self, run_id: str):
+        """Async generator that yields events in real-time."""
+        events = self._async_run_events.get(run_id)
+        if events is None:
+            raise KeyError(f"Unknown run_id: {run_id}")
+        while True:
+            event = await events.get()
             if event is None:
                 break
             yield event

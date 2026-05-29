@@ -29,6 +29,17 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
     if s.total_tasks > 0:
         summary_lines.append(f"[bold]预估 CNY/任务:[/bold] CNY {s.total_cost_cny / s.total_tasks:.4f}")
 
+    # Prompt cache statistics
+    if s.total_cache_hit_tokens + s.total_cache_miss_tokens > 0:
+        summary_lines.append("")
+        summary_lines.append(f"[bold]Prompt 缓存命中率:[/bold] {s.cache_hit_rate:.1%}")
+        total_cache = s.total_cache_hit_tokens + s.total_cache_miss_tokens
+        summary_lines.append(
+            f"[bold]缓存命中 Token:[/bold] {s.total_cache_hit_tokens:,} / {total_cache:,}"
+        )
+        if s.cache_saved_cost_cny > 0:
+            summary_lines.append(f"[bold]缓存节省成本:[/bold] CNY {s.cache_saved_cost_cny:.4f}")
+
     console.print(Panel(
         "\n".join(summary_lines),
         title=f"Token 成本统计（最近 {days} 天）",

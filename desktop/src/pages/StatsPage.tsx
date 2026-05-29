@@ -1,0 +1,71 @@
+import { useState, useEffect } from 'react'
+import { BarChart3, Activity } from 'lucide-react'
+import { api } from '../services/api'
+
+export default function StatsPage() {
+  const [stats, setStats] = useState<Record<string, any>>({})
+  const [logs, setLogs] = useState<any[]>([])
+  const [days, setDays] = useState(7)
+
+  useEffect(() => {
+    api.getStats(days).then(setStats).catch(console.error)
+    api.getLogs(days).then(({ traces }) => setLogs(traces)).catch(console.error)
+  }, [days])
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-text-primary">Stats & Logs</h1>
+        <select
+          value={days}
+          onChange={e => setDays(Number(e.target.value))}
+          className="bg-bg-tertiary text-text-primary rounded-md px-2 py-1 text-sm border border-border-default"
+        >
+          <option value={1}>1 day</option>
+          <option value={7}>7 days</option>
+          <option value={30}>30 days</option>
+        </select>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Tasks', value: stats.total_tasks ?? '-', icon: BarChart3 },
+          { label: 'Input Tokens', value: stats.total_input_tokens?.toLocaleString() ?? '-', icon: Activity },
+          { label: 'Output Tokens', value: stats.total_output_tokens?.toLocaleString() ?? '-', icon: Activity },
+          { label: 'Avg Latency', value: stats.avg_latency_ms ? `${Math.round(stats.avg_latency_ms)}ms` : '-', icon: Activity },
+        ].map(({ label, value, icon: Icon }) => (
+          <div key={label} className="bg-bg-secondary rounded-lg p-3 border border-border-default">
+            <div className="flex items-center gap-1 mb-1">
+              <Icon size={14} className="text-accent-secondary" />
+              <span className="text-xs text-text-muted">{label}</span>
+            </div>
+            <p className="text-lg font-semibold text-text-primary">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Logs */}
+      <div className="flex-1 overflow-y-auto">
+        <h2 className="text-sm font-medium text-text-secondary mb-2">Recent Traces</h2>
+        {logs.length === 0 ? (
+          <p className="text-text-muted text-sm">No traces found.</p>
+        ) : (
+          <div className="space-y-1">
+            {logs.slice(0, 30).map((trace, i) => (
+              <div key={i} className="bg-bg-secondary rounded-md px-3 py-2 flex items-center justify-between text-sm border border-border-default">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-accent-secondary">{trace.trace_id?.slice(0, 12)}</span>
+                  <span className="text-text-muted text-xs">{trace.date}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-text-muted">
+                  <span>{trace.span_count} spans</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

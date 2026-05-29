@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -50,7 +51,9 @@ class MemoryManager:
         self.short_term = ShortTermMemory()
         self.long_term = get_long_term_memory() if enable_long_term else None
         self._llm = llm or AgentLLM()
-        self._embed_model = get_embedding_model()
+        self._embed_model = None
+        self._embed_ready = threading.Event()
+        threading.Thread(target=self._preload_embed_model, daemon=True).start()
         self._enable_long_term = enable_long_term
         self._compact_failures: int = 0
         self._circuit_open: bool = False
@@ -81,6 +84,25 @@ class MemoryManager:
     def estimate_stm_tokens(self) -> int:
         """Return current STM token estimate."""
         return self.short_term.estimate_tokens()
+
+    def _preload_embed_model(self):
+        """Background thread: load embedding model without blocking startup."""
+        try:
+            self._embed_model = get_embedding_model()
+        except Exception as exc:
+            logger.warning("Embedding model preload failed: %s", exc)
+        finally:
+            self._embed_ready.set()
+
+    def _get_embed_model(self, timeout: float = 30):
+        """Return embedding model, waiting for background preload if needed."""
+        if self._embed_model is not None:
+            return self._embed_model
+        if not self._embed_ready.wait(timeout=timeout):
+            raise TimeoutError("Embedding model failed to load within timeout")
+        if self._embed_model is None:
+            raise RuntimeError("Embedding model failed to load")
+        return self._embed_model
 
     def _fire_compact(self, event_type: str, **kwargs):
         """Fire compact event callback if set."""
@@ -115,7 +137,7 @@ class MemoryManager:
                 if summary:
                     # Prepend summary for richer context when available
                     query_text = f"{summary[:300]} {question}"
-        query_vec = embedding_to_list(self._embed_model.encode(query_text, normalize_embeddings=True))
+        query_vec = embedding_to_list(self._get_embed_model().encode(query_text, normalize_embeddings=True))
         memories = self.long_term.search(
             query_embedding=query_vec, limit=ltm_limit, min_similarity=ltm_similarity)
 
@@ -385,7 +407,7 @@ class MemoryManager:
         self._compacting = True
         try:
             prompt = SUMMARIZE_PROMPT.format(history=augmented)
-            response = self._llm.think([{"role": "user", "content": prompt}]) or ""
+            response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
             if not response:
                 self._compact_failures += 1
                 if self._compact_failures >= 3:
@@ -456,7 +478,7 @@ class MemoryManager:
             answer = _mask_pii(answer)
         extract_and_save_memories(
             llm=self._llm,
-            embed_model=self._embed_model,
+            embed_model=self._get_embed_model(),
             long_term=self.long_term,
             session_id=self.session_id,
             question=question,

@@ -136,12 +136,12 @@ class RAGEvaluator:
     def _think_timeout(self, llm, messages, timeout=0):
         """LLM call with timeout protection. timeout<=0 means no timeout."""
         if timeout <= 0:
-            return llm.think(messages)
+            return llm.think(messages, silent=True)
         result = [None]
         error = [None]
         def _target():
             try:
-                result[0] = llm.think(messages)
+                result[0] = llm.think(messages, silent=True)
             except Exception as e:
                 error[0] = e
         t = threading.Thread(target=_target, daemon=True)
@@ -497,7 +497,7 @@ class RAGEvaluator:
         for chunk in retrieved:
             prompt = EVAL_PRECISION_PROMPT.format(chunk=chunk, question=sample.question)
             try:
-                result = self._judge_llm.think([{"role": "user", "content": prompt}])
+                result = self._judge_llm.think([{"role": "user", "content": prompt}], silent=True)
             except Exception:
                 result = None
             scores.append(_parse_score(result))

@@ -158,6 +158,10 @@ class TestOpenAIProvider:
         usage_mock.prompt_tokens = 10
         usage_mock.completion_tokens = 5
         usage_mock.total_tokens = 15
+        # Remove cache-related attributes to simulate no cache fields
+        del usage_mock.prompt_cache_hit_tokens
+        del usage_mock.prompt_cache_miss_tokens
+        usage_mock.prompt_tokens_details = None
 
         chunk = MockOpenAIChunk(
             content="hi", finish_reason="stop", usage=usage_mock,
@@ -179,6 +183,96 @@ class TestOpenAIProvider:
             "output_tokens": 5,
             "total_tokens": 15,
         }
+
+    def test_deepseek_cache_hit_tokens(self):
+        """DeepSeek prompt_cache_hit_tokens and prompt_cache_miss_tokens are parsed."""
+        provider = self._make_provider()
+        usage_mock = MagicMock()
+        usage_mock.prompt_tokens = 1000
+        usage_mock.completion_tokens = 50
+        usage_mock.total_tokens = 1050
+        usage_mock.prompt_cache_hit_tokens = 800
+        usage_mock.prompt_cache_miss_tokens = 200
+
+        chunk = MockOpenAIChunk(
+            content="answer", finish_reason="stop", usage=usage_mock,
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            result = provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="deepseek/deepseek-v4-flash",
+                api_key="test-key",
+                base_url="https://api.deepseek.com",
+            )
+
+        assert result.usage["cache_hit_tokens"] == 800
+        assert result.usage["cache_miss_tokens"] == 200
+        assert result.usage["input_tokens"] == 1000
+
+    def test_openai_cached_tokens(self):
+        """OpenAI prompt_tokens_details.cached_tokens is parsed."""
+        provider = self._make_provider()
+        usage_mock = MagicMock()
+        usage_mock.prompt_tokens = 500
+        usage_mock.completion_tokens = 30
+        usage_mock.total_tokens = 530
+        # Simulate OpenAI structure
+        details_mock = MagicMock()
+        details_mock.cached_tokens = 400
+        usage_mock.prompt_tokens_details = details_mock
+        # No DeepSeek fields
+        del usage_mock.prompt_cache_hit_tokens
+        del usage_mock.prompt_cache_miss_tokens
+
+        chunk = MockOpenAIChunk(
+            content="answer", finish_reason="stop", usage=usage_mock,
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            result = provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4",
+                api_key="test-key",
+                base_url="https://api.openai.com",
+            )
+
+        assert result.usage["cache_hit_tokens"] == 400
+
+    def test_no_cache_fields_when_absent(self):
+        """No cache fields when API doesn't return them."""
+        provider = self._make_provider()
+        usage_mock = MagicMock()
+        usage_mock.prompt_tokens = 10
+        usage_mock.completion_tokens = 5
+        usage_mock.total_tokens = 15
+        # Remove cache-related attributes
+        del usage_mock.prompt_cache_hit_tokens
+        del usage_mock.prompt_cache_miss_tokens
+        usage_mock.prompt_tokens_details = None
+
+        chunk = MockOpenAIChunk(
+            content="hi", finish_reason="stop", usage=usage_mock,
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            result = provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4",
+                api_key="test-key",
+                base_url="https://api.openai.com",
+            )
+
+        assert "cache_hit_tokens" not in result.usage
 
     def test_tools_passed_to_client(self):
         provider = self._make_provider()
