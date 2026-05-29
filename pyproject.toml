@@ -49,6 +49,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "perf: performance/benchmark tests (use --benchmark-only to run without functional tests)",
+    "e2e: end-to-end tests requiring real LLM API key (use --run-e2e to enable)",
 ]
 
 [tool.coverage.run]
