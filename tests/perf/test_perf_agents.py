@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 AGENT_STEP_P95_MAX_MS = 200
 AGENT_FULL_RUN_P95_MAX_MS = 1000
@@ -30,14 +30,14 @@ def _noop_tool(msg: str = "") -> str:
     return f"echo: {msg}"
 
 
-# ── ToolExecutor creation ─────────────────────────────────────
+# ── ToolRegistry creation ─────────────────────────────────────
 
 
 def test_tool_executor_creation(benchmark):
     from agentnexus.tools import register_all_tools
 
     def _create():
-        ex = ToolExecutor()
+        ex = ToolRegistry()
         register_all_tools(ex, non_interactive=True)
         return ex
 
@@ -55,7 +55,7 @@ def test_agent_single_step_mock(benchmark, mock_llm_latency, perf_env):
 
     _prepare_llm(mock_llm_latency)
 
-    executor = ToolExecutor()
+    executor = ToolRegistry()
     register_all_tools(executor, non_interactive=True)
 
     agent = ReActAgent(
@@ -130,8 +130,8 @@ class _StatefulMock:
 def test_agent_multi_step(benchmark, perf_env):
     from agentnexus.agents.re_act_agent import ReActAgent
 
-    executor = ToolExecutor()
-    executor.registerTool(
+    executor = ToolRegistry()
+    executor.register_tool(
         "echo", "Echo testing tool", _noop_tool,
         param_schema={
             "type": "object",
@@ -217,8 +217,8 @@ class _MultiStepMock:
 def test_agent_multi_tool_steps(benchmark, perf_env, steps):
     from agentnexus.agents.re_act_agent import ReActAgent
 
-    executor = ToolExecutor()
-    executor.registerTool(
+    executor = ToolRegistry()
+    executor.register_tool(
         "echo", "Echo testing tool", _noop_tool,
         param_schema={
             "type": "object",
@@ -249,12 +249,12 @@ def test_agent_multi_tool_steps(benchmark, perf_env, steps):
     )
 
 
-# ── ToolExecutor invoke overhead ──────────────────────────────
+# ── ToolRegistry invoke overhead ──────────────────────────────
 
 
 def test_tool_executor_invoke_overhead(benchmark):
-    ex = ToolExecutor()
-    ex.registerTool(
+    ex = ToolRegistry()
+    ex.register_tool(
         "echo", "Echo testing tool", _noop_tool,
         param_schema={
             "type": "object",

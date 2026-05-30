@@ -13,7 +13,7 @@ from agentnexus.tools.mcp_adapter import (
     MCPToolManager,
     _sanitize_name,
 )
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:
@@ -113,22 +113,22 @@ class TestAgentAccessControl:
             local_name="mcp_api__admin",
             allowed_agents=["admin_agent"],
         )
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager.register_tools(executor)
-        meta = executor.registry._tools["mcp_api__admin"][0]
+        meta = executor._tools["mcp_api__admin"][0]
         assert meta.allowed_agents == ["admin_agent"]
 
     def test_rbac_enforced_on_invoke(self):
         """Registry must reject calls from unauthorized agents."""
-        executor = ToolExecutor()
-        executor.registerTool(
+        executor = ToolRegistry()
+        executor.register_tool(
             "mcp_api__secret",
             "secret tool",
             lambda: "secret",
             allowed_agents=["admin"],
         )
         with pytest.raises(PermissionError):
-            executor.registry.invoke("mcp_api__secret", {}, caller="unauthorized_agent")
+            executor.invoke("mcp_api__secret", {}, caller="unauthorized_agent")
 
 
 # ── 3. Risk level propagation ────────────────────────────────────
@@ -180,20 +180,20 @@ class TestHITLPropagation:
             local_name="mcp_api__delete",
             require_hitl=True,
         )
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager.register_tools(executor)
-        meta = executor.registry._tools["mcp_api__delete"][0]
+        meta = executor._tools["mcp_api__delete"][0]
         assert meta.require_hitl is True
 
     def test_hitl_blocks_when_no_approver(self):
-        executor = ToolExecutor()
-        executor.registerTool(
+        executor = ToolRegistry()
+        executor.register_tool(
             "mcp_api__delete",
             "delete",
             lambda: "deleted",
             require_hitl=True,
         )
-        result = executor.registry.invoke("mcp_api__delete", {}, caller="react_agent")
+        result = executor.invoke("mcp_api__delete", {}, caller="react_agent")
         assert "blocked" in result
 
 
@@ -207,22 +207,22 @@ class TestRateLimitPropagation:
             local_name="mcp_api__search",
             rate_limit_per_min=3,
         )
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager.register_tools(executor)
-        meta = executor.registry._tools["mcp_api__search"][0]
+        meta = executor._tools["mcp_api__search"][0]
         assert meta.rate_limit_per_min == 3
 
     def test_rate_limit_exceeded_raises(self):
-        executor = ToolExecutor()
-        executor.registerTool(
+        executor = ToolRegistry()
+        executor.register_tool(
             "mcp_api__search",
             "search",
             lambda: "ok",
             rate_limit_per_min=1,
         )
-        executor.registry.invoke("mcp_api__search", {}, caller="react_agent")
+        executor.invoke("mcp_api__search", {}, caller="react_agent")
         with pytest.raises(RuntimeError, match="Rate limit exceeded"):
-            executor.registry.invoke("mcp_api__search", {}, caller="react_agent")
+            executor.invoke("mcp_api__search", {}, caller="react_agent")
 
 
 # ── 6. Timeout propagation ───────────────────────────────────────
@@ -235,9 +235,9 @@ class TestTimeoutPropagation:
             local_name="mcp_api__slow",
             timeout_sec=5,
         )
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager.register_tools(executor)
-        meta = executor.registry._tools["mcp_api__slow"][0]
+        meta = executor._tools["mcp_api__slow"][0]
         assert meta.timeout_sec == 5
 
 

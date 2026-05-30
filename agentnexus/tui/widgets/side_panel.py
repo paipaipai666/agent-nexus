@@ -6,6 +6,8 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Label, Static
 
+from agentnexus.core.text_utils import collapse_and_truncate
+
 
 class SidePanel(Widget):
     """Dense IDE-style runtime summary panel."""
@@ -119,7 +121,7 @@ class SidePanel(Widget):
         lines = []
         for item in self._timeline_items[-8:]:
             kind = str(item.get("kind", "event")).lower()
-            text = _truncate(str(item.get("text", "")), 56)
+            text = collapse_and_truncate(str(item.get("text", "")), 56)
             marker = {
                 "thought": "[#a78bfa]think[/]",
                 "tool_start": "[#fab283]tool[/]",
@@ -136,7 +138,7 @@ class SidePanel(Widget):
             return "[dim]No tools registered[/]"
         lines = []
         for item in self._tool_items[:14]:
-            name = _truncate(str(item.get("name", "tool")), 22)
+            name = collapse_and_truncate(str(item.get("name", "tool")), 22)
             risk = str(item.get("risk", "low")).lower()
             badge = {
                 "low": "[#75c990]low[/]",
@@ -147,7 +149,7 @@ class SidePanel(Widget):
         return "\n".join(lines)
 
     def _render_model(self) -> str:
-        model = _truncate(str(self._model_info.get("model", "unknown")), 30)
+        model = collapse_and_truncate(str(self._model_info.get("model", "unknown")), 30)
         ctx = self._model_info.get("ctx", "unknown")
         strategy = self._model_info.get("strategy", "")
         strategy_line = f"\n[dim]Strategy[/] {strategy}" if strategy else ""
@@ -196,13 +198,13 @@ class SidePanel(Widget):
             runtime_line += "\n[dim]Resources[/] " + ", ".join(resources)
         if auto_reason:
             label = f"Auto {auto_source}" if auto_source else "Auto"
-            runtime_line += f"\n[dim]{label}[/] " + _truncate(auto_reason, 80)
+            runtime_line += f"\n[dim]{label}[/] " + collapse_and_truncate(auto_reason, 80)
         available_line = ""
         if available:
             lines = ["\n[dim]Available[/]"]
             for item in available[:6]:
-                skill_id = _truncate(str(item[0]), 24)
-                name = _truncate(str(item[1]), 26)
+                skill_id = collapse_and_truncate(str(item[0]), 24)
+                name = collapse_and_truncate(str(item[1]), 26)
                 lines.append(f"{skill_id} [dim]{name}[/]")
             if len(available) > 6:
                 lines.append(f"[dim]... {len(available) - 6} more[/]")
@@ -218,7 +220,7 @@ class SidePanel(Widget):
         lines = []
         for item in self._todo_items:
             status = str(item.get("status", "pending"))
-            desc = _truncate(str(item.get("description", "")), 28)
+            desc = collapse_and_truncate(str(item.get("description", "")), 28)
             marker = {
                 "done": "[#7fd88f]✓[/]",
                 "in_progress": "[#fab283]→[/]",
@@ -243,10 +245,3 @@ class SidePanel(Widget):
         yield Static(self._render_skill(), id="skill-card", classes="section-body")
         yield Label("Session", classes="section-title")
         yield Static(self._render_version(), id="version-card", classes="section-body")
-
-
-def _truncate(text: str, limit: int) -> str:
-    clean = " ".join((text or "").split())
-    if len(clean) <= limit:
-        return clean
-    return clean[: max(0, limit - 1)] + "…"

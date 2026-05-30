@@ -6,7 +6,7 @@ from agentnexus.core.hooks import HookContext, HookType
 class TestExecuteTool:
     def _make_executor(self, return_value="tool_result"):
         executor = MagicMock()
-        executor.registry.invoke.return_value = return_value
+        executor.invoke.return_value = return_value
         return executor
 
     def _make_hook_ctx(self, *, aborted=False, payload=None):
@@ -68,7 +68,7 @@ class TestExecuteTool:
             caller="agent",
             hitl_approver=lambda s: True,
         )
-        executor.registry.invoke.assert_not_called()
+        executor.invoke.assert_not_called()
         assert "[PERMISSION_DENIED]" in result
         assert "not allowed" in result
 
@@ -98,7 +98,7 @@ class TestExecuteTool:
         hook_ctx = self._make_hook_ctx(payload={"name": "my_tool", "params": {}})
         mock_get_hook.return_value.fire.return_value = hook_ctx
         executor = self._make_executor()
-        executor.registry.invoke.side_effect = ValueError("bad input")
+        executor.invoke.side_effect = ValueError("bad input")
 
         result = execute_tool(
             tool_executor=executor,
@@ -126,7 +126,7 @@ class TestExecuteTool:
             caller="agent",
             hitl_approver=lambda s: True,
         )
-        call_kwargs = executor.registry.invoke.call_args.kwargs
+        call_kwargs = executor.invoke.call_args.kwargs
         assert call_kwargs["params"]["timeout"] == 999
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")
@@ -156,7 +156,7 @@ class TestExecuteTool:
         mock_mgr = mock_get_hook.return_value
         mock_mgr.fire.return_value = hook_ctx
         executor = self._make_executor()
-        executor.registry.invoke.side_effect = RuntimeError("boom")
+        executor.invoke.side_effect = RuntimeError("boom")
 
         execute_tool(
             tool_executor=executor,

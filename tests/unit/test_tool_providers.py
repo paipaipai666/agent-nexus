@@ -4,7 +4,7 @@ from agentnexus.tools.providers import (
     default_tool_providers,
     register_tool_providers,
 )
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def test_default_providers_expose_specs():
@@ -23,11 +23,11 @@ def test_default_providers_expose_specs():
 
 
 def test_provider_registration_respects_include_tools():
-    executor = ToolExecutor()
+    executor = ToolRegistry()
     registered = register_tool_providers(
         executor,
         context=ToolProviderContext(include_tools={"file_read", "kb_search"}, enable_subagent=False),
     )
     assert set(registered) == {"file_read", "kb_search"}
-    assert set(executor.registry.list_tools()) == {"file_read", "kb_search"}
+    assert set(executor.list_tools()) == {"file_read", "kb_search"}
 

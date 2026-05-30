@@ -26,7 +26,7 @@ from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_session_profile
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
@@ -44,7 +44,7 @@ class ReActAgent:
     The run() method now delegates to a StateMachine with per-transition handlers.
     """
 
-    def __init__(self, llm_client: AgentLLM, tool_executor: ToolExecutor,
+    def __init__(self, llm_client: AgentLLM, tool_executor: ToolRegistry,
                  max_steps: int | None = None,
                  output=None, confirm_fn=None, async_confirm=None,
                  conversation_mode: bool = False,
@@ -211,8 +211,8 @@ class ReActAgent:
             memory_manager.append("user", run_state.question)
 
         tool_policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
-        tool_state.tools = self.tool_executor.registry.to_openai_tools(self.agent_id, tool_policy=tool_policy)
-        tool_state.tools_desc = self.tool_executor.getAvailableTools(self.agent_id, tool_policy=tool_policy)
+        tool_state.tools = self.tool_executor.to_openai_tools(self.agent_id, tool_policy=tool_policy)
+        tool_state.tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=tool_policy)
 
         if self.conversation_mode and memory_manager:
             memory_state.conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
@@ -229,7 +229,7 @@ class ReActAgent:
             def rebuild():
                 profile = self._compiled_session_profile
                 policy = profile.tool_policy if profile else None
-                new_tools_desc = self.tool_executor.getAvailableTools(self.agent_id, tool_policy=policy)
+                new_tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=policy)
                 new_conv = ""
                 if self.conversation_mode:
                     new_conv = self._build_conversation_context(memory_manager, per_msg_limit=800)

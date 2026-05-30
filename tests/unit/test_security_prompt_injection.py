@@ -7,12 +7,11 @@ from unittest.mock import MagicMock, patch
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.llm import AgentLLM
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
-from agentnexus.tools.tool_executor import ToolExecutor
 
 
-def _make_executor(registry: ToolRegistry) -> ToolExecutor:
-    """Helper: build ToolExecutor with tools from the given registry."""
-    executor = ToolExecutor()
+def _make_executor(registry: ToolRegistry) -> ToolRegistry:
+    """Helper: build ToolRegistry with tools from the given registry."""
+    executor = ToolRegistry()
     executor.registry = registry
     return executor
 

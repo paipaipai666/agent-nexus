@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.runtime import WorkflowRunState, WorkflowRuntime
 from agentnexus.skills.workflow import Workflow
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _profile(steps, tool_policy=None):
@@ -70,14 +70,14 @@ def test_start_advance_render_context_state_machine():
 
 
 def test_retrieve_uses_visible_kb_search_tool():
-    executor = ToolExecutor()
+    executor = ToolRegistry()
     seen = {}
 
     def kb_search(**kwargs):
         seen.update(kwargs)
         return "retrieved docs"
 
-    executor.registerTool("kb_search", "search kb", kb_search, risk_level="low")
+    executor.register_tool("kb_search", "search kb", kb_search, risk_level="low")
     profile = _profile([{"type": "retrieve", "id": "docs", "prompt": "Find {target}."}])
 
     result = WorkflowRuntime().prepare("question", profile, tool_executor=executor)
@@ -104,14 +104,14 @@ def test_retrieve_falls_back_to_memory_manager():
 
 
 def test_tool_call_invokes_visible_tool_with_formatted_arguments():
-    executor = ToolExecutor()
+    executor = ToolRegistry()
     seen = {}
 
     def echo(message):
         seen["message"] = message
         return "ok"
 
-    executor.registerTool(
+    executor.register_tool(
         "echo",
         "echo",
         echo,
@@ -129,8 +129,8 @@ def test_tool_call_invokes_visible_tool_with_formatted_arguments():
 
 
 def test_tool_call_denied_by_policy_records_error_event():
-    executor = ToolExecutor()
-    executor.registerTool("shell_exec", "shell", lambda command: "ok", risk_level="high")
+    executor = ToolRegistry()
+    executor.register_tool("shell_exec", "shell", lambda command: "ok", risk_level="high")
     profile = _profile([
         {"type": "tool_call", "id": "shell", "tool": "shell_exec", "arguments": {"command": "pwd"}}
     ], tool_policy={"allow": ["shell_exec"], "max_risk": "low"})

@@ -6,8 +6,8 @@ from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.prompts import load_prompt
 from agentnexus.tools import register_all_tools
 from agentnexus.tools.confirm_bridge import ConfirmBridge
+from agentnexus.tools.registry import ToolRegistry
 from agentnexus.tools.subagent import make_subagent_run
-from agentnexus.tools.tool_executor import ToolExecutor
 
 
 class FakeMCPManager:
@@ -17,7 +17,7 @@ class FakeMCPManager:
     def register_tools(self, executor, include_tools=None):
         if include_tools is not None and "mcp_demo__echo" not in include_tools:
             return []
-        executor.registerTool(
+        executor.register_tool(
             "mcp_demo__echo",
             "[MCP:demo] echo",
             lambda message: message,
@@ -37,8 +37,8 @@ class FakeMCPManager:
 
 class TestAgentIdentityAndToolFiltering:
     def test_to_openai_tools_filters_by_agent(self):
-        te = ToolExecutor()
-        te.registerTool("restricted", "desc", lambda: 1, allowed_agents=["parent_agent"])
+        te = ToolRegistry()
+        te.register_tool("restricted", "desc", lambda: 1, allowed_agents=["parent_agent"])
 
         parent_tools = te.registry.to_openai_tools("parent_agent")
         child_tools = te.registry.to_openai_tools("child_agent")
@@ -48,7 +48,7 @@ class TestAgentIdentityAndToolFiltering:
 
     def test_execute_tool_uses_agent_id_as_caller(self, monkeypatch):
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         captured = {}
 
         def fake_invoke(name: str, params: dict, caller: str = "unknown", hitl_approver=None, tool_policy=None):
@@ -66,12 +66,12 @@ class TestAgentIdentityAndToolFiltering:
 
 class TestSubagentRegistration:
     def test_register_all_tools_can_register_subagent_tool(self):
-        te = ToolExecutor()
+        te = ToolRegistry()
         register_all_tools(te, non_interactive=True, llm_client=MagicMock(), include_tools={"subagent_run"})
-        assert te.getTool("subagent_run") is not None
+        assert te.get_tool("subagent_run") is not None
 
     def test_register_all_tools_can_disable_subagent_tool(self):
-        te = ToolExecutor()
+        te = ToolRegistry()
         register_all_tools(
             te,
             non_interactive=True,
@@ -79,7 +79,7 @@ class TestSubagentRegistration:
             include_tools={"subagent_run"},
             enable_subagent=False,
         )
-        assert te.getTool("subagent_run") is None
+        assert te.get_tool("subagent_run") is None
 
 
 class TestSubagentPromptGuidance:
@@ -98,7 +98,7 @@ class TestSubagentRun:
 
         def fake_run(self, question, memory_manager=None):
             captured["agent_id"] = self.agent_id
-            captured["tools"] = set(self.tool_executor.registry.list_tools())
+            captured["tools"] = set(self.tool_executor.list_tools())
             captured["question"] = question
             return SimpleNamespace(answer="child answer", steps=[object(), object()])
 
@@ -129,7 +129,7 @@ class TestSubagentRun:
 
         def fake_run(self, question, memory_manager=None):
             captured["agent_id"] = self.agent_id
-            captured["tools"] = set(self.tool_executor.registry.list_tools())
+            captured["tools"] = set(self.tool_executor.list_tools())
             return SimpleNamespace(answer="explorer answer", steps=[])
 
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
@@ -150,7 +150,7 @@ class TestSubagentRun:
 
         def fake_run(self, question, memory_manager=None):
             captured["agent_id"] = self.agent_id
-            captured["tools"] = set(self.tool_executor.registry.list_tools())
+            captured["tools"] = set(self.tool_executor.list_tools())
             captured["confirm"] = self._confirm
             return SimpleNamespace(answer="executor answer", steps=[])
 
@@ -238,7 +238,7 @@ class TestSubagentRun:
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
 
         def fake_run(self, question, memory_manager=None):
-            captured["tools"] = set(self.tool_executor.registry.list_tools())
+            captured["tools"] = set(self.tool_executor.list_tools())
             return SimpleNamespace(answer="mcp answer", steps=[])
 
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)

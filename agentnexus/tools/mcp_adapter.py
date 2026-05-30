@@ -28,7 +28,7 @@ from agentnexus.tools.mcp_schema import (
     MCPToolDescriptor,
     ServerRuntime,
 )
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 _NAME_SANITIZER = re.compile(r"[^a-zA-Z0-9_]+")
 
@@ -225,9 +225,9 @@ class MCPToolManager:
                 names.append(tool.local_name)
         return names
 
-    def register_tools(self, executor: ToolExecutor, include_tools: set[str] | None = None) -> list[str]:
+    def register_tools(self, executor: ToolRegistry, include_tools: set[str] | None = None) -> list[str]:
         registered = []
-        executor_key = id(executor.registry)
+        executor_key = id(executor)
         for tool in self.tool_descriptors():
             if include_tools is not None and tool.local_name not in include_tools:
                 continue
@@ -236,7 +236,7 @@ class MCPToolManager:
             if self._registered_signatures.get(cache_key) == signature:
                 registered.append(tool.local_name)
                 continue
-            executor.registerTool(
+            executor.register_tool(
                 tool.local_name,
                 tool.description,
                 self._make_tool_callable(tool.local_name),

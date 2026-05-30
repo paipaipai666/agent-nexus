@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_adapter import MCPToolDescriptor, MCPToolManager
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 BUILD_DESCRIPTOR_P95_MAX_MS = 50
 REGISTER_TOOLS_P95_MAX_MS = 50
@@ -137,7 +137,7 @@ def test_mcp_build_descriptor_many(benchmark):
 
 def test_mcp_register_tools_empty(benchmark):
     manager = MCPToolManager([])
-    executor = ToolExecutor()
+    executor = ToolRegistry()
 
     def _run():
         manager.register_tools(executor)
@@ -157,7 +157,7 @@ def test_mcp_register_tools_many(benchmark):
         )
 
     def _run():
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         return manager.register_tools(executor)
 
     registered = benchmark(_run)
@@ -179,7 +179,7 @@ def test_mcp_register_tools_with_filter(benchmark):
     include = {f"mcp_perf__tool_{i}" for i in range(50)}
 
     def _run():
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         return manager.register_tools(executor, include_tools=include)
 
     registered = benchmark(_run)

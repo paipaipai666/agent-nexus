@@ -1,9 +1,9 @@
+from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.skills.runtime import (
     WorkflowRunState,
     WorkflowStepState,
     _format_value,
     _format_with_variables,
-    _summarize,
     _supported_kb_filters,
     _truncate_block,
 )
@@ -86,26 +86,26 @@ class TestFormatWithVariables:
         assert result == "{missing}"
 
 
-class TestSummarize:
+class TestCollapseAndTruncate:
     def test_short_text_unchanged(self):
         text = "Hello world"
-        assert _summarize(text, limit=72) == "Hello world"
+        assert collapse_and_truncate(text, limit=72) == "Hello world"
 
     def test_long_text_truncated(self):
         text = "a" * 80
-        result = _summarize(text, limit=72)
+        result = collapse_and_truncate(text, limit=72)
         assert len(result) == 72
         assert result.endswith("…")
 
     def test_custom_limit(self):
         text = "a" * 50
-        result = _summarize(text, limit=10)
+        result = collapse_and_truncate(text, limit=10)
         assert len(result) == 10
         assert result.endswith("…")
 
     def test_multiline_collapsed(self):
         text = "hello   world\n\nsecond  line"
-        assert _summarize(text) == "hello world second line"
+        assert collapse_and_truncate(text, 72) == "hello world second line"
 
 
 class TestTruncateBlock:

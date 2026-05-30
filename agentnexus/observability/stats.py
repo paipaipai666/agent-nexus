@@ -7,21 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# DeepSeek V3 官方定价（人民币/百万 token）
-_PRICING = {
-    "deepseek-v3":      (1.0, 2.0),
-    "deepseek-v4-flash": (0.6, 1.2),
-    "deepseek-v4-pro":   (1.0, 4.0),
-    "deepseek-r1":       (4.0, 16.0),
-    "qwen-max":          (2.5, 10.0),
-    "gpt-4o":            (17.5, 70.0),
-    "gpt-4o-mini":       (1.0, 4.0),
-}
-
-_MODEL_ALIASES = {
-    "deepseek-chat": "deepseek-v3",
-    "deepseek-reasoner": "deepseek-r1",
-}
+from agentnexus.core.pricing import estimate_cost, resolve_model
 
 
 @dataclass
@@ -46,18 +32,12 @@ class TokenStats:
 
 
 def _cost(input_tokens: int, output_tokens: int, model: str) -> float:
-    model = _MODEL_ALIASES.get(model, model)
-    for key, (in_price, out_price) in _PRICING.items():
-        if key in model.lower():
-            return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
-    return 0.0
+    return estimate_cost(input_tokens, output_tokens, model)
 
 
 def _short_model(model: str) -> str:
-    for alias, full in _MODEL_ALIASES.items():
-        if model == alias:
-            return full
-    return model
+    resolved = resolve_model(model)
+    return resolved if resolved != model else model
 
 
 def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:

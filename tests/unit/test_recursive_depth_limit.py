@@ -6,7 +6,7 @@ and prevent infinite recursion.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _make_llm(response=""):
@@ -35,7 +35,7 @@ class TestRecursiveDepthLimit:
     def test_max_steps_prevents_infinite_loop(self):
         llm = _make_llm("Answer")
         llm.think.side_effect = lambda **kw: (setattr(llm, 'last_tool_calls', []) or "Answer")
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         result = agent.run("Infinite loop question")
@@ -51,8 +51,8 @@ class TestRecursiveDepthLimit:
             return f"Answer {call_count[0]}"
         llm.think.side_effect = mock_think
 
-        te = ToolExecutor()
-        te.registerTool("web_search", "搜索", lambda **kw: "result")
+        te = ToolRegistry()
+        te.register_tool("web_search", "搜索", lambda **kw: "result")
         agent = ReActAgent(llm, te, max_steps=5)
 
         result = agent.run("Complex question")
@@ -64,7 +64,7 @@ class TestRecursiveDepthLimit:
         llm.last_error = ""
         llm.think.side_effect = lambda **kw: (setattr(llm, 'last_tool_calls', []) or "Direct answer")
 
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=2)
 
         result = agent.run("Test")

@@ -50,7 +50,7 @@ def execute_tool(
     try:
         if cancel_checker is not None and cancel_checker():
             raise RuntimeError("cancelled")
-        result = tool_executor.registry.invoke(
+        result = tool_executor.invoke(
             name=name,
             params=arguments,
             caller=caller,

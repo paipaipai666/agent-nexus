@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from agentnexus.core.text_utils import collapse_and_truncate
+
 TurnStatus = Literal["running", "finished", "failed", "interrupted", "empty_answer"]
 
 
@@ -138,7 +140,7 @@ class TurnRuntime:
             f"原始请求: {self.question}",
         ]
         if detail and detail != reason:
-            lines.append(f"详情: {_plain_summary(detail, 500)}")
+            lines.append(f"详情: {collapse_and_truncate(detail, 500)}")
         if self._journal:
             lines.append("中断前已记录的活动:")
             for item in self._journal[-20:]:
@@ -146,10 +148,3 @@ class TurnRuntime:
         else:
             lines.append("中断前没有记录到已完成的 Agent 活动。")
         return "\n".join(lines)
-
-
-def _plain_summary(text: str, limit: int) -> str:
-    clean = " ".join(str(text or "").split())
-    if len(clean) <= limit:
-        return clean
-    return clean[: max(0, limit - 1)] + "…"

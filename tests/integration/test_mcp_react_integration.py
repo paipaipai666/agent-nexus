@@ -1,4 +1,4 @@
-"""Integration tests: MCP tools registered on ToolExecutor, called through ReActAgent."""
+"""Integration tests: MCP tools registered on ToolRegistry, called through ReActAgent."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.mcp_adapter import MCPToolDescriptor
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:
@@ -42,12 +42,12 @@ class FakeMCPManager:
     def list_tool_names(self) -> list[str]:
         return list(self._tool_descriptors.keys())
 
-    def register_tools(self, executor: ToolExecutor, include_tools: set[str] | None = None) -> list[str]:
+    def register_tools(self, executor: ToolRegistry, include_tools: set[str] | None = None) -> list[str]:
         registered = []
         for desc in self._tool_descriptors.values():
             if include_tools is not None and desc.local_name not in include_tools:
                 continue
-            executor.registerTool(
+            executor.register_tool(
                 desc.local_name, desc.description,
                 self._make_callable(desc.local_name),
                 param_schema=desc.param_schema,
@@ -70,29 +70,29 @@ class FakeMCPManager:
 
 class TestMcpToolRegistrationOnExecutor:
     def test_mcp_tools_listed_as_available(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor())
         manager.add_tool(_make_descriptor(local_name="mcp_demo__search", remote_name="search"))
 
         manager.register_tools(executor)
-        available = executor.getAvailableTools("react_agent")
+        available = executor.get_available_tools("react_agent")
         assert "mcp_demo__echo" in available
         assert "mcp_demo__search" in available
         assert "[MCP:demo]" in available
 
     def test_mcp_tools_filtered_by_include(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"))
         manager.add_tool(_make_descriptor(local_name="mcp_demo__delete"))
 
         manager.register_tools(executor, include_tools={"mcp_demo__echo"})
-        assert executor.getTool("mcp_demo__echo") is not None
-        assert executor.getTool("mcp_demo__delete") is None
+        assert executor.get_tool("mcp_demo__echo") is not None
+        assert executor.get_tool("mcp_demo__delete") is None
 
     def test_mcp_tool_rbac_respected(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(
             local_name="mcp_admin__secret",
@@ -101,10 +101,10 @@ class TestMcpToolRegistrationOnExecutor:
         manager.register_tools(executor)
 
         with pytest.raises(PermissionError):
-            executor.registry.invoke("mcp_admin__secret", {}, caller="react_agent")
+            executor.invoke("mcp_admin__secret", {}, caller="react_agent")
 
     def test_mcp_tool_hitl_blocks_without_approver(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(
             local_name="mcp_risky__delete",
@@ -113,33 +113,33 @@ class TestMcpToolRegistrationOnExecutor:
         ))
         manager.register_tools(executor)
 
-        result = executor.registry.invoke("mcp_risky__delete", {"id": "42"}, caller="react_agent")
+        result = executor.invoke("mcp_risky__delete", {"id": "42"}, caller="react_agent")
         assert "blocked" in result
 
     def test_mcp_tool_audit_logged(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"))
         manager.register_tools(executor)
 
-        executor.registry.invoke("mcp_demo__echo", {"message": "hello"}, caller="react_agent")
-        log = executor.registry.get_audit_log()
+        executor.invoke("mcp_demo__echo", {"message": "hello"}, caller="react_agent")
+        log = executor.get_audit_log()
         assert len(log) == 1
         assert log[0].tool_name == "mcp_demo__echo"
 
     def test_mcp_tool_returns_string_result_through_registry(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"), result="echo: hello")
 
         manager.register_tools(executor)
-        result = executor.registry.invoke("mcp_demo__echo", {"message": "hello"}, caller="react_agent")
+        result = executor.invoke("mcp_demo__echo", {"message": "hello"}, caller="react_agent")
         assert result == "echo: hello"
 
 
 class TestMcpToolViaReActAgent:
     def test_agent_execute_tool_calls_mcp(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"), result="echo: hello")
         manager.register_tools(executor)
@@ -149,7 +149,7 @@ class TestMcpToolViaReActAgent:
         assert result == "echo: hello"
 
     def test_agent_execute_tool_reports_failure(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"), result="ok")
         manager.register_tools(executor)
@@ -159,7 +159,7 @@ class TestMcpToolViaReActAgent:
         assert "错误" in result
 
     def test_agent_execute_tool_hitl_blocked(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(
             local_name="mcp_risky__delete",
@@ -173,7 +173,7 @@ class TestMcpToolViaReActAgent:
         assert "blocked" in result
 
     def test_agent_execute_tool_rbac_blocked(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(
             local_name="mcp_admin__secret",
@@ -187,7 +187,7 @@ class TestMcpToolViaReActAgent:
         assert "not allowed" in result
 
     def test_agent_execute_tool_rate_limited(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(
             local_name="mcp_demo__search",
@@ -203,21 +203,21 @@ class TestMcpToolViaReActAgent:
         assert "Rate limit" in result
 
     def test_mcp_tool_name_in_available_tools(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"))
         manager.register_tools(executor)
 
         agent = ReActAgent(MagicMock(), executor, agent_id="react_agent")
-        tools_str = agent.tool_executor.getAvailableTools("react_agent")
+        tools_str = agent.tool_executor.get_available_tools("react_agent")
         assert "mcp_demo__echo" in tools_str
 
     def test_mcp_tool_listed_in_openai_tools(self):
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         manager = FakeMCPManager()
         manager.add_tool(_make_descriptor(local_name="mcp_demo__echo"))
         manager.register_tools(executor)
 
-        openai_tools = executor.registry.to_openai_tools("react_agent")
+        openai_tools = executor.to_openai_tools("react_agent")
         names = [t["function"]["name"] for t in openai_tools]
         assert "mcp_demo__echo" in names

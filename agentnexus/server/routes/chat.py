@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -221,6 +222,65 @@ def list_sessions():
             "profile": handle.profile,
         })
     return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.get("/sessions/recent")
+def list_recent_sessions(limit: int = 5):
+    from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
+
+    settings = get_settings()
+    workspace = str(Path.cwd())
+    sessions = ConversationVersionManager.find_recent_sessions(
+        settings.memory_db_path, workspace, limit=limit
+    )
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.post("/session/restore")
+def restore_session(req: CreateSessionRequest):
+    from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
+
+    settings = get_settings()
+    workspace = str(Path.cwd())
+
+    # Find the latest session if no session_id provided
+    session_id = req.skill  # Reuse skill field for session_id
+    if not session_id:
+        session_id = ConversationVersionManager.find_latest_session(
+            settings.memory_db_path, workspace
+        )
+    if not session_id:
+        raise HTTPException(status_code=404, detail="No session to restore")
+
+    # Verify session belongs to workspace
+    if not ConversationVersionManager.session_belongs_to_workspace(
+        settings.memory_db_path, session_id, workspace
+    ):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Create a new handle with the existing session_id
+    from agentnexus.server.app import _get_runtime
+    from agentnexus.services.chat import SessionHandle
+
+    runtime = _get_runtime()
+    handle = SessionHandle(id=session_id, skill=None, profile=req.profile)
+    runtime.services.chat._sessions[session_id] = handle
+
+    # Restore memory from version manager
+    version = ConversationVersionManager(
+        session_id, settings.memory_db_path,
+        workspace_path=workspace, profile=req.profile or ""
+    )
+    snapshot = version.get_head_stm()
+    if snapshot:
+        from agentnexus.memory.short_term import ShortTermMemory
+        restored = ShortTermMemory.from_json(snapshot)
+        runtime.memory_manager.short_term._messages = restored._messages
+        runtime.memory_manager.short_term._summary = restored._summary
+
+    return {"session_id": session_id, "restored": True}
 
 
 @router.get("/session/{session_id}/checkpoints")

@@ -11,7 +11,7 @@ def test_runtime_build_assembles_core_services():
 
     with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
          patch("agentnexus.core.llm.AgentLLM", return_value=MagicMock()), \
-         patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=MagicMock()), \
+         patch("agentnexus.tools.tool_executor.ToolRegistry", return_value=MagicMock()), \
          patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=MagicMock()), \
          patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
          patch("agentnexus.tools.register_all_tools"), \
@@ -57,7 +57,7 @@ def test_runtime_build_uses_supplied_session_id_and_restores_stm():
 
     with patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
          patch("agentnexus.core.llm.AgentLLM", return_value=MagicMock()), \
-         patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=MagicMock()), \
+         patch("agentnexus.tools.tool_executor.ToolRegistry", return_value=MagicMock()), \
          patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=MagicMock()), \
          patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
          patch("agentnexus.tools.register_all_tools"), \

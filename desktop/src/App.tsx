@@ -15,6 +15,7 @@ export default function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<ChatPage />} />
+            <Route path="/chat/:sessionId" element={<ChatPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/memory" element={<MemoryPage />} />

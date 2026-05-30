@@ -131,6 +131,52 @@ class TestConversationVersionManager:
         assert msgs[1]["content"] == "hi there"
         assert stm2._summary == "test summary"
 
+    def test_get_head_stm_fallback_when_head_checkpoint_id_null(self, temp_agentnexus_home):
+        """When head_checkpoint_id is null, get_head_stm should fallback to latest checkpoint."""
+        from agentnexus.core.config import get_settings
+
+        settings = get_settings()
+        session_id = "fallback-test"
+
+        # Insert checkpoint directly without setting head_checkpoint_id
+        import sqlite3
+        conn = sqlite3.connect(settings.memory_db_path)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS conversation_checkpoints (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, parent_id TEXT,
+                stm_snapshot TEXT NOT NULL, question TEXT, answer TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS conversation_sessions (
+                session_id TEXT PRIMARY KEY, workspace_path TEXT NOT NULL,
+                profile TEXT, head_checkpoint_id TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+        """)
+
+        stm_json = _make_stm([{"role": "user", "content": "test message"}])
+        conn.execute(
+            "INSERT INTO conversation_checkpoints (id, session_id, stm_snapshot, question, answer) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("cp1", session_id, stm_json, "test question", "test answer"),
+        )
+        # Insert session without head_checkpoint_id
+        conn.execute(
+            "INSERT INTO conversation_sessions (session_id, workspace_path) VALUES (?, ?)",
+            (session_id, "/tmp"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Now use ConversationVersionManager - head_checkpoint_id is null
+        mgr = ConversationVersionManager(session_id, settings.memory_db_path)
+        result = mgr.get_head_stm()
+
+        # Should fallback to the latest checkpoint
+        assert result == stm_json
+        mgr._conn.close()
+
     def test_session_metadata_latest_for_workspace(self, temp_agentnexus_home):
         from agentnexus.core.config import get_settings
 

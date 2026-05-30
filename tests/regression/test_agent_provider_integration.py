@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.capabilities import ModelCapabilities
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _openai_chunk(content=None, finish_reason=None, tool_calls=None):
@@ -67,7 +67,7 @@ class TestAgentWithProvider:
         ])
 
         llm = _make_llm_with_settings("openai/gpt-4", "https://api.openai.com")
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
@@ -103,8 +103,8 @@ class TestAgentWithProvider:
             return iter([_openai_chunk(content=answer_json, finish_reason="stop")])
 
         llm = _make_llm_with_settings("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
-        te = ToolExecutor()
-        te.registerTool("web_search", "搜索", lambda query: f"Results for: {query}")
+        te = ToolRegistry()
+        te.register_tool("web_search", "搜索", lambda query: f"Results for: {query}")
 
         agent = ReActAgent(llm, te, max_steps=3)
 
@@ -144,9 +144,9 @@ class TestAgentWithProvider:
             return iter([_openai_chunk(content=final, finish_reason="stop")])
 
         llm = _make_llm_with_settings("openai/gpt-4", "https://api.openai.com")
-        te = ToolExecutor()
-        te.registerTool("step_one", "Step 1", lambda input: f"R1:{input}")
-        te.registerTool("step_two", "Step 2", lambda input: f"R2:{input}")
+        te = ToolRegistry()
+        te.register_tool("step_one", "Step 1", lambda input: f"R1:{input}")
+        te.register_tool("step_two", "Step 2", lambda input: f"R2:{input}")
 
         agent = ReActAgent(llm, te, max_steps=5)
 
@@ -179,7 +179,7 @@ class TestAgentWithProvider:
         litellm_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
         llm = _make_llm_with_settings("anthropic/claude-4.5", "https://api.anthropic.com")
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         with patch("litellm.completion", return_value=iter([litellm_chunk])):
@@ -210,7 +210,7 @@ class TestAgentProviderEdgeCases:
         ])
 
         llm = _make_llm_with_settings("openai/gpt-4", "https://api.openai.com")
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
@@ -237,7 +237,7 @@ class TestAgentProviderEdgeCases:
         litellm_chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
         llm = _make_llm_with_settings("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
-        te = ToolExecutor()
+        te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         with patch("agentnexus.core.providers.openai_provider.OpenAI", side_effect=ConnectionError("fail")):

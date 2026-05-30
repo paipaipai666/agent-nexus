@@ -103,6 +103,44 @@ class ToolRegistry:
 
     # ── registration ──────────────────────────────────────────────
 
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        func: Callable,
+        param_schema: dict | None = None,
+        allowed_agents: list[str] | None = None,
+        risk_level: str = "low",
+        require_hitl: bool = False,
+        timeout_sec: int = 30,
+        rate_limit_per_min: int = 0,
+        output_schema: dict | None = None,
+        audit_enabled: bool = True,
+        source_type: str = "unknown",
+        source_id: str = "unknown",
+        enabled: bool = True,
+        generation: int = 0,
+    ) -> None:
+        """Register a tool with flat parameters (convenience wrapper)."""
+        risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
+        meta = ToolMeta(
+            name=name,
+            description=description,
+            param_schema=param_schema or {"type": "object", "properties": {}},
+            allowed_agents=allowed_agents or ["*"],
+            risk_level=risk,
+            require_hitl=require_hitl,
+            timeout_sec=timeout_sec,
+            rate_limit_per_min=rate_limit_per_min,
+            output_schema=output_schema,
+            audit_enabled=audit_enabled,
+            source_type=source_type,
+            source_id=source_id,
+            enabled=enabled,
+            generation=generation,
+        )
+        self.register(meta, func)
+
     def register(self, meta: ToolMeta, func: Callable) -> None:
         if meta.name in self._tools:
             existing_meta, _ = self._tools[meta.name]

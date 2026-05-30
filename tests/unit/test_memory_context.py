@@ -127,17 +127,17 @@ class TestReActAgentConversationMode:
 
     def test_conversation_mode_true(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
         assert agent.conversation_mode is True
 
     def test_build_prompt_without_profile_matches_default_template(self):
         from agentnexus.agents.re_act_agent import REACT_PROMPT_TEMPLATE, ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
 
         result = agent._build_prompt("tools", "question", "history", "memory", "conversation")
         expected = REACT_PROMPT_TEMPLATE.format(
@@ -152,9 +152,9 @@ class TestReActAgentConversationMode:
 
     def test_build_prompt_includes_available_skill_context(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         agent.set_available_skill_context("== Available Skills ==\n- default/docx: DOCX - Word docs\n\n")
 
         result = agent._build_prompt("tools", "question", "", "", "")
@@ -165,9 +165,9 @@ class TestReActAgentConversationMode:
     def test_build_prompt_with_profile_injects_guidance(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         profile = Workflow.model_validate({
             "id": "code_review",
             "version": "1",
@@ -196,13 +196,13 @@ class TestReActAgentConversationMode:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import ExecutionContext, ReActEvent, ReActEventType
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
         mock_llm.capabilities.supports_tool_calling = True
-        executor = ToolExecutor()
-        executor.registerTool("file_read", "read", lambda: "ok", risk_level="low")
-        executor.registerTool("shell_exec", "shell", lambda: "ok", risk_level="high")
+        executor = ToolRegistry()
+        executor.register_tool("file_read", "read", lambda: "ok", risk_level="low")
+        executor.register_tool("shell_exec", "shell", lambda: "ok", risk_level="high")
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         profile = Workflow.model_validate({
             "id": "safe",
@@ -226,17 +226,17 @@ class TestReActAgentConversationMode:
     def test_execute_tool_uses_profile_tool_policy_hard_gate(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         called = {"value": False}
 
         def shell():
             called["value"] = True
             return "ok"
 
-        executor.registerTool("shell_exec", "shell", shell, risk_level="high")
+        executor.register_tool("shell_exec", "shell", shell, risk_level="high")
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         profile = Workflow.model_validate({
             "id": "safe",
@@ -257,15 +257,15 @@ class TestReActAgentConversationMode:
     def test_run_with_profile_sends_guidance_to_llm(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
         mock_llm.capabilities.supports_tool_calling = False
         mock_llm.capabilities.supports_json_mode = False
         mock_llm.think.return_value = '{"answer": "done"}'
-        executor = ToolExecutor()
-        executor.registerTool("file_read", "read", lambda: "ok", risk_level="low")
-        executor.registerTool("shell_exec", "shell", lambda: "ok", risk_level="high")
+        executor = ToolRegistry()
+        executor.register_tool("file_read", "read", lambda: "ok", risk_level="low")
+        executor.register_tool("shell_exec", "shell", lambda: "ok", risk_level="high")
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         profile = Workflow.model_validate({
             "id": "code_review",
@@ -291,9 +291,9 @@ class TestReActAgentConversationMode:
     def test_reset_profile_restores_default_prompt(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         profile = Workflow.model_validate({
             "id": "code_review",
             "version": "1",
@@ -317,10 +317,10 @@ class TestReActAgentConversationMode:
     def test_conversation_mode_false_creates_new_local_history(self):
         """In non-conversation mode, history is a local variable re-created each run."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         mock_llm.think.return_value = "done"
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
         # Should not raise — history is now local, not self.history
         result = agent.run("test question")
@@ -328,9 +328,9 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_empty_stm(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         mock_mm = MagicMock()
@@ -340,9 +340,9 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_with_messages(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
@@ -359,9 +359,9 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_truncates_long_content(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
@@ -376,9 +376,9 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_limits_to_six_messages(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
@@ -394,9 +394,9 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_with_summary(self):
         """When STM has a summary, it should be shown prominently."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
@@ -414,9 +414,9 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_no_summary_fallback(self):
         """Without summary, should show recent messages directly."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
@@ -431,7 +431,7 @@ class TestReActAgentConversationMode:
     def test_run_routes_side_channel_events_through_three_arg_observer(self, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         def fake_run_loop(self, initial_event, ctx, handlers):
             ctx.emit(ReActEventType.TOOL_START, name="read", arguments={"file_path": "x.py"})
@@ -441,7 +441,7 @@ class TestReActAgentConversationMode:
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         calls = []
@@ -459,12 +459,12 @@ class TestReActAgentConversationMode:
     def test_classified_tool_emits_thought_event_from_reasoning(self, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = True
         mock_llm.last_reasoning_content = "Need fresh information before answering"
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
@@ -494,11 +494,11 @@ class TestReActAgentConversationMode:
     def test_classified_tool_falls_back_to_json_thought_without_reasoning(self, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
@@ -531,11 +531,11 @@ class TestReActAgentConversationMode:
     def test_classified_tool_emits_tool_done_side_channel_for_ui(self, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         observation = "[1] Tavily result\nURL: https://example.com\nSnippet"
@@ -572,11 +572,11 @@ class TestReActAgentConversationMode:
     def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = True
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         emitted = []
@@ -598,11 +598,11 @@ class TestReActAgentConversationMode:
     def test_classified_answer_emits_answer_thought_after_tool_use(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = True
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         emitted = []
@@ -626,10 +626,10 @@ class TestReActAgentConversationMode:
     def test_fallback_text_extracts_answer_from_malformed_json(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         ctx = ExecutionContext(question="readme")
@@ -647,11 +647,11 @@ class TestReActAgentConversationMode:
     def test_prompt_json_tool_followup_does_not_append_duplicate_thought_prompt(self, monkeypatch):
         from agentnexus.agents.re_act_agent import CallingStrategy, ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "README content")

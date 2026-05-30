@@ -18,7 +18,7 @@ from agentnexus.tools.mcp_adapter import (
     _sanitize_name,
     create_mcp_manager_from_settings,
 )
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 class FakeExitStack:
@@ -373,24 +373,24 @@ class TestMcpToolManager:
             remote_name="search",
             server_name="api",
         )
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         registered = manager.register_tools(executor)
         assert registered == ["mcp_api__search"]
-        assert executor.getTool("mcp_api__search") is not None
+        assert executor.get_tool("mcp_api__search") is not None
 
     def test_register_tools_respects_include_filter(self):
         manager = MCPToolManager([])
         manager._tool_descriptors["tool_a"] = _make_descriptor(local_name="tool_a")
         manager._tool_descriptors["tool_b"] = _make_descriptor(local_name="tool_b")
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         registered = manager.register_tools(executor, include_tools={"tool_a"})
         assert registered == ["tool_a"]
-        assert executor.getTool("tool_a") is not None
-        assert executor.getTool("tool_b") is None
+        assert executor.get_tool("tool_a") is not None
+        assert executor.get_tool("tool_b") is None
 
     def test_register_tools_empty_when_no_descriptors(self):
         manager = MCPToolManager([])
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         assert manager.register_tools(executor) == []
 
     # ── call_tool ────────────────────────────────────────────────

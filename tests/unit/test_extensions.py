@@ -187,8 +187,8 @@ class DemoProvider:
         return ProviderSpec("demo-dynamic", description="Dynamic demo provider")
 
     def register(self, executor, context):
-        before = set(executor.registry.list_tools())
-        executor.registerTool(
+        before = set(executor.list_tools())
+        executor.register_tool(
             "demo_dynamic_echo",
             "echo",
             lambda text="ok": text,
@@ -206,7 +206,7 @@ class DemoProvider:
 
         from agentnexus.extensions import ExtensionManager
         from agentnexus.tools.providers import ToolProviderContext, register_tool_providers
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         settings = SimpleNamespace(
             memory_db_path=str(tmp_path / "memory.db"),
@@ -221,9 +221,9 @@ class DemoProvider:
         providers = manager.loaded_providers()
         assert [provider.metadata().name for provider in providers] == ["demo-dynamic"]
 
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         registered = register_tool_providers(executor, providers, ToolProviderContext())
         assert registered == ["demo_dynamic_echo"]
-        assert executor.registry.invoke("demo_dynamic_echo", {"text": "hello"}) == "hello"
+        assert executor.invoke("demo_dynamic_echo", {"text": "hello"}) == "hello"
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)

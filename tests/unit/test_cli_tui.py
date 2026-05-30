@@ -23,7 +23,7 @@ class TestTuiCommand:
         mock_trace = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
-             patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
+             patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
              patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
              patch("agentnexus.tools.register_all_tools") as mock_reg, \
@@ -68,7 +68,7 @@ class TestTuiCommand:
         mock_tui_app = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
-             patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
+             patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
              patch("agentnexus.tools.register_all_tools"), \
              patch("agentnexus.memory.manager.MemoryManager", return_value=mock_memory), \
@@ -94,7 +94,7 @@ class TestTuiCommand:
         mock_tui_app = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
-             patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
+             patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
              patch("agentnexus.tools.register_all_tools"), \
              patch("agentnexus.memory.manager.MemoryManager", return_value=mock_memory) as mock_mm, \
@@ -128,7 +128,7 @@ class TestTuiCommand:
         mock_tui_app = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
-             patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
+             patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
              patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
              patch("agentnexus.tools.register_all_tools"), \
@@ -156,7 +156,7 @@ class TestTuiCommand:
         mock_manager = MagicMock()
 
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
-             patch("agentnexus.tools.tool_executor.ToolExecutor", return_value=mock_executor), \
+             patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
              patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=mock_manager), \
              patch("agentnexus.tools.register_all_tools"), \

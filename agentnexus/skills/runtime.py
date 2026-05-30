@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from string import Formatter
 from typing import Any
 
+from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.profile import filter_tool_meta
 from agentnexus.skills.workflow import SessionProfile, WorkflowStep
@@ -196,7 +197,7 @@ class WorkflowRuntime:
                     )
                     step_state.context_block = _truncate_block(block)
                     step_state.status = "ok"
-                    summary = _summarize(block or step.type)
+                    summary = collapse_and_truncate(block or step.type, 72)
                     span.output = {
                         "status": step_state.status,
                         "summary": summary,
@@ -313,7 +314,7 @@ class WorkflowRuntime:
                 "view": profile.retrieval_policy.view,
             }
             args.update(_supported_kb_filters(profile.retrieval_policy.filters))
-            result = tool_executor.registry.invoke(
+            result = tool_executor.invoke(
                 "kb_search",
                 args,
                 caller="react_agent",
@@ -348,7 +349,7 @@ class WorkflowRuntime:
 
 
 def _tool_visible(tool_executor: Any, tool_name: str, profile: SessionProfile) -> bool:
-    registry = getattr(tool_executor, "registry", None)
+    registry = tool_executor if hasattr(tool_executor, "list_tools") else None
     if registry is None:
         return False
     entry = getattr(registry, "_tools", {}).get(tool_name)
@@ -395,13 +396,6 @@ def _format_with_variables(text: str, variables: dict[str, Any]) -> str:
         return text.format(**safe_vars)
     except (KeyError, ValueError):
         return text
-
-
-def _summarize(text: str, limit: int = 72) -> str:
-    clean = " ".join(str(text or "").split())
-    if len(clean) <= limit:
-        return clean
-    return clean[: limit - 1] + "…"
 
 
 def _truncate_block(text: str, limit: int = 4000) -> str:

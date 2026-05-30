@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
+from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.services.turn import TurnRecord, TurnRuntime
 
 
@@ -338,7 +339,7 @@ class ChatService:
         elif event_type == "TOOL_START":
             turn.record("tool start", f"{payload.get('name', '')} {payload.get('arguments', {})}")
         elif event_type == "TOOL_DONE":
-            result = _plain_summary(payload.get("result", ""), 300)
+            result = collapse_and_truncate(payload.get("result", ""), 300)
             turn.record("tool done", f"{payload.get('name', '')} -> {result}")
         elif event_type == "THOUGHT_MISSING":
             turn.record("retry", "model thought missing; requested retry")
@@ -410,10 +411,3 @@ class ChatService:
         if turn is not None:
             return turn.record_snapshot
         return self._run_snapshots.get(run_id)
-
-
-def _plain_summary(text: str, limit: int) -> str:
-    clean = " ".join(str(text or "").split())
-    if len(clean) <= limit:
-        return clean
-    return clean[: max(0, limit - 1)] + "…"

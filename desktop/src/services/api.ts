@@ -33,6 +33,17 @@ export const api = {
   getSessions: () =>
     request<{ sessions: Array<{ session_id: string; skill: string | null }> }>('/api/sessions'),
 
+  getRecentSessions: (limit = 5) =>
+    request<{ sessions: Array<{ session_id: string; created_at: string; updated_at: string; last_message_at: string; preview: string; profile: string | null }>; count: number }>(
+      `/api/sessions/recent?limit=${limit}`
+    ),
+
+  restoreSession: (sessionId: string) =>
+    request<{ session_id: string; restored: boolean }>('/api/session/restore', {
+      method: 'POST',
+      body: JSON.stringify({ skill: sessionId }),
+    }),
+
   // Chat
   sendMessage: (sessionId: string, content: string) =>
     request<{ run_id: string; answer: string; status: string }>('/api/chat', {

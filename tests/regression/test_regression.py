@@ -63,12 +63,12 @@ def test_hybrid_retrieval(temp_agentnexus_home):
 
 
 def test_tool_executor():
-    from agentnexus.tools.tool_executor import ToolExecutor
+    from agentnexus.tools.registry import ToolRegistry
 
-    te = ToolExecutor()
-    te.registerTool("Echo", "回显", lambda x: f"ECHO:{x}")
+    te = ToolRegistry()
+    te.register_tool("Echo", "回显", lambda x: f"ECHO:{x}")
 
-    assert te.getTool("Echo")("hello") == "ECHO:hello"
+    assert te.get_tool("Echo")("hello") == "ECHO:hello"
 
 
 def test_cli_entry():

@@ -14,8 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.tools.registry import ToolMeta
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 # ── Thresholds ──────────────────────────────────────────────────────
 
@@ -56,13 +55,13 @@ def _create_tool_meta(name: str, description: str, **kwargs) -> ToolMeta:
     )
 
 
-def _populate_executor(executor: ToolExecutor, count: int) -> dict[str, str]:
+def _populate_executor(executor: ToolRegistry, count: int) -> dict[str, str]:
     """Populate executor with tools and return name->description mapping."""
     tool_descriptions = {}
     for i in range(count):
         name = f"tool_{i:04d}"
         description = f"Tool {i} for testing purposes"
-        executor.registerTool(name, description, _make_handler(name))
+        executor.register_tool(name, description, _make_handler(name))
         tool_descriptions[name] = description
     return tool_descriptions
 
@@ -165,14 +164,14 @@ class TestAgentToolSelectionAccuracy:
     @pytest.mark.parametrize("tool_count", [50, 100, 200])
     def test_accuracy_with_many_tools(self, tool_count: int):
         """Verify agent accuracy with many registered tools."""
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         _populate_executor(executor, tool_count)
 
         mock_llm = MockAgentLLM(accuracy_rate=0.90)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
-        test_cases = list(executor.registry._tools.keys())[:20]
+        test_cases = list(executor._tools.keys())[:20]
 
         for expected_tool in test_cases:
             mock_llm.set_expected_tool(expected_tool)
@@ -204,14 +203,14 @@ class TestAgentToolSelectionAccuracy:
         accuracies = []
 
         for tool_count in [30, 80, 150, 250]:
-            executor = ToolExecutor()
+            executor = ToolRegistry()
             _populate_executor(executor, tool_count)
 
             mock_llm = MockAgentLLM(accuracy_rate=0.90)
-            mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+            mock_llm.set_available_tools(list(executor._tools.keys()))
 
             tracker = AgentToolSelectionTracker()
-            test_cases = list(executor.registry._tools.keys())[:10]
+            test_cases = list(executor._tools.keys())[:10]
 
             for expected_tool in test_cases:
                 mock_llm.set_expected_tool(expected_tool)
@@ -246,14 +245,14 @@ class TestAgentToolSelectionLatency:
 
     def test_latency_with_accuracy_measurement(self):
         """Verify latency remains acceptable during accuracy testing."""
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         _populate_executor(executor, 100)
 
         mock_llm = MockAgentLLM(accuracy_rate=0.90)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
-        test_cases = list(executor.registry._tools.keys())[:30]
+        test_cases = list(executor._tools.keys())[:30]
 
         start = time.perf_counter()
         for expected_tool in test_cases:
@@ -280,13 +279,13 @@ class TestAgentToolSelectionLatency:
         latencies = []
 
         for tool_count in [50, 100, 200]:
-            executor = ToolExecutor()
+            executor = ToolRegistry()
             _populate_executor(executor, tool_count)
 
             mock_llm = MockAgentLLM(accuracy_rate=0.90)
-            mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+            mock_llm.set_available_tools(list(executor._tools.keys()))
 
-            test_cases = list(executor.registry._tools.keys())[:15]
+            test_cases = list(executor._tools.keys())[:15]
 
             start = time.perf_counter()
             for expected_tool in test_cases:
@@ -315,11 +314,11 @@ class TestAgentToolSelectionComplexQueries:
 
     def test_accuracy_with_complex_queries(self):
         """Verify accuracy with complex, realistic queries."""
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         _populate_executor(executor, 80)
 
         mock_llm = MockAgentLLM(accuracy_rate=0.88)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
 
@@ -333,7 +332,7 @@ class TestAgentToolSelectionComplexQueries:
         ]
 
         for query, expected_tool in complex_queries:
-            if expected_tool not in executor.registry._tools:
+            if expected_tool not in executor._tools:
                 continue
 
             mock_llm.set_expected_tool(expected_tool)
@@ -354,11 +353,11 @@ class TestAgentToolSelectionComplexQueries:
 
     def test_accuracy_with_ambiguous_queries(self):
         """Verify accuracy with ambiguous queries that could match multiple tools."""
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         _populate_executor(executor, 60)
 
         mock_llm = MockAgentLLM(accuracy_rate=0.85)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
 
@@ -400,19 +399,19 @@ class TestAgentToolSelectionIntegration:
     """Integration tests with real agent components."""
 
     def test_accuracy_with_real_executor(self):
-        """Verify accuracy with real ToolExecutor operations."""
-        executor = ToolExecutor()
+        """Verify accuracy with real ToolRegistry operations."""
+        executor = ToolRegistry()
         _populate_executor(executor, 100)
 
         # Perform some executor operations
-        executor.registry.unregister("tool_0050")
-        executor.registry.unregister("tool_0100")
+        executor.unregister("tool_0050")
+        executor.unregister("tool_0100")
 
         mock_llm = MockAgentLLM(accuracy_rate=0.90)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
-        remaining_tools = [t for t in executor.registry._tools.keys()
+        remaining_tools = [t for t in executor._tools.keys()
                           if t not in ["tool_0050", "tool_0100"]]
         test_cases = remaining_tools[:15]
 
@@ -435,16 +434,16 @@ class TestAgentToolSelectionIntegration:
 
     def test_accuracy_with_tool_updates(self):
         """Verify accuracy when tools are updated."""
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         _populate_executor(executor, 80)
 
         # Update some tools
         for i in range(0, 80, 10):
             name = f"tool_{i:04d}"
-            executor.registerTool(name, f"Updated tool {i}", _make_handler(name))
+            executor.register_tool(name, f"Updated tool {i}", _make_handler(name))
 
         mock_llm = MockAgentLLM(accuracy_rate=0.90)
-        mock_llm.set_available_tools(list(executor.registry._tools.keys()))
+        mock_llm.set_available_tools(list(executor._tools.keys()))
 
         tracker = AgentToolSelectionTracker()
         test_cases = [f"tool_{i:04d}" for i in range(0, 80, 10)]

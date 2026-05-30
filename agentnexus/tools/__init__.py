@@ -9,11 +9,11 @@ from agentnexus.tools.providers import (
     default_tool_providers,
     register_tool_providers,
 )
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def register_all_tools(
-    executor: ToolExecutor,
+    executor: ToolRegistry,
     non_interactive: bool = False,
     llm_client=None,
     include_tools: set[str] | None = None,
@@ -47,7 +47,7 @@ __all__ = [
     "ProviderSpec",
     "ToolProvider",
     "ToolProviderContext",
-    "ToolExecutor",
+    "ToolRegistry",
     "default_tool_providers",
     "register_all_tools",
     "register_tool_providers",

@@ -53,11 +53,11 @@ class AppRuntime:
         from agentnexus.tools import register_all_tools
         from agentnexus.tools.confirm_bridge import ConfirmBridge
         from agentnexus.tools.mcp_adapter import create_mcp_manager_from_settings
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         settings = get_settings()
         llm = AgentLLM()
-        executor = ToolExecutor()
+        executor = ToolRegistry()
         subagent_confirm = ConfirmBridge()
         mcp_manager = create_mcp_manager_from_settings(settings)
 
@@ -80,7 +80,7 @@ class AppRuntime:
         try:
             from agentnexus.observability.audit_log import _global_audit_log
 
-            executor.registry._audit_log = _global_audit_log
+            executor._audit_log = _global_audit_log
         except Exception:
             pass
 

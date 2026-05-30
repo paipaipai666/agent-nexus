@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import yaml
 
 from agentnexus.capabilities.runtime import CapabilityRuntime
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):
@@ -22,7 +22,7 @@ def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):
     hook = MagicMock()
     runtime = CapabilityRuntime(
         settings=SimpleNamespace(),
-        executor=ToolExecutor(),
+        executor=ToolRegistry(),
         register_tools=hook,
     )
 
@@ -33,14 +33,14 @@ def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):
 
 
 def test_disable_unloads_source_and_persists_generation(temp_agentnexus_home):
-    executor = ToolExecutor()
-    executor.registerTool("hello", "say hello", lambda: "ok", source_type="builtin", source_id="builtin")
+    executor = ToolRegistry()
+    executor.register_tool("hello", "say hello", lambda: "ok", source_type="builtin", source_id="builtin")
     runtime = CapabilityRuntime(settings=SimpleNamespace(), executor=executor)
 
     result = runtime.disable("tools")
 
     assert result["tools"] == "unloaded"
-    assert executor.registry.get_tool("hello") is None
+    assert executor.get_tool("hello") is None
     data = yaml.safe_load((temp_agentnexus_home / "config.yaml").read_text(encoding="utf-8"))
     assert data["capabilities"]["states"]["tools"]["enabled"] is False
 
@@ -50,7 +50,7 @@ def test_enable_skill_updates_named_state(temp_agentnexus_home):
     skill_service.refresh.return_value = []
     runtime = CapabilityRuntime(
         settings=SimpleNamespace(),
-        executor=ToolExecutor(),
+        executor=ToolRegistry(),
         skill_service=skill_service,
     )
 

@@ -17,6 +17,7 @@ from textual.widgets import Input, Label, Static
 from textual.worker import get_current_worker
 
 from agentnexus.core.config import get_settings
+from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.services.chat import ChatService
@@ -959,7 +960,7 @@ class ChatScreen(Screen):
                     else:
                         result = self._mcp_manager.reload_server(server_name)
                     if getattr(self._agent, "tool_executor", None) is not None:
-                        self._agent.tool_executor.registry.unregister_source_prefix("mcp:", source_type="mcp")
+                        self._agent.tool_executor.unregister_source_prefix("mcp:", source_type="mcp")
                         self._mcp_manager.register_tools(self._agent.tool_executor)
                     if hasattr(self._agent, "set_mcp_context"):
                         self._agent.set_mcp_context(self._mcp_manager.auto_context())
@@ -1023,7 +1024,7 @@ class ChatScreen(Screen):
 
     def _refresh_tools_panel(self):
         try:
-            registry = getattr(getattr(self._agent, "tool_executor", None), "registry", None)
+            registry = getattr(self._agent, "tool_executor", None)
             tools = []
             if registry is not None:
                 for meta in registry.list_tools_with_meta():
@@ -1065,8 +1066,8 @@ class ChatScreen(Screen):
         try:
             tools = ", ".join(dict.fromkeys(self._turn_tool_names)) or "no tools"
             thought_part = f"{self._turn_thought_count} thoughts"
-            answer_part = _plain_summary(answer, 32) if answer else "no answer"
-            question_part = _plain_summary(question, 24)
+            answer_part = collapse_and_truncate(answer, 32) if answer else "no answer"
+            question_part = collapse_and_truncate(question, 24)
             self._side_panel.add_timeline_event(
                 "summary",
                 f"{question_part}: {tools}; {thought_part}; {answer_part}",
@@ -1084,7 +1085,7 @@ class ChatScreen(Screen):
             summary = getattr(event, "summary", "")
             if summary:
                 text = f"{text} - {summary}"
-            self._side_panel.add_timeline_event(marker, _plain_summary(text, 80))
+            self._side_panel.add_timeline_event(marker, collapse_and_truncate(text, 80))
         except Exception:
             pass
 
@@ -1122,7 +1123,7 @@ class ChatScreen(Screen):
                     source = snapshot.auto_route_source or "auto"
                     self._side_panel.add_timeline_event(
                         "run",
-                        _plain_summary(
+                        collapse_and_truncate(
                             f"Auto skill ({source}): {snapshot.current} - {snapshot.auto_route_reason}",
                             96,
                         ),
@@ -1538,7 +1539,7 @@ class ChatScreen(Screen):
                 answer = record.answer
                 self._chat_area.add_system(f"[#e06c75]错误: {e}[/]\n[dim]已记录失败摘要。[/]")
             try:
-                self._side_panel.add_timeline_event("error", _plain_summary(str(e), 80))
+                self._side_panel.add_timeline_event("error", collapse_and_truncate(str(e), 80))
             except Exception:
                 pass
             self._record_turn_summary(text, answer)
@@ -1641,13 +1642,6 @@ class ChatScreen(Screen):
                 self._chat_service.mark_processing(True)
                 # Defer to allow the current @work(exclusive=True) worker to finish
                 self.set_timer(0, lambda: self._run_agent(text))
-
-
-def _plain_summary(text: str, limit: int) -> str:
-    clean = " ".join(str(text or "").split())
-    if len(clean) <= limit:
-        return clean
-    return clean[: max(0, limit - 1)] + "…"
 
 
 def _format_ctx_window(tokens) -> str:

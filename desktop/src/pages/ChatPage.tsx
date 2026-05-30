@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useParams } from 'react-router-dom'
 import { Send, Square, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +16,7 @@ interface Message {
 }
 
 export default function ChatPage() {
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -33,12 +35,42 @@ export default function ChatPage() {
 
   // Initialize session
   useEffect(() => {
-    api.createSession().then(({ session_id }) => {
-      setSessionId(session_id)
-      agentWs.connect(session_id)
-    })
+    if (routeSessionId) {
+      // Restore existing session
+      api.restoreSession(routeSessionId).then(({ session_id }) => {
+        setSessionId(session_id)
+        agentWs.connect(session_id)
+        // Load history messages from STM
+        api.listShortMemories().then(({ messages }) => {
+          if (messages && messages.length > 0) {
+            const historyMessages: Message[] = messages
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .map((m, idx) => ({
+                id: `history-${idx}`,
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+                timestamp: new Date(),
+              }))
+            setMessages(historyMessages)
+          }
+        }).catch(err => console.error('Failed to load history:', err))
+      }).catch((error) => {
+        console.error('Failed to restore session:', error)
+        // Fallback to creating new session
+        api.createSession().then(({ session_id }) => {
+          setSessionId(session_id)
+          agentWs.connect(session_id)
+        })
+      })
+    } else {
+      // Create new session
+      api.createSession().then(({ session_id }) => {
+        setSessionId(session_id)
+        agentWs.connect(session_id)
+      })
+    }
     return () => agentWs.disconnect()
-  }, [])
+  }, [routeSessionId])
 
   // Listen for WS events
   useEffect(() => {

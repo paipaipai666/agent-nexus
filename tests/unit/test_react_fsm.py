@@ -2,7 +2,7 @@
 
 Uses StateMachine directly with minimal transfer tables that mirror
 key ReActAgent transitions.  Handlers are defined inline to simulate
-real ReActAgent behaviour without AgentLLM / ToolExecutor dependencies.
+real ReActAgent behaviour without AgentLLM / ToolRegistry dependencies.
 
 IMPORTANT: run_loop always resets state to INIT and processes the initial
 event through the transition table.  Tests that need to start from a

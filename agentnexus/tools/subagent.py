@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.tracer import trace_manager
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 _SAFE_SUBAGENT_TOOLS = {
     "grep_search",
@@ -103,7 +103,7 @@ def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None
 
 
 
-def _register_child_tools(executor: ToolExecutor, parent_llm: AgentLLM | None,
+def _register_child_tools(executor: ToolRegistry, parent_llm: AgentLLM | None,
                           non_interactive: bool, include_tools: list[str],
                           subagent_confirm: Callable[[str], bool] | None = None,
                           mcp_manager: "MCPToolManager | None" = None) -> None:
@@ -149,7 +149,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
     })
 
     child_llm = _clone_llm(parent_llm)
-    child_executor = ToolExecutor()
+    child_executor = ToolRegistry()
     _register_child_tools(
         child_executor,
         parent_llm,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 @dataclass(frozen=True)
@@ -41,12 +41,12 @@ class ToolProviderContext:
     def want(self, name: str) -> bool:
         return self.include_tools is None or name in self.include_tools
 
-    def mark_registered(self, executor: ToolExecutor, before: set[str]) -> None:
-        after = set(executor.registry.list_tools())
+    def mark_registered(self, executor: ToolRegistry, before: set[str]) -> None:
+        after = set(executor.list_tools())
         added = sorted(after - before)
         source_id = self.source_id or self.source_type
         for name in added:
-            entry = executor.registry._tools.get(name)
+            entry = executor._tools.get(name)
             if entry is None:
                 continue
             meta, func = entry
@@ -55,7 +55,7 @@ class ToolProviderContext:
             meta.source_type = self.source_type
             meta.source_id = source_id
             meta.generation = self.generation
-            executor.registry._tools[name] = (meta, func)
+            executor._tools[name] = (meta, func)
         self.registered_tools.extend(added)
 
     def for_provider(self, provider_name: str, source_type: str | None = None, generation: int | None = None):
@@ -77,12 +77,12 @@ class ToolProviderContext:
 
 
 class ToolProvider(Protocol):
-    """Register one cohesive group of tools on a ToolExecutor."""
+    """Register one cohesive group of tools on a ToolRegistry."""
 
     def metadata(self) -> ProviderSpec:
         ...
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         ...
 
 
@@ -90,13 +90,13 @@ class MemoryToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("memory", description="Long-term memory search and save tools.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.memory_save import memory_save
         from agentnexus.tools.memory_search import memory_search
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
         if context.want("memory_search"):
-            executor.registerTool(
+            executor.register_tool(
                 "memory_search",
                 "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词",
                 memory_search,
@@ -110,7 +110,7 @@ class MemoryToolProvider:
             )
 
         if context.want("memory_save"):
-            executor.registerTool(
+            executor.register_tool(
                 "memory_save",
                 "主动保存重要信息到长期记忆。当用户明确分享个人信息(姓名/偏好/背景)或发现重要事实时使用",
                 memory_save,
@@ -133,14 +133,14 @@ class SearchToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("search", description="Project grep, web search, and knowledge-base search tools.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.grep_search import grep_search
         from agentnexus.tools.kb_search import kb_search
         from agentnexus.tools.web_search import web_search
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
         if context.want("grep_search"):
-            executor.registerTool(
+            executor.register_tool(
                 "grep_search",
                 "使用 ripgrep 在项目中搜索文本。默认字面量匹配（非正则），"
                 "直接搜函数名、类名、导入、错误消息等即可，无需转义。"
@@ -178,7 +178,7 @@ class SearchToolProvider:
             )
 
         if context.want("web_search"):
-            executor.registerTool(
+            executor.register_tool(
                 "web_search",
                 "搜索互联网获取实时信息。参数: query(搜索词,必填), "
                 "max_results(返回条数,1-20,默认5), "
@@ -225,7 +225,7 @@ class SearchToolProvider:
             )
 
         if context.want("kb_search"):
-            executor.registerTool(
+            executor.register_tool(
                 "kb_search",
                 "检索结构化知识库，返回带来源与分数的结果。"
                 "参数: query(搜索词,必填), "
@@ -280,12 +280,12 @@ class FilesystemToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("filesystem", description="Read and write local files.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.file_ops import file_list, file_read, file_write
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
         if context.want("file_read"):
-            executor.registerTool(
+            executor.register_tool(
                 "file_read",
                 "读取文件内容，返回带行号的内容以及当前 version 指纹。参数: path(文件路径,必填), "
                 "offset(起始行号,0起,默认0), limit(返回行数,默认最多1000)",
@@ -304,7 +304,7 @@ class FilesystemToolProvider:
             )
 
         if context.want("file_list"):
-            executor.registerTool(
+            executor.register_tool(
                 "file_list",
                 "列出目录内容。参数: path(目录路径,默认当前目录), pattern(glob过滤,如 '*.py')",
                 file_list,
@@ -325,7 +325,7 @@ class FilesystemToolProvider:
             )
 
         if context.want("file_write"):
-            executor.registerTool(
+            executor.register_tool(
                 "file_write",
                 "写入/创建文件。参数: path(文件路径), content(文件内容), "
                 "mode(create=创建新文件/overwrite=覆盖已有文件/append=追加), "
@@ -408,14 +408,14 @@ class ExecutionToolProvider:
             exposed_agents=("react_agent", "subagent_executor"),
         )
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.code_executor import python_execute
         from agentnexus.tools.shell import get_os_info, shell_exec
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
         os_info = get_os_info()
         if context.want("python_execute"):
-            executor.registerTool(
+            executor.register_tool(
                 "python_execute",
                 "在安全沙箱中执行Python代码，参数为代码字符串",
                 python_execute,
@@ -431,7 +431,7 @@ class ExecutionToolProvider:
             )
 
         if context.want("shell_exec"):
-            executor.registerTool(
+            executor.register_tool(
                 "shell_exec",
                 f"执行控制台命令（当前系统: {os_info}）。参数: command(命令字符串,必填), "
                 "cwd(工作目录,可选,默认项目根目录), timeout(超时秒数,默认30)。"
@@ -457,10 +457,10 @@ class McpBridgeToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("mcp-bridge", description="Bridge tools discovered from configured MCP servers.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         if context.mcp_manager is None:
             return
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
         context.mcp_manager.register_tools(executor, include_tools=context.include_tools)
         context.mark_registered(executor, before)
 
@@ -469,14 +469,14 @@ class SubagentToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("subagent", description="Delegation tool for controlled child ReAct agents.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         if not context.enable_subagent or not context.want("subagent_run"):
             return
 
         from agentnexus.tools.subagent import make_subagent_run
 
-        before = set(executor.registry.list_tools())
-        executor.registerTool(
+        before = set(executor.list_tools())
+        executor.register_tool(
             "subagent_run",
             (
                 "将一个明确、可独立完成、输入充分的子任务委派给子代理执行。默认是 Explorer"
@@ -517,19 +517,19 @@ class TodoToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("todo", description="Task list management for complex task decomposition.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         todo_list = context.todo_list
         if todo_list is None:
             return
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
 
         if context.want("todo_add"):
             def _todo_add(description: str) -> str:
                 item = todo_list.add(description)
                 return f"Added todo #{item.id}: {item.description}"
 
-            executor.registerTool(
+            executor.register_tool(
                 "todo_add",
                 "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。",
                 _todo_add,
@@ -546,7 +546,7 @@ class TodoToolProvider:
                 item = todo_list.update(item_id, status)
                 return f"Updated todo #{item.id}: {item.status}"
 
-            executor.registerTool(
+            executor.register_tool(
                 "todo_update",
                 "更新任务状态。开始执行时标记 in_progress，完成后立即标记 done。不要等到所有任务都完成才更新。",
                 _todo_update,
@@ -572,7 +572,7 @@ class TodoToolProvider:
                     lines.append(f"#{item.id} {marker} {item.description}")
                 return "\n".join(lines)
 
-            executor.registerTool(
+            executor.register_tool(
                 "todo_list",
                 "查看当前任务清单的完整状态。",
                 _todo_list,
@@ -589,17 +589,17 @@ class CodeGraphToolProvider:
     def metadata(self) -> ProviderSpec:
         return ProviderSpec("codegraph", description="Code knowledge graph search and query tools.")
 
-    def register(self, executor: ToolExecutor, context: ToolProviderContext) -> None:
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.codegraph.queries import (
             codegraph_context,
             codegraph_relations,
             codegraph_search,
         )
 
-        before = set(executor.registry.list_tools())
+        before = set(executor.list_tools())
 
         if context.want("codegraph_search"):
-            executor.registerTool(
+            executor.register_tool(
                 "codegraph_search",
                 "语义搜索代码实体。参数: query(搜索词,必填), kind(节点类型过滤,可选), limit(返回条数,默认10)",
                 codegraph_search,
@@ -626,7 +626,7 @@ class CodeGraphToolProvider:
             )
 
         if context.want("codegraph_relations"):
-            executor.registerTool(
+            executor.register_tool(
                 "codegraph_relations",
                 "查询代码实体的关系。参数: symbol(实体名,必填), relation(关系类型:callers/callees/inherits/imports)",
                 codegraph_relations,
@@ -647,7 +647,7 @@ class CodeGraphToolProvider:
             )
 
         if context.want("codegraph_context"):
-            executor.registerTool(
+            executor.register_tool(
                 "codegraph_context",
                 "获取代码实体的完整上下文。参数: symbol(实体名,必填)",
                 codegraph_context,
@@ -681,7 +681,7 @@ def default_tool_providers() -> list[ToolProvider]:
 
 
 def register_tool_providers(
-    executor: ToolExecutor,
+    executor: ToolRegistry,
     providers: list[ToolProvider] | None = None,
     context: ToolProviderContext | None = None,
 ) -> list[str]:

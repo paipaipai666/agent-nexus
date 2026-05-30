@@ -19,39 +19,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agentnexus.core.pricing import estimate_cost
 from agentnexus.evaluation.utils import find_trace, load_trace_spans
-
-# Pricing (CNY per million tokens) — mirrors observability/stats.py
-_PRICING: dict[str, tuple[float, float]] = {
-    "deepseek-v3": (1.0, 2.0),
-    "deepseek-v4-flash": (0.6, 1.2),
-    "deepseek-v4-pro": (1.0, 4.0),
-    "deepseek-r1": (4.0, 16.0),
-    "qwen-max": (2.5, 10.0),
-    "gpt-4o": (17.5, 70.0),
-    "gpt-4o-mini": (1.0, 4.0),
-}
-
-_MODEL_ALIASES: dict[str, str] = {
-    "deepseek-chat": "deepseek-v3",
-    "deepseek-reasoner": "deepseek-r1",
-}
-
-
-def _resolve_model(m: str) -> str:
-    m = _MODEL_ALIASES.get(m, m)
-    for key in _PRICING:
-        if key in m.lower():
-            return key
-    return m
 
 
 def _cost(input_tokens: int, output_tokens: int, model: str) -> float:
-    key = _resolve_model(model)
-    prices = _PRICING.get(key)
-    if not prices:
-        return 0.0
-    return (input_tokens * prices[0] + output_tokens * prices[1]) / 1_000_000
+    return estimate_cost(input_tokens, output_tokens, model)
 
 
 # ── Per-trace record ─────────────────────────────────────────────

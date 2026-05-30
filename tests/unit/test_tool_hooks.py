@@ -17,7 +17,7 @@ def clean_hooks():
 class TestToolHooks:
     def _make_executor(self):
         executor = MagicMock()
-        executor.registry.invoke.return_value = "tool_result"
+        executor.invoke.return_value = "tool_result"
         return executor
 
     def test_before_tool_call_fires(self):
@@ -57,8 +57,8 @@ class TestToolHooks:
             caller="a",
             hitl_approver=lambda s: True,
         )
-        executor.registry.invoke.assert_called_once()
-        call_kwargs = executor.registry.invoke.call_args
+        executor.invoke.assert_called_once()
+        call_kwargs = executor.invoke.call_args
         assert call_kwargs.kwargs["params"]["timeout"] == 999
 
     def test_before_tool_call_abort_blocks_execution(self):
@@ -74,7 +74,7 @@ class TestToolHooks:
             caller="a",
             hitl_approver=lambda s: True,
         )
-        executor.registry.invoke.assert_not_called()
+        executor.invoke.assert_not_called()
         assert "BLOCKED" in result
 
     def test_after_tool_call_fires(self):
@@ -105,7 +105,7 @@ class TestToolHooks:
             HookType.ON_TOOL_ERROR, lambda ctx: fired.append(ctx.payload)
         )
         executor = self._make_executor()
-        executor.registry.invoke.side_effect = RuntimeError("boom")
+        executor.invoke.side_effect = RuntimeError("boom")
         result = execute_tool(
             tool_executor=executor,
             name="t",

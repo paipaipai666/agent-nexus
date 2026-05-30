@@ -155,6 +155,63 @@ class ConversationVersionManager:
             conn.close()
 
     @classmethod
+    def find_recent_sessions(
+        cls, db_path: str, workspace_path: str, limit: int = 5
+    ) -> list[dict]:
+        """Return recent sessions for a workspace with preview info."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return []
+            normalized = cls.normalize_workspace_path(workspace_path)
+            rows = conn.execute(
+                "SELECT s.session_id, s.created_at, s.updated_at, s.profile "
+                "FROM conversation_sessions s "
+                "WHERE s.workspace_path = ? "
+                "AND EXISTS ("
+                "  SELECT 1 FROM conversation_checkpoints c "
+                "  WHERE c.session_id = s.session_id"
+                ") "
+                "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
+                "LIMIT ?",
+                (normalized, limit),
+            ).fetchall()
+
+            sessions = []
+            for row in rows:
+                session_id = row["session_id"]
+                last_cp = conn.execute(
+                    "SELECT question, answer, created_at "
+                    "FROM conversation_checkpoints "
+                    "WHERE session_id = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+
+                preview = ""
+                last_message_at = row["updated_at"]
+                if last_cp:
+                    preview = last_cp["question"] or last_cp["answer"] or ""
+                    if len(preview) > 100:
+                        preview = preview[:100] + "..."
+                    last_message_at = last_cp["created_at"] or row["updated_at"]
+
+                sessions.append({
+                    "session_id": session_id,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "last_message_at": last_message_at,
+                    "preview": preview,
+                    "profile": row["profile"],
+                })
+            return sessions
+        finally:
+            conn.close()
+
+    @classmethod
     def session_belongs_to_workspace(cls, db_path: str, session_id: str, workspace_path: str) -> bool:
         """Return True only when a session is registered for the given workspace."""
         conn = sqlite3.connect(db_path)
@@ -234,7 +291,13 @@ class ConversationVersionManager:
         """Return the STM snapshot JSON for the current HEAD checkpoint."""
         head = self._current_checkpoint()
         if head is None:
-            return ""
+            # Fallback: find the latest checkpoint for this session
+            row = self._conn.execute(
+                "SELECT stm_snapshot FROM conversation_checkpoints "
+                "WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                (self.session_id,),
+            ).fetchone()
+            return row["stm_snapshot"] if row else ""
         return head["stm_snapshot"]
 
     def reset(self):

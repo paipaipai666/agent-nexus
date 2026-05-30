@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.tool_executor import ToolExecutor
+from agentnexus.tools.registry import ToolRegistry
 
 
 def _make_llm():
@@ -36,9 +36,9 @@ class TestE2EReActAgent:
 
     def _make_agent(self):
         llm = _make_llm()
-        te = ToolExecutor()
-        te.registerTool("web_search", "搜索", lambda **kw: {"results": [{"title": "Python"}]})
-        te.registerTool("file_read", "读文件", lambda **kw: "file content")
+        te = ToolRegistry()
+        te.register_tool("web_search", "搜索", lambda **kw: {"results": [{"title": "Python"}]})
+        te.register_tool("file_read", "读文件", lambda **kw: "file content")
         agent = ReActAgent(llm, te, max_steps=5)
         return agent, llm
 

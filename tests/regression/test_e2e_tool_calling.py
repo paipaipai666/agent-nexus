@@ -1,7 +1,7 @@
 """E2E tests for agent tool calling with real LLM.
 
 Exercises the full tool-calling pipeline: agent selects a tool →
-ToolExecutor validates and runs it → agent observes result → agent answers.
+ToolRegistry validates and runs it → agent observes result → agent answers.
 """
 
 import pytest
@@ -56,11 +56,11 @@ class TestAgentToolCalling:
 
 
 @pytest.mark.e2e
-class TestToolExecutorIntegration:
-    """ToolExecutor works correctly with real agent flow."""
+class TestToolRegistryIntegration:
+    """ToolRegistry works correctly with real agent flow."""
 
     def test_tool_executor_is_wired(self, real_agent):
-        """Agent has a ToolExecutor with registered tools."""
+        """Agent has a ToolRegistry with registered tools."""
         if not hasattr(real_agent, "tool_executor"):
             pytest.skip("Agent does not expose tool_executor directly")
 

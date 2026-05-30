@@ -1,31 +1,31 @@
-"""Tests for ToolExecutor"""
-from agentnexus.tools.tool_executor import ToolExecutor
+"""Tests for ToolRegistry"""
+from agentnexus.tools.registry import ToolRegistry
 
 
-class TestToolExecutor:
+class TestToolRegistry:
     def test_register_and_get(self):
-        te = ToolExecutor()
+        te = ToolRegistry()
 
         def dummy(x):
             return x
 
-        te.registerTool("test", "desc", dummy)
-        assert te.getTool("test") is dummy
+        te.register_tool("test", "desc", dummy)
+        assert te.get_tool("test") is dummy
 
     def test_get_nonexistent(self):
-        te = ToolExecutor()
-        assert te.getTool("missing") is None
+        te = ToolRegistry()
+        assert te.get_tool("missing") is None
 
     def test_get_available_tools(self):
-        te = ToolExecutor()
-        te.registerTool("a", "first tool", lambda: 1)
-        te.registerTool("b", "second tool", lambda: 2)
-        desc = te.getAvailableTools()
+        te = ToolRegistry()
+        te.register_tool("a", "first tool", lambda: 1)
+        te.register_tool("b", "second tool", lambda: 2)
+        desc = te.get_available_tools()
         assert "first tool" in desc
         assert "second tool" in desc
 
     def test_register_overwrite(self):
-        te = ToolExecutor()
+        te = ToolRegistry()
 
         def f1(x):
             return 1
@@ -33,13 +33,13 @@ class TestToolExecutor:
         def f2(x):
             return 2
 
-        te.registerTool("x", "desc1", f1)
-        te.registerTool("x", "desc2", f2)
-        assert te.getTool("x") is f2
+        te.register_tool("x", "desc1", f1)
+        te.register_tool("x", "desc2", f2)
+        assert te.get_tool("x") is f2
 
     def test_hitl_blocks_when_approver_missing(self):
-        te = ToolExecutor()
-        te.registerTool(
+        te = ToolRegistry()
+        te.register_tool(
             "danger",
             "desc",
             lambda code: "ok",
@@ -47,7 +47,7 @@ class TestToolExecutor:
             risk_level="high",
             require_hitl=True,
         )
-        result = te.registry.invoke(
+        result = te.invoke(
             "danger",
             {"code": "print(1)"},
             caller="subagent_executor",
@@ -56,14 +56,14 @@ class TestToolExecutor:
         assert result == "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
 
     def test_hitl_summary_includes_caller_tool_and_risk(self):
-        te = ToolExecutor()
+        te = ToolRegistry()
         seen = {}
 
         def approver(summary: str) -> bool:
             seen["summary"] = summary
             return False
 
-        te.registerTool(
+        te.register_tool(
             "danger",
             "desc",
             lambda code: "ok",
@@ -71,7 +71,7 @@ class TestToolExecutor:
             risk_level="high",
             require_hitl=True,
         )
-        result = te.registry.invoke(
+        result = te.invoke(
             "danger",
             {"code": "print(1)"},
             caller="subagent_executor",

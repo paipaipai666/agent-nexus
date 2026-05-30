@@ -207,14 +207,14 @@ class TestTraceManager:
     def test_tool_and_final_answer_spans_capture_subagent_adoption(self, tmp_path, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import ExecutionContext, ReActEvent, ReActEventType
-        from agentnexus.tools.tool_executor import ToolExecutor
+        from agentnexus.tools.registry import ToolRegistry
 
         tm = TraceManager()
         tm.configure(str(tmp_path))
         tm.start_trace("parent adoption trace")
 
         mock_llm = MagicMock()
-        agent = ReActAgent(mock_llm, ToolExecutor(), conversation_mode=False)
+        agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         ctx = ExecutionContext(question="请总结 README")
         ctx.steps.append(SimpleNamespace(tool_outputs=[]))
         ctx.last_answer = "最终答案"
