@@ -8,6 +8,7 @@ path that still consumes the raw ReActAgent directly.
 from __future__ import annotations
 
 import asyncio
+import logging
 import queue
 import uuid
 from dataclasses import dataclass, field
@@ -15,6 +16,8 @@ from typing import Any, Iterator
 
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.services.turn import TurnRecord, TurnRuntime
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -104,8 +107,8 @@ class ChatService:
         if async_q is not None:
             try:
                 async_q.put_nowait(event)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Async event queue put_nowait failed: %s", e)
 
     def send_message(self, session_id: str, text: str) -> RunHandle:
         if session_id not in self._sessions:
@@ -123,8 +126,8 @@ class ChatService:
             # Suppress agent _output (print) — events are sent via WebSocket
             try:
                 self._agent._output = lambda _msg: None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to suppress agent output: %s", e)
             result = self._agent.run(agent_text, memory_manager=self._memory)
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
@@ -171,12 +174,12 @@ class ChatService:
                 self._agent.set_cancel_checker(None)
             try:
                 self._agent._on_event = old_on_event
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to restore agent _on_event: %s", e)
             try:
                 self._agent._output = old_output
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to restore agent _output: %s", e)
             self._put_event(run.id, None)
         return run
 
@@ -325,8 +328,8 @@ class ChatService:
 
         try:
             self._agent._on_event = _on_event
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to install agent event bridge: %s", e)
 
     @staticmethod
     def _record_agent_event(turn: TurnRuntime, event) -> None:

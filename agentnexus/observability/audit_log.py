@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import time
 from collections.abc import Iterator
+from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -11,17 +15,34 @@ if TYPE_CHECKING:
 else:
     AuditEntry = Any
 
+logger = logging.getLogger(__name__)
+
 
 class ThreadSafeAuditLog:
-    """Small list-like audit buffer guarded by a re-entrant lock."""
+    """Small list-like audit buffer guarded by a re-entrant lock.
 
-    def __init__(self):
+    Optionally persists entries to a JSONL file for crash resilience.
+    """
+
+    def __init__(self, persist_dir: str | None = None):
         self._entries: list[AuditEntry] = []
         self._lock = RLock()
+        self._persist_dir = persist_dir
+        if persist_dir:
+            Path(persist_dir).mkdir(parents=True, exist_ok=True)
 
     def append(self, entry: AuditEntry) -> None:
         with self._lock:
             self._entries.append(entry)
+            if self._persist_dir:
+                try:
+                    date_str = time.strftime("%Y-%m-%d")
+                    path = Path(self._persist_dir) / f"audit_{date_str}.jsonl"
+                    with open(path, "a", encoding="utf-8") as f:
+                        entry_dict = entry if isinstance(entry, dict) else {"entry": str(entry)}
+                        f.write(json.dumps(entry_dict, ensure_ascii=False, default=str) + "\n")
+                except OSError as e:
+                    logger.debug("Audit log persistence failed (non-fatal): %s", e)
 
     def clear(self) -> None:
         with self._lock:

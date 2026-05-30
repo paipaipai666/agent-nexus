@@ -254,11 +254,10 @@ class CapabilityRuntime:
 
     @staticmethod
     def _capability_config() -> dict:
-        from agentnexus.core.config import load_config_yaml
+        from agentnexus.core.config import get_settings
 
-        data = load_config_yaml()
-        cfg = data.get("capabilities")
-        return dict(cfg) if isinstance(cfg, dict) else {}
+        caps = get_settings().capabilities
+        return caps.model_dump()
 
     @staticmethod
     def _write_capability_config(cfg: dict) -> None:

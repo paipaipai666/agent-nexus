@@ -33,7 +33,7 @@ Each call records `AuditEntry{tool, caller, params(masked), duration, hitl, erro
 
 ## Tool Registration
 
-`ToolProvider` protocol, 6 providers registered in order:
+`ToolProvider` protocol, 8 providers registered in order:
 
 ```python
 MemoryToolProvider    → memory_search, memory_save
@@ -42,6 +42,8 @@ FilesystemToolProvider → file_read, file_list, file_write
 ExecutionToolProvider  → python_execute, shell_exec
 SubagentToolProvider   → subagent_run
 McpBridgeToolProvider  → MCP dynamic import
+TodoToolProvider      → todo_add, todo_update, todo_list
+CodeGraphToolProvider → codegraph_search, codegraph_relations, codegraph_context
 ```
 
 ## Built-in Tool Parameters
@@ -59,5 +61,11 @@ McpBridgeToolProvider  → MCP dynamic import
 | `python_execute` | `code` | Unlimited | HIGH |
 | `shell_exec` | `command`, `cwd?`, `timeout?` | Unlimited | HIGH |
 | `subagent_run` | `task`, `role?`, `allowed_tools?`, `max_steps?` | 10/min | LOW |
+| `todo_add` | `description` | Unlimited | LOW |
+| `todo_update` | `item_id`, `status` | Unlimited | LOW |
+| `todo_list` | No parameters | Unlimited | LOW |
+| `codegraph_search` | `query`, `kind?`, `limit?` | 20/min | LOW |
+| `codegraph_relations` | `symbol`, `relation` | 20/min | LOW |
+| `codegraph_context` | `symbol` | 20/min | LOW |
 
 > See [Code Execution](Code-Execution.en.md) for sandbox details, [MCP Integration](MCP-Integration.en.md) for external tool integration.

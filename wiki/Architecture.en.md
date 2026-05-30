@@ -31,7 +31,7 @@
 │         (7 Security Gates)                          │
 │  RBAC → Schema → Rate-limit → Timeout              │
 │  → Risk → HITL → Audit                              │
-│  12 built-in tools + MCP dynamic import + sub-agent │
+│  17 built-in tools + MCP dynamic import + sub-agent │
 └──────────────────┬────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────┐
@@ -72,7 +72,7 @@ agentnexus/
 2. Create `AgentLLM` + `ToolExecutor` + `ConfirmBridge`
 3. Initialize `MCPToolManager` (if `mcp_enabled=True`)
 4. Load `ExtensionManager`
-5. `register_all_tools()` — register 6 providers + MCP
+5. `register_all_tools()` — register 8 providers + MCP
 6. Create `MemoryManager` + `ConversationVersionManager`
 7. Create `ReActAgent`
 8. `SkillRegistry.discover()` — scan skill directories

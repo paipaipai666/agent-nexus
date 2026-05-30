@@ -7,14 +7,14 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/agentnexus/agentnexus/blob/main/LICENSE)
 
-AgentNexus 将 LLM 的推理能力与 12 种内置工具结合，通过 FSM 驱动的安全循环完成复杂任务。所有数据（向量库、记忆、追踪日志）全部留在本地。
+AgentNexus 将 LLM 的推理能力与 17 种内置工具结合，通过 FSM 驱动的安全循环完成复杂任务。所有数据（向量库、记忆、追踪日志）全部留在本地。
 
 ```mermaid
 graph TD
     User["用户 (CLI/TUI)"] --> CLI["CLI 层 (Typer+Rich)<br>31 命令"]
     CLI --> ReAct["ReActAgent (FSM 16 状态 × 25 规则)<br>三级 LLM 策略降级"]
     ReAct --> Gate["ToolRegistry 治理网关<br>①RBAC②Schema③限流④超时⑤风险⑥HITL⑦审计"]
-    Gate --> Tools["工具执行层<br>6 内置 Provider + MCP 扩展"]
+    Gate --> Tools["工具执行层<br>8 内置 Provider + MCP 扩展"]
     Tools --> Local["本地基础设施<br>ChromaDB 向量 | SQLite 关系 | JSONL 追踪"]
 ```
 

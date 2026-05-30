@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import traceback
 from typing import Any, Callable
@@ -50,13 +51,19 @@ def execute_tool(
     try:
         if cancel_checker is not None and cancel_checker():
             raise RuntimeError("cancelled")
-        result = tool_executor.invoke(
-            name=name,
-            params=arguments,
-            caller=caller,
-            hitl_approver=hitl_approver,
-            tool_policy=tool_policy,
-        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                tool_executor.invoke,
+                name=name,
+                params=arguments,
+                caller=caller,
+                hitl_approver=hitl_approver,
+                tool_policy=tool_policy,
+            )
+            try:
+                result = future.result(timeout=60)
+            except concurrent.futures.TimeoutError:
+                result = f"[错误: 工具 {name} 执行超时 (60s)]"
 
         # ── after hook (observer) ──────────────────────────────
         hook_mgr.fire(HookType.AFTER_TOOL_CALL, {

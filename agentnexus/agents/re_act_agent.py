@@ -66,6 +66,8 @@ class ReActAgent:
         self._mcp_context: str = ""
         self._cancel_checker: Callable[[], bool] | None = None
         self._todo_list = None  # Set externally after construction
+        self._degrade_count = 0
+        self._thought_retries = 0
 
     # ================================================================
     # Public API (unchanged)
@@ -124,31 +126,38 @@ class ReActAgent:
         })
 
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
+        self._degrade_count = 0
+        self._thought_retries = 0
 
-        ctx = ExecutionContext(
-            question=question,
-            messages=[],
-            current_step=0,
-            json_retries=0,
-            strategy=CallingStrategy.PROMPT_JSON,
-            max_steps=self.max_steps,
-            max_json_retries=MAX_JSON_RETRIES,
-            memory_manager=memory_manager,
-        )
-        ctx.run_state.thinking_enabled = self.llm_client.capabilities.supports_thinking
-        ctx.run_state.cancel_checker = self._cancel_checker
+        try:
+            ctx = ExecutionContext(
+                question=question,
+                messages=[],
+                current_step=0,
+                json_retries=0,
+                strategy=CallingStrategy.PROMPT_JSON,
+                max_steps=self.max_steps,
+                max_json_retries=MAX_JSON_RETRIES,
+                memory_manager=memory_manager,
+            )
+            ctx.run_state.thinking_enabled = self.llm_client.capabilities.supports_thinking
+            ctx.run_state.cancel_checker = self._cancel_checker
 
-        fsm = StateMachine(TRANSFER_TABLE)
-        if self._on_event:
-            fsm.subscribe(self._on_event)
-            ctx._on_emit = self._on_event
+            fsm = StateMachine(TRANSFER_TABLE)
+            if self._on_event:
+                fsm.subscribe(self._on_event)
+                ctx._on_emit = self._on_event
 
-        answer, steps = fsm.run_loop(
-            ReActEvent(ReActEventType.START, {"question": question}),
-            ctx,
-            self._get_handlers(),
-        )
-        self._total_usage = ctx._total_usage
+            answer, steps = fsm.run_loop(
+                ReActEvent(ReActEventType.START, {"question": question}),
+                ctx,
+                self._get_handlers(),
+            )
+            self._total_usage = ctx._total_usage
+        except KeyboardInterrupt:
+            answer = "[Agent execution cancelled by user]"
+            steps = []
+            self._total_usage = {"input_tokens": 0, "output_tokens": 0}
 
         # ── agent end hook ───────────────────────────────────────
         hook_mgr.fire(HookType.AGENT_END, {
@@ -302,7 +311,6 @@ class ReActAgent:
         if ctx.pending_tool_calls:
             thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
             if not thought:
-                ctx.json_retries = 0  # fresh retry budget for thought injection
                 ctx.messages.append(
                     {"role": "user",
                      "content": "你必须先用 Thought 分析当前情况、说明意图，然后才能调用工具。"})
@@ -338,6 +346,10 @@ class ReActAgent:
 
     def _on_thought_missing(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """CHECK_TOOL_CALLS + THOUGHT_MISSING -> route to retry gate."""
+        self._thought_retries += 1
+        if self._thought_retries > 2:
+            ctx.memory_state.session_caps.mark_failed("tool_calling")
+            return [ReActEvent(ReActEventType.DEGRADED)]
         return self._check_retry_gate(ctx, event.payload.get("reason", "missing_thought"))
 
     def _on_tool_done(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
@@ -487,6 +499,10 @@ class ReActAgent:
 
     def _on_degraded(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """DEGRADE + DEGRADED -> re-select strategy, continue loop."""
+        self._degrade_count += 1
+        if self._degrade_count > 3:
+            self._output("[策略降级] 超过最大降级次数，终止流程。")
+            return [ReActEvent(ReActEventType.ABORT)]
         ctx.run_state.strategy = self._select_strategy(ctx.memory_state.session_caps)
         new_strategy = ctx.run_state.strategy.name
         self._output(f"[策略降级] → {new_strategy}")

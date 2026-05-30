@@ -52,7 +52,7 @@ def eval_list():
 def eval_run(
     ci: bool = typer.Option(False, "--ci", "-c", help="CI 模式：不达标则 exit(1)"),
     top_k: int = typer.Option(10, "--top-k", "-k", help="检索排序截断数（Hit Rate / MRR 的 k）"),
-    dataset: str = typer.Option("", "--dataset", "-d", help="外部 JSONL 评测集路径"),
+    dataset: str = typer.Option("", "--dataset", "-D", help="外部 JSONL 评测集路径"),
     output: str = typer.Option("", "--output", "-o", help="Export report path, or '-' for stdout"),
     export_format: str = typer.Option("json", "--format", "-f", help="Export format: json or csv"),
     quick: bool = typer.Option(False, "--quick", "-q", help="快速模式：仅运行 4 个代表性组合"),

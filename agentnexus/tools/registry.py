@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from agentnexus.observability.audit_log import ThreadSafeAuditLog
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.profile import filter_tool_meta
 from agentnexus.tools.result_format import summarize_tool_result
@@ -96,10 +98,13 @@ class ToolRegistry:
     def __init__(self, audit_log: Any | None = None):
         self._tools: dict[str, tuple[ToolMeta, Callable]] = {}
         self._rate_counters: dict[str, list[float]] = defaultdict(list)
-        self._audit_log = audit_log if audit_log is not None else []
+        self._audit_log = audit_log if audit_log is not None else ThreadSafeAuditLog()
         self._param_validators: dict[str, Any] = {}
         self._output_validators: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=4)
+        self._rate_lock = threading.Lock()
+        if jsonschema is None:
+            logger.warning("jsonschema package not installed — tool parameter validation is disabled")
 
     # ── registration ──────────────────────────────────────────────
 
@@ -414,13 +419,14 @@ class ToolRegistry:
             logger.warning("Tool '%s' output validation failed: %s", name, e)
 
     def _check_rate_limit(self, name: str, limit: int) -> None:
-        now = time.time()
-        window = self._rate_counters[name]
-        # Remove entries older than 60s
-        cutoff = now - 60
-        window[:] = [t for t in window if t > cutoff]
-        if len(window) >= limit:
-            raise RuntimeError(
-                f"Rate limit exceeded for tool '{name}' ({limit}/min)"
-            )
-        window.append(now)
+        with self._rate_lock:
+            now = time.time()
+            window = self._rate_counters[name]
+            # Remove entries older than 60s
+            cutoff = now - 60
+            window[:] = [t for t in window if t > cutoff]
+            if len(window) >= limit:
+                raise RuntimeError(
+                    f"Rate limit exceeded for tool '{name}' ({limit}/min)"
+                )
+            window.append(now)

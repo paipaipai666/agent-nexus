@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-import fitz
+try:
+    import fitz
+except ImportError:
+    raise ImportError(
+        "pymupdf is required for PDF loading. Install it with: pip install agentnexus[rag]"
+    )
 
 from agentnexus.rag.models import DocumentSection, SourceDocument
 

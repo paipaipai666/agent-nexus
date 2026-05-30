@@ -1,5 +1,6 @@
 """Transfer-table-driven FSM engine. Pure mechanical — no agent logic."""
 
+import logging
 from collections import deque
 from typing import Callable, Optional
 
@@ -9,6 +10,8 @@ from agentnexus.agents.react_types import (
     ReActState,
     Transition,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class StateMachine:
@@ -38,8 +41,8 @@ class StateMachine:
         for obs in self._observers:
             try:
                 obs(event, from_state, to_state)
-            except Exception:
-                pass  # observer failures must not break the FSM
+            except Exception as e:
+                logger.debug("Observer error in FSM transition %s -> %s: %s", from_state, to_state, e)
 
     def _lookup(self, event: ReActEvent) -> Optional[Transition]:
         """Find the first matching transition for (current_state, event_type)."""
@@ -88,6 +91,11 @@ class StateMachine:
 
             if t.next_state == ReActState.DONE:
                 return (ctx.last_answer, ctx.steps)
+
+        if self._state != ReActState.DONE:
+            logger.warning("FSM exited in non-terminal state: %s", self._state)
+            if not ctx.last_answer:
+                ctx.last_answer = f"[Agent exited in state {self._state.name}]"
 
         return (ctx.last_answer, ctx.steps)
 

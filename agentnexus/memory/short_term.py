@@ -89,8 +89,9 @@ class ShortTermMemory:
         for m in self._messages:
             content = m.get("content", "")
             chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
-            other_chars = len(content) - chinese_chars
-            total += int(chinese_chars * 1.8 + other_chars * 0.3)
+            ascii_chars = len(re.findall(r'[a-zA-Z0-9]', content))
+            other_chars = len(content) - chinese_chars - ascii_chars
+            total += int(chinese_chars * 1.8 + ascii_chars * 0.75 + other_chars * 0.3)
         return total
 
     def get_summary(self) -> str:

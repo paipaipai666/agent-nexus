@@ -67,6 +67,10 @@ class ServerRuntime:
     semaphore: asyncio.Semaphore | None = None
     state: MCPServerState = MCPServerState.HEALTHY
     last_ping_at: float | None = None
+
+    def __post_init__(self):
+        if self.semaphore is None:
+            self.semaphore = asyncio.Semaphore(1)
     consecutive_failures: int = 0
     reconnect_attempts: int = 0
     next_reconnect_at: float | None = None

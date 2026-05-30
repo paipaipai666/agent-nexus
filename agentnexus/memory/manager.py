@@ -57,6 +57,7 @@ class MemoryManager:
         self._enable_long_term = enable_long_term
         self._compact_failures: int = 0
         self._circuit_open: bool = False
+        self._circuit_opened_at: float = 0.0
         self._microcompacts_since_open: int = 0
         self._compacting: bool = False
         self._last_api_call_ts: float = 0.0
@@ -109,8 +110,8 @@ class MemoryManager:
         if self._on_compact:
             try:
                 self._on_compact({"event": event_type, **kwargs})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Compact event callback failed: %s", e)
 
     @staticmethod
     def _resolve_ctx_max() -> int | None:
@@ -120,7 +121,8 @@ class MemoryManager:
             model_id = get_settings().llm_model_id
             info = get_model_info(model_id)
             return info.get("max_input_tokens") or None
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to resolve ctx_max from litellm: %s", e)
             return None
 
     def init_session(self, question: str) -> str:
@@ -238,7 +240,8 @@ class MemoryManager:
             try:
                 raw = Path(fp).read_text(encoding="utf-8")
                 content = raw[:per_file * 4]
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read file %s for restore: %s", fp, e)
                 content = preview or f"[无法读取文件] {fp}"
             self.short_term.append("system", f"[恢复文件] {fp}\n{content}")
             total_tokens += per_file
@@ -350,6 +353,12 @@ class MemoryManager:
         })
 
         if self._circuit_open:
+            # Time-based backoff: 30s, 60s, 120s based on failure count
+            backoff = min(30 * (2 ** min(self._compact_failures - 3, 2)), 120)
+            elapsed = time.time() - getattr(self, '_circuit_opened_at', 0) or backoff
+            if elapsed < backoff:
+                logger.debug("Circuit breaker in cooldown (%.0fs remaining)", backoff - elapsed)
+                return 0
             self.microcompact()
             self._microcompacts_since_open += 1
             if self._microcompacts_since_open >= 5:
@@ -395,6 +404,10 @@ class MemoryManager:
         if not history_text.strip():
             return 0
 
+        from agentnexus.observability.tracer import get_trace_manager
+
+        trace_mgr = get_trace_manager()
+
         # Layer 5: Kairos transcript backup before destructive compact
         self._write_transcript()
 
@@ -406,48 +419,52 @@ class MemoryManager:
 
         self._compacting = True
         try:
-            prompt = SUMMARIZE_PROMPT.format(history=augmented)
-            response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
-            if not response:
-                self._compact_failures += 1
-                if self._compact_failures >= 3:
-                    self._circuit_open = True
-                    self._microcompacts_since_open = 0
-                    self._fire_compact("circuit_open")
-                return 0
+            with trace_mgr.span("memory_compact", {"is_auto": is_auto}):
+                prompt = SUMMARIZE_PROMPT.format(history=augmented)
+                response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
+                if not response:
+                    self._compact_failures += 1
+                    if self._compact_failures >= 3:
+                        self._circuit_open = True
+                        self._circuit_opened_at = time.time()
+                        self._microcompacts_since_open = 0
+                        self._fire_compact("circuit_open")
+                    return 0
 
-            summary_content = _extract_xml_tag(response, "summary")
-            final_summary = (summary_content or response).strip()
-            self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
-                                         is_auto=is_auto)
-            self._compact_failures = 0
-            self._microcompacts_since_open = 0
-            self._snip_freed_tokens = 0
-            self._recent_reads.clear()
+                summary_content = _extract_xml_tag(response, "summary")
+                final_summary = (summary_content or response).strip()
+                self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
+                                             is_auto=is_auto)
+                self._compact_failures = 0
+                self._microcompacts_since_open = 0
+                self._snip_freed_tokens = 0
+                self._recent_reads.clear()
 
-            # A3: File recovery after compact
-            self._restore_files()
+                # A3: File recovery after compact
+                self._restore_files()
 
-            # A6: System prompt rebuild hook
-            if self._on_after_compact:
-                try:
-                    self._on_after_compact()
-                except Exception:
-                    pass
+                # A6: System prompt rebuild hook
+                if self._on_after_compact:
+                    try:
+                        self._on_after_compact()
+                    except Exception as e:
+                        logger.debug("After-compact callback failed: %s", e)
 
-            tokens_after = self.short_term.estimate_tokens()
-            tokens_saved = max(0, tokens_before - tokens_after)
-            self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
+                tokens_after = self.short_term.estimate_tokens()
+                tokens_saved = max(0, tokens_before - tokens_after)
+                self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
 
-            hook_mgr.fire(HookType.AFTER_COMPACT, {
-                "is_auto": is_auto, "tokens_saved": tokens_saved,
-                "tokens_before": tokens_before, "tokens_after": tokens_after,
-            })
-            return tokens_saved
-        except Exception:
+                hook_mgr.fire(HookType.AFTER_COMPACT, {
+                    "is_auto": is_auto, "tokens_saved": tokens_saved,
+                    "tokens_before": tokens_before, "tokens_after": tokens_after,
+                })
+                return tokens_saved
+        except Exception as e:
+            logger.warning("Compaction failed: %s", e)
             self._compact_failures += 1
             if self._compact_failures >= 3:
                 self._circuit_open = True
+                self._circuit_opened_at = time.time()
                 self._microcompacts_since_open = 0
                 self._fire_compact("circuit_open")
             return 0
@@ -465,8 +482,8 @@ class MemoryManager:
 
         try:
             self._conclude_impl(question, answer, allow_memory)
-        except Exception:
-            pass  # LTM extraction failure must never propagate to agent flow
+        except Exception as e:
+            logger.warning("LTM extraction failed (non-fatal): %s", e)
 
     def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
         if not answer or not self.long_term:

@@ -1,11 +1,12 @@
 """CLI kb add/list/search commands"""
+from __future__ import annotations
+
 import os
 import time
 
 import typer
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
 
 from . import console, kb_app
 
@@ -78,6 +79,7 @@ def _build_search_where(*args, **kwargs):
 
 def _default_kb_record(namespace: str) -> KnowledgeBaseRecord:
     from agentnexus.rag.kb_service import default_kb_record
+    from agentnexus.rag.models import KnowledgeBaseRecord
 
     return default_kb_record(namespace)
 
@@ -93,6 +95,7 @@ def _delete_existing_source_versions(namespace: str, source_id: str) -> int:
 def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict[str, int]:
     from agentnexus.rag import kb_service
     from agentnexus.rag.kb_service import persist_ingested_document
+    from agentnexus.rag.models import IngestedDocument
 
     kb_service.delete_documents = delete_documents
     kb_service.upsert_documents = upsert_documents
@@ -101,6 +104,7 @@ def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> d
 
 def _start_ingestion_run(namespace: str, source_uri: str) -> IngestionRunRecord:
     from agentnexus.rag.kb_service import start_ingestion_run
+    from agentnexus.rag.models import IngestionRunRecord
 
     return start_ingestion_run(namespace, source_uri)
 
@@ -115,6 +119,7 @@ def _finish_ingestion_run(
     metadata: dict | None = None,
 ):
     from agentnexus.rag.kb_service import finish_ingestion_run
+    from agentnexus.rag.models import IngestionRunRecord
 
     finish_ingestion_run(
         run,

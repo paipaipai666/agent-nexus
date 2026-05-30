@@ -1,6 +1,7 @@
 """ChatScreen — main chat interface with real ReActAgent backend."""
 
 import asyncio
+import logging
 import threading
 import time
 from itertools import cycle
@@ -39,6 +40,8 @@ from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ToolCall, render_diff_with_colors
 from agentnexus.tui.widgets.side_panel import SidePanel
+
+logger = logging.getLogger(__name__)
 
 COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("/help", "显示命令帮助"),
@@ -183,8 +186,8 @@ class ChatScreen(Screen):
                     supports_thinking=caps.supports_thinking,
                     strategy=strategy,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to update HUD capabilities: %s", e)
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
 
     def _render_restored_history(self):
@@ -192,7 +195,8 @@ class ChatScreen(Screen):
             return
         try:
             messages = self._memory.short_term.get_all()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get messages for history restore: %s", e)
             return
         visible = [m for m in messages if m.get("role") in {"system", "user", "assistant", "tool"}]
         if not visible:
@@ -273,8 +277,8 @@ class ChatScreen(Screen):
     def action_focus_input(self):
         try:
             self.query_one("#chat-input", Input).focus()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to focus chat input: %s", e)
 
     # ── version control helpers ──────────────────────────────────
 
@@ -311,14 +315,14 @@ class ChatScreen(Screen):
                 st.get("can_undo", False),
                 st.get("can_redo", False),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update side panel version: %s", e)
         # Refresh top bar
         try:
             tb = self.query_one("#top-bar", Static)
             tb.update(self._render_top_bar())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh top bar: %s", e)
 
     # ── commands ──────────────────────────────────────────────
 
@@ -481,8 +485,8 @@ class ChatScreen(Screen):
             palette.styles.display = "block" if suggestions else "none"
             if suggestions:
                 palette.scroll_home(animate=False)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update command suggestions: %s", e)
 
     def _match_command_suggestions(self, text: str) -> str:
         raw = text.strip()
@@ -539,8 +543,8 @@ class ChatScreen(Screen):
                 self._skill_status = snapshot.status
                 self._current_skill = getattr(self._skill_service, "current", None)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to init skill registry from service: %s", e)
         try:
             self._skill_registry = SkillRegistry.from_settings(get_settings())
             self._skill_registry.discover()
@@ -552,8 +556,8 @@ class ChatScreen(Screen):
             self._skill_status = "error"
             try:
                 self._chat_area.add_system(f"[dim]Skill registry 初始化失败: {exc}[/]")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to display skill registry error: %s", e)
 
     def _handle_skill_command(self, arg: str):
         if self._skill_registry is None:
@@ -867,8 +871,8 @@ class ChatScreen(Screen):
                         self._skill_status,
                         available=available,
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh skill panel: %s", e)
 
     def _sync_skill_service_state(self):
         if self._skill_service is None:
@@ -877,15 +881,16 @@ class ChatScreen(Screen):
             snapshot = self._skill_service.snapshot()
             self._skill_status = snapshot.status
             self._current_skill = getattr(self._skill_service, "current", None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to sync skill service state: %s", e)
 
     def _skill_runtime_summary(self) -> dict:
         if self._skill_service is None:
             return {}
         try:
             snapshot = self._skill_service.snapshot()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get skill runtime summary: %s", e)
             return {}
         status = getattr(snapshot, "last_run_status", "")
         if not isinstance(status, str) or not status:
@@ -907,7 +912,8 @@ class ChatScreen(Screen):
         if self._skill_service is not None:
             try:
                 return list(self._skill_service.snapshot().available_skills)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to get available skill summary: %s", e)
                 return []
         registry = self._skill_registry
         if registry is None:
@@ -1067,15 +1073,15 @@ class ChatScreen(Screen):
             self._chat_area.add_system(f"[dim]MCP 命令失败: {exc}[/]")
             try:
                 self._side_panel.add_timeline_event("error", f"MCP command failed: {exc}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to add MCP error timeline event: %s", e)
 
     def _refresh_mcp_panel(self):
         try:
             snapshot = self._mcp_manager.status_snapshot() if self._mcp_manager is not None else None
             self._side_panel.update_mcp(snapshot)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh MCP panel: %s", e)
 
     def _handle_plugin_command(self, arg: str):
         if self._capability_runtime is None:
@@ -1122,8 +1128,8 @@ class ChatScreen(Screen):
                     risk = getattr(meta.risk_level, "value", str(meta.risk_level))
                     tools.append({"name": meta.name, "risk": risk})
             self._side_panel.update_tools(tools)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh tools panel: %s", e)
 
     def _refresh_model_panel(self, strategy: str = ""):
         if not hasattr(self, '_side_panel') or not self._agent:
@@ -1135,8 +1141,8 @@ class ChatScreen(Screen):
             if caps and hasattr(caps, "max_context_tokens"):
                 ctx = f"{caps.max_context_tokens // 1000}k" if caps.max_context_tokens else "?"
             self._side_panel.update_model(model, ctx, strategy)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh model panel: %s", e)
 
     def _refresh_todo_panel(self):
         if not hasattr(self, '_side_panel') or not self._agent:
@@ -1150,8 +1156,8 @@ class ChatScreen(Screen):
                 {"id": t.id, "description": t.description, "status": t.status}
                 for t in items
             ])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to refresh todo panel: %s", e)
 
     def _record_turn_summary(self, question: str, answer: str = ""):
         try:
@@ -1163,8 +1169,8 @@ class ChatScreen(Screen):
                 "summary",
                 f"{question_part}: {tools}; {thought_part}; {answer_part}",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to record turn summary: %s", e)
         finally:
             self._turn_tool_names = []
             self._turn_thought_count = 0
@@ -1177,8 +1183,8 @@ class ChatScreen(Screen):
             if summary:
                 text = f"{text} - {summary}"
             self._side_panel.add_timeline_event(marker, collapse_and_truncate(text, 80))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to apply workflow event: %s", e)
 
     def _prepare_agent_question(self, text: str) -> str:
         if self._current_skill is None and self._skill_service is None:
@@ -1205,7 +1211,8 @@ class ChatScreen(Screen):
             self._chat_service.record_workflow_event(self._current_run_id, workflow_event)
             try:
                 self.app.call_from_thread(self._apply_workflow_event, workflow_event)
-            except Exception:
+            except Exception as e:
+                logger.debug("call_from_thread failed for workflow event, applying directly: %s", e)
                 self._apply_workflow_event(workflow_event)
         if self._skill_service is not None:
             try:
@@ -1219,8 +1226,8 @@ class ChatScreen(Screen):
                             96,
                         ),
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to display auto-route snapshot: %s", e)
         self._refresh_skill_panel()
         return workflow_result.enhanced_question
 
@@ -1239,15 +1246,15 @@ class ChatScreen(Screen):
         if worker is not None:
             try:
                 worker.cancel()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to cancel agent worker: %s", e)
         self._chat_service.mark_processing(False)
         self._stop_spinner()
         self._current_tool_widget = None
         try:
             self._chat_area.query_one("#loading-indicator").remove()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to remove loading indicator: %s", e)
         try:
             snapshot = self._chat_service.get_run_snapshot(self._current_run_id) if self._current_run_id else None
             answer = snapshot.answer if snapshot is not None else ""
@@ -1255,8 +1262,8 @@ class ChatScreen(Screen):
             self._chat_area.add_system("[#e5c07b]已强制中断当前 Agent 活动，并记录中断摘要。[/]")
             self._side_panel.add_timeline_event("error", "Agent interrupted by double Escape")
             self._record_turn_summary(question, answer)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to record interrupt summary: %s", e)
 
     def _tick_spinner(self):
         if not self._current_tool_widget or not self._spinner_frames:
@@ -1495,8 +1502,8 @@ class ChatScreen(Screen):
                         strategy=STRATEGY_LABELS.get(strategy, strategy),
                     )
                     self._refresh_model_panel(STRATEGY_LABELS.get(strategy, strategy))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to update HUD capabilities on strategy change: %s", e)
             if etype == E.STREAM_TOKEN:
                 token = event.payload.get("token", "")
                 if not self._streaming_msg_widget:
@@ -1617,8 +1624,8 @@ class ChatScreen(Screen):
                 self._streaming_buffer = ""
             try:
                 self._chat_area.query_one("#loading-indicator").remove()
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug("Failed to remove loading indicator on error: %s", e2)
             if str(e) == "cancelled":
                 reason = "用户中断或取消信号"
                 record = turn.cancel(reason)
@@ -1631,8 +1638,8 @@ class ChatScreen(Screen):
                 self._chat_area.add_system(f"[#e06c75]错误: {e}[/]\n[dim]已记录失败摘要。[/]")
             try:
                 self._side_panel.add_timeline_event("error", collapse_and_truncate(str(e), 80))
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug("Failed to add error timeline event: %s", e2)
             self._record_turn_summary(text, answer)
             self._chat_service.mark_processing(False)
             self._agent_worker = None
@@ -1661,8 +1668,8 @@ class ChatScreen(Screen):
         # ── Remove loading indicator ──
         try:
             self._chat_area.query_one("#loading-indicator").remove()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to remove loading indicator: %s", e)
 
         if answer:
             loop = asyncio.get_running_loop()

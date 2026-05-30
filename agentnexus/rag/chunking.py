@@ -150,7 +150,16 @@ def _semantic_split(text: str, chunk_size: int, overlap: int) -> list[str]:
     if overlap > 0 and len(chunks) > 1:
         overlapped = [chunks[0]]
         for index in range(1, len(chunks)):
-            prefix = chunks[index - 1][-overlap:].strip()
+            raw_prefix = chunks[index - 1][-overlap:]
+            # Find nearest word boundary to avoid splitting mid-word
+            if len(raw_prefix) < overlap:
+                prefix = raw_prefix.strip()
+            else:
+                space_idx = raw_prefix.find(' ')
+                if space_idx > 0:
+                    prefix = raw_prefix[space_idx + 1:].strip()
+                else:
+                    prefix = raw_prefix.strip()
             overlapped.append(f"{prefix}\n{chunks[index]}".strip() if prefix else chunks[index])
         return overlapped
     return chunks

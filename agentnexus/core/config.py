@@ -1,6 +1,7 @@
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -149,8 +150,25 @@ class MCPSettings(BaseModel):
     servers: list[MCPServerConfig]
 
 
+class CapabilitiesSettings(BaseModel):
+    """Settings for capabilities section of config."""
+
+    model_config = {"extra": "allow"}
+
+    mcp_servers: dict[str, Any] = Field(default_factory=dict)
+    plugins: dict[str, Any] = Field(default_factory=dict)
+    skills: dict[str, Any] = Field(default_factory=dict)
+    tools: dict[str, Any] = Field(default_factory=dict)
+    states: dict[str, Any] = Field(default_factory=dict)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
+
+    def __init__(self, **data: Any):
+        capabilities = data.pop("capabilities", None)
+        super().__init__(**data)
+        self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
 
     llm_api_key: SecretStr = Field(default=SecretStr(""))
     llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
@@ -340,6 +358,12 @@ class Settings(BaseSettings):
             shell_blacklist=self.shell_blacklist,
             runtime_profile=self.runtime_profile,
         )
+
+    @property
+    def capabilities(self) -> CapabilitiesSettings:
+        """Return typed capabilities settings."""
+        raw = getattr(self, "_raw_capabilities", None) or {}
+        return CapabilitiesSettings(**raw)
 
 
 class AgentNexusDumper(yaml.SafeDumper):

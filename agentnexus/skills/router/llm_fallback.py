@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import re
 from typing import Any
 
@@ -77,7 +80,8 @@ def route_with_llm(
             temperature=0,
             silent=True,
         ) or ""
-    except Exception:
+    except Exception as exc:
+        logger.warning("LLM routing fallback failed: %s", exc)
         return None
 
     skill_id = parse_llm_skill_id(raw)

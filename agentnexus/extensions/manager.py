@@ -170,11 +170,10 @@ class ExtensionManager:
 
     def _plugin_enabled_map(self) -> dict[str, bool]:
         try:
-            from agentnexus.core.config import load_config_yaml
+            from agentnexus.core.config import get_settings
 
-            data = load_config_yaml()
-            capabilities = data.get("capabilities") if isinstance(data, dict) else {}
-            plugins = capabilities.get("plugins") if isinstance(capabilities, dict) else {}
+            caps = get_settings().capabilities
+            plugins = caps.plugins
             return dict(plugins) if isinstance(plugins, dict) else {}
         except Exception:
             return {}

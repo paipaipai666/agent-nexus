@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+# Shared truncation constants for consistency across projection layers
+_TRUNCATION_THRESHOLD = 1000
+_TRUNCATION_KEPT = 500
+_MICROCOMPACT_THRESHOLD = 2000
+
 
 def project_mild(messages: list[dict]) -> list[dict]:
     projected = []
@@ -14,10 +19,10 @@ def project_mild(messages: list[dict]) -> list[dict]:
         if is_recent:
             projected.append(dict(message))
             continue
-        if message["role"] in ("assistant", "tool") and len(content) > 1000:
+        if message["role"] in ("assistant", "tool") and len(content) > _TRUNCATION_THRESHOLD:
             projected.append({
                 **message,
-                "content": content[:500] + "\n...[投影截断]...\n" + content[-500:],
+                "content": content[:_TRUNCATION_KEPT] + "\n...[投影截断]...\n" + content[-_TRUNCATION_KEPT:],
             })
         else:
             projected.append(dict(message))
@@ -61,7 +66,7 @@ def project_aggressive(
             content = message.get("content", "")
             projected.append({
                 **message,
-                "content": content[:500] + "\n...[投影压缩]...\n" + content[-500:] if len(content) > 1000 else content,
+                "content": content[:_TRUNCATION_KEPT] + "\n...[投影压缩]...\n" + content[-_TRUNCATION_KEPT:] if len(content) > _TRUNCATION_THRESHOLD else content,
             })
         else:
             projected.append(dict(message))
@@ -129,10 +134,10 @@ def microcompact_messages(
     for index, message in enumerate(compacted):
         if message["role"] == "assistant":
             content = message.get("content", "")
-            if len(content) > 2000:
+            if len(content) > _MICROCOMPACT_THRESHOLD:
                 compacted[index] = {
                     **message,
-                    "content": content[:500] + "\n...[截断]...\n" + content[-500:],
+                    "content": content[:_TRUNCATION_KEPT] + "\n...[截断]...\n" + content[-_TRUNCATION_KEPT:],
                 }
                 cleaned = True
     return compacted, cleaned

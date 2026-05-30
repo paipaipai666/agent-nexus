@@ -103,8 +103,8 @@ _PRODUCT_ALIASES: dict[str, list[str]] = {
     "脚本": ["code"],
     "数据库": ["database"],
     "数据": ["database"],
-    "csv": ["xlsx"],
-    "json": ["xlsx"],
+    "csv": ["csv", "data"],
+    "json": ["json", "data"],
     "検索": ["search"],
     "情報": ["search"],
 }

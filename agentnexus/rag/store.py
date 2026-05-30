@@ -1,9 +1,13 @@
 import json
+import logging
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     ChunkRecord,
@@ -165,10 +169,13 @@ class KnowledgeBaseCatalog:
         self._db_path = db_path or settings.rag_catalog_db_path
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
         self._migrate_schema()
         self._conn.commit()
+        self._lock = threading.RLock()
 
     def _migrate_schema(self):
         source_columns = {
@@ -202,34 +209,35 @@ class KnowledgeBaseCatalog:
         self._conn.close()
 
     def upsert_knowledge_base(self, record: KnowledgeBaseRecord):
-        created_at = record.created_at or _utc_now()
-        updated_at = record.updated_at or created_at
-        self._conn.execute(
-            """
-            INSERT INTO knowledge_bases (
-                kb_id, namespace, display_name, collection_name, description,
-                metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(kb_id) DO UPDATE SET
-                namespace = excluded.namespace,
-                display_name = excluded.display_name,
-                collection_name = excluded.collection_name,
-                description = excluded.description,
-                metadata_json = excluded.metadata_json,
-                updated_at = excluded.updated_at
-            """,
-            (
-                record.kb_id,
-                record.namespace,
-                record.display_name,
-                record.collection_name,
-                record.description,
-                _encode_metadata(record.metadata),
-                created_at,
-                updated_at,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            created_at = record.created_at or _utc_now()
+            updated_at = record.updated_at or created_at
+            self._conn.execute(
+                """
+                INSERT INTO knowledge_bases (
+                    kb_id, namespace, display_name, collection_name, description,
+                    metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(kb_id) DO UPDATE SET
+                    namespace = excluded.namespace,
+                    display_name = excluded.display_name,
+                    collection_name = excluded.collection_name,
+                    description = excluded.description,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    record.kb_id,
+                    record.namespace,
+                    record.display_name,
+                    record.collection_name,
+                    record.description,
+                    _encode_metadata(record.metadata),
+                    created_at,
+                    updated_at,
+                ),
+            )
+            self._conn.commit()
 
     def list_knowledge_bases(self) -> list[KnowledgeBaseRecord]:
         rows = self._conn.execute(
@@ -268,8 +276,9 @@ class KnowledgeBaseCatalog:
         )
 
     def delete_knowledge_base(self, kb_id: str):
-        self._conn.execute("DELETE FROM knowledge_bases WHERE kb_id = ?", (kb_id,))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM knowledge_bases WHERE kb_id = ?", (kb_id,))
+            self._conn.commit()
 
     def get_document(self, document_id: str) -> SourceDocument | None:
         row = self._conn.execute(
@@ -300,50 +309,51 @@ class KnowledgeBaseCatalog:
     def upsert_documents(self, records: list[SourceDocument]):
         if not records:
             return
-        payload = []
-        for record in records:
-            created_at = record.created_at or _utc_now()
-            updated_at = record.updated_at or created_at
-            payload.append(
-                (
-                    record.document_id,
-                    record.kb_id,
-                    record.source_id,
-                    record.source_uri,
-                    record.document_version,
-                    record.content,
-                    record.raw_text or record.content,
-                    record.indexed_text or record.content,
-                    record.sparse_text or record.indexed_text or record.content,
-                    _encode_sections(record.sections),
-                    _encode_metadata(record.metadata),
-                    created_at,
-                    updated_at,
+        with self._lock:
+            payload = []
+            for record in records:
+                created_at = record.created_at or _utc_now()
+                updated_at = record.updated_at or created_at
+                payload.append(
+                    (
+                        record.document_id,
+                        record.kb_id,
+                        record.source_id,
+                        record.source_uri,
+                        record.document_version,
+                        record.content,
+                        record.raw_text or record.content,
+                        record.indexed_text or record.content,
+                        record.sparse_text or record.indexed_text or record.content,
+                        _encode_sections(record.sections),
+                        _encode_metadata(record.metadata),
+                        created_at,
+                        updated_at,
+                    )
                 )
+            self._conn.executemany(
+                """
+                INSERT INTO source_documents (
+                    document_id, kb_id, source_id, source_uri, document_version,
+                    content, raw_text, indexed_text, sparse_text, sections_json,
+                    metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                    kb_id = excluded.kb_id,
+                    source_id = excluded.source_id,
+                    source_uri = excluded.source_uri,
+                    document_version = excluded.document_version,
+                    content = excluded.content,
+                    raw_text = excluded.raw_text,
+                    indexed_text = excluded.indexed_text,
+                    sparse_text = excluded.sparse_text,
+                    sections_json = excluded.sections_json,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
             )
-        self._conn.executemany(
-            """
-            INSERT INTO source_documents (
-                document_id, kb_id, source_id, source_uri, document_version,
-                content, raw_text, indexed_text, sparse_text, sections_json,
-                metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(document_id) DO UPDATE SET
-                kb_id = excluded.kb_id,
-                source_id = excluded.source_id,
-                source_uri = excluded.source_uri,
-                document_version = excluded.document_version,
-                content = excluded.content,
-                raw_text = excluded.raw_text,
-                indexed_text = excluded.indexed_text,
-                sparse_text = excluded.sparse_text,
-                sections_json = excluded.sections_json,
-                metadata_json = excluded.metadata_json,
-                updated_at = excluded.updated_at
-            """,
-            payload,
-        )
-        self._conn.commit()
+            self._conn.commit()
 
     def list_documents(self, kb_id: str | None = None) -> list[SourceDocument]:
         sql = "SELECT * FROM source_documents"
@@ -403,50 +413,51 @@ class KnowledgeBaseCatalog:
     def upsert_chunks(self, records: list[ChunkRecord]):
         if not records:
             return
-        now = _utc_now()
-        payload = [
-            (
-                record.chunk_id,
-                record.kb_id,
-                record.document_id,
-                record.document_version,
-                record.chunk_index,
-                record.text,
-                record.raw_text or record.text,
-                record.indexed_text or record.text,
-                record.sparse_text or record.indexed_text or record.text,
-                record.section_index,
-                record.page_number,
-                _encode_metadata(record.metadata),
-                record.created_at or now,
-                record.updated_at or now,
+        with self._lock:
+            now = _utc_now()
+            payload = [
+                (
+                    record.chunk_id,
+                    record.kb_id,
+                    record.document_id,
+                    record.document_version,
+                    record.chunk_index,
+                    record.text,
+                    record.raw_text or record.text,
+                    record.indexed_text or record.text,
+                    record.sparse_text or record.indexed_text or record.text,
+                    record.section_index,
+                    record.page_number,
+                    _encode_metadata(record.metadata),
+                    record.created_at or now,
+                    record.updated_at or now,
+                )
+                for record in records
+            ]
+            self._conn.executemany(
+                """
+                INSERT INTO document_chunks (
+                    chunk_id, kb_id, document_id, document_version, chunk_index,
+                    text, raw_text, indexed_text, sparse_text, section_index,
+                    page_number, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chunk_id) DO UPDATE SET
+                    kb_id = excluded.kb_id,
+                    document_id = excluded.document_id,
+                    document_version = excluded.document_version,
+                    chunk_index = excluded.chunk_index,
+                    text = excluded.text,
+                    raw_text = excluded.raw_text,
+                    indexed_text = excluded.indexed_text,
+                    sparse_text = excluded.sparse_text,
+                    section_index = excluded.section_index,
+                    page_number = excluded.page_number,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
             )
-            for record in records
-        ]
-        self._conn.executemany(
-            """
-            INSERT INTO document_chunks (
-                chunk_id, kb_id, document_id, document_version, chunk_index,
-                text, raw_text, indexed_text, sparse_text, section_index,
-                page_number, metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(chunk_id) DO UPDATE SET
-                kb_id = excluded.kb_id,
-                document_id = excluded.document_id,
-                document_version = excluded.document_version,
-                chunk_index = excluded.chunk_index,
-                text = excluded.text,
-                raw_text = excluded.raw_text,
-                indexed_text = excluded.indexed_text,
-                sparse_text = excluded.sparse_text,
-                section_index = excluded.section_index,
-                page_number = excluded.page_number,
-                metadata_json = excluded.metadata_json,
-                updated_at = excluded.updated_at
-            """,
-            payload,
-        )
-        self._conn.commit()
+            self._conn.commit()
 
     def list_chunks(self, document_id: str) -> list[ChunkRecord]:
         rows = self._conn.execute(
@@ -479,25 +490,7 @@ class KnowledgeBaseCatalog:
             """,
             (document_id, chunk_index - window, chunk_index + window),
         ).fetchall()
-        return [
-            ChunkRecord(
-                chunk_id=row["chunk_id"],
-                kb_id=row["kb_id"],
-                document_id=row["document_id"],
-                document_version=row["document_version"],
-                chunk_index=row["chunk_index"],
-                text=row["text"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["text"],
-                indexed_text=row["indexed_text"] or row["text"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
-                section_index=row["section_index"],
-                page_number=row["page_number"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        return [_chunk_record_from_row(row) for row in rows]
 
     def list_section_chunks(
         self,
@@ -513,66 +506,50 @@ class KnowledgeBaseCatalog:
             """,
             (document_id, section_index),
         ).fetchall()
-        return [
-            ChunkRecord(
-                chunk_id=row["chunk_id"],
-                kb_id=row["kb_id"],
-                document_id=row["document_id"],
-                document_version=row["document_version"],
-                chunk_index=row["chunk_index"],
-                text=row["text"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["text"],
-                indexed_text=row["indexed_text"] or row["text"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["text"],
-                section_index=row["section_index"],
-                page_number=row["page_number"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        return [_chunk_record_from_row(row) for row in rows]
 
     def delete_document(self, document_id: str):
-        self._conn.execute("DELETE FROM source_documents WHERE document_id = ?", (document_id,))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM source_documents WHERE document_id = ?", (document_id,))
+            self._conn.commit()
 
     def upsert_ingestion_run(self, record: IngestionRunRecord):
-        started_at = record.started_at or _utc_now()
-        updated_at = record.updated_at or started_at
-        self._conn.execute(
-            """
-            INSERT INTO ingestion_runs (
-                run_id, kb_id, source_uri, status, error_message,
-                documents_seen, chunks_written, metadata_json,
-                started_at, finished_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-                kb_id = excluded.kb_id,
-                source_uri = excluded.source_uri,
-                status = excluded.status,
-                error_message = excluded.error_message,
-                documents_seen = excluded.documents_seen,
-                chunks_written = excluded.chunks_written,
-                metadata_json = excluded.metadata_json,
-                finished_at = excluded.finished_at,
-                updated_at = excluded.updated_at
-            """,
-            (
-                record.run_id,
-                record.kb_id,
-                record.source_uri,
-                record.status,
-                record.error_message,
-                record.documents_seen,
-                record.chunks_written,
-                _encode_metadata(record.metadata),
-                started_at,
-                record.finished_at,
-                updated_at,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            started_at = record.started_at or _utc_now()
+            updated_at = record.updated_at or started_at
+            self._conn.execute(
+                """
+                INSERT INTO ingestion_runs (
+                    run_id, kb_id, source_uri, status, error_message,
+                    documents_seen, chunks_written, metadata_json,
+                    started_at, finished_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    kb_id = excluded.kb_id,
+                    source_uri = excluded.source_uri,
+                    status = excluded.status,
+                    error_message = excluded.error_message,
+                    documents_seen = excluded.documents_seen,
+                    chunks_written = excluded.chunks_written,
+                    metadata_json = excluded.metadata_json,
+                    finished_at = excluded.finished_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    record.run_id,
+                    record.kb_id,
+                    record.source_uri,
+                    record.status,
+                    record.error_message,
+                    record.documents_seen,
+                    record.chunks_written,
+                    _encode_metadata(record.metadata),
+                    started_at,
+                    record.finished_at,
+                    updated_at,
+                ),
+            )
+            self._conn.commit()
 
     def list_ingestion_runs(self, kb_id: str | None = None) -> list[IngestionRunRecord]:
         sql = "SELECT * FROM ingestion_runs"

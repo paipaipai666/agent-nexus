@@ -99,6 +99,7 @@ class TraceManager:
 
     _instance: Optional["TraceManager"] = None
     _lock = threading.Lock()
+    _write_lock = threading.Lock()
     _local = threading.local()
     _traces_dir: str = ""
 
@@ -151,15 +152,16 @@ class TraceManager:
         traces_path = Path(self._traces_dir)
         try:
             traces_path.mkdir(parents=True, exist_ok=True)
-            file_path = traces_path / f"{date_str}.jsonl"
+            file_path = self._get_trace_file_path(date_str)
 
-            with open(file_path, "a", encoding="utf-8") as f:
-                for span in ctx.spans:
-                    if span._flushed:
-                        continue  # already written by _flush_span
-                    record = self._span_record(ctx.trace_id, span)
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    span._flushed = True
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    for span in ctx.spans:
+                        if span._flushed:
+                            continue  # already written by _flush_span
+                        record = self._span_record(ctx.trace_id, span)
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        span._flushed = True
 
             self._cleanup_old_traces()
         except OSError:
@@ -170,12 +172,13 @@ class TraceManager:
         if not self._traces_dir or span._flushed:
             return
         date_str = time.strftime("%Y-%m-%d")
-        file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
+        file_path = self._get_trace_file_path(date_str)
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             record = self._span_record(ctx.trace_id, span)
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
             span._flushed = True
         except OSError:
             return
@@ -185,12 +188,13 @@ class TraceManager:
         if not self._traces_dir or span._flushed:
             return
         date_str = time.strftime("%Y-%m-%d")
-        file_path = Path(self._traces_dir) / f"{date_str}.jsonl"
+        file_path = self._get_trace_file_path(date_str)
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             record = self._span_record("orphan", span)
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
             span._flushed = True
         except OSError:
             return
@@ -210,6 +214,8 @@ class TraceManager:
             "metadata": span.metadata,
         }
 
+    _MAX_TRACE_FILE_SIZE = 100 * 1024 * 1024  # 100MB per daily file
+
     def _cleanup_old_traces(self):
         """Remove JSONL files older than the configured retention period."""
         try:
@@ -226,6 +232,20 @@ class TraceManager:
                     f.unlink()
             except OSError:
                 pass
+
+    def _get_trace_file_path(self, date_str: str) -> Path:
+        """Get trace file path, rotating if the current file exceeds size limit."""
+        traces_path = Path(self._traces_dir)
+        base_path = traces_path / f"{date_str}.jsonl"
+        if not base_path.exists() or base_path.stat().st_size < self._MAX_TRACE_FILE_SIZE:
+            return base_path
+        # Rotate: find next available sequence number
+        seq = 1
+        while True:
+            rotated = traces_path / f"{date_str}_{seq}.jsonl"
+            if not rotated.exists() or rotated.stat().st_size < self._MAX_TRACE_FILE_SIZE:
+                return rotated
+            seq += 1
 
 
 # ── Span Context Manager ─────────────────────────────────────────────
@@ -281,6 +301,11 @@ def _truncate_dict(d: dict[str, Any], max_len: int = 5000) -> dict[str, Any]:
 # ── 全局实例 ─────────────────────────────────────────────────────────
 
 trace_manager = TraceManager()
+
+
+def get_trace_manager() -> TraceManager:
+    """Return the global TraceManager singleton."""
+    return trace_manager
 
 
 @atexit.register

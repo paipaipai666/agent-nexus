@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import math
+
+logger = logging.getLogger(__name__)
 
 from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.normalize import tokenize
@@ -151,5 +154,6 @@ def compute_skill_embeddings(
         texts = [f"{entry.display_name} {entry.description}" for entry in entries]
         embeddings = embed_texts(texts)
         return [tuple(e) for e in embeddings]
-    except Exception:
+    except Exception as exc:
+        logger.warning("Skill embedding computation failed, falling back to keyword-only routing: %s", exc)
         return [() for _ in entries]

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 from agentnexus.rag.models import DocumentSection, SourceDocument
 
-SUPPORTED_EXTENSIONS = frozenset({".pdf", ".md", ".txt", ".html", ".htm", ".json", ".docx", ".xlsx"})
+SUPPORTED_EXTENSIONS = frozenset({
+    ".pdf", ".md", ".txt", ".html", ".htm", ".json", ".docx", ".xlsx",
+    ".py", ".js", ".ts", ".java", ".go", ".rs", ".cpp", ".c", ".h",
+    ".rb", ".php", ".swift", ".kt", ".scala", ".sh", ".yaml", ".yml",
+    ".toml", ".ini", ".cfg", ".conf", ".sql", ".r", ".m",
+})
 _FULLWIDTH_TABLE = str.maketrans(
     "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ",
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
@@ -19,7 +27,7 @@ def clean_text(text: str) -> str:
     filtered_lines: list[str] = []
     for line in stripped_lines:
         if line:
-            if len(line) >= 3 or re.search(r"[，。！？、；：\"\"''（）]", line):
+            if len(line) >= 3 or re.search(r"[一-鿿，。！？、；：\"\"''（）]", line):
                 filtered_lines.append(line)
             continue
         if filtered_lines and filtered_lines[-1] != "":

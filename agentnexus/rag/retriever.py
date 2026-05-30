@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
-from agentnexus.storage.chroma import insert_documents, resolve_collection_name
+from agentnexus.storage.chroma import insert_documents, resolve_collection_name, upsert_documents
 from agentnexus.storage.chroma import search as chroma_search
 
 from . import query_expansion as _query_expansion
@@ -445,7 +445,7 @@ class HybridRetriever:
         dense_results: list[tuple[str, float]],
         top_k: int = 5,
         rrf_k: int = 60,
-        min_score: float = 0.0,
+        min_score: float = 0.3,
         metadata_filters: dict[str, object] | None = None,
     ) -> list[SearchResult]:
         sparse = self._bm25.search(query, top_k=top_k * 2, metadata_filters=metadata_filters)
@@ -585,7 +585,7 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
 
     catalog.upsert_documents(document_records)
     catalog.upsert_chunks(chunk_records)
-    insert_documents(chunk_texts, metadatas=chunk_metadatas, ids=chunk_ids, namespace=namespace)
+    upsert_documents(chunk_texts, metadatas=chunk_metadatas, ids=chunk_ids, namespace=namespace)
 
     retriever = HybridRetriever(namespace=namespace)
     retriever._chunks = {chunk.chunk_id: chunk for chunk in chunk_records}
@@ -604,34 +604,39 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
         "query": query, "namespace": namespace,
     })
 
+    from agentnexus.observability.tracer import get_trace_manager
+
+    trace_mgr = get_trace_manager()
+
     retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "知识库为空，请先用 `nexus kb add` 添加文档。"
     should_load_reranker = _retriever_reranker_requested.get(namespace, True)
     if should_load_reranker and retriever._reranker is None:
         retriever.load_reranker()
-    queries = expand_queries(query)
-    hypothetical_document = generate_hypothetical_document(query)
-    dense_fused: dict[str, float] = {}
-    for search_query in queries:
-        dense_results = chroma_search(search_query, limit=10, namespace=namespace)
-        for rank, item in enumerate(dense_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
-    if hypothetical_document:
-        hyde_results = chroma_search(hypothetical_document, limit=10, namespace=namespace)
-        for rank, item in enumerate(hyde_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 0.8 / (60 + rank + 1)
-    dense_results = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
-    if not dense_results:
-        return "未找到相关知识。"
-    results = retriever.search(query, dense_results, top_k=5)
-    if not results:
-        return "未找到相关知识。"
-    results = retriever.expand_contexts(results)
-    result_text = "\n\n".join(
-        f"[{index + 1}] {result_citation(result)} (相关度:{result.score:.2f}) {result_display_text(result)}"
-        for index, result in enumerate(results)
-    )
+    with trace_mgr.span("rag_search", {"query": query[:200]}):
+        queries = expand_queries(query)
+        hypothetical_document = generate_hypothetical_document(query)
+        dense_fused: dict[str, float] = {}
+        for search_query in queries:
+            dense_results = chroma_search(search_query, limit=10, namespace=namespace)
+            for rank, item in enumerate(dense_results):
+                dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
+        if hypothetical_document:
+            hyde_results = chroma_search(hypothetical_document, limit=10, namespace=namespace)
+            for rank, item in enumerate(hyde_results):
+                dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
+        dense_results = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
+        if not dense_results:
+            return "未找到相关知识。"
+        results = retriever.search(query, dense_results, top_k=5)
+        if not results:
+            return "未找到相关知识。"
+        results = retriever.expand_contexts(results)
+        result_text = "\n\n".join(
+            f"[{index + 1}] {result_citation(result)} (相关度:{result.score:.2f}) {result_display_text(result)}"
+            for index, result in enumerate(results)
+        )
 
     hook_mgr.fire(HookType.AFTER_RAG_SEARCH, {
         "query": query, "namespace": namespace,

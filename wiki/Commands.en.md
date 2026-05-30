@@ -2,7 +2,7 @@
 
 # ⌨ Commands Reference
 
-31 command entry points, 6 top-level + 5 subcommand groups.
+40 command entry points, 6 top-level + 6 subcommand groups.
 
 ## Global Behavior
 
@@ -72,3 +72,17 @@
 | `skill use <target>` | Set default skill |
 | `skill reset` | Clear default skill |
 | `skill status` | Current skill status |
+
+## Code Graph `nexus codegraph`
+
+| Command | Description |
+|------|------|
+| `codegraph build [--force] [--path]` | Build/update code graph |
+| `codegraph search <query> [--kind] [--limit]` | Semantic search for code entities |
+| `codegraph callers <symbol> [--depth]` | Find who calls a specific entity |
+| `codegraph callees <symbol> [--depth]` | Find what a specific entity calls |
+| `codegraph inherits <cls>` | View inheritance tree |
+| `codegraph imports <module>` | View import relationships |
+| `codegraph context <symbol>` | Get entity full context |
+| `codegraph stats` | Display graph statistics |
+| `codegraph verify [--fix]` | Consistency diagnostics |

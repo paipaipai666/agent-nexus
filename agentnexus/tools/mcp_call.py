@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -52,12 +55,9 @@ async def run_with_limiter(
     runtime: ServerRuntime,
     call: Callable[[], Awaitable[str]],
 ) -> str:
-    limiter: Any = getattr(runtime, "semaphore", None) or getattr(runtime, "call_lock", None)
+    limiter: Any = runtime.semaphore or runtime.call_lock
     if limiter is None:
+        logger.warning("ServerRuntime semaphore not initialized, creating per-call limiter")
         limiter = asyncio.Semaphore(1)
-        try:
-            runtime.semaphore = limiter
-        except Exception:
-            pass
     async with limiter:
         return await call()

@@ -6,7 +6,6 @@ from rich.table import Table
 
 from agentnexus.observability.audit_log import (
     ThreadSafeAuditLog,
-    _global_audit_log,
     append_audit,
     get_audit_log,
 )
@@ -15,7 +14,6 @@ from . import app, console
 
 __all__ = [
     "ThreadSafeAuditLog",
-    "_global_audit_log",
     "append_audit",
     "get_audit_log",
 ]
@@ -27,7 +25,9 @@ def audit(
     tool: str = typer.Option("", "--tool", "-t", help="Filter by tool name"),
 ):
     """Show tool-call audit logs."""
-    entries = get_audit_log()
+    from agentnexus.observability.audit_log import get_audit_log as _get_audit_log
+
+    entries = _get_audit_log()
     if tool:
         entries = [e for e in entries if e.tool_name == tool]
     entries = entries[-limit:]

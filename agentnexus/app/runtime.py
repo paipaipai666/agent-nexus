@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService, SkillService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,8 +84,8 @@ class AppRuntime:
             from agentnexus.observability.audit_log import _global_audit_log
 
             executor._audit_log = _global_audit_log
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Audit log binding failed: %s", e)
 
         prefix = profile or "runtime"
         session_id = session_id or f"{prefix}_{uuid.uuid4().hex[:12]}"
@@ -173,7 +176,8 @@ class AppRuntime:
     def _restore_memory_from_version(memory: Any, version: Any) -> None:
         try:
             snapshot = version.get_head_stm()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get head STM snapshot for restore: %s", e)
             snapshot = ""
         if not snapshot:
             return
@@ -186,3 +190,10 @@ class AppRuntime:
     def close(self) -> None:
         if self.mcp_manager is not None:
             self.mcp_manager.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False

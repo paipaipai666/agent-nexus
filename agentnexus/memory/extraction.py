@@ -41,7 +41,9 @@ def extract_xml_tag(text: str, tag: str) -> str | None:
 def parse_memory_payload(response: str) -> dict:
     try:
         return json.loads(response.strip().lstrip("```json").rstrip("```").strip())
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to parse memory extraction response: %s", e)
         return {}
 
 
@@ -64,15 +66,44 @@ def extract_and_save_memories(
     question: str,
     answer: str,
 ) -> None:
+    import logging
+    logger = logging.getLogger(__name__)
+
     prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
     response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
     data = parse_memory_payload(response)
+    saved_count = 0
     for category, importance, item in iter_memory_items(data):
+        # Use LLM-provided importance if available, else fall back to category default
+        item_importance = importance
+        if isinstance(data.get(category), list):
+            for entry in data[category]:
+                if isinstance(entry, dict):
+                    content = entry.get("content") or entry.get("text") or ""
+                    if content.strip() == item and "importance" in entry:
+                        try:
+                            item_importance = max(0.0, min(1.0, float(entry["importance"])))
+                        except (ValueError, TypeError):
+                            pass
+                        break
+
         vec = embedding_to_list(embed_model.encode(item, normalize_embeddings=True))
+
+        # Semantic dedup: skip if a very similar memory already exists
+        if long_term and vec:
+            existing = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
+            if existing and existing[0].get("_score", 0) >= 0.90:
+                logger.debug("Skipping duplicate memory (similarity=%.2f): %s",
+                             existing[0]["_score"], item[:80])
+                continue
+
         long_term.save(
             session_id=session_id,
             content=item,
             category=category,
-            importance=importance,
+            importance=item_importance,
             embedding=vec,
         )
+        saved_count += 1
+    if saved_count:
+        logger.debug("Extracted and saved %d memories from conversation", saved_count)

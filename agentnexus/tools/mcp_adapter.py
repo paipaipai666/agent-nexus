@@ -255,8 +255,10 @@ class MCPToolManager:
 
     def call_tool(self, local_name: str, params: dict | None = None) -> str:
         from agentnexus.core.hooks import HookType, get_hook_manager
+        from agentnexus.observability.tracer import get_trace_manager
 
         hook_mgr = get_hook_manager()
+        trace_mgr = get_trace_manager()
         hook_mgr.fire(HookType.BEFORE_MCP_CALL_TOOL, {
             "local_name": local_name, "params": params,
         })
@@ -266,10 +268,11 @@ class MCPToolManager:
             raise KeyError(f"Unknown MCP tool: {local_name}")
 
         try:
-            result = self._submit(
-                self._call_descriptor_async(descriptor, params or {}),
-                timeout=descriptor.timeout_sec + 5,
-            )
+            with trace_mgr.span("mcp_call", {"tool_name": local_name}):
+                result = self._submit(
+                    self._call_descriptor_async(descriptor, params or {}),
+                    timeout=descriptor.timeout_sec + 5,
+                )
             hook_mgr.fire(HookType.AFTER_MCP_CALL_TOOL, {
                 "local_name": local_name, "server_name": descriptor.server_name,
                 "result": str(result)[:500],
@@ -673,12 +676,10 @@ def create_mcp_manager_from_settings(settings) -> MCPToolManager | None:
 
 def _apply_capability_mcp_enabled(servers: list[MCPServerConfig]) -> list[MCPServerConfig]:
     try:
-        from agentnexus.core.config import load_config_yaml
+        from agentnexus.core.config import get_settings
 
-        data = load_config_yaml()
-        capabilities = data.get("capabilities") if isinstance(data, dict) else {}
-        enabled_map = capabilities.get("mcp_servers") if isinstance(capabilities, dict) else {}
-        enabled_map = enabled_map if isinstance(enabled_map, dict) else {}
+        caps = get_settings().capabilities
+        enabled_map = caps.mcp_servers if isinstance(caps.mcp_servers, dict) else {}
     except Exception:
         enabled_map = {}
 

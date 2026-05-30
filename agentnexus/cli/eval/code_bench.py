@@ -10,7 +10,7 @@ from agentnexus.cli import console, eval_app
 @eval_app.command("humaneval")
 def eval_humaneval(
     dataset: str = typer.Option(
-        "", "--dataset", "-d", help="HumanEval JSONL 数据集路径",
+        "", "--dataset", "-D", help="HumanEval JSONL 数据集路径",
     ),
     trace_id: str = typer.Option(
         "", "--trace", "-t", help="按 trace_id 过滤单个问题",
@@ -47,7 +47,7 @@ def eval_humaneval(
 @eval_app.command("swe-bench")
 def eval_swebench(
     dataset: str = typer.Option(
-        "", "--dataset", "-d", help="SWE-bench JSONL 数据集路径",
+        "", "--dataset", "-D", help="SWE-bench JSONL 数据集路径",
     ),
 ):
     """评估 SWE-bench issue 修复质量（需传入 patches JSON）"""

@@ -1,5 +1,9 @@
 """CLI stats command"""
+import logging
+
 import typer
+
+logger = logging.getLogger(__name__)
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
@@ -13,7 +17,12 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
     from agentnexus.core.config import get_settings
     from agentnexus.observability.stats import compute_stats
 
-    s = compute_stats(get_settings().traces_dir, days)
+    try:
+        s = compute_stats(get_settings().traces_dir, days)
+    except Exception as e:
+        logger.exception("Failed to compute statistics")
+        console.print(f"[red]Failed to compute statistics. Check that trace files are valid.[/red]")
+        raise SystemExit(1)
 
     if s.total_tasks == 0:
         console.print(f"[dim]最近 {days} 天暂无任务数据[/dim]")

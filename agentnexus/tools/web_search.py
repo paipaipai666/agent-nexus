@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from tavily import TavilyClient
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None  # type: ignore[assignment,misc]
+
+from agentnexus.core.config import get_settings
 
 from agentnexus.core.config import get_settings
 

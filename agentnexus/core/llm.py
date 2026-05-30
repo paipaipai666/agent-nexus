@@ -23,6 +23,11 @@ console = Console()
 LLM_MAX_RETRIES = 3
 LLM_RETRY_BASE_DELAY = 2.0
 
+# Provider health tracking for circuit breaker
+_provider_health: dict[str, tuple[int, float]] = {}  # key -> (failure_count, last_failure_time)
+_PROVIDER_FAILURE_THRESHOLD = 3
+_PROVIDER_COOLDOWN_SECONDS = 60
+
 _default_llm: "AgentLLM | None" = None
 
 
@@ -51,6 +56,7 @@ class AgentLLM:
         self._capabilities: ModelCapabilities | None = None
         self._session_tracker: SessionCapabilityTracker | None = None
         self.last_reasoning_content: str = ""
+        self._non_transient = False
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -81,6 +87,7 @@ class AgentLLM:
 
         self.last_tool_calls = []
         self._tool_call_mode = tools is not None and len(tools) > 0
+        self._non_transient = False
 
         # ── before llm hook ────────────────────────────────────
         hook_mgr = get_hook_manager()
@@ -104,8 +111,11 @@ class AgentLLM:
             ) or ""
             if result:
                 break
+            if self._non_transient:
+                break
             if attempt < attempts - 1:
-                delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                import random
+                delay = LLM_RETRY_BASE_DELAY * (2 ** attempt) * (0.5 + random.random())
                 time.sleep(delay)
 
         # ── after llm hook ─────────────────────────────────────
@@ -137,6 +147,15 @@ class AgentLLM:
         try:
             # ── Step 1: Try direct provider ─────────────────────
             provider = select_provider(model, self.base_url)
+            if provider is not None:
+                provider_key = f"{type(provider).__name__}/{self.model}"
+                health = _provider_health.get(provider_key)
+                if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
+                    elapsed = time.time() - health[1]
+                    if elapsed < _PROVIDER_COOLDOWN_SECONDS:
+                        provider = None  # Skip to fallback
+                    else:
+                        _provider_health.pop(provider_key, None)
             if provider is not None:
                 try:
                     result = self._call_via_provider(
@@ -173,8 +192,14 @@ class AgentLLM:
                         text = Text(result.text)
                         console.print(text)
 
+                    # Reset provider health on success
+                    _provider_health.pop(provider_key, None)
+
                     return result.text
                 except Exception as provider_err:
+                    # Track provider failure for circuit breaker
+                    fail_count, _ = _provider_health.get(provider_key, (0, 0))
+                    _provider_health[provider_key] = (fail_count + 1, time.time())
                     logger.warning(f"Direct provider failed, falling back to LiteLLM: {provider_err}")
 
             # ── Step 2: LiteLLM fallback ────────────────────────
@@ -243,6 +268,7 @@ class AgentLLM:
                 })
 
             if not is_transient:
+                self._non_transient = True
                 return ""
 
             # transient error — outer retry loop continues

@@ -33,7 +33,7 @@ JSON Schema 校验参数结构，注册时自动编译缓存校验器。
 
 ## 工具注册
 
-`ToolProvider` 协议，6 个提供者按顺序注册：
+`ToolProvider` 协议，8 个提供者按顺序注册：
 
 ```python
 MemoryToolProvider    → memory_search, memory_save
@@ -42,6 +42,8 @@ FilesystemToolProvider → file_read, file_list, file_write
 ExecutionToolProvider  → python_execute, shell_exec
 SubagentToolProvider   → subagent_run
 McpBridgeToolProvider  → MCP 动态导入
+TodoToolProvider      → todo_add, todo_update, todo_list
+CodeGraphToolProvider → codegraph_search, codegraph_relations, codegraph_context
 ```
 
 ## 内置工具参数
@@ -59,6 +61,12 @@ McpBridgeToolProvider  → MCP 动态导入
 | `python_execute` | `code` | 无限 | HIGH |
 | `shell_exec` | `command`, `cwd?`, `timeout?` | 无限 | HIGH |
 | `subagent_run` | `task`, `role?`, `allowed_tools?`, `max_steps?` | 10/min | LOW |
+| `todo_add` | `description` | 无限 | LOW |
+| `todo_update` | `item_id`, `status` | 无限 | LOW |
+| `todo_list` | 无参数 | 无限 | LOW |
+| `codegraph_search` | `query`, `kind?`, `limit?` | 20/min | LOW |
+| `codegraph_relations` | `symbol`, `relation` | 20/min | LOW |
+| `codegraph_context` | `symbol` | 20/min | LOW |
 
 > 见 [Code-Execution](Code-Execution.md) 了解沙箱细节，[MCP-Integration](MCP-Integration.md) 了解外部工具集成。
 

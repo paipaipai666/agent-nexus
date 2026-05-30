@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Callable
 from hashlib import blake2b
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
 
@@ -122,8 +125,14 @@ def get_embedding_model(
             from sentence_transformers import SentenceTransformer
 
             _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
-        except Exception:
+        except Exception as e:
+            logger.warning("SentenceTransformer model failed to load, falling back to hash-based embeddings: %s", e)
             _model = _FallbackEmbeddingModel()
+        if hasattr(_model, 'get_sentence_embedding_dimension'):
+            actual_dim = _model.get_sentence_embedding_dimension()
+            if actual_dim != VECTOR_DIM:
+                logger.warning("Embedding model dimension mismatch: expected %d, got %d. "
+                               "This may cause ChromaDB query failures.", VECTOR_DIM, actual_dim)
         _model_name = settings.embedding_model
         _model_device = resolved_device
     return _model

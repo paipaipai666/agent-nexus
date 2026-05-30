@@ -212,20 +212,24 @@ class HookManager:
 
     def fire(self, hook_type: HookType, payload: dict[str, Any]) -> HookContext:
         """Fire all hooks for *hook_type* synchronously.  Returns the context."""
+        from agentnexus.observability.tracer import get_trace_manager
+
+        trace_mgr = get_trace_manager()
         ctx = HookContext(hook_type, dict(payload))
         t0 = time.perf_counter()
-        for entry in self._sorted(hook_type):
-            if not entry.enabled:
-                continue
-            try:
-                if asyncio.iscoroutinefunction(entry.callback):
-                    self._run_async(entry.callback(ctx))
-                else:
-                    entry.callback(ctx)
-            except Exception:
-                logger.debug("Hook %r raised (fire)", entry.name, exc_info=True)
-            if ctx.aborted:
-                break
+        with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
+            for entry in self._sorted(hook_type):
+                if not entry.enabled:
+                    continue
+                try:
+                    if asyncio.iscoroutinefunction(entry.callback):
+                        self._run_async(entry.callback(ctx))
+                    else:
+                        entry.callback(ctx)
+                except Exception:
+                    logger.debug("Hook %r raised (fire)", entry.name, exc_info=True)
+                if ctx.aborted:
+                    break
         ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
         self._check_slow(ctx, hook_type)
         return ctx
@@ -234,20 +238,24 @@ class HookManager:
 
     async def afire(self, hook_type: HookType, payload: dict[str, Any]) -> HookContext:
         """Fire all hooks for *hook_type* asynchronously.  Returns the context."""
+        from agentnexus.observability.tracer import get_trace_manager
+
+        trace_mgr = get_trace_manager()
         ctx = HookContext(hook_type, dict(payload))
         t0 = time.perf_counter()
-        for entry in self._sorted(hook_type):
-            if not entry.enabled:
-                continue
-            try:
-                if asyncio.iscoroutinefunction(entry.callback):
-                    await entry.callback(ctx)
-                else:
-                    entry.callback(ctx)
-            except Exception:
-                logger.debug("Hook %r raised (afire)", entry.name, exc_info=True)
-            if ctx.aborted:
-                break
+        with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
+            for entry in self._sorted(hook_type):
+                if not entry.enabled:
+                    continue
+                try:
+                    if asyncio.iscoroutinefunction(entry.callback):
+                        await entry.callback(ctx)
+                    else:
+                        entry.callback(ctx)
+                except Exception:
+                    logger.debug("Hook %r raised (afire)", entry.name, exc_info=True)
+                if ctx.aborted:
+                    break
         ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
         self._check_slow(ctx, hook_type)
         return ctx
@@ -270,19 +278,25 @@ class HookManager:
             )
 
     @staticmethod
-    def _run_async(coro) -> None:
-        """Run an async coroutine from sync context."""
+    def _run_async(coro):
+        """Run an async coroutine from a sync context."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
-        if loop and loop.is_running():
-            import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(asyncio.run, coro).result()
+        if loop and loop.is_running():
+            # We're inside a running event loop — schedule on it
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                return future.result(timeout=30)
+            except TimeoutError:
+                future.cancel()
+                logger.warning("Async hook timed out after 30s")
+                return None
         else:
-            asyncio.run(coro)
+            # No running loop — safe to create one
+            return asyncio.run(coro)
 
 
 # ── module-level singleton ─────────────────────────────────────────

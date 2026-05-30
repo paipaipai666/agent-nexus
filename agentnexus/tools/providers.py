@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agentnexus.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,8 @@ class ToolProviderContext:
     def mark_registered(self, executor: ToolRegistry, before: set[str]) -> None:
         after = set(executor.list_tools())
         added = sorted(after - before)
+        for name in added:
+            logger.warning("mark_registered() bypasses register() validation for tool '%s'", name)
         source_id = self.source_id or self.source_type
         for name in added:
             entry = executor._tools.get(name)

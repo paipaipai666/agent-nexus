@@ -78,6 +78,19 @@ def _extract_docx_paragraphs(file_path: str) -> list[tuple[str, str | None]]:
         style_name = style.attrib.get(f"{{{_DOCX_NS['w']}}}val") if style is not None else None
         if text:
             paragraphs.append((text, style_name))
+
+    # Extract tables
+    for tbl in root.iterfind(".//w:body/w:tbl", _DOCX_NS):
+        rows = []
+        for tr in tbl.iterfind("w:tr", _DOCX_NS):
+            cells = []
+            for tc in tr.iterfind("w:tc", _DOCX_NS):
+                cell_text = ' '.join(p.text or '' for p in tc.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"))
+                cells.append(cell_text.strip())
+            rows.append(' | '.join(cells))
+        if rows:
+            paragraphs.append(('\n'.join(rows), None))
+
     return paragraphs
 
 

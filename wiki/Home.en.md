@@ -7,14 +7,14 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/agentnexus/agentnexus/blob/main/LICENSE)
 
-AgentNexus combines LLM reasoning with 12 built-in tools, executing complex tasks through an FSM-driven safety loop. All data (vector store, memory, trace logs) stays entirely local.
+AgentNexus combines LLM reasoning with 17 built-in tools, executing complex tasks through an FSM-driven safety loop. All data (vector store, memory, trace logs) stays entirely local.
 
 ```mermaid
 graph TD
     User["User (CLI/TUI)"] --> CLI["CLI Layer (Typer+Rich)<br>31 commands"]
     CLI --> ReAct["ReActAgent (FSM 16 states × 25 rules)<br>3-tier LLM strategy degradation"]
     ReAct --> Gate["ToolRegistry Governance Gateway<br>①RBAC②Schema③Rate-limit④Timeout⑤Risk⑥HITL⑦Audit"]
-    Gate --> Tools["Tool Execution Layer<br>6 Built-in Providers + MCP Extensions"]
+    Gate --> Tools["Tool Execution Layer<br>8 Built-in Providers + MCP Extensions"]
     Tools --> Local["Local Infrastructure<br>ChromaDB Vectors | SQLite Relational | JSONL Traces"]
 ```
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agentnexus.core.text_utils import collapse_and_truncate
+
+logger = logging.getLogger(__name__)
 
 TurnStatus = Literal["running", "finished", "failed", "interrupted", "empty_answer"]
 
@@ -120,17 +123,18 @@ class TurnRuntime:
         if record.status != "finished" and self._memory is not None:
             try:
                 self._memory.append("assistant", record.answer)
-            except Exception:
+            except Exception as e:
+                logger.warning("Memory append failed, trying short_term fallback: %s", e)
                 try:
                     self._memory.short_term.append("assistant", record.answer)
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.warning("Short-term memory append also failed: %s", e2)
         if self._version is not None and self._memory is not None:
             try:
                 stm_json = self._memory.short_term.to_json()
                 self._version.commit(stm_json, question=record.question, answer=record.answer, new_ltm_ids=[])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Version commit failed: %s", e)
 
     def _build_interrupted_answer(self, *, status: TurnStatus, reason: str, detail: str = "") -> str:
         lines = [

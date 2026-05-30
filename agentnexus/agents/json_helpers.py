@@ -89,9 +89,35 @@ def try_fix_json(text: str) -> dict | None:
     candidate = s[start:end + 1]
     candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
     try:
-        return json.loads(candidate)
+        data = json.loads(candidate)
+        if not _validate_strings_closed(candidate):
+            return None
+        return data
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def _validate_strings_closed(text: str) -> bool:
+    """Check that all string values in JSON text have properly closed quotes."""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '\\':
+            i += 2
+            continue
+        if ch == '"':
+            i += 1
+            while i < len(text):
+                if text[i] == '\\':
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    break
+                i += 1
+            else:
+                return False  # unclosed string
+        i += 1
+    return True
 
 
 def normalize_jsonish_text(text: str) -> str:

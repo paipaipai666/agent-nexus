@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 
 from agentnexus.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -183,8 +186,8 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         caps.max_output_tokens = model_info.get(
             "max_output_tokens", caps.max_output_tokens
         )
-    except Exception:
-        pass  # litellm unavailable → stick with registry defaults
+    except Exception as e:
+        logger.debug("LiteLLM dynamic capability detection failed: %s", e)
 
     # ── User config overrides ──
     settings = get_settings()
@@ -262,7 +265,8 @@ def resolve_ctx_max_from_litellm(model_id: str) -> int | None:
         from litellm import get_model_info
         info = get_model_info(model_id)
         return info.get("max_input_tokens") or info.get("max_context_tokens") or None
-    except Exception:
+    except Exception as e:
+        logger.debug("LiteLLM model info lookup failed for %s: %s", model_id, e)
         return None
 
 

@@ -29,7 +29,7 @@
 ┌──────────────────▼────────────────────────────────┐
 │         ToolRegistry 治理网关 (7 道关卡)             │
 │  RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计  │
-│  12 内置工具 + MCP 动态导入 + 子代理隔离              │
+│  17 内置工具 + MCP 动态导入 + 子代理隔离              │
 └──────────────────┬────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────┐
@@ -69,7 +69,7 @@ agentnexus/
 2. 创建 `AgentLLM` + `ToolExecutor` + `ConfirmBridge`
 3. 初始化 `MCPToolManager`（若 `mcp_enabled=True`）
 4. 加载 `ExtensionManager`
-5. `register_all_tools()` — 注册 6 个提供者 + MCP
+5. `register_all_tools()` — 注册 8 个提供者 + MCP
 6. 创建 `MemoryManager` + `ConversationVersionManager`
 7. 创建 `ReActAgent`
 8. `SkillRegistry.discover()` — 扫描 skill 目录
