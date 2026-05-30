@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Any, Callable
 
 from agentnexus.core.hooks import HookType, get_hook_manager
+
+logger = logging.getLogger(__name__)
+
+
+def _log_tool_error(name: str, exc: Exception) -> None:
+    """Write full traceback to tool_errors.log in the agentnexus home dir."""
+    try:
+        from agentnexus.core.config import _config_dir
+        log_path = _config_dir() / "tool_errors.log"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"Tool: {name}\n")
+            f.write(f"Error: {exc}\n")
+            f.write(f"Traceback:\n{traceback.format_exc()}\n")
+    except Exception:
+        pass
 
 
 def execute_tool(
@@ -57,4 +75,5 @@ def execute_tool(
             "params": arguments,
             "error": exc,
         })
+        _log_tool_error(name, exc)
         return f"错误: 工具 '{name}' 执行失败: {exc}"

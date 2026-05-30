@@ -1,8 +1,7 @@
 """Shared ChromaDB storage primitives.
 
 This module owns Chroma client, collection, locking, and metadata normalization
-for both RAG and long-term memory. ``agentnexus.rag.chroma_client`` remains as a
-compatibility layer for older imports and tests.
+for both RAG and long-term memory.
 """
 
 from __future__ import annotations

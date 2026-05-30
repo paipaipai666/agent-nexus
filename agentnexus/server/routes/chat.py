@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -291,23 +292,29 @@ async def ws_agent(ws: WebSocket, session_id: str):
         return
 
     current_run_id: str | None = None
-    confirm_result: asyncio.Future[bool] | None = None
 
     # Set up HITL confirm bridge for this WebSocket connection
     confirm_bridge = runtime.subagent_confirm
     original_target = confirm_bridge._target
 
+    # Capture the main event loop for use in ws_confirm (which runs in a thread)
+    main_loop = asyncio.get_running_loop()
+
+    # Use threading.Event for blocking wait in the tool execution thread
+    confirm_event = threading.Event()
+    confirm_approved = [False]
+
     def ws_confirm(summary: str) -> bool:
         """Send confirm request via WebSocket and wait for response."""
-        nonlocal confirm_result
-        loop = asyncio.get_running_loop()
-        confirm_result = loop.create_future()
+        confirm_event.clear()
+        confirm_approved[0] = False
         asyncio.run_coroutine_threadsafe(
             ws.send_json({"type": "confirm_request", "summary": summary}),
-            loop,
+            main_loop,
         )
         # Block until response
-        return confirm_result.result()
+        confirm_event.wait()
+        return confirm_approved[0]
 
     confirm_bridge.set_target(ws_confirm)
 
@@ -350,7 +357,8 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     except Exception:
                         pass
 
-                task = asyncio.create_task(asyncio.to_thread(run_agent))
+                # Run agent in background thread
+                asyncio.create_task(asyncio.to_thread(run_agent))
 
                 # Wait for begin_turn to create the run (adds to _run_events)
                 new_run_id = None
@@ -363,7 +371,8 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
                 if new_run_id:
                     asyncio.create_task(stream_events(new_run_id))
-                await task
+                # Don't await task — let agent run in background so
+                # the handler can continue receiving messages (confirm, cancel)
 
             elif msg_type == "cancel":
                 run_id = data.get("run_id", current_run_id)
@@ -373,8 +382,8 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
             elif msg_type == "confirm":
                 approved = data.get("approved", False)
-                if confirm_result and not confirm_result.done():
-                    confirm_result.set_result(approved)
+                confirm_approved[0] = approved
+                confirm_event.set()
 
             elif msg_type == "ping":
                 await ws.send_json({"type": "pong"})

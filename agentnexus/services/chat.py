@@ -282,7 +282,10 @@ class ChatService:
         session_id: str,
         previous,
     ) -> None:
+        has_reasoning = False
+
         def _on_event(event, from_state, to_state):
+            nonlocal has_reasoning
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
 
@@ -290,6 +293,8 @@ class ChatService:
             if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
                 token = payload.get("token", "")
                 if token:
+                    if event_type == "STREAM_REASONING":
+                        has_reasoning = True
                     evt_type = "stream_reasoning" if event_type == "STREAM_REASONING" else "stream_token"
                     token_event = AgentEvent(
                         evt_type,
@@ -301,6 +306,12 @@ class ChatService:
                 return
 
             self._record_agent_event(turn, event)
+
+            # Skip thought events when reasoning is available
+            if event_type in ("TOOLS_FOUND", "ANSWER_THOUGHT") and has_reasoning:
+                has_reasoning = False
+                return
+
             agent_event = AgentEvent(
                 "turn_journal",
                 {"event": event_type},

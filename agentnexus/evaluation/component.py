@@ -10,9 +10,9 @@ Reads JSONL trace spans and validates:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
+
+from agentnexus.evaluation.utils import load_all_traces
 
 
 @dataclass
@@ -46,27 +46,13 @@ class ComponentEvaluator:
         report = ComponentReport()
         agent_stats: dict[str, list[float]] = {"coder": [], "researcher": [], "executor": [], "analyst": []}
 
-        for f in sorted(Path(traces_dir).glob("*.jsonl")):
-            spans: list[dict] = []
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if line:
-                        try:
-                            spans.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-
-            traces: dict[str, list[dict]] = {}
-            for s in spans:
-                traces.setdefault(s.get("trace_id", "unknown"), []).append(s)
-
-            report.total_traces += len(traces)
-            for tid, trace_spans in traces.items():
-                self._check_coder(trace_spans, tid, report, agent_stats)
-                self._check_researcher(trace_spans, tid, report, agent_stats)
-                self._check_executor(trace_spans, tid, report, agent_stats)
-                self._check_analyst(trace_spans, tid, report, agent_stats)
+        all_traces = load_all_traces(traces_dir)
+        report.total_traces = len(all_traces)
+        for tid, trace_spans in all_traces.items():
+            self._check_coder(trace_spans, tid, report, agent_stats)
+            self._check_researcher(trace_spans, tid, report, agent_stats)
+            self._check_executor(trace_spans, tid, report, agent_stats)
+            self._check_analyst(trace_spans, tid, report, agent_stats)
 
         for agent, scores in agent_stats.items():
             if scores:

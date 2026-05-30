@@ -48,9 +48,9 @@ def test_bm25_search(benchmark, chunk_records: list[ChunkRecord]):
 
 
 def test_chroma_search(benchmark, perf_env):
-    import agentnexus.rag.chroma_client as chroma
+    import agentnexus.storage.chroma as chroma
 
-    chroma._reset_chroma_client()
+    chroma.reset_storage_client()
     namespace = "perf_chroma"
 
     texts = [
@@ -73,10 +73,10 @@ def test_chroma_search(benchmark, perf_env):
 
 
 def test_hybrid_search(benchmark, perf_env):
-    import agentnexus.rag.chroma_client as chroma
+    import agentnexus.storage.chroma as chroma
     from agentnexus.rag.retriever import HybridRetriever
 
-    chroma._reset_chroma_client()
+    chroma.reset_storage_client()
     namespace = "perf_hybrid"
 
     texts = [
@@ -202,8 +202,8 @@ CHROMA_SEARCH_10000_P95_MAX_MS = 1500
 
 def test_chroma_insert_1000(benchmark, perf_env):
     """Benchmark inserting 1000 documents into ChromaDB."""
-    import agentnexus.rag.chroma_client as chroma
-    chroma._reset_chroma_client()
+    import agentnexus.storage.chroma as chroma
+    chroma.reset_storage_client()
     namespace = "perf_insert_1000"
     texts = [
         f"Performance test document {i} with sufficient content "
@@ -219,8 +219,8 @@ def test_chroma_insert_1000(benchmark, perf_env):
 
 def test_chroma_search_1000(benchmark, perf_env):
     """Benchmark search in a collection of 1000 docs."""
-    import agentnexus.rag.chroma_client as chroma
-    chroma._reset_chroma_client()
+    import agentnexus.storage.chroma as chroma
+    chroma.reset_storage_client()
     namespace = "perf_search_1000"
     _topics = ['retrieval', 'embedding', 'vector database']
     texts = [
@@ -239,7 +239,7 @@ def test_chroma_search_1000(benchmark, perf_env):
 
 
 def _batch_insert(texts, metadatas, ids, namespace, batch_size=5000):
-    import agentnexus.rag.chroma_client as chroma
+    import agentnexus.storage.chroma as chroma
     for i in range(0, len(texts), batch_size):
         chroma.insert_documents(
             texts[i:i + batch_size],
@@ -253,8 +253,8 @@ def test_chroma_search_10000(perf_env):
     """Throughput: search in a collection of 10000 docs."""
     import time
 
-    import agentnexus.rag.chroma_client as chroma
-    chroma._reset_chroma_client()
+    import agentnexus.storage.chroma as chroma
+    chroma.reset_storage_client()
     namespace = "perf_search_10000"
     _topics = ['machine learning', 'data processing', 'search algorithms', 'text analysis', 'information retrieval']
     texts = [
@@ -276,8 +276,8 @@ def test_chroma_search_10000(perf_env):
 
 def test_chroma_upsert_1000(benchmark, perf_env):
     """Benchmark upserting 1000 documents."""
-    import agentnexus.rag.chroma_client as chroma
-    chroma._reset_chroma_client()
+    import agentnexus.storage.chroma as chroma
+    chroma.reset_storage_client()
     namespace = "perf_upsert"
     texts = [
         f"Upsert test document {i} with content for benchmarking upsert operations. " * 3
@@ -327,10 +327,10 @@ HYBRID_1000_P95_MAX_MS = 1200
 @pytest.mark.parametrize("chunk_records", [1000], indirect=True)
 def test_hybrid_search_1000(benchmark, perf_env, chunk_records):
     """Hybrid search with 1000 chunks."""
-    import agentnexus.rag.chroma_client as chroma
+    import agentnexus.storage.chroma as chroma
     from agentnexus.rag.retriever import HybridRetriever
 
-    chroma._reset_chroma_client()
+    chroma.reset_storage_client()
     namespace = "perf_hybrid_1000"
 
     texts = [c.text for c in chunk_records]
@@ -438,10 +438,10 @@ def test_build_knowledge_base_50_docs(perf_env):
     """build_knowledge_base with 50 larger documents (~500 chunks)."""
     import time
 
-    from agentnexus.rag.chroma_client import _reset_chroma_client
     from agentnexus.rag.retriever import build_knowledge_base
+    from agentnexus.storage.chroma import reset_storage_client
 
-    _reset_chroma_client()
+    reset_storage_client()
 
     docs = [
         f"Build KB performance test document {i} with sufficient content "
@@ -466,10 +466,10 @@ def test_search_knowledge_base_10_queries(perf_env):
     """search_knowledge_base end-to-end for 10 queries."""
     import time
 
-    from agentnexus.rag.chroma_client import _reset_chroma_client
     from agentnexus.rag.retriever import build_knowledge_base, search_knowledge_base
+    from agentnexus.storage.chroma import reset_storage_client
 
-    _reset_chroma_client()
+    reset_storage_client()
     docs = [
         f"Search KB performance test document {i} with content about "
         f"{'machine learning' if i % 3 == 0 else 'data processing' if i % 3 == 1 else 'search algorithms'}."
@@ -511,11 +511,11 @@ def test_dense_vs_hybrid_latency(perf_env):
     """Compare dense-only vs hybrid search latency on the same data."""
     import time
 
-    from agentnexus.rag.chroma_client import _reset_chroma_client
-    from agentnexus.rag.chroma_client import search as chroma_search
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
+    from agentnexus.storage.chroma import reset_storage_client
+    from agentnexus.storage.chroma import search as chroma_search
 
-    _reset_chroma_client()
+    reset_storage_client()
     namespace = "perf_compare"
     _topics = ['neural networks', 'data mining', 'natural language', 'computer vision']
     docs = [

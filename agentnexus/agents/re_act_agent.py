@@ -29,6 +29,7 @@ from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_s
 from agentnexus.tools.tool_executor import ToolExecutor
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
+REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
 
 MAX_JSON_RETRIES = 2
 
@@ -102,6 +103,13 @@ class ReActAgent:
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
         """Install a cooperative cancellation callback for the next run."""
         self._cancel_checker = checker
+
+    @property
+    def _react_template(self) -> str:
+        """Select react template based on thinking capability."""
+        if getattr(self.llm_client.capabilities, 'supports_thinking', False) is True:
+            return REACT_THINK_PROMPT_TEMPLATE
+        return REACT_PROMPT_TEMPLATE
 
     def run(self, question: str, memory_manager=None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
@@ -613,7 +621,7 @@ class ReActAgent:
     def _build_prompt(self, tools_desc: str, question: str, history_str: str,
                        memory_context: str, conversation_context: str) -> str:
         compiled = self._compiled_session_profile
-        template = compiled.prompt_template if compiled else REACT_PROMPT_TEMPLATE
+        template = compiled.prompt_template if compiled else self._react_template
         todo_context = self._todo_list.format_context() if self._todo_list else ""
         return build_react_prompt(
             template=template,
@@ -634,7 +642,7 @@ class ReActAgent:
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
         return build_react_messages(
-            system_rules=REACT_PROMPT_TEMPLATE.split("== 可用工具 ==")[0].rstrip(),
+            system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
             tools_desc=tools_desc,
             question=question,
             memory_context=memory_context,

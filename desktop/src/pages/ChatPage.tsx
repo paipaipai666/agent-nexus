@@ -45,6 +45,7 @@ export default function ChatPage() {
     const unsubs = [
       agentWs.on('thinking', (data) => {
         currentAssistantIdRef.current = null
+        currentReasoningIdRef.current = null
         const id = data.seq != null ? `thinking-${data.seq}` : `thinking-${++msgCounterRef.current}`
         setMessages(prev => [...prev, {
           id,

@@ -11,9 +11,10 @@ Article threshold: >0.85 coherence on 4+ step traces.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from agentnexus.evaluation.utils import find_trace, load_trace_spans
 
 COHERENCE_PROMPT = """你是一个 AI 评估助手，专门评估多步 Agent 推理的连贯性。
 你需要根据提供的 trace 步骤，判断每条后续步骤是否建立在前面的步骤之上。
@@ -52,19 +53,16 @@ class CoherenceEvaluator:
     def evaluate_all(self, traces_dir: str) -> list[CoherenceReport]:
         reports: list[CoherenceReport] = []
         for f in sorted(Path(traces_dir).glob("*.jsonl"), reverse=True):
-            traces = self._load_traces(str(f))
+            traces = load_trace_spans(f)
             for tid, spans in traces.items():
                 if len(spans) >= 3:  # need enough steps
                     reports.append(self._evaluate_one(tid, spans))
         return reports
 
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> CoherenceReport | None:
-        for f in sorted(Path(traces_dir).glob("*.jsonl"), reverse=True):
-            with open(f, "r", encoding="utf-8") as fh:
-                spans = [json.loads(line) for line in fh
-                         if line.strip() and json.loads(line.strip()).get("trace_id") == trace_id]
-                if spans:
-                    return self._evaluate_one(trace_id, spans)
+        spans = find_trace(traces_dir, trace_id)
+        if spans:
+            return self._evaluate_one(trace_id, spans)
         return None
 
     def _evaluate_one(self, trace_id: str, spans: list[dict]) -> CoherenceReport:
@@ -101,32 +99,3 @@ class CoherenceEvaluator:
         report.coherence_score = score
         report.issues = response[response.find("主要问题"):][:200] if "主要问题" in response else ""
         return report
-
-    @staticmethod
-    def _parse_score(response: str) -> float:
-        import re
-        m = re.search(r'[连貫]贯性分[数数].*?[：:]\s*(\d+\.?\d*)', response)
-        if not m:
-            m = re.search(r'[Sscore]+[：:]\s*(\d+\.?\d*)', response, re.IGNORECASE)
-        if not m:
-            m = re.search(r'(\d+\.?\d*)\s*分', response)
-        if not m:
-            m = re.search(r'(\d+\.?\d*)', response)
-        if m:
-            return min(10.0, max(0.0, float(m.group(1))))
-        return 5.0  # default mid-score on parse failure
-
-    @staticmethod
-    def _load_traces(filepath: str) -> dict[str, list[dict]]:
-        traces: dict[str, list[dict]] = {}
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    span = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                traces.setdefault(span.get("trace_id", "unknown"), []).append(span)
-        return traces

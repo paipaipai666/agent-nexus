@@ -13,8 +13,8 @@ MM_COMPACT_LARGE_P95_MAX_MS = 3000
 @pytest.fixture
 def memory_manager(perf_env):
     from agentnexus.memory.manager import MemoryManager
-    from agentnexus.rag.chroma_client import _reset_chroma_client
-    _reset_chroma_client()
+    from agentnexus.storage.chroma import reset_storage_client
+    reset_storage_client()
     mm = MemoryManager("perf_bench")
     mm.init_session("perf benchmark")
     return mm
@@ -42,8 +42,8 @@ def test_mm_append_bulk(perf_env, memory_manager):
 def test_mm_init_session(benchmark, perf_env):
     """Cold init_session including LTM ChromaDB setup."""
     from agentnexus.memory.manager import MemoryManager
-    from agentnexus.rag.chroma_client import _reset_chroma_client
-    _reset_chroma_client()
+    from agentnexus.storage.chroma import reset_storage_client
+    reset_storage_client()
 
     def _run():
         mm = MemoryManager("cold_start")

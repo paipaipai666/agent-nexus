@@ -9,9 +9,9 @@ Article threshold: >0.92 for <5 tools, >0.85 for 5+ tools.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
+
+from agentnexus.evaluation.utils import find_trace, iter_spans
 
 
 @dataclass
@@ -67,20 +67,11 @@ class ToolSelectionEvaluator:
         report = ToolSelectionReport()
         queries: dict[str, list[str]] = {}  # trace_id → [tool_names in order]
 
-        for f in sorted(Path(traces_dir).glob("*.jsonl")):
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    tid = span.get("trace_id", "")
-                    name = span.get("name", "")
-                    if tid and name:
-                        queries.setdefault(tid, []).append(name)
+        for span in iter_spans(traces_dir):
+            tid = span.get("trace_id", "")
+            name = span.get("name", "")
+            if tid and name:
+                queries.setdefault(tid, []).append(name)
 
         # For each trace, map first tool-like span to a query type
         for tid, node_names in queries.items():
@@ -128,18 +119,11 @@ class ToolSelectionEvaluator:
     @staticmethod
     def _get_task_from_trace(traces_dir: str, trace_id: str) -> str | None:
         """Extract the original task text from the trace's root span."""
-        for f in sorted(Path(traces_dir).glob("*.jsonl")):
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if (span.get("trace_id") == trace_id
-                            and span.get("name") == "task"):
-                        inp = span.get("input", {})
-                        return inp.get("task", "")
+        spans = find_trace(traces_dir, trace_id)
+        if not spans:
+            return None
+        for span in spans:
+            if span.get("name") == "task":
+                inp = span.get("input", {})
+                return inp.get("task", "")
         return None

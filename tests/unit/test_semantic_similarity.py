@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from agentnexus.rag.chroma_client import _FallbackEmbeddingModel, get_embedding_model
+from agentnexus.rag.embeddings import _FallbackEmbeddingModel, get_embedding_model
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:

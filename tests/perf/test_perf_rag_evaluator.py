@@ -33,12 +33,12 @@ def test_retrieval_quality_keyword(perf_env):
     Hit rate measures whether any relevant doc was retrieved at all.
     MRR measures how early in the ranked list the first relevant doc appears.
     """
-    from agentnexus.rag.chroma_client import _reset_chroma_client, delete_collection
     from agentnexus.rag.chunking import ChunkStrategy, chunk_text
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
+    from agentnexus.storage.chroma import delete_collection, reset_storage_client
 
-    _reset_chroma_client()
+    reset_storage_client()
 
     # Chunk and index
     full_text = "\n\n".join(KNOWLEDGE_BASE)
@@ -90,12 +90,12 @@ def test_retrieval_quality_keyword(perf_env):
 
 
 def test_retrieve_10_queries(perf_env):
-    from agentnexus.rag.chroma_client import _reset_chroma_client, insert_documents
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.evaluator import RAGEvaluator
     from agentnexus.rag.retriever import HybridRetriever
+    from agentnexus.storage.chroma import insert_documents, reset_storage_client
 
-    _reset_chroma_client()
+    reset_storage_client()
 
     # Insert data into the default "documents" collection so _retrieve's
     # internal search() call finds it without requiring a namespace.

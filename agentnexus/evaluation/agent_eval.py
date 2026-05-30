@@ -14,11 +14,12 @@ Reads structured spans from ~/.agentnexus/traces/*.jsonl and computes:
 
 from __future__ import annotations
 
-import json
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from agentnexus.evaluation.utils import find_trace, load_trace_spans
 
 # Pricing (CNY per million tokens) — mirrors observability/stats.py
 _PRICING: dict[str, tuple[float, float]] = {
@@ -182,16 +183,8 @@ class AgentEvaluator:
         for f in sorted(Path(traces_dir).glob("*.jsonl")):
             if days and f.stat().st_mtime < cutoff:
                 continue
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    traces[span.get("trace_id", "unknown")].append(span)
+            for tid, spans in load_trace_spans(f).items():
+                traces[tid].extend(spans)
 
         records = [self._evaluate_trace(tid, spans) for tid, spans in traces.items()]
         report = self._aggregate(records)
@@ -204,10 +197,9 @@ class AgentEvaluator:
 
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> TraceRecord | None:
         """Evaluate a single trace by ID."""
-        for f in sorted(Path(traces_dir).glob("*.jsonl"), reverse=True):
-            spans = self._load_trace_from_file(str(f), trace_id)
-            if spans:
-                return self._evaluate_trace(trace_id, spans)
+        spans = find_trace(traces_dir, trace_id)
+        if spans:
+            return self._evaluate_trace(trace_id, spans)
         return None
 
     # ── per-trace logic ──────────────────────────────────────────
@@ -339,22 +331,6 @@ class AgentEvaluator:
             }
 
         return report
-
-    @staticmethod
-    def _load_trace_from_file(filepath: str, trace_id: str) -> list[dict] | None:
-        spans: list[dict] = []
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    span = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if span.get("trace_id") == trace_id:
-                    spans.append(span)
-        return spans if spans else None
 
 
 def _percentile(sorted_values: list[float], pct: int) -> float:

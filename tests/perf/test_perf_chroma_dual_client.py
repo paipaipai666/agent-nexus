@@ -26,13 +26,15 @@ N_OPS = 20
 
 def _reset_all():
     from agentnexus.memory.long_term import _reset_long_term_memory
-    from agentnexus.rag.chroma_client import _reset_chroma_client
+    from agentnexus.rag.embeddings import reset_embedding_model
+    from agentnexus.storage.chroma import reset_storage_client
     _reset_long_term_memory()
-    _reset_chroma_client(reset_model=True)
+    reset_storage_client()
+    reset_embedding_model()
 
 
 def _rag_write(text, metadata=None):
-    from agentnexus.rag.chroma_client import insert_documents
+    from agentnexus.storage.chroma import insert_documents
     insert_documents(
         texts=[text],
         metadatas=[metadata or {"source": "stress"}],
@@ -40,7 +42,7 @@ def _rag_write(text, metadata=None):
 
 
 def _rag_search(query="document", limit=10):
-    from agentnexus.rag.chroma_client import search
+    from agentnexus.storage.chroma import search
     return search(query=query, limit=limit)
 
 

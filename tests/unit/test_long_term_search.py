@@ -6,7 +6,7 @@ from agentnexus.memory.long_term import (
     _reset_long_term_memory,
     get_long_term_memory,
 )
-from agentnexus.rag.chroma_client import _reset_chroma_client
+from agentnexus.storage.chroma import reset_storage_client as _reset_chroma_client
 
 
 def _fresh_ltm():

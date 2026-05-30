@@ -13,10 +13,10 @@ Thresholds:
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+
+from agentnexus.evaluation.utils import find_trace, iter_spans
 
 
 @dataclass
@@ -49,37 +49,20 @@ class HallucinationDetector:
 
     def evaluate_all(self, traces_dir: str) -> list[HallucinationReport]:
         reports: list[HallucinationReport] = []
-        for f in sorted(Path(traces_dir).glob("*.jsonl")):
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if span.get("name") == "analyst_node":
-                        tid = span.get("trace_id", "")
-                        output = str(span.get("output", ""))
-                        if tid and output:
-                            reports.append(self._evaluate_one(tid, output))
+        for span in iter_spans(traces_dir, filter_fn=lambda s: s.get("name") == "analyst_node"):
+            tid = span.get("trace_id", "")
+            output = str(span.get("output", ""))
+            if tid and output:
+                reports.append(self._evaluate_one(tid, output))
         return reports
 
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> HallucinationReport | None:
-        for f in sorted(Path(traces_dir).glob("*.jsonl"), reverse=True):
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if (span.get("name") == "analyst_node"
-                            and span.get("trace_id") == trace_id):
-                        return self._evaluate_one(trace_id, str(span.get("output", "")))
+        spans = find_trace(traces_dir, trace_id)
+        if not spans:
+            return None
+        for span in spans:
+            if span.get("name") == "analyst_node":
+                return self._evaluate_one(trace_id, str(span.get("output", "")))
         return None
 
     def _evaluate_one(self, trace_id: str, output: str) -> HallucinationReport:
