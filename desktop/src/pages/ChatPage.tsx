@@ -44,10 +44,10 @@ export default function ChatPage() {
         api.listShortMemories().then(({ messages }) => {
           if (messages && messages.length > 0) {
             const historyMessages: Message[] = messages
-              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
               .map((m, idx) => ({
                 id: `history-${idx}`,
-                role: m.role as 'user' | 'assistant',
+                role: m.role as 'user' | 'assistant' | 'system',
                 content: m.content,
                 timestamp: new Date(),
               }))

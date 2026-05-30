@@ -194,7 +194,7 @@ class ChatScreen(Screen):
             messages = self._memory.short_term.get_all()
         except Exception:
             return
-        visible = [m for m in messages if m.get("role") in {"system", "user", "assistant"}]
+        visible = [m for m in messages if m.get("role") in {"system", "user", "assistant", "tool"}]
         if not visible:
             return
         self._chat_area.add_system(f"[dim]Restored {len(visible)} messages from this session.[/]")
@@ -203,7 +203,21 @@ class ChatScreen(Screen):
             content = str(msg.get("content", "") or "")
             if not content:
                 continue
-            if role == "system":
+            if role == "tool":
+                # Parse tool name and result
+                tool_name = ""
+                tool_result = content
+                if content.startswith("Action: "):
+                    parts = content.split("\n", 1)
+                    if len(parts) > 1:
+                        action_part = parts[0]
+                        tool_result = parts[1].replace("Observation: ", "", 1)
+                        # Extract tool name: "Action: tool_name[{...}]"
+                        bracket_idx = action_part.find("[")
+                        if bracket_idx > 0:
+                            tool_name = action_part[len("Action: "):bracket_idx].strip()
+                self._chat_area.add_tool_call(tool_name or "tool", tool_result[:500])
+            elif role == "system":
                 self._chat_area.add_system(content)
             else:
                 self._chat_area.add_message(role, content)

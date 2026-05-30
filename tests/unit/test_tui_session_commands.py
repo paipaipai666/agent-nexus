@@ -110,3 +110,28 @@ def test_handle_switch_success(mock_chat_screen):
         mock_chat_screen._restore_stm_from_version.assert_called_once()
         mock_chat_screen._render_restored_history.assert_called_once()
         mock_chat_screen._refresh_version_display.assert_called_once()
+
+
+def test_render_restored_history_with_tool_messages(mock_chat_screen):
+    """Test that tool messages are rendered when restoring history."""
+    mock_messages = [
+        {"role": "user", "content": "Search for something"},
+        {"role": "assistant", "content": "I'll search for that"},
+        {
+            "role": "tool",
+            "content": "Action: web_search[{\"query\": \"test\"}]\nObservation: [stdout]\nSearch results here",
+        },
+        {"role": "assistant", "content": "Here are the results"},
+    ]
+
+    mock_chat_screen._memory = MagicMock()
+    mock_chat_screen._memory.short_term.get_all.return_value = mock_messages
+
+    mock_chat_screen._render_restored_history()
+
+    # Should call add_tool_call for tool messages
+    mock_chat_screen._chat_area.add_tool_call.assert_called_once_with(
+        "web_search", "[stdout]\nSearch results here"
+    )
+    # Should call add_message for user and assistant messages
+    assert mock_chat_screen._chat_area.add_message.call_count == 3
