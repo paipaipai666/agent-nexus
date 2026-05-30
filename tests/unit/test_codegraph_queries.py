@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,8 +15,8 @@ from agentnexus.codegraph.queries import (
     codegraph_context,
     codegraph_relations,
     codegraph_search,
-    get_callers,
     get_callees,
+    get_callers,
     get_entity_context,
     get_imports,
     get_inheritance_tree,

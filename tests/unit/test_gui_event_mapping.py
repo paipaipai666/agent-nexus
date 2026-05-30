@@ -1,5 +1,4 @@
 """Tests for GUI event mapping — verifies answer reaches frontend."""
-import pytest
 from unittest.mock import MagicMock
 
 from agentnexus.server.routes.chat import _map_to_gui_event

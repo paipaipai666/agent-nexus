@@ -8,8 +8,8 @@ import pytest
 
 from agentnexus.codegraph.models import NodeData, NodeKind
 from agentnexus.codegraph.vector_store import (
-    COLLECTION_NAME,
     COLLECTION_METADATA,
+    COLLECTION_NAME,
     _get_codegraph_collection,
     clear_collection,
     delete_by_file,
@@ -231,7 +231,7 @@ class TestSearchSemantic:
             "metadatas": [[{"name": "func1"}]],
         }
 
-        results = search_semantic([0.1, 0.2], limit=5, kind="function")
+        search_semantic([0.1, 0.2], limit=5, kind="function")
 
         call_args = mock_collection.query.call_args
         where = call_args[1]["where"]
@@ -248,7 +248,7 @@ class TestSearchSemantic:
             "metadatas": [[{}]],
         }
 
-        results = search_semantic([0.1, 0.2], limit=5, language="python")
+        search_semantic([0.1, 0.2], limit=5, language="python")
 
         call_args = mock_collection.query.call_args
         where = call_args[1]["where"]

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +14,6 @@ from agentnexus.codegraph.updater import (
     _compute_content_hash,
     _get_changed_files,
     _process_deleted_file,
-    _recover_wal,
     _scan_project_files,
     build_graph,
     check_and_sync_file,

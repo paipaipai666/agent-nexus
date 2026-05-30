@@ -29,7 +29,7 @@ def _parse_journal_entry(entry: str) -> dict[str, str]:
     return {"kind": "unknown", "content": entry}
 
 
-def _map_to_gui_event(event, chat_service) -> dict | None:
+def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
     """Map a ChatService AgentEvent to GUI-expected format. Returns None to skip."""
     event_type = getattr(event, "type", "")
     payload = getattr(event, "payload", {})
@@ -47,7 +47,7 @@ def _map_to_gui_event(event, chat_service) -> dict | None:
                     if parsed["kind"] == "thought":
                         thought = parsed["content"]
                         break
-            return {"type": "thinking", "content": thought, "run_id": run_id}
+            return {"type": "thinking", "content": thought, "run_id": run_id, "seq": seq}
 
         elif agent_event_name == "TOOL_START":
             turn = chat_service._turns.get(run_id)
@@ -59,7 +59,7 @@ def _map_to_gui_event(event, chat_service) -> dict | None:
                         tool_name = parsed["name"]
                         arguments = parsed["arguments"]
                         break
-            return {"type": "tool_call", "tool_name": tool_name, "arguments": arguments, "run_id": run_id}
+            return {"type": "tool_call", "tool_name": tool_name, "arguments": arguments, "run_id": run_id, "seq": seq}
 
         elif agent_event_name == "TOOL_DONE":
             turn = chat_service._turns.get(run_id)
@@ -71,33 +71,34 @@ def _map_to_gui_event(event, chat_service) -> dict | None:
                         tool_name = parsed["name"]
                         result = parsed["result"]
                         break
-            return {"type": "tool_result", "tool_name": tool_name, "result": result, "run_id": run_id}
+            return {"type": "tool_result", "tool_name": tool_name, "result": result, "run_id": run_id, "seq": seq}
 
         return None
 
     elif event_type == "stream_token":
-        return {"type": "token", "content": payload.get("token", ""), "run_id": run_id}
+        return {"type": "token", "content": payload.get("token", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "stream_reasoning":
-        return {"type": "reasoning", "content": payload.get("token", ""), "run_id": run_id}
+        return {"type": "reasoning", "content": payload.get("token", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "message_delta":
-        return {"type": "token", "content": payload.get("text", ""), "run_id": run_id}
+        # Skip — run_finished already provides the complete answer
+        return None
 
     elif event_type == "run_finished":
-        return {"type": "answer", "content": payload.get("answer", ""), "run_id": run_id}
+        return {"type": "answer", "content": payload.get("answer", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "run_failed":
-        return {"type": "error", "message": payload.get("error", ""), "run_id": run_id}
+        return {"type": "error", "message": payload.get("error", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "run_interrupted":
-        return {"type": "error", "message": payload.get("error", "cancelled"), "run_id": run_id}
+        return {"type": "error", "message": payload.get("error", "cancelled"), "run_id": run_id, "seq": seq}
 
     elif event_type == "run_persisted":
-        return {"type": "done", "run_id": run_id}
+        return {"type": "done", "run_id": run_id, "seq": seq}
 
     elif event_type in ("skill_auto_selected", "workflow_step"):
-        return {**payload, "type": event_type, "run_id": run_id}
+        return {**payload, "type": event_type, "run_id": run_id, "seq": seq}
 
     return None
 
@@ -299,7 +300,7 @@ async def ws_agent(ws: WebSocket, session_id: str):
     def ws_confirm(summary: str) -> bool:
         """Send confirm request via WebSocket and wait for response."""
         nonlocal confirm_result
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         confirm_result = loop.create_future()
         asyncio.run_coroutine_threadsafe(
             ws.send_json({"type": "confirm_request", "summary": summary}),
@@ -317,13 +318,15 @@ async def ws_agent(ws: WebSocket, session_id: str):
         """
         nonlocal current_run_id
         current_run_id = run_id
+        seq = 0
         try:
             async for event in chat.astream_events(run_id):
-                gui_event = _map_to_gui_event(event, chat)
+                gui_event = _map_to_gui_event(event, chat, seq)
                 if gui_event is not None:
                     await ws.send_json(gui_event)
+                    seq += 1
         except Exception as e:
-            await ws.send_json({"type": "error", "message": str(e), "run_id": run_id})
+            await ws.send_json({"type": "error", "message": str(e), "run_id": run_id, "seq": seq})
 
     try:
         while True:
@@ -359,9 +362,7 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     await asyncio.sleep(0.01)
 
                 if new_run_id:
-                    # Run stream_events in thread to avoid blocking event loop
-                    stream_task = asyncio.create_task(asyncio.to_thread(stream_events, new_run_id))
-                    await stream_task
+                    asyncio.create_task(stream_events(new_run_id))
                 await task
 
             elif msg_type == "cancel":

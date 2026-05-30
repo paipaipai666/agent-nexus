@@ -1,150 +1,133 @@
-# AGENTS.md — AgentNexus
+# AGENTS.md
 
-ReAct 单智能体任务协同 CLI 工具。Python 3.11+, 纯本地运行 (ChromaDB + SQLite + JSONL)。
+## Project Overview
 
-## 项目结构
+AgentNexus is a Python 3.11+ ReAct single-agent CLI tool with FSM-driven safety loop, 12 built-in tools, and three-layer storage (ChromaDB/SQLite/JSONL). Entry point: `nexus` CLI via `agentnexus.cli:main`.
 
-```
-<repo-root>/                  ← 仓库根目录（`pyproject.toml` 在这里）
-├── .github/                  ← CI / Release workflows
-├── agentnexus/               ← 源码包
-│   ├── __main__.py           ← python -m 入口
-│   ├── cli/                  ← Typer CLI 层 (kb, memory, logs, eval, stats, config, init, audit, tui)
-│   ├── agents/               ← Agent 实现 (ReActAgent)
-│   ├── core/                 ← config.py (Pydantic Settings) + llm.py (AgentLLM)
-│   ├── prompts/              ← .txt 提示词模板 (str.format, 非 Jinja2)
-│   ├── rag/                  ← ChromaDB + BM25 + Reranker + Grep 双路由检索
-│   ├── memory/               ← 短期 deque + 长期 SQLite+向量
-│   ├── observability/        ← JSONL Trace + Token 统计
-│   └── tools/                ← 代码执行 / Web 搜索 / 工具调度
-├── tests/
-│   ├── unit/                 ← pytest class-based 单元测试
-│   ├── integration/          ← pytest function-based 集成测试
-│   ├── regression/           ← 全功能回归测试 (原 test_all.py 已迁移至此)
-│   ├── evals/                ← 空 (评估数据集待填充)
-│   └── conftest.py           ← temp_agentnexus_home / mock_llm fixtures
-├── AGENTS.md
-├── CLAUDE.md
-├── README.md
-├── agentnexus.spec
-├── pyproject.toml
-└── requirements.txt
-```
-
-**⚠ 安装直接在仓库根目录进行:**
-```bash
-pip install -e ".[dev,eval]"
-```
-
-## 开发命令 (严格顺序)
+## Essential Commands
 
 ```bash
-# 开发安装 (在仓库根目录下)
+# Install (editable with dev+eval deps)
 pip install -e ".[dev,eval]"
 
-# Lint
+# Lint (must be zero warnings before PR)
 ruff check agentnexus/ tests/
 
-# 运行测试 (CI 入口，覆盖 unit + integration + regression)
+# Run all tests
 python -m pytest tests/ -v
 
-# PyInstaller 打包 (需先在 agentnexus.spec 检查 hiddenimports)
+# Run specific test categories
+python -m pytest tests/unit/ -v                    # Unit tests
+python -m pytest tests/integration/ -v             # Integration tests
+python -m pytest tests/security/ -v                # Security tests
+python -m pytest tests/perf/ -v                    # Performance tests (benchmark)
+python -m pytest tests/regression/ -v              # Regression/E2E tests
+
+# Run tests with specific markers
+python -m pytest -m perf -v                        # Only perf tests
+python -m pytest -m e2e --run-e2e -v               # E2E tests (requires real LLM API key)
+
+# Run single test file
+python -m pytest tests/unit/test_config.py -v
+
+# Run single test function
+python -m pytest tests/unit/test_config.py::test_function_name -v
+
+# Coverage
+python -m pytest tests/ --cov=agentnexus --cov-report=term-missing
+
+# Build binary (requires pyinstaller)
 pyinstaller agentnexus.spec --noconfirm
+
+# CLI commands
+nexus init                    # Interactive config
+nexus tui                     # TUI chat
+nexus kb add ./docs           # Add to knowledge base
+nexus stats --days 7          # Token cost stats
+nexus eval agent --days 1     # Agent quality eval
+nexus eval ci -d 7            # CI evaluation
 ```
 
-**注意**: CI 中 test 步骤已不再使用 `continue-on-error`，测试失败会导致 CI 红灯。
-
-## 架构关键点
-
-### 执行入口
+## Architecture
 
 ```
-nexus init       → agentnexus/cli/config.py
-nexus config     → agentnexus/cli/config.py
-nexus kb         → agentnexus/cli/kb.py
-nexus memory     → agentnexus/cli/memory_cmd.py
-nexus logs       → agentnexus/cli/logs.py
-nexus stats      → agentnexus/cli/stats.py
-nexus eval       → agentnexus/cli/eval_cmd.py
-nexus audit      → agentnexus/cli/audit.py
-nexus tui        → agentnexus/cli/tui_cmd.py
+agentnexus/
+├── cli/           # Typer CLI commands (audit, config, eval, kb, logs, memory, serve, skill, stats, tui)
+├── agents/        # ReAct agent, FSM, LLM strategy, prompt builder, tool runner
+├── core/          # Config, LLM client, capabilities, hooks, PII masking
+├── tools/         # 12 built-in tools + MCP adapter + tool registry/executor
+├── memory/        # STM/LTM management, compaction, versioned conversations
+├── rag/           # RAG pipeline, ChromaDB clients, embeddings, ranking
+├── services/      # Business logic layer (chat, config, eval, knowledge, skill)
+├── evaluation/    # 8 evaluators (agent, trajectory, hallucination, RAG, code, etc.)
+├── skills/        # Skill workflow engine, router, runtime
+├── storage/       # Storage abstractions
+├── observability/ # Tracing, audit logs, stats
+├── server/        # FastAPI server for API access
+├── tui/           # Textual TUI screens and widgets
+└── prompts/       # Prompt templates (use str.format(), NOT Jinja2)
 ```
 
-### 提示词管理
+## Testing Conventions
 
-- 所有提示词在 `agentnexus/prompts/*.txt`，用 `str.format()` 注入变量 (非 Jinja2)
-- `load_prompt(name)` → 读取 `{name}.txt` 原始字符串
-- `format_prompt(name, **kwargs)` → 自动注入 `{date}` (UTC 日期)
-- 共 7 个提示词文件: react, contextual, memory_extract, memory_summarize, eval_* (3个)
+- **Fixtures**: Use `temp_agentnexus_home` for isolated `.agentnexus` directory (auto-cleanup)
+- **Mock LLM**: Use `mock_llm` fixture (mocks `AgentLLM.think()`)
+- **CLI tests**: Use `typer.testing.CliRunner` + `isolated_filesystem()`
+- **External services**: Always mock Tavily, E2B, third-party APIs
+- **ChromaDB/SQLite tests**: Use `temp_agentnexus_home` fixture
+- **E2E tests**: Mark with `@pytest.mark.e2e`, require `--run-e2e` flag and `AGENTNEXUS_LLM_API_KEY`
+- **Perf tests**: Mark with `@pytest.mark.perf`, use `pytest-benchmark`
+- **Security tests**: Required for sandbox/code execution changes
 
-### ChromaDB 双客户端 ⚠
+## Configuration
 
-RAG 和长期记忆各自创建独立的 `chromadb.PersistentClient`，指向同一个 `chroma_persist_dir`：
-- RAG: `agentnexus/rag/chroma_client.py::get_chroma_client()` → collection `"documents"` (单例缓存)
-- LTM: `agentnexus/memory/long_term.py::_get_ltm_collection()` → collection `"long_term_memories"` (每次重建)
+- Config via `~/.agentnexus/config.yaml` or `AGENTNEXUS_*` env vars
+- Settings class: `agentnexus.core.config.Settings` (pydantic-settings)
+- API keys: `SecretStr` type, auto-masked in logs
+- Key env vars: `AGENTNEXUS_HOME`, `AGENTNEXUS_LLM_API_KEY`, `AGENTNEXUS_TAVILY_API_KEY`, `AGENTNEXUS_E2B_API_KEY`
 
-BM25 索引仅在内存中，不持久化，每次会话重建。
+## Code Style
 
-### 已移除
+- Line length: 120 chars
+- Linter: ruff (select: E, F, I, W)
+- Type hints: Required on all new function parameters
+- Strings: f-strings preferred, avoid `%` and `.format()` (except prompts/)
+- Imports: stdlib → third-party → project internal (separated by blank lines)
+- Prompt templates: Use `str.format()` in `agentnexus/prompts/`, NOT Jinja2
 
-多 Agent LangGraph 编排器 (`agentnexus/agents/multi_agent/`) 及子 Agent (`coder_agent.py`, `research_agent.py`, `executor_agent.py`, `critic_agent.py`, `critic_rules.py`, `analyst_agent.py`, `schema.py`) 已在清理中移除；当前 CLI 仅保留 kb / memory / logs / eval / stats / config / init / audit / tui / version 等入口。
+## PR Checklist
 
-新增功能时，如果新增了动态导入的依赖，必须同步更新 `agentnexus.spec` 中的 `hiddenimports`，否则 PyInstaller 打包会缺少依赖。
+```bash
+ruff check agentnexus/ tests/    # Must pass with zero warnings
+python -m pytest tests/ -v       # Must pass
+```
 
-## `__main__` 自动追加
+- PR title format: `<type>: <description>` (feat, fix, docs, refactor, perf, test, security)
+- Coverage should not significantly decrease
+- Sync checklist: New CLI commands → docs/commands.md, new config → docs/configuration.md, new tools → docs/architecture.md
 
-`_ensure_main_block()` 用 AST 解析代码，检测缺失的 `if __name__ == '__main__':` 块，自动追加顶层函数调用。不修改已有 `__main__` 块的代码。
+## Important Constraints
 
-(该功能原为多 Agent 编排器的 coder_agent 实现，现保留为共享工具方法。)
+- Never add methods to escape code sandbox
+- Never access LLM inside `ToolExecutor` (tools must be stateless)
+- Never write PII directly to `MemoryManager` (use `conclude()` which masks PII)
+- Don't import `Settings` outside service layer (use env vars or pass params)
+- Secrets in config: `SecretStr` type, never log plaintext
 
-## 配置系统
+## Desktop App (Electron/React/TypeScript)
 
-优先级: YAML 文件 (`~/.agentnexus/config.yaml`) → 环境变量 (`AGENTNEXUS_*`) → Pydantic defaults
+Located in `desktop/` directory:
+```bash
+cd desktop
+npm install
+npm run dev          # Vite dev server
+npm run test         # Vitest
+npm run build        # TypeScript + Vite + Electron builder
+```
 
-关键环境变量:
-- `AGENTNEXUS_HOME` — 数据根目录 (默认 `~/.agentnexus`)，控制 chroma/memory.db/traces 路径
-- `AGENTNEXUS_LLM_API_KEY` — API Key (必须)
-- `AGENTNEXUS_LLM_MODEL_ID` — 模型 ID (默认 `deepseek/deepseek-v4-flash`)
-- `AGENTNEXUS_Tavily_API_KEY` / `AGENTNEXUS_E2B_API_KEY` — 可选外部服务
+## Release Process
 
-测试必须设置 `AGENTNEXUS_HOME` 到临时目录，使用 `conftest.py` 提供的 `temp_agentnexus_home` fixture。
-
-## LLM 调用
-
-`core/llm.py::AgentLLM`:
-- 通过 litellm 流式调用
-- 3 次指数退避重试 (`LLM_RETRY_BASE_DELAY=2.0`)
-- 自动检测 `finish_reason=="length"` → `self.last_truncated = True`
-- 瞬时错误 (connection/ssl/timeout/429/503) → 自动重试；非瞬时错误 → 直接返回空
-- model ID 如果无 `/` 前缀会自动根据 base_url 推断 provider 前缀
-
-## 测试约定
-
-- 统一入口: `python -m pytest tests/ -v` (CI 和本地一致)
-- 目录: `unit/` (class-based) / `integration/` (function-based) / `regression/` (全功能回归，原 test_all.py)
-- `conftest.py` — 提供 `temp_agentnexus_home` (临时数据目录), `mock_llm` (mock AgentLLM.think)
-- 需要 ChromaDB/SQLite 隔离的测试使用 `temp_agentnexus_home` fixture
-- CLI 测试用 `typer.testing.CliRunner` + `isolated_filesystem()`
-
-## Trace 可观测性
-
-`observability/tracer.py`:
-- 线程安全的 TraceManager 单例
-- TraceContext 由对应执行流程创建 → 各节点通过 `_trace_wrapper` 自动记录 span
-- 输出: `~/.agentnexus/traces/{YYYY-MM-DD}.jsonl`
-- ⚠ span 只在 `end_trace()` 时 flush，crash 丢未 flush 数据
-- 输入输出截断 1000 字符
-
-## CI
-
-- 触发: push/PR to `main`
-- 步骤: lint (ruff) → test (`python -m pytest tests/ -v`) → eval sanity check (需 API key secret)
-- 发布: push `v*` tag → PyInstaller 跨平台构建 (ubuntu + windows) → GitHub Release
-
-## 已知问题 / 注意点
-
-- long_term.py: `_get_ltm_collection()` 使用模块级单例缓存 ChromaDB client（非每次重建），但无持久化压力测试 → 已补充 `tests/perf/test_perf_long_term_stress.py`（8 个压力测试）
-- BM25 索引不持久化，重启后需重建，无性能回退测试 → 已补充 `tests/perf/test_perf_bm25_rebuild.py`（3 个基准测试）
-- PII 过滤: 原为完全屏蔽（`_contains_pii` 返回 bool），现已实现部分脱敏 `_mask_pii()`（保留邮箱首字+域名、手机前3后4、API key 前缀、信用卡前4后4），新增 12 个单元测试
-- evals/ 目录原空 → 已填充 5 个评估数据集（agent_eval / tool_selection / hallucination / coherence / trajectory，各 10 条）
-- ChromaDB 1.5.8 numpy 数组兼容性: `_fallback_cosine_search()` 中 `chroma_results.get("embeddings") or []` 需 `is not None` 检查
+1. Update version in `pyproject.toml` + `agentnexus/__init__.py`
+2. Update CHANGELOG
+3. `git tag v0.x.x && git push origin v0.x.x`
+4. CI auto-builds cross-platform binaries via `agentnexus.spec`

@@ -2,9 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ── hud._format_k ────────────────────────────────────────────────
 
 

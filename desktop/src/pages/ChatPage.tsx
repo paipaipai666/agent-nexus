@@ -25,6 +25,7 @@ export default function ChatPage() {
   const currentReasoningIdRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const msgCounterRef = useRef(0)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -43,16 +44,20 @@ export default function ChatPage() {
   useEffect(() => {
     const unsubs = [
       agentWs.on('thinking', (data) => {
+        currentAssistantIdRef.current = null
+        const id = data.seq != null ? `thinking-${data.seq}` : `thinking-${++msgCounterRef.current}`
         setMessages(prev => [...prev, {
-          id: `thinking-${Date.now()}`,
+          id,
           role: 'system',
           content: data.content || 'Thinking...',
           timestamp: new Date(),
         }])
       }),
       agentWs.on('tool_call', (data) => {
+        currentAssistantIdRef.current = null
+        const id = data.seq != null ? `tool-${data.seq}` : `tool-${++msgCounterRef.current}`
         setMessages(prev => [...prev, {
-          id: `tool-${Date.now()}`,
+          id,
           role: 'tool',
           content: `Calling: ${data.tool_name}`,
           toolName: data.tool_name,
@@ -75,10 +80,10 @@ export default function ChatPage() {
         const targetId = currentAssistantIdRef.current
         if (targetId) {
           setMessages(prev =>
-            prev.map(m => m.id === targetId ? { ...m, content: data.content } : m)
+            prev.map(m => m.id === targetId ? { ...m, content: m.content + data.content } : m)
           )
         } else {
-          const newId = `assistant-${Date.now()}`
+          const newId = data.seq != null ? `assistant-${data.seq}` : `assistant-${++msgCounterRef.current}`
           currentAssistantIdRef.current = newId
           setMessages(prev => [...prev, {
             id: newId,
@@ -95,7 +100,7 @@ export default function ChatPage() {
             prev.map(m => m.id === targetId ? { ...m, content: m.content + data.content } : m)
           )
         } else {
-          const newId = `reasoning-${Date.now()}`
+          const newId = data.seq != null ? `reasoning-${data.seq}` : `reasoning-${++msgCounterRef.current}`
           currentReasoningIdRef.current = newId
           setMessages(prev => [...prev, {
             id: newId,
@@ -112,20 +117,32 @@ export default function ChatPage() {
             prev.map(m => m.id === targetId ? { ...m, content: data.content } : m)
           )
         } else {
-          setMessages(prev => [...prev, {
-            id: `assistant-${Date.now()}`,
-            role: 'assistant',
-            content: data.content,
-            timestamp: new Date(),
-          }])
+          // Find the last assistant message in the array and update it,
+          // instead of creating a new message at the end
+          setMessages(prev => {
+            const lastAssistantIdx = [...prev].reverse().findIndex(m => m.role === 'assistant')
+            if (lastAssistantIdx !== -1) {
+              const idx = prev.length - 1 - lastAssistantIdx
+              return prev.map((m, i) => i === idx ? { ...m, content: data.content } : m)
+            }
+            // No existing assistant message found, create new one
+            const newId = data.seq != null ? `assistant-${data.seq}` : `assistant-${++msgCounterRef.current}`
+            return [...prev, {
+              id: newId,
+              role: 'assistant' as const,
+              content: data.content,
+              timestamp: new Date(),
+            }]
+          })
         }
         currentAssistantIdRef.current = null
         setIsRunning(false)
         setCurrentRunId(null)
       }),
       agentWs.on('error', (data) => {
+        const id = `error-${++msgCounterRef.current}`
         setMessages(prev => [...prev, {
-          id: `error-${Date.now()}`,
+          id,
           role: 'system',
           content: `Error: ${data.message}`,
           timestamp: new Date(),
@@ -154,7 +171,7 @@ export default function ChatPage() {
     currentReasoningIdRef.current = null
 
     setMessages(prev => [...prev, {
-      id: `user-${Date.now()}`,
+      id: `user-${++msgCounterRef.current}`,
       role: 'user',
       content: text,
       timestamp: new Date(),

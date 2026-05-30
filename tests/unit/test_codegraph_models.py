@@ -6,7 +6,6 @@ import pytest
 
 from agentnexus.codegraph.models import (
     EMBEDDING_MAX_CHARS,
-    DOCSTRING_PREVIEW_MAX_CHARS,
     EdgeData,
     EdgeKind,
     NodeData,

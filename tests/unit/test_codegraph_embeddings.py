@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentnexus.codegraph.models import NodeData, NodeKind
 from agentnexus.codegraph.embeddings import generate_embeddings_batch
+from agentnexus.codegraph.models import NodeData, NodeKind
 
 
 class TestGenerateEmbeddingsBatch:

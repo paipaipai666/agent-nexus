@@ -82,7 +82,10 @@ def _create_composite_skills() -> list[SkillEntry]:
         _make_skill(
             "code", "Code",
             "Write review debug and refactor source code.",
-            verbs=["编写", "写", "调试", "重构", "修改", "配置", "部署", "review", "debug", "write", "refactor", "deploy"],
+            verbs=[
+                "编写", "写", "调试", "重构", "修改", "配置", "部署",
+                "review", "debug", "write", "refactor", "deploy",
+            ],
             objects=["代码", "程序", "脚本", "code", "script", "source"],
             aliases=["code", "代码", "脚本", "programming", "script"],
         ),
@@ -339,7 +342,7 @@ class TestCompositeEdgeCases:
     def test_vague_composite(self, service: SkillService):
         """'做点什么' should return None or uncertain."""
         service.reset()
-        route = service.maybe_auto_select("做点什么")
+        service.maybe_auto_select("做点什么")
         # Very vague - might return None
 
     def test_single_keyword_dominates(self, service: SkillService):

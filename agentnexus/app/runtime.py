@@ -99,7 +99,7 @@ class AppRuntime:
         agent_output = (lambda _: None) if profile == "server" else None
         if profile == "server":
             llm.silent = True
-        agent = ReActAgent(llm, executor, conversation_mode=True, output=agent_output)
+        agent = ReActAgent(llm, executor, conversation_mode=True, output=agent_output, confirm_fn=subagent_confirm)
         agent._todo_list = todo_list
         if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
             agent.set_mcp_context(mcp_manager.auto_context())

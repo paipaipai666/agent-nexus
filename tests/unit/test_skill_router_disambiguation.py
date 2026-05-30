@@ -379,7 +379,7 @@ class TestAmbiguityResolution:
     def test_ambiguous_proxy_agent(self, service: SkillService):
         """Highly ambiguous query may return None or uncertain result."""
         service.reset()
-        route = service.maybe_auto_select("代理")
+        service.maybe_auto_select("代理")
         # This is ambiguous - could be proxy or agent
         # Router should either return None or mark as uncertain
         # The behavior depends on router implementation
@@ -387,13 +387,13 @@ class TestAmbiguityResolution:
     def test_ambiguous_deploy_backup(self, service: SkillService):
         """Highly ambiguous query may return None or uncertain result."""
         service.reset()
-        route = service.maybe_auto_select("部署备份")
+        service.maybe_auto_select("部署备份")
         # This is ambiguous - deploy or backup?
         # Router should handle gracefully
 
     def test_context_clarifies_intent(self, service: SkillService):
         """Additional context should clarify intent."""
         service.reset()
-        route = service.maybe_auto_select("部署应用并备份数据库")
+        service.maybe_auto_select("部署应用并备份数据库")
         # Has both deploy and backup keywords
         # Should pick one based on primary intent or return None

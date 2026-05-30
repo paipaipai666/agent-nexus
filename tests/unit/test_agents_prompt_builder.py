@@ -143,7 +143,7 @@ class TestBuildConversationContext:
 
         result = build_conversation_context(mm, per_msg_limit=100)
         lines = result.split("\n")
-        user_line = [l for l in lines if l.startswith("用户:")][0]
+        user_line = [line for line in lines if line.startswith("用户:")][0]
         content_part = user_line.split("用户: ", 1)[1]
         assert len(content_part) == 100
 

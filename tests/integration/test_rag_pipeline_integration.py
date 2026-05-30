@@ -1,10 +1,10 @@
 """Integration tests for the RAG pipeline: ingest → catalog → search → delete."""
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentnexus.rag.ids import make_chunk_id, make_document_version, make_source_id
 from agentnexus.rag.models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
-from agentnexus.rag.store import KnowledgeBaseCatalog, get_knowledge_base_catalog
+from agentnexus.rag.store import KnowledgeBaseCatalog
 
 
 class TestRAGPipelineIntegration:

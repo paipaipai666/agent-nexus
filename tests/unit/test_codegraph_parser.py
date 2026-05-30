@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from agentnexus.codegraph.models import EdgeKind, NodeKind, ParseResult
+from agentnexus.codegraph.models import EdgeKind, NodeKind
 from agentnexus.codegraph.parsers.python_parser import PythonParser
 
 

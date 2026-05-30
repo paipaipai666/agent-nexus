@@ -1,14 +1,11 @@
 """Tests for WebSocket agent event streaming."""
 import asyncio
-import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi.testclient import TestClient
-from fastapi.websockets import WebSocket
+import pytest
 
-from agentnexus.server.routes.chat import ws_agent, _map_to_gui_event
-from agentnexus.services.chat import AgentEvent, ChatService
+from agentnexus.server.routes.chat import ws_agent
+from agentnexus.services.chat import ChatService
 
 
 class TestWebSocketAgentStream:
@@ -178,7 +175,10 @@ class TestWebSocketAgentStream:
             event_types = [e.get("type") for e in sent_events]
 
             # Filter to relevant types
-            relevant = [t for t in event_types if t in ("thinking", "tool_call", "tool_result", "token", "answer", "done")]
+            relevant = [
+                t for t in event_types
+                if t in ("thinking", "tool_call", "tool_result", "token", "answer", "done")
+            ]
 
             assert relevant[0] == "thinking"
             assert "tool_call" in relevant
