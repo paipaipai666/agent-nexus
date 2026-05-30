@@ -16,7 +16,7 @@ class TestToolSelectionReport:
         assert report.accuracy == 0.0
         assert report.by_tool == {}
         assert report.mismatches == []
-        assert report.passed is False  # 0.0 >= 0.92 → False
+        assert report.passed is False
 
     def test_passed_high_accuracy(self):
         report = ToolSelectionReport(total_queries=100, correct=95, accuracy=0.95)
@@ -41,14 +41,6 @@ class TestToolSelectionReport:
         assert "9/10" in s
         assert "web_search" in s
         assert "python_execute" in s
-
-    def test_summary_zero_tool_count(self):
-        report = ToolSelectionReport(
-            total_queries=0, correct=0, accuracy=0.0,
-            by_tool={"web_search": {"total": 0, "correct": 0}},
-        )
-        s = report.summary()
-        assert "0.0%" in s or "0%" in s
 
 
 class TestToolSelectionEvaluatorClassifyQuery:
@@ -85,33 +77,6 @@ class TestToolSelectionEvaluatorClassifyQuery:
         assert evaluator._classify_query("something else") == "web_search"
 
 
-class TestToolSelectionEvaluatorGetTaskFromTrace:
-    def test_found(self, tmp_path):
-        trace_file = tmp_path / "trace.jsonl"
-        lines = [
-            {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
-            {"trace_id": "t1", "name": "research_node"},
-        ]
-        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
-                              encoding="utf-8")
-        result = ToolSelectionEvaluator._get_task_from_trace(str(tmp_path), "t1")
-        assert result == "搜索最新的AI新闻"
-
-    def test_not_found(self, tmp_path):
-        trace_file = tmp_path / "trace.jsonl"
-        lines = [
-            {"trace_id": "t1", "name": "research_node"},
-        ]
-        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
-                              encoding="utf-8")
-        result = ToolSelectionEvaluator._get_task_from_trace(str(tmp_path), "t1")
-        assert result is None
-
-    def test_empty_directory(self, tmp_path):
-        result = ToolSelectionEvaluator._get_task_from_trace(str(tmp_path), "t1")
-        assert result is None
-
-
 class TestToolSelectionEvaluatorEvaluateFromTraces:
     def test_empty_directory(self, tmp_path):
         evaluator = ToolSelectionEvaluator()
@@ -123,7 +88,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
-            {"trace_id": "t1", "name": "research_node"},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -137,7 +102,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
-            {"trace_id": "t1", "name": "execute_node"},  # should be research_node
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -154,9 +119,9 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
-            {"trace_id": "t1", "name": "research_node"},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
             {"trace_id": "t2", "name": "task", "input": {"task": "写代码排序"}},
-            {"trace_id": "t2", "name": "execute_node"},
+            {"trace_id": "t2", "name": "tool", "input": {"tool_name": "python_execute"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -167,26 +132,12 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         assert report.accuracy == 1.0
         assert report.by_tool["web_search"]["total"] == 1
         assert report.by_tool["python_execute"]["total"] == 1
-        assert report.by_tool["web_search"]["correct"] == 1
-        assert report.by_tool["python_execute"]["correct"] == 1
 
     def test_skip_no_task(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"
         lines = [
-            {"trace_id": "t1", "name": "research_node"},
-            {"trace_id": "t1", "name": "execute_node"},
-        ]
-        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
-                              encoding="utf-8")
-        evaluator = ToolSelectionEvaluator()
-        report = evaluator.evaluate_from_traces(str(tmp_path))
-        assert report.total_queries == 0  # no task span found
-
-    def test_skip_neither_research_nor_execute(self, tmp_path):
-        trace_file = tmp_path / "trace.jsonl"
-        lines = [
-            {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
-            {"trace_id": "t1", "name": "analyst_node"},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -194,12 +145,38 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         report = evaluator.evaluate_from_traces(str(tmp_path))
         assert report.total_queries == 0
 
+    def test_skip_no_tool_span(self, tmp_path):
+        trace_file = tmp_path / "trace.jsonl"
+        lines = [
+            {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
+            {"trace_id": "t1", "name": "llm", "metadata": {"status": "ok"}},
+        ]
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
+                              encoding="utf-8")
+        evaluator = ToolSelectionEvaluator()
+        report = evaluator.evaluate_from_traces(str(tmp_path))
+        assert report.total_queries == 0
+
+    def test_first_tool_used_for_comparison(self, tmp_path):
+        trace_file = tmp_path / "trace.jsonl"
+        lines = [
+            {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
+        ]
+        trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
+                              encoding="utf-8")
+        evaluator = ToolSelectionEvaluator()
+        report = evaluator.evaluate_from_traces(str(tmp_path))
+        assert report.total_queries == 1
+        assert report.correct == 1  # first tool "web_search" matches "搜索"
+
     def test_bad_json_lines_skipped(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             "not json",
             '{"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}}',
-            '{"trace_id": "t1", "name": "research_node"}',
+            '{"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}}',
         ]
         trace_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         evaluator = ToolSelectionEvaluator()

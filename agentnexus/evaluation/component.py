@@ -1,11 +1,9 @@
-"""Component Evaluator — per-agent deterministic quality checks.
+"""Component Evaluator — deterministic quality checks for single ReAct agent.
 
-Checks each agent type against its contractual obligations without LLM-as-Judge.
 Reads JSONL trace spans and validates:
-  - Coder: schema compliance, __main__ presence, truncation detection
-  - Researcher: source citation presence, claim structure
-  - Executor: success rate, exception handling
-  - Critic/Analyst: score validity, fallback activation
+  - LLM: truncation, error rate, empty responses
+  - Tool execution: success rate, error patterns, timeout detection
+  - Answer: final answer presence, degradation signals
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from agentnexus.evaluation.utils import load_all_traces
 
 @dataclass
 class ComponentIssue:
-    agent: str
+    component: str
     severity: str  # "error" | "warning"
     detail: str
     trace_id: str = ""
@@ -27,8 +25,8 @@ class ComponentIssue:
 class ComponentReport:
     total_traces: int = 0
     issues: list[ComponentIssue] = field(default_factory=list)
-    by_agent: dict[str, dict] = field(default_factory=dict)
-    by_tool: dict[str, dict] = field(default_factory=dict)  # tool_name → {total, success}
+    by_component: dict[str, dict] = field(default_factory=dict)
+    by_tool: dict[str, dict] = field(default_factory=dict)  # tool_name -> {total, success}
 
     @property
     def issue_count(self) -> int:
@@ -36,136 +34,133 @@ class ComponentReport:
 
     @property
     def passed(self) -> bool:
-        return all(a.get("score", 10) >= 6.0 for a in self.by_agent.values())
+        return all(c.get("score", 10) >= 6.0 for c in self.by_component.values())
 
 
 class ComponentEvaluator:
-    """Per-agent component evaluation from trace data."""
+    """Per-component evaluation from single ReAct agent trace data."""
 
     def evaluate_all(self, traces_dir: str) -> ComponentReport:
         report = ComponentReport()
-        agent_stats: dict[str, list[float]] = {"coder": [], "researcher": [], "executor": [], "analyst": []}
+        component_stats: dict[str, list[float]] = {
+            "llm": [], "tool_execution": [], "answer": [],
+        }
 
         all_traces = load_all_traces(traces_dir)
         report.total_traces = len(all_traces)
         for tid, trace_spans in all_traces.items():
-            self._check_coder(trace_spans, tid, report, agent_stats)
-            self._check_researcher(trace_spans, tid, report, agent_stats)
-            self._check_executor(trace_spans, tid, report, agent_stats)
-            self._check_analyst(trace_spans, tid, report, agent_stats)
+            self._check_llm(trace_spans, tid, report, component_stats)
+            self._check_tool_execution(trace_spans, tid, report, component_stats)
+            self._check_answer(trace_spans, tid, report, component_stats)
 
-        for agent, scores in agent_stats.items():
+        for component, scores in component_stats.items():
             if scores:
                 avg = sum(scores) / len(scores)
-                report.by_agent[agent] = {"score": round(avg, 1), "count": len(scores)}
+                report.by_component[component] = {"score": round(avg, 1), "count": len(scores)}
 
         return report
 
-    def _check_coder(self, spans: list[dict], tid: str, report: ComponentReport,
-                     stats: dict[str, list[float]]):
-        code_spans = [s for s in spans if s.get("name") == "code_node"]
-        if not code_spans:
+    def _check_llm(self, spans: list[dict], tid: str, report: ComponentReport,
+                   stats: dict[str, list[float]]):
+        llm_spans = [s for s in spans if s.get("name") == "llm"]
+        if not llm_spans:
             return
 
         score = 10.0
-        for s in code_spans:
-            output = str(s.get("output", ""))
-            # Check for schema validation failure
-            if "SCHEMA_VIOLATION" in output or "validation" in output.lower():
+        errors = 0
+        truncations = 0
+
+        for s in llm_spans:
+            meta = s.get("metadata", {}) or {}
+            status = meta.get("status", "ok")
+
+            if status == "error":
+                errors += 1
                 score -= 2
-                report.issues.append(ComponentIssue("coder", "error", "Schema validation failed", tid))
-            # Check for truncation
-            meta = s.get("metadata", {})
-            if meta.get("status") == "truncated":
+                report.issues.append(ComponentIssue("llm", "error", "LLM call failed", tid))
+
+            if meta.get("truncated", False):
+                truncations += 1
                 score -= 1
-                report.issues.append(ComponentIssue("coder", "warning", "Code generation truncated", tid))
-            # Check __main__ presence in output
-            if output and 'if __name__' not in output and 'code_result' in output.lower():
-                score -= 0.5
+                report.issues.append(ComponentIssue("llm", "warning", "LLM output truncated", tid))
 
-        stats["coder"].append(max(0, score))
+        total = len(llm_spans)
+        if total > 0 and errors / total > 0.3:
+            score -= 2
+            report.issues.append(ComponentIssue(
+                "llm", "error", f"High LLM error rate: {errors}/{total}", tid,
+            ))
 
-    def _check_researcher(self, spans: list[dict], tid: str, report: ComponentReport,
-                          stats: dict[str, list[float]]):
-        research_spans = [s for s in spans if s.get("name") == "research_node"]
-        if not research_spans:
-            return
+        stats["llm"].append(max(0, score))
 
-        score = 10.0
-        for s in research_spans:
-            output = str(s.get("output", ""))
-            # Check for source claims
-            if "SourceClaim" not in output and "source" not in output.lower() and "来源" not in output:
-                score -= 2
-                report.issues.append(
-                    ComponentIssue("researcher", "error", "No source citations in research output", tid)
-                )
-            # Check for empty result
-            if not output or output.strip() == "":
-                score -= 3
-                report.issues.append(ComponentIssue("researcher", "error", "Empty research result", tid))
-
-        stats["researcher"].append(max(0, score))
-
-    def _check_executor(self, spans: list[dict], tid: str, report: ComponentReport,
-                        stats: dict[str, list[float]]):
-        exec_spans = [s for s in spans if s.get("name") == "execute_node"]
-        if not exec_spans:
+    def _check_tool_execution(self, spans: list[dict], tid: str, report: ComponentReport,
+                              stats: dict[str, list[float]]):
+        tool_spans = [s for s in spans if s.get("name") == "tool"]
+        if not tool_spans:
             return
 
         score = 10.0
         failed = 0
-        total = len(exec_spans)
-        for s in exec_spans:
-            is_error = s.get("metadata", {}).get("status") == "error"
+        total = len(tool_spans)
+
+        for s in tool_spans:
+            meta = s.get("metadata", {}) or {}
+            inp = s.get("input", {}) or {}
+            tool_name = inp.get("tool_name", "unknown")
+            is_error = meta.get("status") == "error"
+
+            ts = report.by_tool.setdefault(tool_name, {"total": 0, "success": 0})
+            ts["total"] += 1
             if is_error:
                 failed += 1
-            output = str(s.get("output", ""))
-            if "exception" in output.lower() or "traceback" in output.lower():
-                score -= 1
-
-            # Categorize by tool: inspect span input for tool name
-            inp = str(s.get("input", ""))
-            tool = "unknown"
-            for t in ("web_search", "python_execute", "memory_search", "code_executor"):
-                if t in inp:
-                    tool = t
-                    break
-            ts = report.by_tool.setdefault(tool, {"total": 0, "success": 0})
-            ts["total"] += 1
-            if not is_error:
+            else:
                 ts["success"] += 1
+
+            output = str(s.get("output", {}))
+            if "timed out" in output.lower() or "timeout" in output.lower():
+                score -= 1
+                report.issues.append(ComponentIssue(
+                    "tool_execution", "warning", f"Tool '{tool_name}' timed out", tid,
+                ))
 
         if total > 0 and failed / total > 0.5:
             score -= 2
-            report.issues.append(ComponentIssue("executor", "error", f"High failure rate: {failed}/{total}", tid))
+            report.issues.append(ComponentIssue(
+                "tool_execution", "error", f"High tool failure rate: {failed}/{total}", tid,
+            ))
 
-        stats["executor"].append(max(0, score))
+        stats["tool_execution"].append(max(0, score))
 
-    def _check_analyst(self, spans: list[dict], tid: str, report: ComponentReport,
-                       stats: dict[str, list[float]]):
-        analyst_spans = [s for s in spans if s.get("name") == "analyst_node"]
-        if not analyst_spans:
-            return
+    def _check_answer(self, spans: list[dict], tid: str, report: ComponentReport,
+                      stats: dict[str, list[float]]):
+        answer_spans = [s for s in spans if s.get("name") == "final_answer"]
+        llm_spans = [s for s in spans if s.get("name") == "llm"]
+
+        if not llm_spans and not answer_spans:
+            return  # nothing to evaluate
 
         score = 10.0
-        for s in analyst_spans:
-            output = str(s.get("output", ""))
-            # Check for degraded answer fallback
+
+        if llm_spans and not answer_spans:
+            score -= 3
+            report.issues.append(ComponentIssue(
+                "answer", "error", "Agent ran LLM steps but produced no final answer", tid,
+            ))
+
+        for s in answer_spans:
+            output = str(s.get("output", {}))
+            meta = s.get("metadata", {}) or {}
             if "降级" in output or "fallback" in output.lower():
                 score -= 1
-                report.issues.append(ComponentIssue("analyst", "warning", "LLM fallback activated", tid))
-            # Check critic score validity
-            if "critique_score" in output:
-                try:
-                    import re
-                    m = re.search(r"'critique_score':\s*([\d.]+)", output)
-                    if m:
-                        cs = float(m.group(1))
-                        if cs < 0 or cs > 10:
-                            score -= 1
-                            report.issues.append(ComponentIssue("analyst", "error", f"Invalid critic score: {cs}", tid))
-                except ValueError:
-                    pass
+                report.issues.append(ComponentIssue(
+                    "answer", "warning", "Degraded answer (fallback activated)", tid,
+                ))
+            if meta.get("used_subagent"):
+                sub_status = meta.get("subagent_status", "")
+                if sub_status == "failed":
+                    score -= 1
+                    report.issues.append(ComponentIssue(
+                        "answer", "warning", "Subagent failed during answer generation", tid,
+                    ))
 
-        stats["analyst"].append(max(0, score))
+        stats["answer"].append(max(0, score))

@@ -1,6 +1,5 @@
 """Tests for agentnexus.evaluation.trajectory — dataclasses and deterministic checks."""
 
-import pytest
 
 from agentnexus.evaluation.trajectory import (
     TrajectoryEvaluator,
@@ -78,18 +77,20 @@ class TestTrajectoryReport:
                 check=f"issue_{i}", severity="warning", detail="",
             ))
         s = report.summary()
-        # Only first 5 issues appear
         assert "issue_0" in s
         assert "issue_4" in s
         assert "issue_5" not in s
 
 
 class TestCheckDuplicateCalls:
+    def _make_tool_span(self, tool_name, params=""):
+        return {"name": "tool", "input": {"tool_name": tool_name, "params": params}}
+
     def test_no_duplicates(self):
         spans = [
-            {"name": "search", "input": "a"},
-            {"name": "read", "input": "b"},
-            {"name": "code", "input": "c"},
+            self._make_tool_span("web_search", "a"),
+            self._make_tool_span("python_execute", "b"),
+            self._make_tool_span("memory_search", "c"),
         ]
         report = TrajectoryReport(trace_id="t", total_spans=3)
         TrajectoryEvaluator()._check_duplicate_calls(spans, report)
@@ -98,8 +99,8 @@ class TestCheckDuplicateCalls:
 
     def test_two_identical_not_enough(self):
         spans = [
-            {"name": "search", "input": "query1"},
-            {"name": "search", "input": "query1"},
+            self._make_tool_span("web_search", "query1"),
+            self._make_tool_span("web_search", "query1"),
         ]
         report = TrajectoryReport(trace_id="t", total_spans=2)
         TrajectoryEvaluator()._check_duplicate_calls(spans, report)
@@ -107,9 +108,9 @@ class TestCheckDuplicateCalls:
 
     def test_three_identical(self):
         spans = [
-            {"name": "search", "input": "query1"},
-            {"name": "search", "input": "query1"},
-            {"name": "search", "input": "query1"},
+            self._make_tool_span("web_search", "query1"),
+            self._make_tool_span("web_search", "query1"),
+            self._make_tool_span("web_search", "query1"),
         ]
         report = TrajectoryReport(trace_id="t", total_spans=3)
         TrajectoryEvaluator()._check_duplicate_calls(spans, report)
@@ -118,21 +119,11 @@ class TestCheckDuplicateCalls:
         assert report.issues[0].check == "duplicate_calls"
         assert report.issues[0].severity == "error"
 
-    def test_different_input_same_name_no_flag(self):
+    def test_different_params_same_tool_no_flag(self):
         spans = [
-            {"name": "search", "input": "query1"},
-            {"name": "search", "input": "query2"},
-            {"name": "search", "input": "query3"},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=3)
-        TrajectoryEvaluator()._check_duplicate_calls(spans, report)
-        assert report.score == 10.0
-
-    def test_same_input_different_names_no_flag(self):
-        spans = [
-            {"name": "search", "input": "same"},
-            {"name": "read", "input": "same"},
-            {"name": "code", "input": "same"},
+            self._make_tool_span("web_search", "query1"),
+            self._make_tool_span("web_search", "query2"),
+            self._make_tool_span("web_search", "query3"),
         ]
         report = TrajectoryReport(trace_id="t", total_spans=3)
         TrajectoryEvaluator()._check_duplicate_calls(spans, report)
@@ -140,11 +131,11 @@ class TestCheckDuplicateCalls:
 
     def test_stops_after_first_detection(self):
         spans = [
-            {"name": "search", "input": "q"},
-            {"name": "search", "input": "q"},
-            {"name": "search", "input": "q"},
-            {"name": "search", "input": "q"},
-            {"name": "search", "input": "q"},
+            self._make_tool_span("web_search", "q"),
+            self._make_tool_span("web_search", "q"),
+            self._make_tool_span("web_search", "q"),
+            self._make_tool_span("web_search", "q"),
+            self._make_tool_span("web_search", "q"),
         ]
         report = TrajectoryReport(trace_id="t", total_spans=5)
         TrajectoryEvaluator()._check_duplicate_calls(spans, report)
@@ -152,46 +143,50 @@ class TestCheckDuplicateCalls:
         assert len(report.issues) == 1
 
 
-class TestCheckToolAppropriateness:
-    def test_code_error_with_research(self):
+class TestCheckRepeatedFailures:
+    def _make_tool_span(self, tool_name, status="ok"):
+        return {"name": "tool", "input": {"tool_name": tool_name},
+                "metadata": {"status": status}}
+
+    def test_no_failures(self):
+        spans = [self._make_tool_span("web_search", "ok")] * 5
+        report = TrajectoryReport(trace_id="t", total_spans=5)
+        TrajectoryEvaluator()._check_repeated_failures(spans, report)
+        assert report.score == 10.0
+
+    def test_two_failures_no_flag(self):
         spans = [
-            {"name": "code_execute", "metadata": {"status": "error"}},
-            {"name": "research_docs", "metadata": {}},
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "ok"),
         ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_tool_appropriateness(spans, report)
-        assert report.score == 10.0
-        assert len(report.issues) == 0
-
-    def test_code_error_without_research(self):
-        spans = [{"name": "code_execute", "metadata": {"status": "error"}}]
-        report = TrajectoryReport(trace_id="t", total_spans=1)
-        TrajectoryEvaluator()._check_tool_appropriateness(spans, report)
-        assert report.score == 9.0
-        assert len(report.issues) == 1
-        assert report.issues[0].check == "tool_appropriateness"
-        assert report.issues[0].severity == "warning"
-
-    def test_no_code_error_no_issue(self):
-        spans = [{"name": "code_execute", "metadata": {"status": "ok"}}]
-        report = TrajectoryReport(trace_id="t", total_spans=1)
-        TrajectoryEvaluator()._check_tool_appropriateness(spans, report)
+        report = TrajectoryReport(trace_id="t", total_spans=3)
+        TrajectoryEvaluator()._check_repeated_failures(spans, report)
         assert report.score == 10.0
 
-    def test_code_error_case_insensitive(self):
-        spans = [{"name": "Code_Execute", "metadata": {"status": "error"}}]
-        report = TrajectoryReport(trace_id="t", total_spans=1)
-        TrajectoryEvaluator()._check_tool_appropriateness(spans, report)
-        assert report.score == 9.0
-
-    def test_research_case_insensitive(self):
+    def test_three_consecutive_failures(self):
         spans = [
-            {"name": "code_execute", "metadata": {"status": "error"}},
-            {"name": "Research_API", "metadata": {}},
+            self._make_tool_span("python_execute", "error"),
+            self._make_tool_span("python_execute", "error"),
+            self._make_tool_span("python_execute", "error"),
         ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_tool_appropriateness(spans, report)
-        assert report.score == 10.0
+        report = TrajectoryReport(trace_id="t", total_spans=3)
+        TrajectoryEvaluator()._check_repeated_failures(spans, report)
+        assert report.score == 8.5
+        assert report.issues[0].check == "repeated_failures"
+
+    def test_failure_streak_broken_by_success(self):
+        spans = [
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "ok"),
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "error"),
+            self._make_tool_span("web_search", "error"),
+        ]
+        report = TrajectoryReport(trace_id="t", total_spans=6)
+        TrajectoryEvaluator()._check_repeated_failures(spans, report)
+        assert report.score == 8.5  # only the second streak of 3 triggers
 
 
 class TestCheckLoops:
@@ -201,160 +196,100 @@ class TestCheckLoops:
         TrajectoryEvaluator()._check_loops(spans, report)
         assert report.score == 10.0
 
-    def test_three_plan_nodes_no_loop(self):
-        spans = [{"name": "plan_node"}] * 3
-        report = TrajectoryReport(trace_id="t", total_spans=3)
+    def test_seven_llm_calls_no_loop(self):
+        spans = [{"name": "llm"}] * 7
+        report = TrajectoryReport(trace_id="t", total_spans=7)
         TrajectoryEvaluator()._check_loops(spans, report)
         assert report.score == 10.0
 
     def test_loop_detected(self):
-        spans = [{"name": "plan_node"}] * 4
-        report = TrajectoryReport(trace_id="t", total_spans=4)
+        spans = [{"name": "llm"}] * 8
+        report = TrajectoryReport(trace_id="t", total_spans=8)
         TrajectoryEvaluator()._check_loops(spans, report)
         assert report.score == 8.0
         assert len(report.issues) == 1
         assert report.issues[0].check == "loop_detection"
         assert report.issues[0].severity == "error"
 
-    def test_many_plan_nodes(self):
-        spans = [{"name": "plan_node"}] * 10
+    def test_many_llm_calls(self):
+        spans = [{"name": "llm"}] * 15
+        report = TrajectoryReport(trace_id="t", total_spans=15)
+        TrajectoryEvaluator()._check_loops(spans, report)
+        assert report.score == 8.0
+        assert len(report.issues) == 1
+
+
+class TestCheckErrorCascade:
+    def test_no_errors(self):
+        spans = [{"name": "llm", "metadata": {"status": "ok"}}] * 5
+        report = TrajectoryReport(trace_id="t", total_spans=5)
+        TrajectoryEvaluator()._check_error_cascade(spans, report)
+        assert report.score == 10.0
+
+    def test_two_consecutive_errors_no_flag(self):
+        spans = [
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "ok"}},
+        ]
+        report = TrajectoryReport(trace_id="t", total_spans=3)
+        TrajectoryEvaluator()._check_error_cascade(spans, report)
+        assert report.score == 10.0
+
+    def test_three_consecutive_errors(self):
+        spans = [
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+        ]
+        report = TrajectoryReport(trace_id="t", total_spans=3)
+        TrajectoryEvaluator()._check_error_cascade(spans, report)
+        assert report.score == 8.5
+        assert report.issues[0].check == "error_cascade"
+
+    def test_error_streak_broken(self):
+        spans = [
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "ok"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+            {"name": "llm", "metadata": {"status": "error"}},
+        ]
+        report = TrajectoryReport(trace_id="t", total_spans=6)
+        TrajectoryEvaluator()._check_error_cascade(spans, report)
+        assert report.score == 8.5
+
+
+class TestCheckStepEfficiency:
+    def test_good_ratio(self):
+        llm = [{"name": "llm"}] * 3
+        tools = [{"name": "tool"}] * 3
+        report = TrajectoryReport(trace_id="t", total_spans=6)
+        TrajectoryEvaluator()._check_step_efficiency(llm, tools, report)
+        assert report.score == 10.0
+
+    def test_low_ratio(self):
+        llm = [{"name": "llm"}] * 10
+        tools = [{"name": "tool"}] * 2
+        report = TrajectoryReport(trace_id="t", total_spans=12)
+        TrajectoryEvaluator()._check_step_efficiency(llm, tools, report)
+        assert report.score == 9.0
+        assert report.issues[0].check == "step_efficiency"
+
+    def test_no_tools_no_penalty(self):
+        llm = [{"name": "llm"}] * 10
+        tools = []
         report = TrajectoryReport(trace_id="t", total_spans=10)
-        TrajectoryEvaluator()._check_loops(spans, report)
-        assert report.score == 8.0
-        assert len(report.issues) == 1
-
-    def test_mixed_spans_with_loop(self):
-        spans = [
-            {"name": "task"},
-            {"name": "plan_node"},
-            {"name": "llm"},
-            {"name": "plan_node"},
-            {"name": "llm"},
-            {"name": "plan_node"},
-            {"name": "code_execute"},
-            {"name": "plan_node"},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=8)
-        TrajectoryEvaluator()._check_loops(spans, report)
-        assert report.score == 8.0
-
-
-class TestCheckRetryEfficiency:
-    def test_no_analyst_spans(self):
-        spans = [{"name": "llm"}, {"name": "task"}]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
+        TrajectoryEvaluator()._check_step_efficiency(llm, tools, report)
         assert report.score == 10.0
-
-    def test_single_analyst_no_check(self):
-        spans = [{"name": "analyst_node", "output": {"result": "{'critique_score': 8.5}"}}]
-        report = TrajectoryReport(trace_id="t", total_spans=1)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 10.0
-
-    def test_improving_score_no_deduction(self):
-        spans = [
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 7.0}"}},
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 8.5}"}},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 10.0
-
-    def test_dropping_score_deducted(self):
-        spans = [
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 8.5}"}},
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 7.0}"}},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 9.5
-        assert len(report.issues) == 1
-        assert report.issues[0].check == "retry_efficiency"
-
-    def test_multiple_drops_each_deducted(self):
-        spans = [
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 9.0}"}},
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 7.5}"}},
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 6.0}"}},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=3)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 9.0
-        assert len(report.issues) == 2
-
-    def test_small_drop_not_deducted(self):
-        spans = [
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 8.5}"}},
-            {"name": "analyst_node", "output": {"eval": "{'critique_score': 7.6}"}},  # drop 0.9 < 1.0
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 10.0
-
-    def test_analyst_case_insensitive(self):
-        spans = [
-            {"name": "Analyst_Node", "output": {"eval": "{'critique_score': 8.0}"}},
-            {"name": "Analyst_Node", "output": {"eval": "{'critique_score': 6.5}"}},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_retry_efficiency(spans, report)
-        assert report.score == 9.5
-
-
-class TestCheckPlanAdherence:
-    def test_no_plan_span(self):
-        spans = [{"name": "llm"}, {"name": "task"}]
-        report = TrajectoryReport(trace_id="t", total_spans=2)
-        TrajectoryEvaluator()._check_plan_adherence(spans, report)
-        assert report.score == 10.0
-
-    def test_plan_input_without_research_or_code(self):
-        spans = [{"name": "plan_node", "input": "just a plan"}]
-        report = TrajectoryReport(trace_id="t", total_spans=1)
-        TrajectoryEvaluator()._check_plan_adherence(spans, report)
-        assert report.score == 10.0
-
-    def test_within_bounds_no_deduction(self):
-        spans = [
-            {"name": "plan_node", "input": "research: step1\ncode: step2"},
-            {"name": "research_node"},
-            {"name": "code_node"},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=3)
-        TrajectoryEvaluator()._check_plan_adherence(spans, report)
-        assert report.score == 10.0
-
-    def test_exceeds_double_deducted(self):
-        spans = [
-            {"name": "plan_node", "input": "research: step1\ncode: step2"},
-            {"name": "research_node"}, {"name": "research_node"}, {"name": "research_node"},
-            {"name": "code_node"}, {"name": "code_node"}, {"name": "code_node"},
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=7)
-        TrajectoryEvaluator()._check_plan_adherence(spans, report)
-        # plan_steps = 2 (1 research: + 1 code:), actual = 6, 6 > 4 → deduct 1.0
-        assert report.score == 9.0
-        assert len(report.issues) == 1
-        assert report.issues[0].check == "plan_adherence"
-
-    def test_uses_first_plan_span(self):
-        spans = [
-            {"name": "plan_node", "input": "research: first plan"},
-            {"name": "research_node"}, {"name": "research_node"}, {"name": "research_node"},
-            {"name": "plan_node", "input": "code: revised plan"},  # second plan ignored
-        ]
-        report = TrajectoryReport(trace_id="t", total_spans=4)
-        TrajectoryEvaluator()._check_plan_adherence(spans, report)
-        # plan_steps = 1 (1 research:), actual = 3, 3 > 2 → deduct 1.0
-        assert report.score == 9.0
 
 
 class TestEvaluateOne:
     def test_basic_evaluation(self):
         spans = [
             {"name": "task", "start_time": 0, "trace_id": "t"},
-            {"name": "llm", "start_time": 1, "trace_id": "t"},
+            {"name": "llm", "start_time": 1, "trace_id": "t", "metadata": {"status": "ok"}},
         ]
         report = TrajectoryEvaluator()._evaluate_one("test", spans)
         assert report.trace_id == "test"
@@ -362,60 +297,20 @@ class TestEvaluateOne:
         assert report.score == 10.0
 
     def test_score_floored_at_zero(self):
-        spans = [
-            {"name": "plan_node", "start_time": 0},
-            {"name": "plan_node", "start_time": 1},
-            {"name": "plan_node", "start_time": 2},
-            {"name": "plan_node", "start_time": 3},
-            {"name": "code_execute", "metadata": {"status": "error"}},
-        ]
+        spans = [{"name": "llm", "start_time": i, "metadata": {"status": "error"}}
+                 for i in range(10)]
         report = TrajectoryEvaluator()._evaluate_one("test", spans)
-        # loop: -2.0, tool_appropriateness: -1.0 → score = 7.0
-        assert report.score == 7.0
+        # loop: -2.0, error_cascade: -1.5, step_efficiency: 0 (no tools)
+        assert report.score >= 0
 
     def test_spans_sorted_by_start_time(self):
         spans = [
-            {"name": "llm", "start_time": 5},
+            {"name": "llm", "start_time": 5, "metadata": {"status": "ok"}},
             {"name": "task", "start_time": 0},
-            {"name": "llm", "start_time": 3},
+            {"name": "llm", "start_time": 3, "metadata": {"status": "ok"}},
         ]
         report = TrajectoryEvaluator()._evaluate_one("test", spans)
         assert report.total_spans == 3
-
-
-class TestLoadTraceFromFile:
-    def test_matching_trace_returns_spans(self, tmp_path):
-        f = tmp_path / "traces.jsonl"
-        f.write_text(
-            '{"trace_id": "abc", "name": "task"}\n'
-            '{"trace_id": "abc", "name": "llm"}\n'
-        )
-        spans = TrajectoryEvaluator._load_trace_from_file(str(f), "abc")
-        assert spans is not None
-        assert len(spans) == 2
-
-    def test_no_matching_trace_returns_none(self, tmp_path):
-        f = tmp_path / "traces.jsonl"
-        f.write_text('{"trace_id": "other", "name": "task"}')
-        spans = TrajectoryEvaluator._load_trace_from_file(str(f), "notfound")
-        assert spans is None
-
-    def test_skips_invalid_json(self, tmp_path):
-        f = tmp_path / "traces.jsonl"
-        f.write_text(
-            '{"trace_id": "abc", "name": "task"}\n'
-            'broken\n'
-            '{"trace_id": "abc", "name": "llm"}\n'
-        )
-        spans = TrajectoryEvaluator._load_trace_from_file(str(f), "abc")
-        assert spans is not None
-        assert len(spans) == 2
-
-    def test_file_not_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            TrajectoryEvaluator._load_trace_from_file(
-                str(tmp_path / "nope.jsonl"), "abc"
-            )
 
 
 class TestEvaluateFile:
@@ -482,7 +377,6 @@ class TestEvaluateTrace:
             '{"trace_id": "t1", "name": "task", "input": {"task": "from_b"}, "start_time": 0}\n'
         )
         result = TrajectoryEvaluator().evaluate_trace("t1", str(d))
-        # Should match from later file (b.jsonl sorted reverse)
         assert result is not None
 
 

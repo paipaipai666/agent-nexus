@@ -208,6 +208,7 @@ class TestCoherenceEvaluatorFileMethods:
         assert report is None
 
     def test_bad_json_lines_skipped_in_load_traces(self, tmp_path):
+        from agentnexus.evaluation.utils import load_trace_spans
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             "not json",
@@ -216,6 +217,6 @@ class TestCoherenceEvaluatorFileMethods:
             '{"trace_id": "t1", "name": "analyst", "start_time": 3, "output": "c", "metadata": {"status": "ok"}}',
         ]
         trace_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        traces = CoherenceEvaluator._load_traces(str(trace_file))
+        traces = load_trace_spans(trace_file)
         assert "t1" in traces
         assert len(traces["t1"]) == 3

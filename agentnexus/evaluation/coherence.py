@@ -99,3 +99,17 @@ class CoherenceEvaluator:
         report.coherence_score = score
         report.issues = response[response.find("主要问题"):][:200] if "主要问题" in response else ""
         return report
+
+    @staticmethod
+    def _parse_score(response: str) -> float:
+        import re
+        m = re.search(r'[连貫]贯性分[数数].*?[：:]\s*(\d+\.?\d*)', response)
+        if not m:
+            m = re.search(r'[Sscore]+[：:]\s*(\d+\.?\d*)', response, re.IGNORECASE)
+        if not m:
+            m = re.search(r'(\d+\.?\d*)\s*分', response)
+        if not m:
+            m = re.search(r'(\d+\.?\d*)', response)
+        if m:
+            return min(10.0, max(0.0, float(m.group(1))))
+        return 5.0  # default mid-score on parse failure

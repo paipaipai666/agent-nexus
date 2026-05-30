@@ -2,7 +2,7 @@
 
 Deterministic pipeline (no LLM-as-Judge required):
   1. Extract claims from answer text (split by sentence, filter short fragments)
-  2. For each claim, check if it appears in or is supported by retrieved context
+  2. For each claim, check if it appears in or is supported by tool results
   3. Unsupported claims are flagged as potential hallucinations
   4. Compute hallucination_rate = unsupported_claims / total_claims
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from agentnexus.evaluation.utils import find_trace, iter_spans
+from agentnexus.evaluation.utils import load_all_traces
 
 
 @dataclass
@@ -49,37 +49,43 @@ class HallucinationDetector:
 
     def evaluate_all(self, traces_dir: str) -> list[HallucinationReport]:
         reports: list[HallucinationReport] = []
-        for span in iter_spans(traces_dir, filter_fn=lambda s: s.get("name") == "analyst_node"):
-            tid = span.get("trace_id", "")
-            output = str(span.get("output", ""))
-            if tid and output:
-                reports.append(self._evaluate_one(tid, output))
+        all_traces = load_all_traces(traces_dir)
+        for tid, spans in all_traces.items():
+            answer = self._extract_answer(spans)
+            if answer:
+                reports.append(self._evaluate_one(tid, answer, spans))
         return reports
 
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> HallucinationReport | None:
+        from agentnexus.evaluation.utils import find_trace
         spans = find_trace(traces_dir, trace_id)
         if not spans:
             return None
-        for span in spans:
-            if span.get("name") == "analyst_node":
-                return self._evaluate_one(trace_id, str(span.get("output", "")))
-        return None
+        answer = self._extract_answer(spans)
+        if not answer:
+            return None
+        return self._evaluate_one(trace_id, answer, spans)
 
-    def _evaluate_one(self, trace_id: str, output: str) -> HallucinationReport:
+    def _extract_answer(self, spans: list[dict]) -> str:
+        """Extract the final answer text from trace spans."""
+        for s in spans:
+            if s.get("name") == "final_answer":
+                output = s.get("output", {}) or {}
+                return str(output.get("answer", ""))
+        return ""
+
+    def _evaluate_one(self, trace_id: str, answer: str, spans: list[dict]) -> HallucinationReport:
         report = HallucinationReport(trace_id=trace_id)
-        report.answer_preview = output[:500]
+        report.answer_preview = answer[:500]
 
-        # Extract claims (sentences of sufficient length)
-        claims = [c.strip() for c in self._SENTENCE_RE.split(output)
+        claims = [c.strip() for c in self._SENTENCE_RE.split(answer)
                   if len(c.strip()) >= self._MIN_CLAIM_LEN]
         report.total_claims = len(claims)
         if not claims:
             return report
 
-        # Extract context spans from the same trace (research_result, exec_stdout, etc.)
-        context_text = self._gather_context(trace_id, output)
+        context_text = self._gather_context(spans, answer)
 
-        # Verify each claim against context
         for claim in claims:
             if not self._is_supported(claim, context_text):
                 report.unsupported_claims += 1
@@ -91,17 +97,18 @@ class HallucinationDetector:
         )
         return report
 
-    def _gather_context(self, trace_id: str, current_output: str) -> str:
-        """Collect retrievable context for verification. Falls back to output self-check."""
-        # Without loading the full trace, do a self-contained check:
-        # Look for explicit source citations / research results in the output itself
+    def _gather_context(self, spans: list[dict], current_output: str) -> str:
+        """Collect retrievable context from tool results for verification."""
         context_parts: list[str] = []
 
-        # Extract quoted text (potential citations)
-        quoted = re.findall(r'"([^"]{20,})"', current_output)
-        context_parts.extend(quoted)
+        for s in spans:
+            if s.get("name") == "tool":
+                output = s.get("output", {}) or {}
+                result = str(output.get("result_summary", ""))
+                if result:
+                    context_parts.append(result)
 
-        # Extract code blocks
+        context_parts.extend(re.findall(r'"([^"]{20,})"', current_output))
         code_blocks = re.findall(r'```(?:\w+)?\n(.*?)```', current_output, re.DOTALL)
         context_parts.extend(code_blocks)
 
@@ -109,23 +116,16 @@ class HallucinationDetector:
 
     @staticmethod
     def _is_supported(claim: str, context: str) -> bool:
-        """Check if claim is supported by context using substring + keyword overlap.
-
-        A claim is 'supported' if:
-          - It appears verbatim in context (substring match)
-          - Its key content words overlap significantly with context (>50% overlap)
-        """
+        """Check if claim is supported by context using substring + keyword overlap."""
         if not context:
             return False
 
-        # Direct match
         if claim in context:
             return True
 
-        # Keyword overlap
         claim_words = set(re.findall(r'[一-鿿\w]{2,}', claim.lower()))
         if not claim_words:
-            return True  # can't verify, assume supported
+            return True
 
         context_lower = context.lower()
         matched = sum(1 for w in claim_words if w in context_lower)

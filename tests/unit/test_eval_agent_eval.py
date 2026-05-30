@@ -326,37 +326,41 @@ class TestAgentEvaluatorAggregate:
 
 class TestLoadTraceFromFile:
     def test_matching_trace_returns_spans(self, tmp_path):
+        from agentnexus.evaluation.utils import find_trace_in_file
         f = tmp_path / "traces.jsonl"
         f.write_text(
             '{"trace_id": "abc", "name": "task"}\n'
             '{"trace_id": "abc", "name": "llm"}\n'
             '{"trace_id": "xyz", "name": "task"}\n'
         )
-        spans = AgentEvaluator._load_trace_from_file(str(f), "abc")
+        spans = find_trace_in_file(str(f), "abc")
         assert spans is not None
         assert len(spans) == 2
         assert all(s["trace_id"] == "abc" for s in spans)
 
     def test_no_matching_trace_returns_none(self, tmp_path):
+        from agentnexus.evaluation.utils import find_trace_in_file
         f = tmp_path / "traces.jsonl"
         f.write_text('{"trace_id": "other", "name": "task"}\n')
-        spans = AgentEvaluator._load_trace_from_file(str(f), "notfound")
+        spans = find_trace_in_file(str(f), "notfound")
         assert spans is None
 
     def test_skips_invalid_json(self, tmp_path):
+        from agentnexus.evaluation.utils import find_trace_in_file
         f = tmp_path / "traces.jsonl"
         f.write_text(
             '{"trace_id": "abc", "name": "task"}\n'
             'invalid json\n'
             '{"trace_id": "abc", "name": "llm"}\n'
         )
-        spans = AgentEvaluator._load_trace_from_file(str(f), "abc")
+        spans = find_trace_in_file(str(f), "abc")
         assert spans is not None
         assert len(spans) == 2
 
     def test_file_not_found(self, tmp_path):
+        from agentnexus.evaluation.utils import find_trace_in_file
         with pytest.raises(FileNotFoundError):
-            AgentEvaluator._load_trace_from_file(
+            find_trace_in_file(
                 str(tmp_path / "nonexistent.jsonl"), "abc"
             )
 
