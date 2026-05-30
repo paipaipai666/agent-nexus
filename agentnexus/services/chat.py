@@ -276,6 +276,11 @@ class ChatService:
                 run_id=run_id,
                 session_id=session_id,
             ))
+        # Pass workflow context to agent as a separate system message
+        # (not embedded in the user question — that buryies the actual question)
+        workflow_ctx = getattr(result, "workflow_context", None)
+        if workflow_ctx and hasattr(self._agent, "set_workflow_context"):
+            self._agent.set_workflow_context(workflow_ctx)
         return result.enhanced_question
 
     def _install_agent_event_bridge(

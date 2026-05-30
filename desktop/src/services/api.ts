@@ -145,6 +145,11 @@ export const api = {
       method: 'DELETE',
     }),
 
+  clearShortMemory: () =>
+    request<{ status: string }>('/api/memory/short/clear', {
+      method: 'POST',
+    }),
+
   // Config
   getConfig: () => request<Record<string, any>>('/api/config'),
 

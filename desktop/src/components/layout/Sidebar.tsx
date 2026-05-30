@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquare, BookOpen, Zap, Brain, Settings, BarChart3, Plus, Clock, Server, Puzzle } from 'lucide-react'
 import { api } from '../../services/api'
+import { animateIconHover } from '../../utils/animations'
 
 interface RecentSession {
   session_id: string
@@ -91,12 +92,14 @@ export default function Sidebar() {
                   e.currentTarget.style.color = 'var(--fg-secondary)'
                   e.currentTarget.style.background = 'var(--surface-3)'
                 }
+                animateIconHover(e.currentTarget.querySelector('svg') || e.currentTarget, true)
               }}
               onMouseLeave={e => {
                 if (!isActive) {
                   e.currentTarget.style.color = 'var(--fg-muted)'
                   e.currentTarget.style.background = 'transparent'
                 }
+                animateIconHover(e.currentTarget.querySelector('svg') || e.currentTarget, false)
               }}
             >
               <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />

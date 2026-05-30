@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Zap, Loader2 } from 'lucide-react'
 import { api } from '../services/api'
+import { animateCardGrid } from '../utils/animations'
 
 interface Skill { id: string; display_name: string; description: string; enabled: boolean }
 
@@ -23,6 +24,13 @@ export default function SkillsPage() {
     finally { setTogglingId(null) }
   }
 
+  const gridRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!gridRef.current || loading) return
+    const cards = Array.from(gridRef.current.children)
+    if (cards.length > 0) animateCardGrid(cards)
+  }, [skills, loading])
+
   if (loading) return <div className="flex-1 flex items-center justify-center"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} /></div>
 
   return (
@@ -32,7 +40,7 @@ export default function SkillsPage() {
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{skills.filter(s => s.enabled).length} of {skills.length} enabled</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
+      <div ref={gridRef} className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
         {skills.map((skill) => (
           <div key={skill.id} className="surface-card p-4 transition-all duration-150 hover:border-[var(--border-strong)]" style={{ opacity: skill.enabled ? 1 : 0.6 }}>
             <div className="flex items-start justify-between mb-2.5">

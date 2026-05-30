@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Search, FileText, Upload, Trash2, Loader2 } from 'lucide-react'
 import { api } from '../services/api'
+import { animateEntrance } from '../utils/animations'
 
 export default function KnowledgePage() {
   const [documents, setDocuments] = useState<any[]>([])
@@ -71,13 +72,13 @@ export default function KnowledgePage() {
 
       {/* Search Results */}
       {searchResults.length > 0 && (
-        <div className="space-y-2 animate-fade-in">
+        <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.05 }) }} className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Search Results</h2>
             <button onClick={() => setSearchResults([])} className="text-xs transition-colors" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg-secondary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}>Clear</button>
           </div>
           {searchResults.map((r, i) => (
-            <div key={i} className="surface-card p-3 animate-slide-up" style={{ animationDelay: `${i * 30}ms` }}>
+            <div key={i} className="surface-card p-3">
               <p className="text-xs mb-1 font-mono" style={{ color: 'var(--fg-faint)' }}>{r.source || 'Unknown source'}</p>
               <p className="text-sm" style={{ color: 'var(--fg)' }}>{r.text || JSON.stringify(r)}</p>
               {r.score != null && <p className="text-xs mt-1.5 font-mono" style={{ color: 'var(--accent)' }}>Score: {Number(r.score).toFixed(3)}</p>}
@@ -87,7 +88,7 @@ export default function KnowledgePage() {
       )}
 
       {/* Documents */}
-      <div className="flex-1 overflow-y-auto space-y-1.5">
+      <div ref={(el) => { if (el && documents.length > 0) animateEntrance(Array.from(el.querySelectorAll('.surface-card')), { stagger: 0.04 }) }} className="flex-1 overflow-y-auto space-y-1.5">
         {documents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>

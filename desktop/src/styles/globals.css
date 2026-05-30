@@ -4,21 +4,25 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Deep dark surfaces - inspired by VS Code / Linear / Raycast */
-  --surface-0: #09090b;     /* deepest - window background */
-  --surface-1: #0f0f12;     /* base - main content area */
-  --surface-2: #18181b;     /* elevated - cards, sidebars */
-  --surface-3: #1e1e23;     /* higher - modals, dropdowns */
-  --surface-4: #27272a;     /* hover states */
+/* ═══════════════════════════════════════════
+   DARK THEME (default)
+   ═══════════════════════════════════════════ */
+:root,
+[data-theme="dark"] {
+  /* Deep dark surfaces */
+  --surface-0: #09090b;
+  --surface-1: #0f0f12;
+  --surface-2: #18181b;
+  --surface-3: #1e1e23;
+  --surface-4: #27272a;
 
-  /* Foreground - zinc scale for neutral feel */
+  /* Foreground */
   --fg: #fafafa;
   --fg-secondary: #a1a1aa;
   --fg-muted: #71717a;
   --fg-faint: #52525b;
 
-  /* Accent - electric violet (like Linear/Raycast) */
+  /* Accent — electric violet */
   --accent: #8b5cf6;
   --accent-hover: #a78bfa;
   --accent-muted: rgba(139, 92, 246, 0.15);
@@ -42,6 +46,67 @@
   --border: rgba(255, 255, 255, 0.06);
   --border-subtle: rgba(255, 255, 255, 0.04);
   --border-strong: rgba(255, 255, 255, 0.1);
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-bg-strong: rgba(255, 255, 255, 0.06);
+  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT THEME
+   ═══════════════════════════════════════════ */
+[data-theme="light"] {
+  /* Clean light surfaces */
+  --surface-0: #ffffff;
+  --surface-1: #f8f9fa;
+  --surface-2: #ffffff;
+  --surface-3: #f1f3f5;
+  --surface-4: #e9ecef;
+
+  /* Foreground — darker text for contrast */
+  --fg: #1a1a2e;
+  --fg-secondary: #495057;
+  --fg-muted: #868e96;
+  --fg-faint: #adb5bd;
+
+  /* Accent — deeper violet for light bg readability */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-muted: rgba(124, 58, 237, 0.1);
+  --accent-subtle: rgba(124, 58, 237, 0.05);
+
+  /* Semantic — slightly darker for 4.5:1 contrast on white */
+  --green: #16a34a;
+  --green-muted: rgba(22, 163, 74, 0.1);
+  --red: #dc2626;
+  --red-muted: rgba(220, 38, 38, 0.1);
+  --amber: #d97706;
+  --amber-muted: rgba(217, 119, 6, 0.1);
+  --blue: #2563eb;
+  --blue-muted: rgba(37, 99, 235, 0.1);
+  --purple: #7c3aed;
+  --purple-muted: rgba(124, 58, 237, 0.1);
+  --cyan: #0891b2;
+  --cyan-muted: rgba(8, 145, 178, 0.1);
+
+  /* Borders */
+  --border: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-strong: rgba(0, 0, 0, 0.15);
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.1);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -82,12 +147,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Selection */
@@ -106,14 +171,14 @@ body {
 /* Utility classes */
 @layer components {
   .glass {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--glass-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
   }
 
   .glass-strong {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--glass-bg-strong);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--border-strong);
@@ -129,7 +194,7 @@ body {
     background: var(--surface-3);
     border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-elevated);
   }
 
   .glow-accent {

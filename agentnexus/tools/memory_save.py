@@ -36,7 +36,8 @@ def memory_save(content: str, category: str = "entity_fact", importance: float =
     model = get_embedding_model()
 
     try:
-        embedding = model.encode(content, normalize_embeddings=True).tolist()
+        raw = model.encode(content, normalize_embeddings=True)
+        embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
     except Exception:
         # Save without embedding — will be re-embedded on next search
         embedding = []

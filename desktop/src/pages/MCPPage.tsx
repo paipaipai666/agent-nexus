@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Server, RefreshCw, Loader2, AlertTriangle, Wrench, Package, FileText } from 'lucide-react'
 import { api } from '../services/api'
+import { animateEntrance } from '../utils/animations'
 
 interface MCPServer {
   name: string; transport: string; state: string; connected: boolean
@@ -64,7 +65,7 @@ export default function MCPPage() {
       {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.08 }) }} className="grid grid-cols-4 gap-3">
         {[
           { label: 'Servers', value: `${connected}/${servers.length}`, icon: Server, color: 'var(--green)' },
           { label: 'Tools', value: totalTools, icon: Wrench, color: 'var(--accent)' },

@@ -52,6 +52,7 @@ def build_react_messages(
     mcp_context: str = "",
     compiled_profile: Any = None,
     todo_context: str = "",
+    workflow_context: str = "",
 ) -> list[dict[str, str]]:
     """Build messages array with stable prefix for prompt caching.
 
@@ -59,7 +60,8 @@ def build_react_messages(
         [0] system: fixed rules (stable, cacheable prefix)
         [1] system: tools description (relatively stable)
         [2] system: memory + conversation context (variable)
-        [3] user: question (variable)
+        [3] system: workflow runtime context (when active)
+        [4] user: question (variable)
 
     This structure maximizes prompt cache hit rate by keeping
     the longest possible stable prefix at the beginning.
@@ -94,7 +96,11 @@ def build_react_messages(
         if combined:
             messages.append({"role": "system", "content": combined})
 
-    # 4. User question — always variable
+    # 4. Workflow runtime context — as a system message, not baked into user question
+    if workflow_context:
+        messages.append({"role": "system", "content": workflow_context})
+
+    # 5. User question — always variable, raw user question only
     messages.append({"role": "user", "content": f"== 当前任务 ==\nQuestion: {question}"})
 
     return messages

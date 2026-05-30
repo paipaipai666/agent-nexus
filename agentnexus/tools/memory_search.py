@@ -42,9 +42,10 @@ def memory_search(query: str, category: str = "") -> str:
     search_query = _rewrite_query(query)
 
     try:
-        embedding = model.encode(search_query, normalize_embeddings=True).tolist()
-    except Exception:
-        return "[memory_search] 嵌入模型不可用"
+        raw = model.encode(search_query, normalize_embeddings=True)
+        embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
+    except Exception as e:
+        return f"[memory_search] 嵌入模型不可用: {e}"
 
     cat = category if category else None
     results = ltm.search(query_embedding=embedding, category=cat, limit=5, min_similarity=0.35)

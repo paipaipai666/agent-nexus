@@ -1,6 +1,6 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
-type Theme = 'dark'
+type Theme = 'dark' | 'light'
 
 interface ThemeContextType {
   theme: Theme
@@ -18,9 +18,20 @@ interface ThemeProviderProps {
 }
 
 export default function ThemeProvider({ children }: ThemeProviderProps) {
-  // Dark-only mode — always dark
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('agentnexus-theme')
+    return saved === 'light' ? 'light' : 'dark'
+  })
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('agentnexus-theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+
   return (
-    <ThemeContext.Provider value={{ theme: 'dark', toggleTheme: () => {} }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   )

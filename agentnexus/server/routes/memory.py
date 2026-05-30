@@ -64,6 +64,20 @@ def delete_memory(memory_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+def _strip_workflow_context(content: str) -> str:
+    """Remove legacy workflow context prefix from user messages.
+
+    Old sessions stored enhanced_question which prepended workflow context
+    to the user's actual question. This strips that prefix so the frontend
+    displays only the user's real question.
+    """
+    marker = "== User Question =="
+    idx = content.find(marker)
+    if idx >= 0:
+        return content[idx + len(marker):].lstrip("\n")
+    return content
+
+
 @router.get("/short")
 def list_short_term_memories():
     from agentnexus.server.app import _get_runtime
@@ -71,10 +85,23 @@ def list_short_term_memories():
     runtime = _get_runtime()
     stm = runtime.memory_manager.short_term
     messages = stm.get_all()
-    return {
-        "messages": [
-            {"role": m.get("role", ""), "content": m.get("content", "")}
-            for m in messages
-        ],
-        "count": len(messages),
-    }
+    result = []
+    for m in messages:
+        role = m.get("role", "")
+        content = m.get("content", "")
+        # Strip workflow context prefix from user messages (legacy data)
+        if role == "user":
+            content = _strip_workflow_context(content)
+        result.append({"role": role, "content": content, "ts": m.get("ts")})
+    return {"messages": result, "count": len(result)}
+
+
+@router.post("/short/clear")
+def clear_short_term_memory():
+    """Clear the global short-term memory — called when creating a new session."""
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    stm = runtime.memory_manager.short_term
+    stm.clear()
+    return {"status": "cleared"}

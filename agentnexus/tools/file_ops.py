@@ -21,32 +21,78 @@ LARGE_FILE_LINES = 1000
 LARGE_FILE_PREVIEW_LINES = 20
 
 
-def _resolve_safe(path: str) -> Path:
-    """Resolve path and verify it stays within the workspace sandbox.
+_ALLOWED_ROOTS: list[Path] | None = None
 
-    The workspace root is the directory where nexus was launched (os.getcwd()).
-    Raises ValueError if the resolved path escapes the sandbox.
+
+def _get_allowed_roots() -> list[Path]:
+    """Build the set of allowed root directories (cached)."""
+    global _ALLOWED_ROOTS
+    if _ALLOWED_ROOTS is not None:
+        return _ALLOWED_ROOTS
+
+    workspace = Path(os.getcwd()).absolute()
+    home = Path.home().absolute()
+    roots = [workspace]
+
+    # Allow ~/.agentnexus for skills, config, memory, etc.
+    agentnexus_home = home / ".agentnexus"
+    if agentnexus_home not in roots:
+        roots.append(agentnexus_home)
+
+    # Allow the agentnexus package directory itself (for built-in resources)
+    try:
+        import agentnexus as _pkg
+        pkg_dir = Path(_pkg.__file__).resolve().parent
+        if pkg_dir not in roots:
+            roots.append(pkg_dir)
+    except Exception:
+        pass
+
+    _ALLOWED_ROOTS = roots
+    return roots
+
+
+def _resolve_safe(path: str) -> Path:
+    """Resolve path and verify it stays within allowed directories.
+
+    Allowed roots: workspace (cwd), ~/.agentnexus, and the agentnexus package dir.
+    Raises ValueError if the resolved path escapes all allowed roots.
     """
     workspace = Path(os.getcwd()).absolute()
-    candidate = workspace / path
+    roots = _get_allowed_roots()
 
-    def ensure_within_workspace(resolved: Path) -> None:
-        try:
-            resolved.relative_to(workspace)
-        except ValueError:
-            raise ValueError(
-                f"路径越界: '{path}' 解析为 '{resolved}'，超出工作目录 '{workspace}'。"
-                " 不允许通过 ../ 访问上级目录。"
-            )
+    # If the path is absolute and already under an allowed root, use it directly.
+    # Otherwise, resolve relative to workspace.
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = workspace / path
+
+    def is_allowed(resolved: Path) -> bool:
+        return any(_is_within(resolved, root) for root in roots)
 
     existing_ancestor = candidate
     while not existing_ancestor.exists() and existing_ancestor != existing_ancestor.parent:
         existing_ancestor = existing_ancestor.parent
 
-    ensure_within_workspace(Path(existing_ancestor.resolve()))
+    resolved_ancestor = Path(existing_ancestor.resolve())
     resolved_candidate = Path(candidate.resolve())
-    ensure_within_workspace(resolved_candidate)
+
+    if not is_allowed(resolved_ancestor) and not is_allowed(resolved_candidate):
+        root_names = ", ".join(str(r) for r in roots)
+        raise ValueError(
+            f"路径越界: '{path}' 解析为 '{resolved_candidate}'，不在允许的目录范围内。"
+            f" 允许的根目录: {root_names}"
+        )
     return resolved_candidate
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """Check if path is within root (symlink-safe)."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 

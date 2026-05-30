@@ -64,6 +64,7 @@ class ReActAgent:
         self._compiled_session_profile: CompiledSessionProfile | None = None
         self._available_skill_context: str = ""
         self._mcp_context: str = ""
+        self._workflow_context: str = ""
         self._cancel_checker: Callable[[], bool] | None = None
         self._todo_list = None  # Set externally after construction
         self._degrade_count = 0
@@ -101,6 +102,10 @@ class ReActAgent:
     def set_mcp_context(self, context: str) -> None:
         """Expose discovered MCP resources and prompts to the next prompt."""
         self._mcp_context = context or ""
+
+    def set_workflow_context(self, context: str) -> None:
+        """Expose workflow runtime context to the next prompt as a system message."""
+        self._workflow_context = context or ""
 
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
         """Install a cooperative cancellation callback for the next run."""
@@ -232,6 +237,7 @@ class ReActAgent:
             run_state.question,
             memory_state.memory_context,
             memory_state.conv_ctx,
+            workflow_context=self._workflow_context,
         )
 
         if memory_manager:
@@ -249,6 +255,7 @@ class ReActAgent:
                     run_state.question,
                     memory_state.memory_context,
                     new_conv,
+                    workflow_context=self._workflow_context,
                 )
                 # Preserve accumulated assistant/tool/user messages after the initial messages
                 ctx.messages[:len(new_messages)] = new_messages
@@ -653,7 +660,8 @@ class ReActAgent:
         )
 
     def _build_messages(self, tools_desc: str, question: str,
-                         memory_context: str, conversation_context: str) -> list[dict[str, str]]:
+                         memory_context: str, conversation_context: str,
+                         workflow_context: str = "") -> list[dict[str, str]]:
         """Build messages array with stable prefix for prompt caching."""
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
@@ -667,6 +675,7 @@ class ReActAgent:
             mcp_context=self._mcp_context,
             compiled_profile=compiled,
             todo_context=todo_context,
+            workflow_context=workflow_context,
         )
 
     def _build_conversation_context(self, memory_manager, per_msg_limit: int = 500) -> str:

@@ -96,9 +96,10 @@ class WorkflowRunResult:
 
     @property
     def enhanced_question(self) -> str:
-        if not self.workflow_context:
-            return self.question
-        return f"{self.workflow_context}\n\n== User Question ==\n{self.question}"
+        # Return the raw question — workflow context is injected as a separate
+        # system message by build_react_messages() so it doesn't bury the
+        # user's actual question inside the user role message.
+        return self.question
 
 
 class WorkflowRuntime:

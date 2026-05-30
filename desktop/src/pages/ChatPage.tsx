@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
 import { agentWs } from '../services/ws'
+import { animateMessage, animateDropDown, animateScaleIn } from '../utils/animations'
 
 interface Message {
   id: string
@@ -65,31 +66,118 @@ export default function ChatPage() {
 
   const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [])
 
+  // Internal system markers that should NOT be displayed as chat bubbles
+  const INTERNAL_MARKERS = ['[会话摘要]', '[上下文已裁剪]', '[恢复文件]', '[最终答案]']
+  const isInternalMessage = (role: string, content: string) =>
+    role === 'system' && INTERNAL_MARKERS.some(marker => content.startsWith(marker))
+
+  // Clean tool message: "Action: name[{args}]\nObservation: result" → show name + summary
+  const cleanToolContent = (content: string): { name: string; display: string } => {
+    const actionMatch = content.match(/^Action:\s*(\w+)\[/)
+    const name = actionMatch ? actionMatch[1] : 'tool'
+    // Extract observation part
+    const obsIdx = content.indexOf('\nObservation:')
+    let display = obsIdx >= 0 ? content.slice(obsIdx + 13).trim() : content
+    // Truncate long results for display
+    if (display.length > 500) display = display.slice(0, 500) + '\n...(truncated)'
+    return { name, display }
+  }
+
+  // Load and display STM messages (used by restore, undo, redo)
+  const loadAndDisplayMessages = useCallback(async () => {
+    try {
+      const { messages: stm } = await api.listShortMemories()
+      // Always clear old messages first (BUG 4 fix)
+      if (!stm || stm.length === 0) { setMessages([]); return }
+      const transformed: Message[] = []
+      let idx = 0
+      for (const m of stm) {
+        // Skip internal bookkeeping messages
+        if (isInternalMessage(m.role, m.content)) continue
+        if (!['user', 'assistant', 'system', 'tool'].includes(m.role)) continue
+
+        if (m.role === 'tool') {
+          // Format tool messages: extract name + abbreviated result
+          const { name, display } = cleanToolContent(m.content)
+          transformed.push({
+            id: `h-${idx++}`,
+            role: 'tool',
+            content: display,
+            toolName: name,
+            toolStatus: 'done',
+            timestamp: new Date((m as any).ts || Date.now()),
+          })
+        } else if (m.role === 'assistant') {
+          // Skip raw agent thought duplicates — the final answer is
+          // typically the last assistant message; intermediate ones are
+          // internal reasoning that would confuse the user.
+          // Only keep assistant messages that look like actual answers
+          // (not pure thought/reasoning fragments).
+          const trimmed = m.content.trim()
+          if (trimmed.length < 10) continue  // skip tiny fragments
+          transformed.push({
+            id: `h-${idx++}`,
+            role: 'assistant',
+            content: trimmed,
+            timestamp: new Date((m as any).ts || Date.now()),
+          })
+        } else {
+          transformed.push({
+            id: `h-${idx++}`,
+            role: m.role as 'user' | 'system',
+            content: m.content,
+            timestamp: new Date((m as any).ts || Date.now()),
+          })
+        }
+      }
+      setMessages(transformed)
+    } catch (err) { console.error('Failed to load messages:', err) }
+  }, [])
+
+  // BUG 3 fix: Register WS handlers FIRST via ref, connect AFTER state is set
+  const sessionIdRef = useRef<string | null>(null)
+
   // Init session
   useEffect(() => {
+    const initNew = (sid: string) => {
+      // New session: clear everything immediately
+      sessionIdRef.current = sid
+      setSessionId(sid)
+      setMessages([])
+      currentAssistantIdRef.current = null
+      currentReasoningIdRef.current = null
+      messageQueueRef.current = []
+      agentWs.connect(sid)
+      // Clear server-side STM so old session messages don't leak
+      api.clearShortMemory().catch(() => {})
+      // Load HUD data
+      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+    }
+
+    const initRestore = (sid: string) => {
+      // Restoring existing session: load history
+      sessionIdRef.current = sid
+      setSessionId(sid)
+      agentWs.connect(sid)
+      loadAndDisplayMessages().catch(() => {})
+      // Load HUD data
+      api.getVersionStatus().then(setVersionStatus).catch(() => {})
+      api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
+      api.getMcpStatus().then(setMcpStatus).catch(() => {})
+      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+    }
+
     if (routeSessionId) {
-      api.restoreSession(routeSessionId).then(({ session_id }) => {
-        setSessionId(session_id); agentWs.connect(session_id)
-        api.listShortMemories().then(({ messages }) => {
-          if (messages?.length > 0) setMessages(messages.filter(m => ['user','assistant','system'].includes(m.role)).map((m, i) => ({ id: `h-${i}`, role: m.role as any, content: m.content, timestamp: new Date() })))
-        }).catch(console.error)
-      }).catch(() => { api.createSession().then(({ session_id }) => { setSessionId(session_id); agentWs.connect(session_id) }) })
+      api.restoreSession(routeSessionId)
+        .then(({ session_id }) => initRestore(session_id))
+        .catch(() => api.createSession().then(({ session_id }) => initNew(session_id)))
     } else {
-      api.createSession().then(({ session_id }) => { setSessionId(session_id); agentWs.connect(session_id) })
+      api.createSession().then(({ session_id }) => initNew(session_id))
     }
     return () => agentWs.disconnect()
   }, [routeSessionId])
 
-  // Load HUD
-  useEffect(() => {
-    if (!sessionId) return
-    api.getVersionStatus().then(setVersionStatus).catch(() => {})
-    api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
-    api.getMcpStatus().then(setMcpStatus).catch(() => {})
-    api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
-  }, [sessionId])
-
-  // WS events
+  // WS events — registered once, uses refs for current state
   useEffect(() => {
     const unsubs = [
       agentWs.on('thinking', (data) => {
@@ -156,13 +244,33 @@ export default function ChatPage() {
     switch (cmd) {
       case '/help': addSys(COMMAND_DEFS.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n')); break
       case '/clear': setMessages([]); messageQueueRef.current = []; break
-      case '/undo': try { const r = await api.versionUndo(); addSys(`Undone: ${r.checkpoint?.id || 'ok'}`); setVersionStatus(await api.getVersionStatus()); const { messages: stm } = await api.listShortMemories(); if (stm) setMessages(stm.filter(m => ['user','assistant','system'].includes(m.role)).map((m, i) => ({ id: `h-${i}`, role: m.role as any, content: m.content, timestamp: new Date() }))) } catch (e: any) { addSys(`Undo failed: ${e.message}`) }; break
-      case '/redo': try { const r = await api.versionRedo(); addSys(`Redone: ${r.checkpoint?.id || 'ok'}`); setVersionStatus(await api.getVersionStatus()); const { messages: stm } = await api.listShortMemories(); if (stm) setMessages(stm.filter(m => ['user','assistant','system'].includes(m.role)).map((m, i) => ({ id: `h-${i}`, role: m.role as any, content: m.content, timestamp: new Date() }))) } catch (e: any) { addSys(`Redo failed: ${e.message}`) }; break
+      case '/undo':
+        try {
+          const r = await api.versionUndo()
+          setVersionStatus(await api.getVersionStatus())
+          setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+          await loadAndDisplayMessages()
+          addSys(`Undone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
+        } catch (e: any) { addSys(`Undo failed: ${e.message}`) }
+        break
+      case '/redo':
+        try {
+          const r = await api.versionRedo()
+          setVersionStatus(await api.getVersionStatus())
+          setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+          await loadAndDisplayMessages()
+          addSys(`Redone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
+        } catch (e: any) { addSys(`Redo failed: ${e.message}`) }
+        break
       case '/log': try { const { checkpoints: cps } = await api.getVersionLog(10); addSys(cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')) } catch (e: any) { addSys(`Log failed: ${e.message}`) }; break
       case '/status': try { const s = await api.getVersionStatus(); addSys(`Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`) } catch (e: any) { addSys(`Status failed: ${e.message}`) }; break
       case '/compact': addSys('Compressing context...'); try { const r = await api.compactContext(args); addSys(`Compacted: ${r.tokens_saved} tokens saved`) } catch (e: any) { addSys(`Compact failed: ${e.message}`) }; break
       case '/sessions': try { const { sessions } = await api.getRecentSessions(10); addSys(sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')) } catch (e: any) { addSys(`Sessions failed: ${e.message}`) }; break
-      case '/switch': if (!args) { addSys('Usage: /switch <session_id>'); break }; try { await api.restoreSession(args); window.location.href = `/chat/${args}` } catch (e: any) { addSys(`Switch failed: ${e.message}`) }; break
+      case '/switch':
+        if (!args) { addSys('Usage: /switch <session_id>'); break }
+        // BUG 7 fix: navigate directly — the init useEffect will handle restore
+        window.location.href = `/chat/${args}`
+        break
       default: addSys(`Unknown command: ${cmd}. Type /help for commands.`)
     }
   }
@@ -172,8 +280,22 @@ export default function ChatPage() {
   const handlePaletteSelect = (cmd: string) => { setInput(cmd + ' '); setShowPalette(false); inputRef.current?.focus() }
   const handleCancel = () => { if (currentRunId) agentWs.cancel(currentRunId) }
   const handleConfirm = (approved: boolean) => { agentWs.confirm('', approved); setConfirmRequest(null) }
-  const handleUndo = async () => { try { await api.versionUndo(); setVersionStatus(await api.getVersionStatus()); setCheckpoints((await api.getVersionLog(5)).checkpoints || []) } catch {} }
-  const handleRedo = async () => { try { await api.versionRedo(); setVersionStatus(await api.getVersionStatus()); setCheckpoints((await api.getVersionLog(5)).checkpoints || []) } catch {} }
+  const handleUndo = async () => {
+    try {
+      await api.versionUndo()
+      setVersionStatus(await api.getVersionStatus())
+      setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+      await loadAndDisplayMessages()
+    } catch {}
+  }
+  const handleRedo = async () => {
+    try {
+      await api.versionRedo()
+      setVersionStatus(await api.getVersionStatus())
+      setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+      await loadAndDisplayMessages()
+    } catch {}
+  }
 
   const filteredCommands = COMMAND_DEFS.filter(c => c.cmd.startsWith(paletteFilter))
 
@@ -195,7 +317,11 @@ export default function ChatPage() {
             </div>
           )}
           {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}>
+            <div
+              key={msg.id}
+              ref={(el) => { if (el) animateMessage(el, msg.role) }}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
               <div className={`max-w-[80%] ${msg.role === 'user' ? 'rounded-2xl rounded-br-md' : msg.role === 'tool' ? 'rounded-lg' : 'rounded-2xl rounded-bl-md'} px-4 py-2.5`} style={{
                 background: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--surface-2)' : msg.role === 'system' ? 'var(--surface-2)' : 'var(--surface-2)',
                 border: msg.role === 'tool' ? '1px solid var(--border)' : msg.role === 'system' ? '1px solid var(--border-subtle)' : 'none',
@@ -222,7 +348,7 @@ export default function ChatPage() {
 
         {/* Confirm */}
         {confirmRequest && (
-          <div className="mx-5 mb-3 rounded-xl p-4 animate-slide-up" style={{ background: 'var(--amber-muted)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <div ref={(el) => { if (el) animateScaleIn(el) }} className="mx-5 mb-3 rounded-xl p-4" style={{ background: 'var(--amber-muted)', border: '1px solid rgba(245,158,11,0.3)' }}>
             <div className="text-sm font-medium mb-2" style={{ color: 'var(--amber)' }}>Confirmation Required</div>
             <pre className="text-xs rounded-lg p-2.5 mb-3 overflow-auto max-h-32" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
             <div className="flex gap-2">
@@ -234,7 +360,7 @@ export default function ChatPage() {
 
         {/* Command Palette */}
         {showPalette && filteredCommands.length > 0 && (
-          <div className="mx-5 mb-2 rounded-xl overflow-hidden animate-slide-down" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+          <div ref={(el) => { if (el) animateDropDown(el) }} className="mx-5 mb-2 rounded-xl overflow-hidden" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
             {filteredCommands.map(c => (
               <button key={c.cmd} onClick={() => handlePaletteSelect(c.cmd)} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors" style={{ color: 'var(--fg)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>

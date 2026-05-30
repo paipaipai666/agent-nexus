@@ -1229,6 +1229,10 @@ class ChatScreen(Screen):
             except Exception as e:
                 logger.debug("Failed to display auto-route snapshot: %s", e)
         self._refresh_skill_panel()
+        # Pass workflow context to agent as a separate system message
+        workflow_ctx = getattr(workflow_result, "workflow_context", None)
+        if workflow_ctx and hasattr(self._agent, "set_workflow_context"):
+            self._agent.set_workflow_context(workflow_ctx)
         return workflow_result.enhanced_question
 
     # ── spinner animation ────────────────────────────────────
