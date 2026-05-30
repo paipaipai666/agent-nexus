@@ -10,13 +10,13 @@ def _compute_calibration(samples: list[dict], score_file: str) -> None:
     """Compute Spearman/Pearson correlation between Judge and human scores."""
     score_path = Path(score_file)
     if not score_path.exists():
-        console.print(f"[red]评分文件不存在: {score_file}[/red]")
+        console.print(f"[red]Score file not found: {score_file}[/red]")
         return
 
     try:
         human_scores = json.loads(score_path.read_text(encoding="utf-8"))
     except Exception as e:
-        console.print(f"[red]读取评分文件失败: {e}[/red]")
+        console.print(f"[red]Failed to read score file: {e}[/red]")
         return
 
     human_map = {}
@@ -45,32 +45,32 @@ def _compute_calibration(samples: list[dict], score_file: str) -> None:
             judge_rec.append(jr)
             human_rec.append(hr)
 
-    console.print(f"\n[bold]校准结果[/bold] ({len(labels)} 个样本)\n")
+    console.print(f"\n[bold]Calibration Results[/bold] ({len(labels)} samples)\n")
 
     if len(judge_pre) >= 3:
         sp, pp = _spearman(judge_pre, human_pre)
         pr, _ = _pearson(judge_pre, human_pre)
         console.print(f"[bold]Precision[/bold]  Spearman ρ={sp:.3f} (p={pp:.4f})  Pearson r={pr:.3f}")
 
-        console.print("  Judge → Human 散点 (Precision):")
+        console.print("  Judge → Human scatter (Precision):")
         for j, h, lbl in sorted(zip(judge_pre, human_pre, labels), key=lambda x: x[1]):
             bar = "█" * max(1, int(h * 20))
             console.print(f"    {lbl:>4s}  J={j:.2f}  H={h:.2f}  {bar}")
     else:
-        console.print("[yellow]Precision: 样本太少 (<3)，无法计算相关性[/yellow]")
+        console.print("[yellow]Precision: too few samples (<3) to compute correlation[/yellow]")
 
     if len(judge_rec) >= 3:
         sr, prr = _spearman(judge_rec, human_rec)
         rr, _ = _pearson(judge_rec, human_rec)
         console.print(f"[bold]Recall[/bold]     Spearman ρ={sr:.3f} (p={prr:.4f})  Pearson r={rr:.3f}")
 
-        console.print("  Judge → Human 散点 (Recall):")
+        console.print("  Judge → Human scatter (Recall):")
         for j, h, lbl in sorted(zip(judge_rec, human_rec, labels), key=lambda x: x[1]):
             bar = "█" * max(1, int(h * 20))
             console.print(f"    {lbl:>4s}  J={j:.2f}  H={h:.2f}  {bar}")
 
-    console.print("\n[dim]ρ > 0.7: 强相关 | ρ 0.4~0.7: 中等相关 | ρ < 0.4: 弱相关[/dim]")
-    console.print("[dim]Judge 评分一致性达标阈值: Spearman ρ > 0.7[/dim]")
+    console.print("\n[dim]ρ > 0.7: strong | ρ 0.4~0.7: moderate | ρ < 0.4: weak correlation[/dim]")
+    console.print("[dim]Judge consistency threshold: Spearman ρ > 0.7[/dim]")
 
 
 def _spearman(x: list[float], y: list[float]) -> tuple[float, float]:

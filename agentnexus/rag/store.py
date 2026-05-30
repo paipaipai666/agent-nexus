@@ -94,6 +94,12 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_kb_id ON ingestion_runs(kb_id);
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_status ON ingestion_runs(status);
+
+CREATE TABLE IF NOT EXISTS schema_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL,
+    applied_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 _catalog_instances: dict[str, "KnowledgeBaseCatalog"] = {}
@@ -184,7 +190,38 @@ class KnowledgeBaseCatalog:
         self._conn.commit()
         self._lock = threading.RLock()
 
-    def _migrate_schema(self):
+    def _get_schema_version(self) -> int:
+        """Get the current schema version."""
+        try:
+            row = self._conn.execute(
+                "SELECT MAX(version) as ver FROM schema_versions"
+            ).fetchone()
+            return row["ver"] if row and row["ver"] else 0
+        except Exception:
+            return 0
+
+    def _set_schema_version(self, version: int) -> None:
+        """Record a schema version."""
+        self._conn.execute(
+            "INSERT INTO schema_versions (version) VALUES (?)", (version,)
+        )
+        self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        """Apply versioned migrations."""
+        current = self._get_schema_version()
+
+        if current < 1:
+            self._migrate_v1()
+            self._set_schema_version(1)
+
+        # Add future migrations here:
+        # if current < 2:
+        #     self._migrate_v2()
+        #     self._set_schema_version(2)
+
+    def _migrate_v1(self) -> None:
+        """Migration v1: Ensure all current columns exist."""
         source_columns = {
             row["name"] for row in self._conn.execute("PRAGMA table_info(source_documents)").fetchall()
         }

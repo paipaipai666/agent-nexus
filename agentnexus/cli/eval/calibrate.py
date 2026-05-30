@@ -17,15 +17,15 @@ def _rag_evaluator_cls():
 
 @eval_app.command("calibrate")
 def eval_calibrate(
-    output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="输出文件路径"),
+    output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="Output file path"),
     score_file: str = typer.Option(
         "",
         "--score-file",
         "-s",
-        help="人工评分 JSON 文件路径（含 human_precision/human_recall 字段）",
+        help="Human score JSON file path (with human_precision/human_recall fields)",
     ),
 ):
-    """Judge 校准：导出样本供人工打分，计算 Judge 与人工评分的一致性"""
+    """Judge calibration: export samples for human scoring, compute Judge-to-human agreement."""
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.ingestion import ChunkStrategy
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base
@@ -34,7 +34,7 @@ def eval_calibrate(
     evaluator = _rag_evaluator_cls()(KNOWLEDGE_BASE, EVAL_SAMPLES)
     strategy, chunk_size, overlap, use_hybrid = ChunkStrategy.FIXED, 256, 64, False
 
-    console.print(f"[bold]校准运行: {strategy.value}-{chunk_size}-dense[/bold]\n")
+    console.print(f"[bold]Calibration run: {strategy.value}-{chunk_size}-dense[/bold]\n")
 
     samples = []
     chunks = evaluator._chunk_all(strategy, chunk_size, overlap)

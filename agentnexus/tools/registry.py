@@ -55,6 +55,13 @@ def _serialize_params(params: dict, limit: int) -> str:
 
 
 class RiskLevel(str, Enum):
+    """Static risk classification for tools.
+
+    SEC-011: Risk level is currently metadata-only, used for HITL triggering
+    and tool_policy filtering. A future enhancement could add risk-aware
+    behaviors: tighter rate limits for high-risk tools, automatic HITL
+    escalation after N calls, or risk-weighted audit detail levels.
+    """
     LOW = "low"          # read-only queries (search, file read)
     MEDIUM = "medium"    # write ops, network requests
     HIGH = "high"        # code execution, database writes, external payments
@@ -267,6 +274,13 @@ class ToolRegistry:
                     return "[blocked] 用户取消了该工具调用"
 
             # 6. Execute with timeout enforcement
+            # SEC-008: future.result(timeout=) provides a soft timeout — it raises
+            # TimeoutError on the caller side but cannot terminate the running thread.
+            # Python's ThreadPoolExecutor does not support thread cancellation.
+            # Subprocess-based tools (shell_exec, python_execute) already have their
+            # own timeout= in subprocess.run calls. For non-subprocess tools (network,
+            # database), this is a Python language limitation — multiprocessing.Process
+            # would be needed for hard cancellation.
             span_input = {
                 "tool_name": name,
                 "caller": caller,

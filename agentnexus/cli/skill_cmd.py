@@ -125,7 +125,7 @@ def _resource_summary(entry) -> str:
 
 @skill_app.command("list")
 def list_skills():
-    """列出可用 skills。"""
+    """List available skills."""
     registry = _registry()
     table = Table(title="Skills")
     table.add_column("ID", style="cyan")
@@ -143,17 +143,17 @@ def list_skills():
         )
     console.print(table)
     if registry.errors:
-        console.print(f"[red]{len(registry.errors)} 个 skill 加载失败，运行 nexus skill validate 查看详情[/red]")
+        console.print(f"[red]{len(registry.errors)} skills failed to load, run nexus skill validate for details[/red]")
 
 
 @skill_app.command("init")
 def init_skill(
-    target: str = typer.Argument(..., help="skill 名称，或 namespace/skill_id"),
-    display_name: str = typer.Option("", "--name", help="显示名称，默认从 skill_id 生成"),
-    force: bool = typer.Option(False, "--force", help="覆盖已存在的 SKILL.md 或 workflow.yaml"),
-    workflow: bool = typer.Option(False, "--workflow", help="生成旧版 workflow.yaml，而不是通用 SKILL.md"),
+    target: str = typer.Argument(..., help="Skill name, or namespace/skill_id"),
+    display_name: str = typer.Option("", "--name", help="Display name (defaults to derived from skill_id)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing SKILL.md or workflow.yaml"),
+    workflow: bool = typer.Option(False, "--workflow", help="Generate legacy workflow.yaml instead of generic SKILL.md"),
 ):
-    """在 ~/.agentnexus/skills 下创建一个通用 SKILL.md skill 模板。"""
+    """Create a generic SKILL.md skill template under ~/.agentnexus/skills."""
     from agentnexus.core.config import get_config_dir, get_settings
 
     settings = get_settings()
@@ -161,8 +161,8 @@ def init_skill(
     name = display_name or workflow_id.replace("_", " ").replace("-", " ").title()
     path = Path(get_config_dir()) / "skills" / namespace / ("workflow.yaml" if workflow else "SKILL.md")
     if path.exists() and not force:
-        console.print(f"[red]skill 已存在:[/red] {path}")
-        console.print("[dim]如需覆盖，请加 --force[/dim]")
+        console.print(f"[red]Skill already exists:[/red] {path}")
+        console.print("[dim]Use --force to overwrite[/dim]")
         raise typer.Exit(code=1)
     path.parent.mkdir(parents=True, exist_ok=True)
     if workflow:
@@ -172,16 +172,16 @@ def init_skill(
         path.write_text(_skill_md_template(workflow_id, name), encoding="utf-8")
         for child in ("scripts", "references", "assets"):
             (path.parent / child).mkdir(exist_ok=True)
-    console.print(f"[green]已创建 skill[/green] {namespace}/{workflow_id}")
+    console.print(f"[green]Skill created[/green] {namespace}/{workflow_id}")
     console.print(f"[dim]{path}[/dim]")
-    console.print("[dim]下一步: nexus skill validate && nexus skill use " f"{namespace}/{workflow_id}[/dim]")
+    console.print("[dim]Next: nexus skill validate && nexus skill use " f"{namespace}/{workflow_id}[/dim]")
 
 
 @skill_app.command("validate")
 def validate_skill(
-    target: str = typer.Argument("", help="可选 skill_id 或 namespace/skill_id"),
+    target: str = typer.Argument("", help="Optional skill_id or namespace/skill_id"),
 ):
-    """验证 skill 与 prompt 资源。"""
+    """Validate skill and prompt resources."""
     registry = _registry()
     errors = registry.validate(target or None)
     if not errors:
@@ -194,8 +194,8 @@ def validate_skill(
 
 
 @skill_app.command("use")
-def use_skill(target: str = typer.Argument(..., help="skill_id 或 namespace/skill_id")):
-    """设置默认 skill，后续 TUI 启动会自动应用。"""
+def use_skill(target: str = typer.Argument(..., help="skill_id or namespace/skill_id")):
+    """Set the default skill for TUI sessions."""
     from agentnexus.core.config import load_config_yaml, write_config_yaml
 
     registry = _registry()
@@ -205,34 +205,34 @@ def use_skill(target: str = typer.Argument(..., help="skill_id 或 namespace/ski
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     if entry is None:
-        console.print(f"[red]未找到 skill: {target}[/red]")
+        console.print(f"[red]Skill not found: {target}[/red]")
         raise typer.Exit(code=1)
     errors = registry.validate(entry.qualified_id)
     if errors:
-        console.print("[red]无法设置默认 skill，验证失败:[/red]")
+        console.print("[red]Cannot set default skill, validation failed:[/red]")
         for error in errors:
             console.print(f"- {error}")
         raise typer.Exit(code=1)
     data = load_config_yaml()
     data["default_skill"] = entry.qualified_id
     write_config_yaml(data)
-    console.print(f"[green]默认 skill 已设置[/green] {entry.qualified_id}")
+    console.print(f"[green]Default skill set[/green] {entry.qualified_id}")
 
 
 @skill_app.command("reset")
 def reset_skill():
-    """清除默认 skill。"""
+    """Clear the default skill."""
     from agentnexus.core.config import load_config_yaml, write_config_yaml
 
     data = load_config_yaml()
     data.pop("default_skill", None)
     write_config_yaml(data)
-    console.print("[green]默认 skill 已清除[/green]")
+    console.print("[green]Default skill cleared[/green]")
 
 
 @skill_app.command("status")
 def skill_status():
-    """显示默认 skill 和发现状态。"""
+    """Show the default skill and discovery status."""
     from agentnexus.core.config import get_settings
 
     settings = get_settings()

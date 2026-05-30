@@ -28,18 +28,18 @@ def _rag_evaluator_cls():
 
 @eval_app.command("list")
 def eval_list():
-    """列出可用的评估数据集"""
+    """List available evaluation datasets."""
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
 
-    console.print(f"[bold]知识库文档:[/bold] {len(KNOWLEDGE_BASE)} 篇")
-    kb_mode = "文件型" if KNOWLEDGE_BASE and all(Path(item).exists() for item in KNOWLEDGE_BASE) else "内联文本"
-    console.print(f"[bold]知识库类型:[/bold] {kb_mode}")
-    console.print(f"[bold]评估样本:[/bold] {len(EVAL_SAMPLES)} 个\n")
+    console.print(f"[bold]Knowledge base documents:[/bold] {len(KNOWLEDGE_BASE)}")
+    kb_mode = "File-based" if KNOWLEDGE_BASE and all(Path(item).exists() for item in KNOWLEDGE_BASE) else "Inline text"
+    console.print(f"[bold]Knowledge base type:[/bold] {kb_mode}")
+    console.print(f"[bold]Evaluation samples:[/bold] {len(EVAL_SAMPLES)}\n")
 
-    table = Table(title="评估样本列表", box=box.ROUNDED)
+    table = Table(title="Evaluation Samples", box=box.ROUNDED)
     table.add_column("#", style="dim", justify="right")
-    table.add_column("问题")
-    table.add_column("标准答案（节选）", style="dim")
+    table.add_column("Question")
+    table.add_column("Ground Truth (excerpt)", style="dim")
 
     for i, sample in enumerate(EVAL_SAMPLES, 1):
         gt_display = sample.ground_truth
@@ -50,18 +50,18 @@ def eval_list():
 
 @eval_app.command("run")
 def eval_run(
-    ci: bool = typer.Option(False, "--ci", "-c", help="CI 模式：不达标则 exit(1)"),
-    top_k: int = typer.Option(10, "--top-k", "-k", help="检索排序截断数（Hit Rate / MRR 的 k）"),
-    dataset: str = typer.Option("", "--dataset", "-D", help="外部 JSONL 评测集路径"),
+    ci: bool = typer.Option(False, "--ci", "-c", help="CI mode: exit(1) if thresholds not met"),
+    top_k: int = typer.Option(10, "--top-k", "-k", help="Retrieval cutoff for Hit Rate / MRR"),
+    dataset: str = typer.Option("", "--dataset", "-D", help="External JSONL eval dataset path"),
     output: str = typer.Option("", "--output", "-o", help="Export report path, or '-' for stdout"),
     export_format: str = typer.Option("json", "--format", "-f", help="Export format: json or csv"),
-    quick: bool = typer.Option(False, "--quick", "-q", help="快速模式：仅运行 4 个代表性组合"),
-    parallel: bool = typer.Option(False, "--parallel", "-p", help="并行模式：多线程并发评估样本"),
-    jobs: int = typer.Option(8, "--jobs", "-j", help="并行线程数（需配合 --parallel 使用）"),
-    verbose: bool = typer.Option(False, "--verbose", "-V", help="详细模式：输出每步耗时和样本进度"),
-    timeout: int = typer.Option(120, "--timeout", "-T", help="单次 LLM 调用超时秒数 (0=不限)"),
+    quick: bool = typer.Option(False, "--quick", "-q", help="Quick mode: run only 4 representative combinations"),
+    parallel: bool = typer.Option(False, "--parallel", "-p", help="Parallel mode: multi-threaded evaluation"),
+    jobs: int = typer.Option(8, "--jobs", "-j", help="Number of parallel threads (use with --parallel)"),
+    verbose: bool = typer.Option(False, "--verbose", "-V", help="Verbose mode: output per-step timing and progress"),
+    timeout: int = typer.Option(120, "--timeout", "-T", help="Per-call LLM timeout in seconds (0=unlimited)"),
 ):
-    """运行 RAG 评估并输出指标报告"""
+    """Run RAG evaluation and output metrics report."""
     from agentnexus.rag.eval_dataset import DATASET_VERSION, EVAL_SAMPLES, KNOWLEDGE_BASE, load_eval_dataset
     from agentnexus.rag.evaluator import DEFAULT_RAG_THRESHOLDS
 
@@ -71,14 +71,14 @@ def eval_run(
 
     if dataset:
         kb, samples, dataset_version = load_eval_dataset(dataset)
-        kb_mode = "文件型" if kb and all(Path(item).exists() for item in kb) else "内联文本"
+        kb_mode = "File-based" if kb and all(Path(item).exists() for item in kb) else "Inline text"
         output_console.print(
-            f"[bold]已加载外部数据集:[/bold] {dataset} ({len(samples)} 样本, version={dataset_version}, {kb_mode})"
+            f"[bold]External dataset loaded:[/bold] {dataset} ({len(samples)} samples, version={dataset_version}, {kb_mode})"
         )
     else:
         kb, samples, dataset_version = KNOWLEDGE_BASE, EVAL_SAMPLES, DATASET_VERSION
 
-    output_console.print("[bold]正在运行 RAG 评估...[/bold]\n")
+    output_console.print("[bold]Running RAG evaluation...[/bold]\n")
     _print_eval_runtime_summary(output_console)
 
     evaluator = _rag_evaluator_cls()(kb, samples)
@@ -110,15 +110,15 @@ def eval_run(
     combinations = quick_combinations if quick else all_combinations
     max_workers = jobs if parallel else 1
     if quick:
-        output_console.print("[yellow]⚡ 快速模式: 仅运行 4 个代表性组合[/yellow]")
+        output_console.print("[yellow]⚡ Quick mode: running 4 representative combinations[/yellow]")
     if max_workers > 1:
-        output_console.print(f"[cyan]⚡ 并行模式: {max_workers} 线程[/cyan]")
+        output_console.print(f"[cyan]⚡ Parallel mode: {max_workers} threads[/cyan]")
     output_console.print()
 
     results = []
     for strategy, chunk_size, overlap, use_hybrid in combinations:
         label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
-        output_console.print(f"  [{len(results) + 1}/{len(combinations)}] 运行: {label}...", end=" ")
+        output_console.print(f"  [{len(results) + 1}/{len(combinations)}] Running: {label}...", end=" ")
         try:
             run = evaluator.run_combination(
                 strategy, chunk_size, overlap, use_hybrid,
@@ -131,11 +131,11 @@ def eval_run(
             output_console.print(f"[red]✗ {e}[/red]")
 
     if not results:
-        output_console.print("[red]所有评估组合均失败[/red]")
+        output_console.print("[red]All evaluation combinations failed[/red]")
         return
 
-    table = Table(title="RAG 评估结果", box=box.ROUNDED)
-    table.add_column("配置", style="cyan")
+    table = Table(title="RAG Evaluation Results", box=box.ROUNDED)
+    table.add_column("Config", style="cyan")
     table.add_column("Faithfulness", justify="right")
     table.add_column("AnsRel", justify="right")
     table.add_column("AnsCorr", justify="right")
@@ -166,7 +166,7 @@ def eval_run(
 
     # Highlight best
     best = max(results, key=lambda r: r.faithfulness)
-    output_console.print(f"\n[bold green]最优配置:[/bold green] {best.label} (faithfulness={best.faithfulness:.3f})")
+    output_console.print(f"\n[bold green]Best configuration:[/bold green] {best.label} (faithfulness={best.faithfulness:.3f})")
 
     # Save report
     report_dir = Path(get_settings().traces_dir) / "evals"
@@ -198,7 +198,7 @@ def eval_run(
         ],
     }
     report_path.write_text(json.dumps(report_data, ensure_ascii=False, indent=2), encoding="utf-8")
-    output_console.print(f"[dim]报告已保存: {report_path}[/dim]")
+    output_console.print(f"[dim]Report saved: {report_path}[/dim]")
     if output:
         export_path = _export_eval_report(report_data, output, export_format)
         if export_path:
@@ -206,7 +206,7 @@ def eval_run(
 
     # CI gate
     if ci:
-        output_console.print("\n[bold]CI 门禁检查:[/bold]")
+        output_console.print("\n[bold]CI Gate Check:[/bold]")
         all_passed = True
         for r in results:
             show = []
@@ -218,9 +218,9 @@ def eval_run(
             for line in show:
                 output_console.print(line)
         if all_passed:
-            output_console.print("\n[bold green]全部通过 ✓[/bold green]")
+            output_console.print("\n[bold green]All passed ✓[/bold green]")
         else:
-            output_console.print("\n[bold red]部分组合未达标，阈值:[/bold red]")
+            output_console.print("\n[bold red]Some combinations below threshold:[/bold red]")
             for k, v in sorted(DEFAULT_RAG_THRESHOLDS.items()):
                 output_console.print(f"  {k}: {v}")
             raise typer.Exit(code=1)
@@ -289,26 +289,26 @@ def _report_to_csv(report_data: dict) -> str:
 
 @eval_app.command("history")
 def eval_history():
-    """列出历史 RAG 评估报告"""
+    """List historical RAG evaluation reports."""
 
     report_dir = Path(get_settings().traces_dir) / "evals"
     if not report_dir.exists():
-        console.print("[dim]暂无历史评估报告[/dim]")
+        console.print("[dim]No historical evaluation reports[/dim]")
         return
 
     files = sorted(report_dir.glob("eval_report_*.json"), reverse=True)
     if not files:
-        console.print("[dim]暂无历史评估报告[/dim]")
+        console.print("[dim]No historical evaluation reports[/dim]")
         return
 
-    table = Table(title="历史评估报告", box=box.ROUNDED)
-    table.add_column("时间", style="cyan")
-    table.add_column("数据集版本")
-    table.add_column("最优配置")
+    table = Table(title="Historical Evaluation Reports", box=box.ROUNDED)
+    table.add_column("Time", style="cyan")
+    table.add_column("Dataset Version")
+    table.add_column("Best Config")
     table.add_column("Faithfulness", justify="right")
     table.add_column("HitRate", justify="right")
     table.add_column("MRR", justify="right")
-    table.add_column("配置数", justify="right")
+    table.add_column("Configs", justify="right")
 
     for file in files[:20]:
         try:
@@ -334,18 +334,18 @@ def eval_history():
 
 @eval_app.command("compare")
 def eval_compare(
-    baseline: str = typer.Option(..., "--baseline", "-b", help="基准报告 JSON 路径"),
-    candidate: str = typer.Option(..., "--candidate", "-c", help="候选报告 JSON 路径"),
+    baseline: str = typer.Option(..., "--baseline", "-b", help="Baseline report JSON path"),
+    candidate: str = typer.Option(..., "--candidate", "-c", help="Candidate report JSON path"),
 ):
-    """对比两次 RAG 评估结果"""
+    """Compare two RAG evaluation results."""
     b_path = Path(baseline)
     c_path = Path(candidate)
 
     if not b_path.exists():
-        console.print(f"[red]基准文件不存在: {baseline}[/red]")
+        console.print(f"[red]Baseline file not found: {baseline}[/red]")
         return
     if not c_path.exists():
-        console.print(f"[red]候选文件不存在: {candidate}[/red]")
+        console.print(f"[red]Candidate file not found: {candidate}[/red]")
         return
 
     b_raw = json.loads(b_path.read_text(encoding="utf-8"))
@@ -357,15 +357,15 @@ def eval_compare(
     c_version = c_raw.get("dataset_version", "unknown") if isinstance(c_raw, dict) else "unknown"
 
     if b_version != c_version:
-        console.print(f"[yellow]⚠ 数据集版本不一致: baseline={b_version} vs candidate={c_version}[/yellow]\n")
+        console.print(f"[yellow]⚠ Dataset version mismatch: baseline={b_version} vs candidate={c_version}[/yellow]\n")
 
     b_map = {r["label"]: r for r in b_configs}
     c_map = {r["label"]: r for r in c_configs}
 
     metrics = ["faithfulness", "answer_relevancy", "hit_rate", "mrr", "context_precision", "context_recall"]
 
-    table = Table(title=f"对比: {baseline} vs {candidate}", box=box.ROUNDED)
-    table.add_column("配置", style="cyan")
+    table = Table(title=f"Comparison: {baseline} vs {candidate}", box=box.ROUNDED)
+    table.add_column("Config", style="cyan")
     for m in metrics:
         table.add_column(m, justify="right")
 

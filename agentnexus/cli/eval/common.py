@@ -76,7 +76,7 @@ def _collect_eval_runtime_summary() -> list[str]:
 
 def _print_eval_runtime_summary(target_console=None) -> None:
     output_console = target_console or console
-    output_console.print("[bold]评估运行信息:[/bold]")
+    output_console.print("[bold]Evaluation Run Info:[/bold]")
     for line in _collect_eval_runtime_summary():
         output_console.print(f"  - {line}")
     output_console.print()

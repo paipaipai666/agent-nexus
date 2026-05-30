@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
 );
 CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_ltm_category ON long_term_memories(category);
+
+CREATE TABLE IF NOT EXISTS schema_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL,
+    applied_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 LTM_COLLECTION = "long_term_memories"
@@ -85,7 +91,38 @@ class LongTermMemory:
         self._write_counter: int = 0
         self._lock = threading.RLock()
 
-    def _migrate(self):
+    def _get_schema_version(self) -> int:
+        """Get the current schema version."""
+        try:
+            row = self._conn.execute(
+                "SELECT MAX(version) as ver FROM schema_versions"
+            ).fetchone()
+            return row["ver"] if row and row["ver"] else 0
+        except Exception:
+            return 0
+
+    def _set_schema_version(self, version: int) -> None:
+        """Record a schema version."""
+        self._conn.execute(
+            "INSERT INTO schema_versions (version) VALUES (?)", (version,)
+        )
+        self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Apply versioned migrations."""
+        current = self._get_schema_version()
+
+        if current < 1:
+            self._migrate_v1()
+            self._set_schema_version(1)
+
+        # Add future migrations here:
+        # if current < 2:
+        #     self._migrate_v2()
+        #     self._set_schema_version(2)
+
+    def _migrate_v1(self) -> None:
+        """Migration v1: Ensure all current columns exist."""
         cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
         cols = {r["name"] for r in cur.fetchall()}
         if "chroma_id" not in cols:

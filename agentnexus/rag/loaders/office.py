@@ -62,8 +62,11 @@ def _extract_docx_paragraphs(file_path: str) -> list[tuple[str, str | None]]:
         document_xml = archive.read("word/document.xml")
 
     root = ET.fromstring(document_xml)
+    body = root.find(".//w:body", _DOCX_NS)
+    if body is None:
+        return []
     paragraphs: list[tuple[str, str | None]] = []
-    for paragraph in root.findall(".//w:body/w:p", _DOCX_NS):
+    for paragraph in body.findall("w:p", _DOCX_NS):
         text_parts: list[str] = []
         for node in paragraph.iter():
             tag = _strip_xml_tag(node.tag)
@@ -79,15 +82,22 @@ def _extract_docx_paragraphs(file_path: str) -> list[tuple[str, str | None]]:
         if text:
             paragraphs.append((text, style_name))
 
-    # Extract tables
-    for tbl in root.iterfind(".//w:body/w:tbl", _DOCX_NS):
+    # Extract tables (w:tbl elements)
+    for tbl in body.findall("w:tbl", _DOCX_NS):
         rows = []
-        for tr in tbl.iterfind("w:tr", _DOCX_NS):
+        for tr in tbl.findall("w:tr", _DOCX_NS):
             cells = []
-            for tc in tr.iterfind("w:tc", _DOCX_NS):
-                cell_text = ' '.join(p.text or '' for p in tc.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"))
-                cells.append(cell_text.strip())
-            rows.append(' | '.join(cells))
+            for tc in tr.findall("w:tc", _DOCX_NS):
+                # Extract all paragraph text within each cell
+                cell_parts = []
+                for p in tc.findall("w:p", _DOCX_NS):
+                    cell_text = ''.join(
+                        node.text or '' for node in p.iter() if node.text
+                    )
+                    cell_parts.append(cell_text.strip())
+                cells.append(' '.join(cell_parts))
+            if any(cells):
+                rows.append(' | '.join(cells))
         if rows:
             paragraphs.append(('\n'.join(rows), None))
 

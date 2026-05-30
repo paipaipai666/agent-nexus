@@ -12,12 +12,12 @@ from . import app, console
 
 @app.command()
 def config(
-    set_key: str = typer.Argument(None, help="配置项名称 (nexus config <key> <value>)"),
-    set_value: str = typer.Argument(None, help="配置值"),
-    key: str = typer.Option(None, "--set", "-s", help="设置配置项 (legacy)"),
-    value: str = typer.Option(None, "--value", "-v", help="配置值 (legacy)"),
+    set_key: str = typer.Argument(None, help="Config key name (nexus config <key> <value>)"),
+    set_value: str = typer.Argument(None, help="Config value"),
+    key: str = typer.Option(None, "--set", "-s", help="Set a config key (legacy)"),
+    value: str = typer.Option(None, "--value", "-v", help="Config value (legacy)"),
 ):
-    """查看或修改配置"""
+    """View or modify configuration."""
     from agentnexus.core.config import Settings, get_config_dir, get_settings, load_config_yaml, write_config_yaml
 
     settings = get_settings()
@@ -50,23 +50,23 @@ def config(
     if key is not None:
         # ── Set mode ──
         if key not in SETTABLE_KEYS:
-            console.print(f"[red]无效的配置项: {key}[/red]")
-            console.print(f"可用配置项: [dim]{', '.join(SETTABLE_KEYS)}[/dim]")
+            console.print(f"[red]Invalid config key: {key}[/red]")
+            console.print(f"Available keys: [dim]{', '.join(SETTABLE_KEYS)}[/dim]")
             return
         if value is None:
-            console.print("[yellow]请用 --value / -v 提供值[/yellow]")
-            console.print("示例: nexus config --set llm_model_id --value deepseek/deepseek-chat")
+            console.print("[yellow]Please provide a value with --value / -v[/yellow]")
+            console.print("Example: nexus config --set llm_model_id --value deepseek/deepseek-chat")
             return
 
         data = load_config_yaml()
         data[key] = value
         write_config_yaml(data)
-        console.print(f"[green]已保存[/green] {key} = [bold]{value}[/bold]")
-        console.print(f"[dim]配置文件: {config_path}[/dim]")
+        console.print(f"[green]Saved[/green] {key} = [bold]{value}[/bold]")
+        console.print(f"[dim]Config file: {config_path}[/dim]")
         return
 
     # ── View mode ──
-    table = Table(title="AgentNexus 配置", box=box.ROUNDED)
+    table = Table(title="AgentNexus Configuration", box=box.ROUNDED)
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="green")
     table.add_column("Source", style="dim")
@@ -88,30 +88,30 @@ def config(
             if raw:
                 display = f"{raw[:3]}****{raw[-4:]}" if len(raw) > 7 else "****"
             else:
-                display = "(未设置)"
+                display = "(not set)"
         else:
-            display = str(resolved) if resolved != "" else "(未设置)"
+            display = str(resolved) if resolved != "" else "(not set)"
 
         table.add_row(name, display, source)
 
     console.print(table)
-    console.print(f"[dim]配置文件: {config_path}[/dim]")
+    console.print(f"[dim]Config file: {config_path}[/dim]")
 
 
 @app.command()
 def init():
-    """首次初始化引导"""
+    """First-time initialization wizard."""
     from agentnexus.core.config import get_config_dir, load_config_yaml, write_config_yaml
 
-    console.print(Panel("[bold]AgentNexus 初始化引导[/bold]", border_style="cyan"))
+    console.print(Panel("[bold]AgentNexus Setup Wizard[/bold]", border_style="cyan"))
     console.print()
 
-    api_key = input("LLM API Key (必填): ").strip()
+    api_key = input("LLM API Key (required): ").strip()
     while not api_key:
-        console.print("[yellow]API Key 不能为空[/yellow]")
-        api_key = input("LLM API Key (必填): ").strip()
+        console.print("[yellow]API Key cannot be empty[/yellow]")
+        api_key = input("LLM API Key (required): ").strip()
 
-    model = input("LLM 模型 [deepseek/deepseek-v4-flash]: ").strip()
+    model = input("LLM Model [deepseek/deepseek-v4-flash]: ").strip()
     if not model:
         model = "deepseek/deepseek-v4-flash"
 
@@ -128,5 +128,5 @@ def init():
     write_config_yaml(data)
 
     console.print()
-    console.print("[green]配置完成![/green] 试试 nexus run '你好'")
-    console.print(f"[dim]配置文件: {config_path}[/dim]")
+    console.print("[green]Configuration complete![/green] Try: nexus run 'hello'")
+    console.print(f"[dim]Config file: {config_path}[/dim]")

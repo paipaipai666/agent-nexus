@@ -45,12 +45,12 @@ def _read_trace_spans(days: int):
 
 
 @logs_app.command("list")
-def logs_list(days: int = typer.Option(7, "--days", "-d", help="查看最近 N 天的 trace")):
-    """列出历史 Trace 记录"""
+def logs_list(days: int = typer.Option(7, "--days", "-d", help="Look back N days of traces")):
+    """List historical trace records."""
     spans = _read_trace_spans(days)
 
     if not spans:
-        console.print(f"[dim]最近 {days} 天暂无 trace 记录[/dim]")
+        console.print(f"[dim]No trace records in the last {days} days[/dim]")
         return
 
     traces: dict[str, dict] = {}
@@ -76,16 +76,16 @@ def logs_list(days: int = typer.Option(7, "--days", "-d", help="查看最近 N �
             info["status"] = "error"
 
     if not traces:
-        console.print(f"[dim]最近 {days} 天暂无 trace 记录[/dim]")
+        console.print(f"[dim]No trace records in the last {days} days[/dim]")
         return
 
-    table = Table(title=f"历史 Trace（最近 {days} 天）", box=box.ROUNDED)
+    table = Table(title=f"Historical Traces (Last {days} Days)", box=box.ROUNDED)
     table.add_column("Trace ID", style="cyan")
-    table.add_column("时间", style="dim")
-    table.add_column("Span 数", justify="right")
+    table.add_column("Time", style="dim")
+    table.add_column("Spans", justify="right")
     table.add_column("Token", justify="right")
-    table.add_column("延迟(ms)", justify="right")
-    table.add_column("状态")
+    table.add_column("Latency(ms)", justify="right")
+    table.add_column("Status")
 
     for tid, info in sorted(traces.items(),
                              key=lambda x: x[1]["first_time"], reverse=True):
@@ -107,11 +107,11 @@ def logs_list(days: int = typer.Option(7, "--days", "-d", help="查看最近 N �
 
 
 @logs_app.command("view")
-def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查看的 Trace ID")):
-    """查看指定 Trace 的完整 Span 树"""
+def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="Trace ID to view")):
+    """View the complete span tree for a given trace."""
     traces_dir = Path(get_settings().traces_dir)
     if not traces_dir.exists():
-        console.print("[dim]暂无 trace 记录[/dim]")
+        console.print("[dim]No trace records[/dim]")
         return
 
     spans: list[dict] = []
@@ -132,7 +132,7 @@ def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查
             continue
 
     if not spans:
-        console.print(f"[red]未找到 Trace: {trace_id}[/red]")
+        console.print(f"[red]Trace not found: {trace_id}[/red]")
         return
 
     span_map: dict[str, dict] = {s["span_id"]: s for s in spans}
@@ -181,7 +181,7 @@ def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查
         root_tree = _build_tree(root)
 
     if root_tree:
-        console.print(Panel(f"Trace [bold cyan]{trace_id}[/bold cyan]", title="Trace 详情"))
+        console.print(Panel(f"Trace [bold cyan]{trace_id}[/bold cyan]", title="Trace Details"))
         console.print(root_tree)
 
         # Summary section
@@ -191,11 +191,11 @@ def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查
         error_count = sum(1 for s in spans if s.get("metadata", {}).get("status") == "error")
 
         summary_lines = [
-            f"Span 总数: {len(spans)}",
-            f"总延迟: {total_latency:.1f}ms",
-            f"总 Token: 输入 {total_in} / 输出 {total_out}",
+            f"Total spans: {len(spans)}",
+            f"Total latency: {total_latency:.1f}ms",
+            f"Total tokens: input {total_in} / output {total_out}",
         ]
         if error_count:
-            summary_lines.append(f"[red]错误: {error_count} 个 span[/red]")
+            summary_lines.append(f"[red]Errors: {error_count} spans[/red]")
 
-        console.print(Panel("\n".join(summary_lines), title="汇总", border_style="dim"))
+        console.print(Panel("\n".join(summary_lines), title="Summary", border_style="dim"))

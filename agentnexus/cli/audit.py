@@ -33,7 +33,7 @@ def audit(
     entries = entries[-limit:]
 
     if not entries:
-        console.print("[dim]暂无审计记录[/dim]")
+        console.print("[dim]No audit records[/dim]")
         return
 
     table = Table(title="工具调用审计日志", box=box.ROUNDED)

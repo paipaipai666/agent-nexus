@@ -12,14 +12,14 @@ def get_long_term_memory():
 
 
 @memory_app.command("list")
-def memory_list(limit: int = typer.Option(10, help="显示条数")):
-    """查看长期记忆"""
+def memory_list(limit: int = typer.Option(10, help="Number of entries")):
+    """List long-term memories."""
     ltm = get_long_term_memory()
     rows = ltm.list_recent(limit)
     if not rows:
-        console.print("[dim]暂无记忆[/dim]")
+        console.print("[dim]No memories[/dim]")
         return
-    table = Table(title="长期记忆")
+    table = Table(title="Long-term Memory")
     table.add_column("ID", style="dim")
     table.add_column("类别")
     table.add_column("重要性")
@@ -31,7 +31,7 @@ def memory_list(limit: int = typer.Option(10, help="显示条数")):
 
 @memory_app.command("clear")
 def memory_clear():
-    """清空长期记忆"""
+    """Clear all long-term memories."""
     ltm = get_long_term_memory()
     ltm.clear_all()
-    console.print("[green]+[/green] 记忆已清空")
+    console.print("[green]+[/green] All memories cleared")

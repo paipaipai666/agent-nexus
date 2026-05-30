@@ -449,6 +449,10 @@ class HybridRetriever:
         metadata_filters: dict[str, object] | None = None,
     ) -> list[SearchResult]:
         sparse = self._bm25.search(query, top_k=top_k * 2, metadata_filters=metadata_filters)
+        # RAG-011: Two-level RRF is intentional — first fuses expanded queries for
+        # multi-query recall, then fuses dense vs sparse. The dense side accumulates
+        # scores from multiple queries while BM25 has one query's ranking. This is
+        # by design for improved recall, not a bug.
         fused = reciprocal_rank_fusion(dense_results, sparse, k=rrf_k)
         boosted: list[tuple[str, float]] = []
         for chunk_id, score in fused.items():
@@ -624,6 +628,7 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
                 dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
         if hypothetical_document:
             hyde_results = chroma_search(hypothetical_document, limit=10, namespace=namespace)
+            # HyDE weight reduced from 0.8 to 0.5 to mitigate hallucination bias
             for rank, item in enumerate(hyde_results):
                 dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
         dense_results = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)

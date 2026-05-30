@@ -132,8 +132,8 @@ def _finish_ingestion_run(
 
 
 @kb_app.command("add")
-def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
-    """添加文档到知识库"""
+def kb_add(path: str = typer.Argument(..., help="Document path or directory")):
+    """Add documents to the knowledge base."""
     settings = get_settings()
     namespace = settings.rag_default_namespace
     llm_client = None
@@ -141,7 +141,7 @@ def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
         from agentnexus.core.llm import AgentLLM
 
         llm_client = AgentLLM()
-        console.print("[cyan]上下文增强已启用[/cyan]")
+        console.print("[cyan]Context enhancement enabled[/cyan]")
 
     def _ingest_one(filepath: str) -> IngestedDocument:
         run = _start_ingestion_run(namespace, filepath)
@@ -178,7 +178,7 @@ def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
 
     path = os.path.abspath(path)
     if not os.path.exists(path):
-        console.print(f"[red]路径不存在: {path}[/red]")
+        console.print(f"[red]Path not found: {path}[/red]")
         return
 
     if os.path.isdir(path):
@@ -187,18 +187,18 @@ def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
                 if f.endswith((".pdf", ".md", ".txt", ".html", ".htm", ".json", ".docx", ".xlsx")):
                     try:
                         artifacts = _ingest_one(os.path.join(root, f))
-                        console.print(f"  [green]+[/green] {f} ({len(artifacts.chunks)} 块)")
+                        console.print(f"  [green]+[/green] {f} ({len(artifacts.chunks)} chunks)")
                     except Exception as e:
                         console.print(f"  [red]-[/red] {f}: {e}")
     else:
         artifacts = _ingest_one(path)
-        console.print(f"[green]+[/green] {path} ({len(artifacts.chunks)} 块)")
-    console.print(f"\n知识库共 [bold]{get_collection(namespace=namespace).count()}[/bold] 个文档块")
+        console.print(f"[green]+[/green] {path} ({len(artifacts.chunks)} chunks)")
+    console.print(f"\nKnowledge base has [bold]{get_collection(namespace=namespace).count()}[/bold] chunks")
 
 
 @kb_app.command("list")
 def kb_list():
-    """查看知识库状态"""
+    """View knowledge base status."""
     settings = get_settings()
     catalog = get_knowledge_base_catalog()
     kb = catalog.get_knowledge_base(settings.rag_default_namespace)
@@ -207,7 +207,7 @@ def kb_list():
     console.print(
         f"知识库: [bold]{get_collection(namespace=settings.rag_default_namespace).count()}[/bold] 个文档块"
     )
-    console.print(f"文档数: [bold]{len(documents)}[/bold]")
+    console.print(f"Documents: [bold]{len(documents)}[/bold]")
     if runs:
         latest = runs[0]
         console.print(
@@ -217,25 +217,25 @@ def kb_list():
 
 @kb_app.command("search")
 def kb_search_command(
-    query: str = typer.Argument(..., help="检索问题"),
-    top_k: int = typer.Option(5, "--top-k", min=1, max=20, help="返回结果数量"),
-    view: str = typer.Option("section", "--view", help="结果视图: section 或 chunk"),
-    source: str = typer.Option("", "--source", "-s", help="按 source_uri 过滤"),
-    file_format: str = typer.Option("", "--format", help="按 format 过滤"),
-    section_title: str = typer.Option("", "--section", "-S", help="按 section_title 过滤"),
-    page_number: int | None = typer.Option(None, "--page", help="按页码过滤"),
-    block_type: str = typer.Option("", "--block-type", help="按块类型过滤: paragraph/list/heading/code"),
-    has_code: bool | None = typer.Option(None, "--has-code/--no-code", help="过滤是否包含代码"),
-    has_list: bool | None = typer.Option(None, "--has-list/--no-list", help="过滤是否包含列表"),
-    heading_depth: int | None = typer.Option(None, "--heading-depth", min=1, help="按标题层级过滤"),
+    query: str = typer.Argument(..., help="Search query"),
+    top_k: int = typer.Option(5, "--top-k", min=1, max=20, help="Number of results"),
+    view: str = typer.Option("section", "--view", help="Result view: section or chunk"),
+    source: str = typer.Option("", "--source", "-s", help="Filter by source_uri"),
+    file_format: str = typer.Option("", "--format", help="Filter by format"),
+    section_title: str = typer.Option("", "--section", "-S", help="Filter by section_title"),
+    page_number: int | None = typer.Option(None, "--page", help="Filter by page number"),
+    block_type: str = typer.Option("", "--block-type", help="Filter by block type: paragraph/list/heading/code"),
+    has_code: bool | None = typer.Option(None, "--has-code/--no-code", help="Filter by code presence"),
+    has_list: bool | None = typer.Option(None, "--has-list/--no-list", help="Filter by list presence"),
+    heading_depth: int | None = typer.Option(None, "--heading-depth", min=1, help="Filter by heading depth"),
 ):
-    """搜索知识库"""
+    """Search the knowledge base."""
     settings = get_settings()
     namespace = settings.rag_default_namespace
     retriever = HybridRetriever(namespace=namespace)
     retriever.rebuild_from_catalog()
     if not retriever._chunks:
-        console.print("[yellow]知识库为空[/yellow]")
+        console.print("[yellow]Knowledge base is empty[/yellow]")
         raise typer.Exit(code=0)
 
     if retriever._reranker is None:
@@ -270,7 +270,7 @@ def kb_search_command(
         metadata_filters=where,
     )
     if not results:
-        console.print("[yellow]未找到相关知识[/yellow]")
+        console.print("[yellow]No relevant knowledge found[/yellow]")
         raise typer.Exit(code=0)
     results = retriever.expand_contexts(results, view=view)
 

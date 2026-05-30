@@ -12,8 +12,8 @@ from . import app, console
 
 
 @app.command()
-def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")):
-    """显示 Token 成本统计"""
+def stats(days: int = typer.Option(7, "--days", "-d", help="Statistics for the last N days")):
+    """Show token cost statistics."""
     from agentnexus.core.config import get_settings
     from agentnexus.observability.stats import compute_stats
 
@@ -25,44 +25,44 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
         raise SystemExit(1)
 
     if s.total_tasks == 0:
-        console.print(f"[dim]最近 {days} 天暂无任务数据[/dim]")
+        console.print(f"[dim]No task data in the last {days} days[/dim]")
         return
 
     summary_lines = [
-        f"[bold]总任务数:[/bold] {s.total_tasks}",
-        f"[bold]平均重试:[/bold] {s.avg_retries} 次/任务",
-        f"[bold]总 Token:[/bold] 输入 {s.total_input_tokens:,} / 输出 {s.total_output_tokens:,}",
-        f"[bold]总成本:[/bold] CNY {s.total_cost_cny:.4f}",
-        f"[bold]延迟:[/bold] 平均 {s.avg_latency_ms}ms | P95 {s.p95_latency_ms}ms | 最大 {s.max_latency_ms}ms",
+        f"[bold]Total tasks:[/bold] {s.total_tasks}",
+        f"[bold]Avg retries:[/bold] {s.avg_retries} per task",
+        f"[bold]Total tokens:[/bold] input {s.total_input_tokens:,} / output {s.total_output_tokens:,}",
+        f"[bold]Total cost:[/bold] CNY {s.total_cost_cny:.4f}",
+        f"[bold]Latency:[/bold] avg {s.avg_latency_ms}ms | P95 {s.p95_latency_ms}ms | max {s.max_latency_ms}ms",
     ]
     if s.total_tasks > 0:
-        summary_lines.append(f"[bold]预估 CNY/任务:[/bold] CNY {s.total_cost_cny / s.total_tasks:.4f}")
+        summary_lines.append(f"[bold]Est. CNY/task:[/bold] CNY {s.total_cost_cny / s.total_tasks:.4f}")
 
     # Prompt cache statistics
     if s.total_cache_hit_tokens + s.total_cache_miss_tokens > 0:
         summary_lines.append("")
-        summary_lines.append(f"[bold]Prompt 缓存命中率:[/bold] {s.cache_hit_rate:.1%}")
+        summary_lines.append(f"[bold]Prompt cache hit rate:[/bold] {s.cache_hit_rate:.1%}")
         total_cache = s.total_cache_hit_tokens + s.total_cache_miss_tokens
         summary_lines.append(
-            f"[bold]缓存命中 Token:[/bold] {s.total_cache_hit_tokens:,} / {total_cache:,}"
+            f"[bold]Cache hit tokens:[/bold] {s.total_cache_hit_tokens:,} / {total_cache:,}"
         )
         if s.cache_saved_cost_cny > 0:
-            summary_lines.append(f"[bold]缓存节省成本:[/bold] CNY {s.cache_saved_cost_cny:.4f}")
+            summary_lines.append(f"[bold]Cache saved cost:[/bold] CNY {s.cache_saved_cost_cny:.4f}")
 
     console.print(Panel(
         "\n".join(summary_lines),
-        title=f"Token 成本统计（最近 {days} 天）",
+        title=f"Token Cost Statistics (Last {days} Days)",
         border_style="cyan",
     ))
 
     if s.by_model:
-        model_table = Table(title="按模型分布", box=box.ROUNDED)
-        model_table.add_column("模型", style="cyan")
-        model_table.add_column("任务数", justify="right")
-        model_table.add_column("输入 Token", justify="right")
-        model_table.add_column("输出 Token", justify="right")
-        model_table.add_column("成本 (CNY)", justify="right")
-        model_table.add_column("占比", justify="right")
+        model_table = Table(title="By Model", box=box.ROUNDED)
+        model_table.add_column("Model", style="cyan")
+        model_table.add_column("Tasks", justify="right")
+        model_table.add_column("Input Token", justify="right")
+        model_table.add_column("Output Token", justify="right")
+        model_table.add_column("Cost (CNY)", justify="right")
+        model_table.add_column("Share", justify="right")
 
         for model, info in s.by_model.items():
             pct = (info["cost_cny"] / s.total_cost_cny * 100) if s.total_cost_cny > 0 else 0
@@ -77,12 +77,12 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
         console.print(model_table)
 
     if s.by_date:
-        date_table = Table(title="按日期趋势", box=box.ROUNDED)
-        date_table.add_column("日期", style="cyan")
-        date_table.add_column("模型")
-        date_table.add_column("任务数", justify="right")
-        date_table.add_column("输入 Token", justify="right")
-        date_table.add_column("输出 Token", justify="right")
+        date_table = Table(title="By Date Trend", box=box.ROUNDED)
+        date_table.add_column("Date", style="cyan")
+        date_table.add_column("Model")
+        date_table.add_column("Tasks", justify="right")
+        date_table.add_column("Input Token", justify="right")
+        date_table.add_column("Output Token", justify="right")
 
         for date_str, models in s.by_date.items():
             for model, info in models.items():
