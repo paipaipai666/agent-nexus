@@ -12,8 +12,10 @@ from . import app, console
 
 @app.command()
 def config(
-    key: str = typer.Option(None, "--set", "-s", help="设置配置项"),
-    value: str = typer.Option(None, "--value", "-v", help="配置值"),
+    set_key: str = typer.Argument(None, help="配置项名称 (nexus config <key> <value>)"),
+    set_value: str = typer.Argument(None, help="配置值"),
+    key: str = typer.Option(None, "--set", "-s", help="设置配置项 (legacy)"),
+    value: str = typer.Option(None, "--value", "-v", help="配置值 (legacy)"),
 ):
     """查看或修改配置"""
     from agentnexus.core.config import Settings, get_config_dir, get_settings, load_config_yaml, write_config_yaml
@@ -39,6 +41,11 @@ def config(
         "skill_auto_route_min_score",
         "skill_auto_route_margin",
     ]
+
+    # Support both positional args (nexus config <key> <value>) and legacy flags (--set/--value)
+    if set_key is not None and key is None:
+        key = set_key
+        value = set_value
 
     if key is not None:
         # ── Set mode ──

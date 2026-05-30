@@ -119,6 +119,10 @@ _CONNECTOR_PATTERNS: list[tuple[str, str, str]] = [
     (r"(.+?)的话就", "conditional", "conditional"),
 ]
 
+# NOTE: Composite action overrides are a global heuristic. When a query contains
+# multiple verbs, this table picks which verb should drive skill selection.
+# A future improvement would allow per-skill override metadata so individual
+# skills can declare their own composite-action preferences.
 _COMPOSITE_ACTION_OVERRIDES: dict[tuple[str, ...], str] = {
     ("搜索", "总结"): "搜索",
     ("分析", "总结"): "总结",

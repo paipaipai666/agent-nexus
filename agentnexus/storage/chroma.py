@@ -93,6 +93,16 @@ def get_collection(
         return _collections[collection_name]
 
 
+def check_health() -> bool:
+    """Return True if the ChromaDB client heartbeat succeeds."""
+    try:
+        client = get_chroma_client()
+        client.heartbeat()
+        return True
+    except Exception:
+        return False
+
+
 def normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
     if isinstance(value, bool):
         return value
@@ -287,6 +297,7 @@ __all__ = [
     "COLLECTION_NAME",
     "DEFAULT_COLLECTION_METADATA",
     "ThreadSafeChromaCollection",
+    "check_health",
     "chroma_operation_lock",
     "chunk_metadata_to_chroma",
     "delete_collection",

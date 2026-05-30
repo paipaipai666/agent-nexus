@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
+logger = logging.getLogger(__name__)
 NAME_SANITIZER = re.compile(r"[^a-zA-Z0-9_]+")
+
+
+def get_sdk_attr(obj: Any, *names: str, default: Any = None) -> Any:
+    """Get an attribute from an SDK object, trying multiple naming conventions.
+
+    Handles camelCase vs snake_case inconsistencies in MCP SDK.
+    Returns the first non-None value found, or default if none match.
+    """
+    for name in names:
+        val = getattr(obj, name, None)
+        if val is not None:
+            return val
+    return default
 
 
 def sanitize_name(value: str) -> str:
@@ -35,13 +50,11 @@ def dump_sdk_object(value: Any) -> dict:
 
 def normalize_tool_result(result: Any) -> str:
     parts: list[str] = []
-    structured = getattr(result, "structuredContent", None)
-    if structured is None:
-        structured = getattr(result, "structured_content", None)
+    structured = get_sdk_attr(result, "structuredContent", "structured_content")
     if structured is not None:
         parts.append(json.dumps(structured, ensure_ascii=False, default=str))
 
-    for block in getattr(result, "content", []) or []:
+    for block in get_sdk_attr(result, "content", default=[]) or []:
         text = content_block_to_text(block)
         if text:
             parts.append(text)
@@ -51,7 +64,7 @@ def normalize_tool_result(result: Any) -> str:
 
 def normalize_resource_result(result: Any) -> str:
     parts = []
-    for block in getattr(result, "contents", None) or getattr(result, "content", []) or []:
+    for block in get_sdk_attr(result, "contents", "content", default=[]) or []:
         text = content_block_to_text(block)
         if text:
             parts.append(text)
@@ -61,7 +74,7 @@ def normalize_resource_result(result: Any) -> str:
 
 
 def normalize_prompt_result(result: Any) -> str:
-    messages = getattr(result, "messages", []) or []
+    messages = get_sdk_attr(result, "messages", default=[]) or []
     if messages:
         return json_text([dump_sdk_object(message) for message in messages])
     if hasattr(result, "model_dump"):
@@ -80,14 +93,14 @@ def content_block_to_text(block: Any) -> str:
         if resource_text:
             return str(resource_text)
         blob = getattr(resource, "blob", None)
-        mime_type = getattr(resource, "mimeType", None) or getattr(resource, "mime_type", None) or "unknown"
+        mime_type = get_sdk_attr(resource, "mimeType", "mime_type", default="unknown")
         if blob is not None:
             return f"[embedded resource: {mime_type}]"
         uri = getattr(resource, "uri", None)
         if uri:
             return f"[embedded resource] {uri}"
 
-    mime_type = getattr(block, "mimeType", None) or getattr(block, "mime_type", None)
+    mime_type = get_sdk_attr(block, "mimeType", "mime_type")
     data = getattr(block, "data", None)
     if mime_type and data is not None:
         return f"[binary content: {mime_type}]"

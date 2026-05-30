@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS source_documents (
     source_id TEXT NOT NULL,
     source_uri TEXT NOT NULL,
     document_version TEXT NOT NULL,
+    -- STOR-011: Large document content is stored inline in SQLite for simplicity.
+    -- For very large documents this increases DB size and can slow backups.
+    -- A future optimization could use content-addressed storage (hash-keyed blobs)
+    -- and reference them here, keeping SQLite lightweight for metadata queries.
     content TEXT NOT NULL,
     raw_text TEXT NOT NULL DEFAULT '',
     indexed_text TEXT NOT NULL DEFAULT '',
@@ -144,6 +148,9 @@ def _decode_sections(payload: str | None) -> list[DocumentSection]:
 
 
 def _chunk_record_from_row(row) -> ChunkRecord:
+    # Text columns (raw_text, indexed_text, sparse_text) can be empty strings
+    # when they match the document-level defaults. The `or` fallbacks reconstruct
+    # the effective value on read from the primary `text` column. (STOR-007)
     indexed_text = row["indexed_text"] or row["text"]
     return ChunkRecord(
         chunk_id=row["chunk_id"],

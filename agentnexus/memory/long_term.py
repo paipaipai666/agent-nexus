@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
     importance REAL DEFAULT 0.5,
     metadata_json TEXT DEFAULT '{}',
     chroma_id TEXT,
+    last_accessed_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memories(session_id);
@@ -92,6 +93,8 @@ class LongTermMemory:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_ltm_chroma_id ON long_term_memories(chroma_id)")
         if "metadata_json" not in cols:
             self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN metadata_json TEXT DEFAULT '{}'")
+        if "last_accessed_at" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN last_accessed_at TEXT")
 
     @property
     def write_counter(self) -> int:
@@ -100,6 +103,17 @@ class LongTermMemory:
     def _ensure_chroma(self):
         if self._chroma_col is None:
             self._chroma_col = _get_ltm_collection()
+
+    def _update_last_accessed(self, ids: list[int]):
+        """Update last_accessed_at for the given memory ids."""
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        self._conn.execute(
+            f"UPDATE long_term_memories SET last_accessed_at = datetime('now') WHERE id IN ({placeholders})",
+            ids,
+        )
+        self._conn.commit()
 
     def save(self, session_id: str, content: str, category: str = "general",
              importance: float = 0.5, metadata: dict | None = None,
@@ -116,6 +130,11 @@ class LongTermMemory:
 
         with trace_mgr.span("ltm_save", {"category": category, "content_len": len(content)}):
             with self._lock:
+                # Pre-save eviction check: if count >= max_memories * 1.1, evict first to avoid burst growth
+                count_row_pre = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+                if count_row_pre["cnt"] >= self._max_memories * 1.1:
+                    self._evict_if_needed()
+
                 cur = self._conn.execute(
                     "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
                     (content, category)
@@ -148,6 +167,11 @@ class LongTermMemory:
                     self._write_counter += 1
 
                 self._conn.commit()
+                # Ordering note: SQLite commit precedes the ChromaDB upsert below.
+                # SQLite is the source of truth; if the upsert fails, the memory is
+                # still persisted and the failure is logged as non-fatal.
+                # The inverse ordering in _evict_if_needed (ChromaDB-first) ensures
+                # we never leave orphan vectors if the ChromaDB delete fails.
 
             if embedding:
                 self._ensure_chroma()
@@ -186,7 +210,9 @@ class LongTermMemory:
             excess = current - self._max_memories
             # Fetch chroma_ids for evicted rows before deleting
             to_evict = self._conn.execute(
-                "SELECT id, chroma_id FROM long_term_memories ORDER BY importance ASC, created_at ASC LIMIT ?",
+                "SELECT id, chroma_id FROM long_term_memories "
+                "ORDER BY (importance * 0.6 + (julianday('now') - julianday(COALESCE(last_accessed_at, created_at))) / 7.0 * 0.4) ASC "
+                "LIMIT ?",
                 (excess,)
             ).fetchall()
             chroma_ids = [r["chroma_id"] for r in to_evict if r["chroma_id"]]
@@ -198,7 +224,8 @@ class LongTermMemory:
                     self._ensure_chroma()
                     self._chroma_col.delete(ids=chroma_ids)
                 except Exception as e:
-                    logger.warning("ChromaDB eviction failed: %s", e)
+                    logger.warning("ChromaDB eviction failed, skipping SQLite delete to avoid orphans: %s", e)
+                    return  # Don't delete SQLite rows if ChromaDB failed
 
             # Then delete from SQLite
             placeholders = ",".join("?" for _ in ids_to_delete)
@@ -300,7 +327,10 @@ class LongTermMemory:
                 sql += " ORDER BY created_at DESC LIMIT ?"
                 params.append(limit)
                 rows = self._conn.execute(sql, params).fetchall()
-                return [dict(r) for r in rows]
+                results = [dict(r) for r in rows]
+                if results:
+                    self._update_last_accessed([r["id"] for r in results])
+                return results
 
             self._ensure_chroma()
             where_filter = None
@@ -357,6 +387,8 @@ class LongTermMemory:
                 "category": category, "limit": limit,
                 "result_count": len(results),
             })
+            if results:
+                self._update_last_accessed([r["id"] for r in results])
             return results
 
     def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,
@@ -419,6 +451,8 @@ class LongTermMemory:
             d = s[1]
             d["_score"] = round(s[0], 3)
             results.append(d)
+        if results:
+            self._update_last_accessed([r["id"] for r in results])
         return results
 
     def list_recent(self, limit: int = 10) -> list[dict]:

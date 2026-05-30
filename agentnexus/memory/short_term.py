@@ -1,6 +1,11 @@
 import json
+import logging
+import os
 import time
 from collections import deque
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _tiktoken_encoding = None
 _tiktoken_loaded = False
@@ -20,12 +25,19 @@ def _get_tiktoken_encoding():
 
 
 class ShortTermMemory:
-    def __init__(self, max_messages: int = 50):
+    def __init__(self, max_messages: int = 50, wal_path: str | None = None):
         self._messages: deque[dict] = deque(maxlen=max_messages)
         self._summary: str = ""
+        self._append_count: int = 0
+        self._wal_path = wal_path
+        if self._wal_path:
+            self._recover_wal()
 
     def append(self, role: str, content: str):
         self._messages.append({"role": role, "content": content, "ts": time.time()})
+        self._append_count += 1
+        if self._wal_path and self._append_count % 5 == 0:
+            self._flush_wal()
 
     def get_all(self) -> list[dict]:
         return list(self._messages)
@@ -101,6 +113,43 @@ class ShortTermMemory:
     def clear(self):
         self._messages.clear()
         self._summary = ""
+
+    def _flush_wal(self):
+        """Write current state to a lightweight WAL file for crash recovery."""
+        if not self._wal_path:
+            return
+        try:
+            wal_data = {
+                "messages": list(self._messages),
+                "summary": self._summary,
+                "append_count": self._append_count,
+            }
+            Path(self._wal_path).parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._wal_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(wal_data, f, ensure_ascii=False)
+            os.replace(tmp_path, self._wal_path)
+        except Exception as e:
+            logger.warning("STM WAL flush failed: %s", e)
+
+    def _recover_wal(self):
+        """Recover state from WAL file if it exists."""
+        if not self._wal_path:
+            return
+        wal_file = Path(self._wal_path)
+        if not wal_file.exists():
+            return
+        try:
+            with open(wal_file, "r", encoding="utf-8") as f:
+                wal_data = json.load(f)
+            for msg in wal_data.get("messages", []):
+                self._messages.append(msg)
+            self._summary = wal_data.get("summary", "")
+            self._append_count = wal_data.get("append_count", 0)
+            logger.info("Recovered %d messages from STM WAL", len(self._messages))
+            wal_file.unlink()
+        except Exception as e:
+            logger.warning("STM WAL recovery failed: %s", e)
 
     def to_json(self) -> str:
         """Serialize full state to JSON for checkpoint snapshots."""

@@ -76,6 +76,15 @@ def reciprocal_rank_fusion(
     sparse_results: list[tuple[str, float]],
     k: int = 60,
 ) -> dict[str, float]:
+    """Combine dense and sparse results using Reciprocal Rank Fusion.
+
+    Args:
+        k: RRF parameter (must be >= 1). Controls how quickly scores decay
+           with rank. Higher k gives more uniform scores. Default 60 is a
+           standard value from the RRF literature.
+    """
+    if k < 1:
+        raise ValueError(f"RRF k parameter must be >= 1, got {k}")
     scores: dict[str, float] = {}
     for rank, (chunk_id, _) in enumerate(dense_results):
         scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank + 1)

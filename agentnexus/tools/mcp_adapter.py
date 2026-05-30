@@ -44,7 +44,7 @@ class MCPToolManager:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._started = False
-        self._closing = False
+        self._closing = threading.Event()
         self._health_task: asyncio.Task | None = None
         self._tool_descriptors: dict[str, MCPToolDescriptor] = {}
         self._resource_descriptors: dict[str, list[MCPResourceDescriptor]] = {}
@@ -160,7 +160,7 @@ class MCPToolManager:
         if not self._all_servers:
             self._started = True
             return
-        self._closing = False
+        self._closing.clear()
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, name="agentnexus-mcp", daemon=True)
         self._thread.start()
@@ -180,7 +180,7 @@ class MCPToolManager:
     def close(self) -> None:
         if not self._started:
             return
-        self._closing = True
+        self._closing.set()
         if self._loop is not None and self._thread is not None:
             try:
                 self._submit(self._close_all(), timeout=10)
@@ -192,7 +192,7 @@ class MCPToolManager:
         self._thread = None
         self._health_task = None
         self._started = False
-        self._closing = False
+        self._closing.clear()
 
     def enable_server(self, server_name: str) -> dict:
         if not self._started or self._loop is None:
@@ -318,7 +318,7 @@ class MCPToolManager:
             self._health_task = asyncio.create_task(self._health_loop())
 
     async def _health_loop(self) -> None:
-        while not self._closing:
+        while not self._closing.is_set():
             await self._health_check_once()
             interval = min((server.health_check_interval_sec for server in self._servers), default=30)
             await asyncio.sleep(max(1, interval))
@@ -580,7 +580,7 @@ class MCPToolManager:
             server,
             runtime,
             now,
-            closing=self._closing,
+            closing=self._closing.is_set(),
             has_failure=server.name in self._failures,
         )
 

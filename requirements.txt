@@ -1,25 +1,43 @@
-# AgentNexus 版本锁定 (pip freeze 生成)
-# 使用: pip install -r requirements.txt
-# 注意: 此文件包含传递依赖，用于 CI 和部署环境一致性
+# AgentNexus pinned dependencies for CI/deployment reproducibility
+# Synced with pyproject.toml — use `pip install -e .[all,dev]` for development
+# Run `pip-compile pyproject.toml -o requirements.txt` to regenerate
 
-chromadb==1.5.8
-e2b==2.20.2
-e2b-code-interpreter==2.6.1
-httpx==0.28.1
-jieba==0.42.1
-langchain-text-splitters==1.1.2
+# Core
 litellm==1.83.14
-mcp==1.27.1
 openai==2.24.0
-prompt-toolkit==3.0.52
+tiktoken==0.12.0
 pydantic==2.12.5
 pydantic-settings==2.10.1
-PyMuPDF==1.27.2.3
 PyYAML==6.0.2
-rank-bm25==0.2.2
-rich==14.1.0
-sentence-transformers==5.2.0
-tavily-python==0.7.24
-textual==8.2.6
-tiktoken==0.12.0
 typer==0.16.1
+rich==14.1.0
+httpx==0.28.1
+mcp==1.27.1
+prompt-toolkit==3.0.52
+
+# RAG (optional: pip install agentnexus[rag])
+sentence-transformers==5.2.0
+chromadb==1.5.8
+PyMuPDF==1.27.2.3
+jieba==0.42.1
+rank-bm25==0.2.2
+
+# Server (optional: pip install agentnexus[server])
+fastapi==0.115.12
+uvicorn==0.34.3
+
+# Search (optional: pip install agentnexus[search])
+tavily-python==0.7.24
+
+# Sandbox (optional: pip install agentnexus[sandbox])
+e2b==2.20.2
+e2b-code-interpreter==2.6.1
+
+# TUI (optional: pip install agentnexus[tui])
+textual==8.2.6
+
+# Dev
+pytest==8.4.1
+pytest-mock==3.14.0
+pytest-cov==6.1.1
+ruff==0.11.13

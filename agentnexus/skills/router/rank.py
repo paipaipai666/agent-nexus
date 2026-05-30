@@ -23,6 +23,12 @@ def score_indexed_entry(
     matched: list[str],
     idf: dict[str, float],
 ) -> float:
+    """Score a skill entry against a parsed query.
+
+    Uses IDF-weighted metadata alignment (not TF-IDF).
+    Term frequency is not meaningful for short skill metadata,
+    so only inverse document frequency is used for discrimination.
+    """
     if not matched:
         return 0.0
     score = sum(idf.get(term, 1.0) for term in matched)
