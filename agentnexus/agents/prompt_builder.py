@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentnexus.memory.compaction import parse_tool_message
+
+TOOL_CONTEXT_LIMIT = 200  # max chars for tool results in conversation context
+
 
 def build_react_prompt(
     *,
@@ -100,23 +104,45 @@ def build_conversation_context(memory_manager, per_msg_limit: int = 500) -> str:
     stm = memory_manager.short_term
     summary = stm.get_summary()
     messages = stm.get_all()
-    user_assistant_msgs = [message for message in messages if message["role"] in ("user", "assistant")]
+
+    relevant_msgs = [m for m in messages if m["role"] in ("user", "assistant", "tool")]
+    role_label = {"user": "用户", "assistant": "助手", "tool": "工具"}
+
     if summary:
-        recent = user_assistant_msgs[-3:] if len(user_assistant_msgs) > 3 else user_assistant_msgs
+        recent = relevant_msgs[-5:] if len(relevant_msgs) > 5 else relevant_msgs
         parts = ["== 对话历史摘要 ==", summary]
         if recent:
             parts.append("\n== 最近对话 ==")
             for message in recent:
-                role_label = "用户" if message["role"] == "user" else "助手"
-                content = message["content"][:per_msg_limit]
-                parts.append(f"{role_label}: {content}")
+                label = role_label.get(message["role"], message["role"])
+                if message["role"] == "tool":
+                    content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
+                else:
+                    content = message["content"][:per_msg_limit]
+                parts.append(f"{label}: {content}")
         return "\n".join(parts) + "\n\n"
-    if not user_assistant_msgs:
+
+    if not relevant_msgs:
         return ""
-    recent = user_assistant_msgs[-6:]
+    recent = relevant_msgs[-10:]
     lines = []
     for message in recent:
-        role_label = "用户" if message["role"] == "user" else "助手"
-        content = message["content"][:per_msg_limit]
-        lines.append(f"{role_label}: {content}")
+        label = role_label.get(message["role"], message["role"])
+        if message["role"] == "tool":
+            content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
+        else:
+            content = message["content"][:per_msg_limit]
+        lines.append(f"{label}: {content}")
     return "== 近期对话 ==\n" + "\n".join(lines) + "\n\n"
+
+
+def _format_tool_for_context(content: str, limit: int) -> str:
+    """Format a tool STM message for conversation context display."""
+    tool_name, _ = parse_tool_message(content)
+    obs_idx = content.find("Observation: ")
+    observation = content[obs_idx + len("Observation: "):] if obs_idx >= 0 else content
+    observation = " ".join(observation.split())
+    if len(observation) > limit:
+        observation = observation[:limit] + "..."
+    label = tool_name or "工具"
+    return f"[{label}] {observation}"

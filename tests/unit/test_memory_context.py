@@ -389,7 +389,28 @@ class TestReActAgentConversationMode:
         mock_mm.short_term = stm
         result = agent._build_conversation_context(mock_mm)
         user_lines = [line for line in result.split("\n") if line.startswith("用户:") or line.startswith("助手:")]
-        assert len(user_lines) <= 6
+        assert len(user_lines) <= 10
+
+    def test_build_conversation_context_includes_tool_messages(self):
+        """Tool messages should appear in conversation context."""
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.tools.registry import ToolRegistry
+        mock_llm = MagicMock()
+        executor = ToolRegistry()
+        agent = ReActAgent(mock_llm, executor, conversation_mode=True)
+
+        stm = ShortTermMemory()
+        stm.append("user", "帮我读取文件")
+        stm.append("assistant", "我来读取")
+        stm.append("tool", "Action: read[{\"path\": \"test.py\"}]\nObservation: print('hello')")
+        stm.append("assistant", "文件内容是 print('hello')")
+
+        mock_mm = MagicMock()
+        mock_mm.short_term = stm
+        result = agent._build_conversation_context(mock_mm)
+        assert "工具:" in result
+        assert "[read]" in result
+        assert "print('hello')" in result
 
     def test_build_conversation_context_with_summary(self):
         """When STM has a summary, it should be shown prominently."""
