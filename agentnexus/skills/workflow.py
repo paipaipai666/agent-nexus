@@ -69,20 +69,27 @@ class SkillResource(BaseModel):
     size_bytes: int = 0
 
 
-class Workflow(BaseModel):
-    id: str
-    version: str
+class _ProfileBase(BaseModel):
+    """Fields shared by Workflow and SessionProfile."""
+
     display_name: str
     prompt_profile: PromptProfile
     tool_policy: ToolPolicy
     steps: list[WorkflowStep]
     success_criteria: list[str]
-    description: str | None = None
-    entry_mode: str = "chat"
+    description: str = ""
     memory_policy: MemoryPolicy = Field(default_factory=MemoryPolicy)
     retrieval_policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
-    fallbacks: list[str] = Field(default_factory=list)
     resources: list[SkillResource] = Field(default_factory=list)
+
+
+class Workflow(_ProfileBase):
+    id: str
+    version: str
+    display_name: str
+    description: str | None = None
+    entry_mode: str = "chat"
+    fallbacks: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
     verbs: list[str] = Field(default_factory=list)
     objects: list[str] = Field(default_factory=list)
@@ -90,33 +97,27 @@ class Workflow(BaseModel):
     examples: list[str] = Field(default_factory=list)
     negative_hints: list[str] = Field(default_factory=list)
 
-
-    def to_session_profile(self) -> "SessionProfile":
-        return SessionProfile(
-            workflow_id=self.id,
-            display_name=self.display_name,
-            description=self.description or "",
-            prompt_profile=self.prompt_profile,
-            tool_policy=self.tool_policy,
-            memory_policy=self.memory_policy,
-            retrieval_policy=self.retrieval_policy,
-            steps=self.steps,
-            success_criteria=self.success_criteria,
-            resources=self.resources,
-        )
+    def to_session_profile(self) -> SessionProfile:
+        return SessionProfile.from_workflow(self)
 
 
-class SessionProfile(BaseModel):
+class SessionProfile(_ProfileBase):
     workflow_id: str
-    display_name: str = ""
-    description: str = ""
-    prompt_profile: PromptProfile
-    tool_policy: ToolPolicy
-    memory_policy: MemoryPolicy
-    retrieval_policy: RetrievalPolicy
-    steps: list[WorkflowStep]
-    success_criteria: list[str] = Field(default_factory=list)
-    resources: list[SkillResource] = Field(default_factory=list)
+
+    @classmethod
+    def from_workflow(cls, wf: Workflow) -> SessionProfile:
+        return cls(
+            workflow_id=wf.id,
+            display_name=wf.display_name,
+            description=wf.description or "",
+            prompt_profile=wf.prompt_profile,
+            tool_policy=wf.tool_policy,
+            memory_policy=wf.memory_policy,
+            retrieval_policy=wf.retrieval_policy,
+            steps=wf.steps,
+            success_criteria=wf.success_criteria,
+            resources=wf.resources,
+        )
 
 
 class WorkflowLoader:

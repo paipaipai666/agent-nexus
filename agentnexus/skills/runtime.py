@@ -339,7 +339,7 @@ class WorkflowRuntime:
         if tool_executor is None:
             raise ValueError("tool executor unavailable")
         args = _format_value(step.arguments, ctx.variables)
-        result = tool_executor.registry.invoke(
+        result = tool_executor.invoke(
             step.tool,
             args,
             caller="react_agent",

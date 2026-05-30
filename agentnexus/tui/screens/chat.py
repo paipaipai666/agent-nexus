@@ -49,6 +49,8 @@ COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("/status", "查看状态"),
     ("/compact", "压缩当前上下文"),
     ("/stats", "查看运行统计"),
+    ("/sessions", "列出历史会话"),
+    ("/switch", "切换到指定会话"),
     ("/skill", "管理 Skill"),
     ("/mcp", "管理 MCP server"),
     ("/plugin", "管理插件"),
@@ -369,6 +371,10 @@ class ChatScreen(Screen):
                 self._chat_area.add_system("[dim]当前上下文未达到压缩阈值[/]")
         elif cmd == "/stats":
             self._chat_area.add_system(self._hud._build_text())
+        elif cmd == "/sessions":
+            self._handle_sessions()
+        elif cmd == "/switch":
+            self._handle_switch(arg)
         elif cmd == "/mcp":
             self._handle_mcp_command(arg)
         elif cmd == "/plugin":
@@ -381,6 +387,77 @@ class ChatScreen(Screen):
             if self._handle_dynamic_skill_command(cmd, arg):
                 return
             self._chat_area.add_system(f"[dim]未知: {cmd}[/]")
+
+    def _handle_sessions(self):
+        """List recent sessions for the current workspace."""
+        if not self._version:
+            self._chat_area.add_system("[red]版本管理未启用[/]")
+            return
+
+        from pathlib import Path
+
+        from agentnexus.core.config import get_settings
+        from agentnexus.memory.versioned import ConversationVersionManager
+
+        settings = get_settings()
+        workspace = str(Path.cwd())
+
+        sessions = ConversationVersionManager.find_recent_sessions(
+            settings.memory_db_path, workspace, limit=10
+        )
+
+        if not sessions:
+            self._chat_area.add_system("[yellow]当前目录下没有找到历史会话[/]")
+            return
+
+        self._chat_area.add_system("[bold]最近的会话:[/]")
+        for i, s in enumerate(sessions, 1):
+            sid = s["session_id"]
+            preview = s.get("preview", "") or "(空)"
+            if len(preview) > 50:
+                preview = preview[:47] + "..."
+            last_msg = s.get("last_message_at", "") or s.get("updated_at", "")
+            marker = " [green]← 当前[/]" if sid == self._version.session_id else ""
+            self._chat_area.add_system(f"  {i}. [cyan]{sid}[/] ({last_msg}){marker}")
+            self._chat_area.add_system(f"     {preview}")
+
+        self._chat_area.add_system("\n[dim]使用 /switch <session_id> 切换会话[/]")
+
+    def _handle_switch(self, arg: str):
+        """Switch to a different session."""
+        session_id = arg.strip()
+        if not session_id:
+            self._chat_area.add_system("[red]用法: /switch <session_id>[/]")
+            return
+
+        if not self._version:
+            self._chat_area.add_system("[red]版本管理未启用[/]")
+            return
+
+        from pathlib import Path
+
+        from agentnexus.core.config import get_settings
+        from agentnexus.memory.versioned import ConversationVersionManager
+
+        settings = get_settings()
+        workspace = str(Path.cwd())
+
+        # Validate session exists
+        if not ConversationVersionManager.session_belongs_to_workspace(
+            settings.memory_db_path, session_id, workspace
+        ):
+            self._chat_area.add_system(f"[red]会话不存在:[/red] {session_id}")
+            return
+
+        # Switch to new session
+        self._version.session_id = session_id
+        self._restore_stm_from_version()
+
+        # Clear and re-render
+        self._chat_area.clear_all()
+        self._chat_area.add_system(f"[green]已切换到会话:[/] {session_id}")
+        self._render_restored_history()
+        self._refresh_version_display()
 
     def _update_command_suggestions(self, text: str):
         suggestions = self._match_command_suggestions(text)

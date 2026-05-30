@@ -39,6 +39,7 @@ from agentnexus.cli import (
     logs,  # noqa: E402
     memory_cmd,  # noqa: E402
     serve_cmd,  # noqa: E402
+    sessions,  # noqa: E402
     skill_cmd,  # noqa: E402
     stats,  # noqa: E402
     tui_cmd,  # noqa: E402
