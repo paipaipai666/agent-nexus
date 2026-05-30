@@ -6,7 +6,9 @@ from typing import Any
 
 from agentnexus.memory.compaction import parse_tool_message
 
-TOOL_CONTEXT_LIMIT = 200  # max chars for tool results in conversation context
+TOOL_CONTEXT_LIMIT = 200       # max chars for tool results in conversation context
+N_TURNS_NO_SUMMARY = 3         # turns to show when no compressed summary exists
+N_TURNS_WITH_SUMMARY = 2       # turns to show alongside compressed summary
 
 
 def build_react_prompt(
@@ -105,35 +107,70 @@ def build_conversation_context(memory_manager, per_msg_limit: int = 500) -> str:
     summary = stm.get_summary()
     messages = stm.get_all()
 
-    relevant_msgs = [m for m in messages if m["role"] in ("user", "assistant", "tool")]
-    role_label = {"user": "用户", "assistant": "助手", "tool": "工具"}
+    relevant_msgs = [m for m in messages if m["role"] in ("user", "assistant", "tool", "system")]
 
     if summary:
-        recent = relevant_msgs[-5:] if len(relevant_msgs) > 5 else relevant_msgs
+        turns = _collect_recent_turns(relevant_msgs, N_TURNS_WITH_SUMMARY)
         parts = ["== 对话历史摘要 ==", summary]
-        if recent:
+        if turns:
             parts.append("\n== 最近对话 ==")
-            for message in recent:
-                label = role_label.get(message["role"], message["role"])
-                if message["role"] == "tool":
-                    content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
-                else:
-                    content = message["content"][:per_msg_limit]
-                parts.append(f"{label}: {content}")
+            parts.append(_format_turns_for_context(turns, assistant_user_limit=per_msg_limit))
         return "\n".join(parts) + "\n\n"
 
-    if not relevant_msgs:
+    turns = _collect_recent_turns(relevant_msgs, N_TURNS_NO_SUMMARY)
+    if not turns:
         return ""
-    recent = relevant_msgs[-10:]
+    return "== 近期对话 ==\n" + _format_turns_for_context(turns, assistant_user_limit=per_msg_limit) + "\n\n"
+
+
+def _collect_recent_turns(messages: list[dict], n_turns: int) -> list[list[dict]]:
+    """Collect the last N complete turns from STM messages.
+
+    A turn starts with a ``user`` message and ends at the next ``user``
+    message or a ``system`` structural marker (``[最终答案]``).
+
+    Convention: compaction markers (``[会话摘要]``, ``[上下文已裁剪]``,
+    ``[恢复文件]``) are written to STM *between* turns, so encountering
+    them when ``current_turn`` is empty is safe to skip.  If compaction
+    behaviour changes, this assumption must be revisited.
+    """
+    turns: list[list[dict]] = []
+    current_turn: list[dict] = []
+
+    for msg in messages:
+        if msg["role"] == "user":
+            if current_turn:
+                turns.append(current_turn)
+            current_turn = [msg]
+        elif msg["role"] == "system" and msg["content"].startswith("["):
+            if current_turn:
+                current_turn.append(msg)
+                turns.append(current_turn)
+                current_turn = []
+        elif current_turn:
+            current_turn.append(msg)
+
+    if current_turn:
+        turns.append(current_turn)
+
+    return turns[-n_turns:]
+
+
+def _format_turns_for_context(turns: list[list[dict]], assistant_user_limit: int) -> str:
+    """Format collected turns into a readable context block."""
+    role_label = {"user": "用户", "assistant": "助手", "tool": "工具"}
     lines = []
-    for message in recent:
-        label = role_label.get(message["role"], message["role"])
-        if message["role"] == "tool":
-            content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
-        else:
-            content = message["content"][:per_msg_limit]
-        lines.append(f"{label}: {content}")
-    return "== 近期对话 ==\n" + "\n".join(lines) + "\n\n"
+    for turn in turns:
+        for message in turn:
+            if message["role"] == "system":
+                continue  # [最终答案] is a boundary marker, not display content
+            label = role_label.get(message["role"], message["role"])
+            if message["role"] == "tool":
+                content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
+            else:
+                content = message["content"][:assistant_user_limit]
+            lines.append(f"{label}: {content}")
+    return "\n".join(lines)
 
 
 def _format_tool_for_context(content: str, limit: int) -> str:

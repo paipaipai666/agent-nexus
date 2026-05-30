@@ -374,7 +374,8 @@ class TestReActAgentConversationMode:
             if line.startswith("用户:"):
                 assert len(line) <= 510
 
-    def test_build_conversation_context_limits_to_six_messages(self):
+    def test_build_conversation_context_groups_by_turns(self):
+        """Messages are grouped by complete turns, not by raw count."""
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
@@ -382,14 +383,69 @@ class TestReActAgentConversationMode:
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
-        for i in range(10):
-            stm.append("user" if i % 2 == 0 else "assistant", f"msg{i}")
+        # Turn 1
+        stm.append("user", "问题1")
+        stm.append("assistant", "回答1")
+        stm.append("system", "[最终答案] 回答1")
+        # Turn 2
+        stm.append("user", "问题2")
+        stm.append("assistant", "回答2")
+        stm.append("system", "[最终答案] 回答2")
+        # Turn 3 (in progress)
+        stm.append("user", "问题3")
+        stm.append("assistant", "回答3")
 
         mock_mm = MagicMock()
         mock_mm.short_term = stm
         result = agent._build_conversation_context(mock_mm)
-        user_lines = [line for line in result.split("\n") if line.startswith("用户:") or line.startswith("助手:")]
-        assert len(user_lines) <= 10
+        lines = result.split("\n")
+        # All 3 turns should be present (N_TURNS_NO_SUMMARY=3)
+        user_lines = [line for line in lines if line.startswith("用户:")]
+        assert len(user_lines) == 3
+        # [最终答案] should NOT appear in output
+        assert "[最终答案]" not in result
+
+    def test_collect_recent_turns_skips_compaction_markers(self):
+        """Compaction markers between turns are skipped, not grouped into turns."""
+        from agentnexus.agents.prompt_builder import _collect_recent_turns
+        messages = [
+            {"role": "system", "content": "[会话摘要] 之前的对话摘要"},
+            {"role": "user", "content": "问题1"},
+            {"role": "assistant", "content": "回答1"},
+            {"role": "system", "content": "[最终答案] 回答1"},
+            {"role": "user", "content": "问题2"},
+            {"role": "assistant", "content": "回答2"},
+        ]
+        turns = _collect_recent_turns(messages, 5)
+        assert len(turns) == 2
+        # First turn starts with 问题1, not 会话摘要
+        assert turns[0][0]["content"] == "问题1"
+
+    def test_collect_recent_turns_includes_incomplete_turn(self):
+        """An in-progress turn (no [最终答案]) is still collected."""
+        from agentnexus.agents.prompt_builder import _collect_recent_turns
+        messages = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "思考中"},
+            {"role": "tool", "content": "Action: read[{}]\nObservation: 结果"},
+        ]
+        turns = _collect_recent_turns(messages, 5)
+        assert len(turns) == 1
+        assert len(turns[0]) == 3
+
+    def test_final_answer_filtered_from_display(self):
+        """[最终答案] system messages are boundary markers, not displayed."""
+        from agentnexus.agents.prompt_builder import _format_turns_for_context
+        turns = [[
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "回答内容"},
+            {"role": "system", "content": "[最终答案] 回答内容"},
+        ]]
+        result = _format_turns_for_context(turns, assistant_user_limit=500)
+        assert "用户: 问题" in result
+        assert "助手: 回答内容" in result
+        assert "系统" not in result
+        assert "[最终答案]" not in result
 
     def test_build_conversation_context_includes_tool_messages(self):
         """Tool messages should appear in conversation context."""
