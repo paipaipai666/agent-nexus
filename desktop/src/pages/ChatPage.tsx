@@ -280,7 +280,7 @@ export default function ChatPage() {
       {/* Confirm Dialog */}
       {confirmRequest && (
         <div className="border-t border-status-warning p-4 bg-status-warning/10">
-          <div className="text-sm text-status-warning font-medium mb-2">需要确认</div>
+          <div className="text-sm text-status-warning font-medium mb-2">Confirmation Required</div>
           <pre className="text-xs text-text-secondary bg-bg-tertiary p-2 rounded mb-3 overflow-auto max-h-32">
             {confirmRequest.summary}
           </pre>
@@ -289,13 +289,13 @@ export default function ChatPage() {
               onClick={() => handleConfirm(true)}
               className="px-3 py-1.5 text-sm bg-status-warning text-bg-primary rounded hover:opacity-90"
             >
-              确认执行
+              Approve
             </button>
             <button
               onClick={() => handleConfirm(false)}
               className="px-3 py-1.5 text-sm bg-bg-tertiary text-text-secondary rounded hover:bg-bg-secondary"
             >
-              拒绝
+              Deny
             </button>
           </div>
         </div>

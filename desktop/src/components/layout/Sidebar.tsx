@@ -70,11 +70,11 @@ export default function Sidebar() {
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
 
-    if (diffMins < 1) return '刚刚'
-    if (diffMins < 60) return `${diffMins}分钟前`
-    if (diffHours < 24) return `${diffHours}小时前`
-    if (diffDays < 7) return `${diffDays}天前`
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+    if (diffMins < 1) return 'just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
   return (
@@ -104,18 +104,18 @@ export default function Sidebar() {
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-tertiary transition-colors border-b border-border-default"
                 >
                   <Plus size={18} className="text-accent-primary" />
-                  <span className="text-sm text-text-primary font-medium">开启新对话</span>
+                  <span className="text-sm text-text-primary font-medium">New Chat</span>
                 </button>
 
                 {/* Recent Sessions */}
                 <div className="max-h-80 overflow-y-auto">
                   {loading ? (
                     <div className="px-4 py-3 text-sm text-text-muted text-center">
-                      加载中...
+                      Loading...
                     </div>
                   ) : recentSessions.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-text-muted text-center">
-                      暂无历史会话
+                      No recent sessions
                     </div>
                   ) : (
                     recentSessions.map((session) => (
@@ -126,7 +126,7 @@ export default function Sidebar() {
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-text-primary truncate flex-1">
-                            {session.preview || '新会话'}
+                            {session.preview || 'New session'}
                           </span>
                           <span className="text-xs text-text-muted ml-2 flex items-center gap-1">
                             <Clock size={10} />

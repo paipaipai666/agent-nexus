@@ -22,6 +22,27 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
+async function uploadRequest<T>(path: string, file: File): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export const api = {
   // Session
   createSession: (skill?: string) =>
@@ -41,7 +62,7 @@ export const api = {
   restoreSession: (sessionId: string) =>
     request<{ session_id: string; restored: boolean }>('/api/session/restore', {
       method: 'POST',
-      body: JSON.stringify({ skill: sessionId }),
+      body: JSON.stringify({ skill: sessionId }),  // backend reuses skill field for session_id
     }),
 
   // Chat
@@ -79,9 +100,27 @@ export const api = {
       body: JSON.stringify({ query, top_k: topK }),
     }),
 
+  uploadDocument: (file: File) =>
+    uploadRequest<{ status: string; filename: string; result: any }>('/api/kb/documents', file),
+
+  deleteDocument: (docId: string) =>
+    request<{ status: string; doc_id: string }>(`/api/kb/documents/${docId}`, {
+      method: 'DELETE',
+    }),
+
   // Skills
   listSkills: () =>
     request<{ skills: Array<{ id: string; display_name: string; description: string; enabled: boolean }>; count: number }>('/api/skills'),
+
+  enableSkill: (skillId: string) =>
+    request<{ status: string; skill_id: string }>(`/api/skills/${skillId}/enable`, {
+      method: 'POST',
+    }),
+
+  disableSkill: (skillId: string) =>
+    request<{ status: string; skill_id: string }>(`/api/skills/${skillId}/disable`, {
+      method: 'POST',
+    }),
 
   // Memory
   listMemories: (limit = 20) =>
@@ -89,6 +128,22 @@ export const api = {
 
   listShortMemories: () =>
     request<{ messages: Array<{ role: string; content: string }>; count: number }>('/api/memory/short'),
+
+  searchMemory: (query: string, limit = 5) =>
+    request<{ results: any[]; query: string }>('/api/memory/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  deleteMemory: (memoryId: string) =>
+    request<{ status: string; memory_id: string }>(`/api/memory/${memoryId}`, {
+      method: 'DELETE',
+    }),
+
+  clearMemories: () =>
+    request<{ status: string }>('/api/memory/clear', {
+      method: 'DELETE',
+    }),
 
   // Config
   getConfig: () => request<Record<string, any>>('/api/config'),

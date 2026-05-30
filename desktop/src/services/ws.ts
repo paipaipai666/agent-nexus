@@ -80,6 +80,13 @@ class AgentWebSocket {
     if (!this.sessionId) return
     this.reconnectTimer = setTimeout(() => {
       if (this.sessionId) {
+        // Close stale connection before reconnecting
+        if (this.ws) {
+          this.ws.onclose = null
+          this.ws.onerror = null
+          this.ws.close()
+          this.ws = null
+        }
         this.connect(this.sessionId)
       }
     }, 3000)

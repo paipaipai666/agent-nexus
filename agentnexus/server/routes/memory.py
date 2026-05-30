@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter(tags=["memory"])
+
+
+class SearchMemoryRequest(BaseModel):
+    query: str
+    limit: int = 5
 
 
 @router.get("/list")
@@ -26,13 +32,13 @@ def list_long_term_memories(limit: int = 20):
 
 
 @router.post("/search")
-def search_memories(query: str, limit: int = 5):
+def search_memories(req: SearchMemoryRequest):
     from agentnexus.memory.long_term import get_long_term_memory
 
     ltm = get_long_term_memory()
     try:
-        results = ltm.search(query_text=query, limit=limit)
-        return {"results": results, "query": query}
+        results = ltm.search(query_text=req.query, limit=req.limit)
+        return {"results": results, "query": req.query}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
