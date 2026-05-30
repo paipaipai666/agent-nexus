@@ -158,4 +158,75 @@ export const api = {
   getStats: (days = 7) => request<Record<string, any>>(`/api/stats?days=${days}`),
 
   getLogs: (days = 7) => request<{ traces: any[] }>(`/api/logs?days=${days}`),
+
+  // MCP
+  getMcpStatus: () => request<Record<string, any>>('/api/mcp/status'),
+
+  listMcpTools: (server?: string) =>
+    request<{ tools: Array<{ server: string; tool: string; transport: string }>; count: number }>(
+      `/api/mcp/tools${server ? `?server=${server}` : ''}`
+    ),
+
+  listMcpResources: (server?: string) =>
+    request<{ resources: any[] }>(`/api/mcp/resources${server ? `?server=${server}` : ''}`),
+
+  listMcpPrompts: (server?: string) =>
+    request<{ prompts: any[] }>(`/api/mcp/prompts${server ? `?server=${server}` : ''}`),
+
+  listMcpFailures: () =>
+    request<{ failures: any[]; count: number }>('/api/mcp/failures'),
+
+  retryMcp: (server?: string) =>
+    request<{ status: string; result: any }>('/api/mcp/retry', {
+      method: 'POST',
+      body: JSON.stringify({ server }),
+    }),
+
+  enableMcpServer: (serverName: string) =>
+    request<{ status: string }>(`/api/mcp/${serverName}/enable`, { method: 'POST' }),
+
+  disableMcpServer: (serverName: string) =>
+    request<{ status: string }>(`/api/mcp/${serverName}/disable`, { method: 'POST' }),
+
+  reloadMcp: (server?: string) =>
+    request<{ status: string; result: any }>('/api/mcp/reload', {
+      method: 'POST',
+      body: JSON.stringify({ server }),
+    }),
+
+  // Version Control
+  getVersionStatus: () =>
+    request<{ session_id: string; head: any; can_undo: boolean; can_redo: boolean }>('/api/version/status'),
+
+  getVersionLog: (limit = 10) =>
+    request<{ checkpoints: any[]; total: number }>(`/api/version/log?limit=${limit}`),
+
+  versionUndo: () =>
+    request<{ status: string; checkpoint: any }>('/api/version/undo', { method: 'POST' }),
+
+  versionRedo: () =>
+    request<{ status: string; checkpoint: any }>('/api/version/redo', { method: 'POST' }),
+
+  versionReset: () =>
+    request<{ status: string }>('/api/version/reset', { method: 'POST' }),
+
+  compactContext: (customInstructions = '') =>
+    request<{ status: string; tokens_saved: number }>('/api/version/compact', {
+      method: 'POST',
+      body: JSON.stringify({ custom_instructions: customInstructions }),
+    }),
+
+  // Extensions / Plugins
+  getExtensions: () => request<Record<string, any>>('/api/config/extensions'),
+
+  // Runtime Status
+  getRuntimeStatus: () =>
+    request<{
+      model_id: string
+      total_usage: { input_tokens: number; output_tokens: number }
+      ctx_max: number
+      stm_tokens: number
+      step_count: number
+      skill_id: string | null
+    }>('/api/runtime/status'),
 }

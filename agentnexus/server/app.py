@@ -59,9 +59,12 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     from agentnexus.server.routes.config import router as config_router
     from agentnexus.server.routes.eval_routes import router as eval_router
     from agentnexus.server.routes.knowledge import router as knowledge_router
+    from agentnexus.server.routes.mcp import router as mcp_router
     from agentnexus.server.routes.memory import router as memory_router
+    from agentnexus.server.routes.runtime import router as runtime_router
     from agentnexus.server.routes.skills import router as skills_router
     from agentnexus.server.routes.stats import router as stats_router
+    from agentnexus.server.routes.version import router as version_router
 
     app.include_router(chat_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api/kb")
@@ -72,6 +75,9 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     app.include_router(audit_router, prefix="/api/audit")
     app.include_router(codegraph_router, prefix="/api/codegraph")
     app.include_router(eval_router, prefix="/api/eval")
+    app.include_router(mcp_router, prefix="/api/mcp")
+    app.include_router(version_router, prefix="/api/version")
+    app.include_router(runtime_router, prefix="/api/runtime")
 
     @app.get("/health")
     def health():

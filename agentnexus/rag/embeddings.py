@@ -124,7 +124,14 @@ def get_embedding_model(
         try:
             from sentence_transformers import SentenceTransformer
 
-            _model = SentenceTransformer(settings.embedding_model, device=resolved_device)
+            # Load to CPU first then move to target device to avoid meta tensor issues
+            _model = SentenceTransformer(settings.embedding_model, device="cpu")
+            if resolved_device != "cpu":
+                try:
+                    _model = _model.to(resolved_device)
+                except Exception as move_err:
+                    logger.warning("Failed to move embedding model to %s, staying on CPU: %s", resolved_device, move_err)
+                    resolved_device = "cpu"
         except Exception as e:
             logger.warning("SentenceTransformer model failed to load, falling back to hash-based embeddings: %s", e)
             _model = _FallbackEmbeddingModel()

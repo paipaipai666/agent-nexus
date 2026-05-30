@@ -74,7 +74,7 @@ class ConversationVersionManager:
 
     # ── public API ─────────────────────────────────────────────────
 
-    def commit(self, stm_snapshot: str, question: str = "", answer: str = "") -> str:
+    def commit(self, stm_snapshot: str, question: str = "", answer: str = "", new_ltm_ids: list | None = None) -> str:
         """Create a checkpoint. Returns the new checkpoint ID."""
         from agentnexus.core.hooks import HookType, get_hook_manager
 

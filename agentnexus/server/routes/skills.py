@@ -96,24 +96,6 @@ def get_skill(skill_id: str):
     }
 
 
-@router.post("/{skill_id}/enable")
-def enable_skill(skill_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
-    runtime.services.skill.set_enabled(skill_id, True)
-    return {"status": "enabled", "skill_id": skill_id}
-
-
-@router.post("/{skill_id}/disable")
-def disable_skill(skill_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
-    runtime.services.skill.set_enabled(skill_id, False)
-    return {"status": "disabled", "skill_id": skill_id}
-
-
 @router.post("/validate")
 def validate_skills(skill_id: str | None = None):
     from agentnexus.server.app import _get_runtime
@@ -172,3 +154,22 @@ def recommend_skill(req: RecommendRequest):
             for r in routes
         ]
     }
+
+
+# Path-based routes MUST come last — :path catches everything after the prefix
+@router.post("/{skill_id:path}/enable")
+def enable_skill(skill_id: str):
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    runtime.services.skill.set_enabled(skill_id, True)
+    return {"status": "enabled", "skill_id": skill_id}
+
+
+@router.post("/{skill_id:path}/disable")
+def disable_skill(skill_id: str):
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    runtime.services.skill.set_enabled(skill_id, False)
+    return {"status": "disabled", "skill_id": skill_id}
