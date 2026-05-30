@@ -1,49 +1,54 @@
-import { Minus, Square, X, Search, Sun, Moon } from 'lucide-react'
-import { useTheme } from '../theme/ThemeProvider'
+import { Minus, Square, X } from 'lucide-react'
 
 export default function Titlebar() {
-  const { theme, toggleTheme } = useTheme()
-
   return (
-    <div className="h-9 bg-bg-secondary border-b border-border-default flex items-center select-none shrink-0"
-         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
-      <div className="flex items-center px-3 gap-2">
-        <div className="w-4 h-4 rounded bg-accent-primary" />
-        <span className="text-sm font-medium text-text-primary">AgentNexus</span>
-      </div>
-
-      <div className="flex-1 flex justify-center">
-        <div className="flex items-center bg-bg-tertiary rounded-md px-2 py-1 gap-1 text-text-muted text-xs"
-             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <Search size={12} />
-          <span>Ctrl+K</span>
+    <div
+      className="h-10 flex items-center select-none shrink-0"
+      style={{
+        background: 'rgba(15, 15, 18, 0.8)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        borderBottom: '1px solid var(--border)',
+        WebkitAppRegion: 'drag',
+      } as React.CSSProperties}
+    >
+      {/* App Identity */}
+      <div className="flex items-center px-4 gap-2.5">
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent), var(--cyan))' }}>
+          <span className="text-[10px] font-bold text-white">N</span>
         </div>
+        <span className="text-sm font-semibold tracking-tight" style={{ color: 'var(--fg)' }}>AgentNexus</span>
       </div>
 
-      <div className="flex items-center h-full gap-0"
-           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        <button
-          onClick={toggleTheme}
-          className="w-9 h-full flex items-center justify-center hover:bg-bg-tertiary text-text-muted hover:text-text-primary transition-colors"
-          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-        >
-          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Window Controls */}
+      <div className="flex items-center h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           onClick={() => window.electronAPI?.minimize()}
-          className="w-11 h-full flex items-center justify-center hover:bg-bg-tertiary text-text-muted hover:text-text-primary transition-colors"
+          className="w-11 h-full flex items-center justify-center transition-colors"
+          style={{ color: 'var(--fg-muted)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-muted)' }}
         >
           <Minus size={14} />
         </button>
         <button
           onClick={() => window.electronAPI?.maximize()}
-          className="w-11 h-full flex items-center justify-center hover:bg-bg-tertiary text-text-muted hover:text-text-primary transition-colors"
+          className="w-11 h-full flex items-center justify-center transition-colors"
+          style={{ color: 'var(--fg-muted)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-muted)' }}
         >
           <Square size={12} />
         </button>
         <button
           onClick={() => window.electronAPI?.close()}
-          className="w-11 h-full flex items-center justify-center hover:bg-status-error hover:text-white text-text-muted transition-colors"
+          className="w-11 h-full flex items-center justify-center transition-colors"
+          style={{ color: 'var(--fg-muted)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--red)'; e.currentTarget.style.color = 'white' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-muted)' }}
         >
           <X size={14} />
         </button>

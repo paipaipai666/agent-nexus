@@ -33,9 +33,7 @@ export default function Sidebar() {
   const isChatActive = location.pathname === '/' || location.pathname.startsWith('/chat/')
 
   useEffect(() => {
-    if (showSessionList) {
-      loadRecentSessions()
-    }
+    if (showSessionList) loadRecentSessions()
   }, [showSessionList])
 
   const loadRecentSessions = async () => {
@@ -50,19 +48,9 @@ export default function Sidebar() {
     }
   }
 
-  const handleChatClick = () => {
-    setShowSessionList(!showSessionList)
-  }
-
-  const handleNewChat = () => {
-    setShowSessionList(false)
-    navigate('/')
-  }
-
-  const handleSessionClick = (sessionId: string) => {
-    setShowSessionList(false)
-    navigate(`/chat/${sessionId}`)
-  }
+  const handleChatClick = () => setShowSessionList(!showSessionList)
+  const handleNewChat = () => { setShowSessionList(false); navigate('/') }
+  const handleSessionClick = (sessionId: string) => { setShowSessionList(false); navigate(`/chat/${sessionId}`) }
 
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -71,16 +59,21 @@ export default function Sidebar() {
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
-
-    if (diffMins < 1) return 'just now'
-    if (diffMins < 60) return `${diffMins}m ago`
-    if (diffHours < 24) return `${diffHours}h ago`
-    if (diffDays < 7) return `${diffDays}d ago`
+    if (diffMins < 1) return 'now'
+    if (diffMins < 60) return `${diffMins}m`
+    if (diffHours < 24) return `${diffHours}h`
+    if (diffDays < 7) return `${diffDays}d`
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
   return (
-    <nav className="w-14 bg-bg-secondary border-r border-border-default flex flex-col items-center py-3 gap-1 shrink-0 relative">
+    <nav
+      className="w-[52px] flex flex-col items-center py-3 gap-0.5 shrink-0 relative"
+      style={{
+        background: 'var(--surface-1)',
+        borderRight: '1px solid var(--border)',
+      }}
+    >
       {navItems.map(({ path, icon: Icon, label, isChat }) => {
         const isActive = isChat ? isChatActive : location.pathname === path
         return (
@@ -88,55 +81,78 @@ export default function Sidebar() {
             <button
               onClick={isChat ? handleChatClick : () => navigate(path)}
               title={label}
-              className={`w-10 h-10 flex items-center justify-center rounded-md transition-colors ${
-                isActive
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : 'text-text-muted hover:text-text-primary hover:bg-bg-tertiary'
-              }`}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150"
+              style={{
+                color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
+                background: isActive ? 'var(--accent-subtle)' : 'transparent',
+              }}
+              onMouseEnter={e => {
+                if (!isActive) {
+                  e.currentTarget.style.color = 'var(--fg-secondary)'
+                  e.currentTarget.style.background = 'var(--surface-3)'
+                }
+              }}
+              onMouseLeave={e => {
+                if (!isActive) {
+                  e.currentTarget.style.color = 'var(--fg-muted)'
+                  e.currentTarget.style.background = 'transparent'
+                }
+              }}
             >
-              <Icon size={20} />
+              <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
             </button>
 
             {/* Session List Dropdown */}
             {isChat && showSessionList && (
-              <div className="absolute left-12 top-0 z-50 w-72 bg-bg-secondary border border-border-default rounded-lg shadow-xl">
-                {/* New Chat Button */}
+              <div
+                className="absolute left-12 top-0 z-50 w-72 animate-scale-in"
+                style={{
+                  background: 'var(--surface-3)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '12px',
+                  boxShadow: '0 16px 64px rgba(0,0,0,0.5)',
+                }}
+              >
                 <button
                   onClick={handleNewChat}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-tertiary transition-colors border-b border-border-default"
+                  className="w-full flex items-center gap-3 px-4 py-3 transition-colors"
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <Plus size={18} className="text-accent-primary" />
-                  <span className="text-sm text-text-primary font-medium">New Chat</span>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent-muted)' }}>
+                    <Plus size={14} style={{ color: 'var(--accent)' }} />
+                  </div>
+                  <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>New Chat</span>
                 </button>
 
-                {/* Recent Sessions */}
-                <div className="max-h-80 overflow-y-auto">
+                <div className="max-h-80 overflow-y-auto py-1">
                   {loading ? (
-                    <div className="px-4 py-3 text-sm text-text-muted text-center">
-                      Loading...
+                    <div className="px-4 py-6 text-center">
+                      <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin mx-auto" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
                     </div>
                   ) : recentSessions.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-text-muted text-center">
-                      No recent sessions
-                    </div>
+                    <div className="px-4 py-6 text-sm text-center" style={{ color: 'var(--fg-muted)' }}>No recent sessions</div>
                   ) : (
                     recentSessions.map((session) => (
                       <button
                         key={session.session_id}
                         onClick={() => handleSessionClick(session.session_id)}
-                        className="w-full flex flex-col gap-1 px-4 py-3 hover:bg-bg-tertiary transition-colors text-left border-b border-border-default last:border-b-0"
+                        className="w-full flex flex-col gap-1 px-4 py-2.5 transition-colors text-left"
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-sm text-text-primary truncate flex-1">
+                          <span className="text-sm truncate flex-1" style={{ color: 'var(--fg)' }}>
                             {session.preview || 'New session'}
                           </span>
-                          <span className="text-xs text-text-muted ml-2 flex items-center gap-1">
+                          <span className="text-xs ml-2 flex items-center gap-1 shrink-0" style={{ color: 'var(--fg-faint)' }}>
                             <Clock size={10} />
                             {formatTime(session.last_message_at)}
                           </span>
                         </div>
-                        <span className="text-xs text-text-muted truncate">
-                          {session.session_id}
+                        <span className="text-xs font-mono truncate" style={{ color: 'var(--fg-faint)' }}>
+                          {session.session_id.slice(0, 16)}
                         </span>
                       </button>
                     ))
@@ -150,10 +166,7 @@ export default function Sidebar() {
 
       {/* Click outside to close */}
       {showSessionList && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setShowSessionList(false)}
-        />
+        <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
       )}
     </nav>
   )
