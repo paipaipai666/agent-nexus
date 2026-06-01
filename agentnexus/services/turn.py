@@ -47,6 +47,13 @@ class TurnRuntime:
         self._journal: list[str] = []
         self._record = TurnRecord(run_id=run_id, session_id=session_id, question=question, status="running")
         self._persisted = False
+        # Snapshot STM length at turn start so we can journal new messages later
+        self._stm_start_count = 0
+        if self._memory is not None:
+            try:
+                self._stm_start_count = len(self._memory.short_term.get_all())
+            except Exception:
+                pass
         self.record("user", f"用户请求: {question}")
 
     @property
@@ -131,8 +138,20 @@ class TurnRuntime:
                     logger.warning("Short-term memory append also failed: %s", e2)
         if self._version is not None and self._memory is not None:
             try:
-                stm_json = self._memory.short_term.to_json()
-                self._version.commit(stm_json, question=record.question, answer=record.answer, new_ltm_ids=[])
+                # Write new messages to the journal
+                all_msgs = self._memory.short_term.get_all()
+                new_msgs = all_msgs[self._stm_start_count:]
+                if new_msgs:
+                    self._version.append_messages(new_msgs)
+                total_count = self._version.get_message_count()
+                # Commit checkpoint with message_count (stm_snapshot left empty for new format)
+                self._version.commit(
+                    stm_snapshot="",
+                    question=record.question,
+                    answer=record.answer,
+                    new_ltm_ids=[],
+                    message_count=total_count,
+                )
             except Exception as e:
                 logger.warning("Version commit failed: %s", e)
 

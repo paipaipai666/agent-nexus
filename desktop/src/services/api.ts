@@ -129,6 +129,12 @@ export const api = {
   listShortMemories: () =>
     request<{ messages: Array<{ role: string; content: string }>; count: number }>('/api/memory/short'),
 
+  listSessionHistory: (limit = 0) =>
+    request<{ messages: Array<{ role: string; content: string; ts?: number }>; count: number; session_id?: string }>(`/api/memory/short/history?limit=${limit}`),
+
+  runReflection: (days = 7, maxMemories = 50) =>
+    request<{ patterns_found: number; patterns_saved: number; memories_reviewed: number; error?: string; reason?: string }>(`/api/memory/reflect?days=${days}&max_memories=${maxMemories}`, { method: 'POST' }),
+
   searchMemory: (query: string, limit = 5) =>
     request<{ results: any[]; query: string }>('/api/memory/search', {
       method: 'POST',

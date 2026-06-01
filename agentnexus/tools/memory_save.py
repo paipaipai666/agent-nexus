@@ -4,12 +4,25 @@ from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.rag.embeddings import get_embedding_model
 
 _VALID_CATEGORIES = {
+    "fact", "preference", "note",
+    # Legacy names — accepted and auto-migrated
     "user_preference", "entity_fact", "conclusion",
     "task_progress", "error_pattern", "tool_preference",
 }
 
+# Map old names to new
+_CATEGORY_MIGRATION = {
+    "entity_fact": "fact",
+    "conclusion": "fact",
+    "user_preference": "preference",
+    "tool_preference": "preference",
+    "task_progress": "note",
+    "error_pattern": "note",
+    "conversation": "note",
+}
 
-def memory_save(content: str, category: str = "entity_fact", importance: float = 0.7) -> str:
+
+def memory_save(content: str, category: str = "fact", importance: float = 0.85) -> str:
     """Save a fact, preference, or conclusion to long-term memory for future recall.
 
     Use this when the user explicitly shares personal info (name, preferences, background),
@@ -17,9 +30,8 @@ def memory_save(content: str, category: str = "entity_fact", importance: float =
 
     Args:
         content: The fact to remember, written as a clear standalone sentence.
-        category: Type of memory. One of: user_preference, entity_fact, conclusion,
-                  task_progress, error_pattern, tool_preference.
-        importance: How important this memory is (0.0-1.0). Default 0.7.
+        category: Type of memory. One of: fact, preference, note.
+        importance: How important this memory is (0.0-1.0). Default 0.85.
 
     Returns:
         Confirmation message.
@@ -28,8 +40,10 @@ def memory_save(content: str, category: str = "entity_fact", importance: float =
         return "[memory_save] 内容太短，至少需要5个字符"
 
     if category not in _VALID_CATEGORIES:
-        return f"[memory_save] 无效分类 '{category}'，有效值: {', '.join(sorted(_VALID_CATEGORIES))}"
+        return f"[memory_save] 无效分类 '{category}'，有效值: fact, preference, note"
 
+    # Migrate legacy category names
+    category = _CATEGORY_MIGRATION.get(category, category)
     importance = max(0.0, min(1.0, importance))
 
     ltm = get_long_term_memory()

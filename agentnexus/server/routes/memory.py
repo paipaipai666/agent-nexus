@@ -105,3 +105,81 @@ def clear_short_term_memory():
     stm = runtime.memory_manager.short_term
     stm.clear()
     return {"status": "cleared"}
+
+
+@router.get("/short/history")
+def list_session_history(limit: int = 0):
+    """Read full conversation history from the message journal.
+
+    Unlike /short (which reads from the in-memory STM deque, max 50 messages),
+    this reads from the durable conversation_messages table — no message loss
+    after compaction.
+
+    Args:
+        limit: Max messages to return (0 = all).
+    """
+    from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    # Get current session id from the version manager if available
+    settings = get_settings()
+    workspace = str(__import__("pathlib").Path.cwd())
+
+    # Try to find the current active session
+    session_id = None
+    chat = runtime.services.chat
+    if chat._sessions:
+        session_id = next(iter(chat._sessions.keys()))
+
+    if not session_id:
+        session_id = ConversationVersionManager.find_latest_session(
+            settings.memory_db_path, workspace
+        )
+    if not session_id:
+        return {"messages": [], "count": 0}
+
+    version = ConversationVersionManager(
+        session_id, settings.memory_db_path,
+        workspace_path=workspace,
+    )
+    messages = version.get_messages(limit=limit)
+    result = []
+    for m in messages:
+        role = m.get("role", "")
+        content = m.get("content", "")
+        if role == "user":
+            content = _strip_workflow_context(content)
+        result.append({"role": role, "content": content, "ts": m.get("ts")})
+    return {"messages": result, "count": len(result), "session_id": session_id}
+
+
+@router.post("/reflect")
+def run_reflection(days: int = 7, max_memories: int = 50):
+    """Trigger periodic reflection: distill higher-level patterns from recent memories.
+
+    Reviews note-category memories from the last N days, identifies recurring patterns,
+    and saves distilled insights as fact/preference memories.
+    """
+    from agentnexus.memory.reflection import run_reflection as _run_reflection
+    from agentnexus.memory.long_term import get_long_term_memory
+    from agentnexus.rag.embeddings import get_embedding_model
+    from agentnexus.core.llm import AgentLLM
+
+    ltm = get_long_term_memory()
+    if not ltm:
+        raise HTTPException(status_code=503, detail="Long-term memory not available")
+
+    llm = AgentLLM()
+    embed_model = get_embedding_model()
+
+    result = _run_reflection(
+        llm=llm,
+        embed_model=embed_model,
+        long_term=ltm,
+        session_id="reflection",
+        days=days,
+        max_memories=max_memories,
+    )
+    return result

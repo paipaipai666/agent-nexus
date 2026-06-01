@@ -485,10 +485,39 @@ class MemoryManager:
         except Exception as e:
             logger.warning("LTM extraction failed (non-fatal): %s", e)
 
+    # Signal words that strongly indicate memory-worthy content
+    _MEMORY_SIGNALS = frozenset([
+        "记住", "我是", "我叫", "我喜欢", "我不喜欢", "以后", "偏好",
+        "我的名字", "我住", "我在", "我用", "我喜欢用", "我习惯",
+    ])
+
+    # Patterns that indicate low-value tool/transactional queries
+    _SKIP_PATTERNS = frozenset([
+        "怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行",
+    ])
+
+    def _should_extract(self, question: str, answer: str) -> bool:
+        """Pre-filter: decide if this conversation is worth extracting memories from."""
+        combined = question + answer
+        # Always extract if signal words present
+        if any(sig in combined for sig in self._MEMORY_SIGNALS):
+            return True
+        # Skip very short answers (tool outputs, errors, trivial replies)
+        if len(answer.strip()) < 80:
+            return False
+        # Skip pure transactional queries with short answers
+        if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 200:
+            return False
+        # Probabilistic sampling for borderline cases (30%)
+        import random
+        return random.random() < 0.3
+
     def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
         if not answer or not self.long_term:
             return
         if not allow_memory:
+            return
+        if not self._should_extract(question, answer):
             return
         if _contains_pii(question) or _contains_pii(answer):
             question = _mask_pii(question)

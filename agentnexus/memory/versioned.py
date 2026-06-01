@@ -16,10 +16,11 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     parent_id TEXT,
-    stm_snapshot TEXT NOT NULL,
+    stm_snapshot TEXT NOT NULL DEFAULT '',
     question TEXT,
     answer TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    message_count INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS conversation_sessions (
@@ -31,13 +32,27 @@ CREATE TABLE IF NOT EXISTS conversation_sessions (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_cp_session ON conversation_checkpoints(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON conversation_sessions(workspace_path, updated_at);
+CREATE INDEX IF NOT EXISTS idx_msg_session ON conversation_messages(session_id, id);
 """
 
 # Migration: add head_checkpoint_id column if missing
 _MIGRATION_SQL = """
 ALTER TABLE conversation_sessions ADD COLUMN head_checkpoint_id TEXT;
+"""
+
+# Migration: add message_count column to checkpoints
+_MIGRATION_MSG_COUNT_SQL = """
+ALTER TABLE conversation_checkpoints ADD COLUMN message_count INTEGER;
 """
 
 
@@ -74,8 +89,16 @@ class ConversationVersionManager:
 
     # ── public API ─────────────────────────────────────────────────
 
-    def commit(self, stm_snapshot: str, question: str = "", answer: str = "", new_ltm_ids: list | None = None) -> str:
-        """Create a checkpoint. Returns the new checkpoint ID."""
+    def commit(self, stm_snapshot: str = "", question: str = "", answer: str = "", new_ltm_ids: list | None = None, message_count: int | None = None) -> str:
+        """Create a checkpoint. Returns the new checkpoint ID.
+
+        Args:
+            stm_snapshot: Full STM JSON (legacy, pass '' for new journal-based checkpoints).
+            question: The user question for this turn.
+            answer: The agent answer for this turn.
+            new_ltm_ids: Unused, kept for API compat.
+            message_count: Total message count in the journal at checkpoint time.
+        """
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()
@@ -88,8 +111,8 @@ class ConversationVersionManager:
 
         self._conn.execute(
             "INSERT INTO conversation_checkpoints (id, session_id, parent_id, "
-            "stm_snapshot, question, answer) VALUES (?, ?, ?, ?, ?, ?)",
-            (cp_id, self.session_id, parent_id, stm_snapshot, question, answer),
+            "stm_snapshot, question, answer, message_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (cp_id, self.session_id, parent_id, stm_snapshot, question, answer, message_count),
         )
 
         self._set_head(cp_id)
@@ -120,6 +143,64 @@ class ConversationVersionManager:
             (self.session_id, normalized, self._profile),
         )
         self._conn.commit()
+
+    # ── message journal ─────────────────────────────────────────────
+
+    def append_message(self, role: str, content: str, ts: float | None = None) -> int:
+        """Append a single message to the journal. Returns the message row id."""
+        import time as _time
+        ts = ts or _time.time()
+        cur = self._conn.execute(
+            "INSERT INTO conversation_messages (session_id, role, content, ts) "
+            "VALUES (?, ?, ?, ?)",
+            (self.session_id, role, content, ts),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def append_messages(self, messages: list[dict]) -> int:
+        """Batch-append messages to the journal. Each dict needs role, content, ts.
+        Returns the number of messages inserted."""
+        import time as _time
+        rows = []
+        for m in messages:
+            rows.append((
+                self.session_id,
+                m.get("role", ""),
+                m.get("content", ""),
+                m.get("ts", _time.time()),
+            ))
+        self._conn.executemany(
+            "INSERT INTO conversation_messages (session_id, role, content, ts) "
+            "VALUES (?, ?, ?, ?)",
+            rows,
+        )
+        self._conn.commit()
+        return len(rows)
+
+    def get_messages(self, limit: int = 0) -> list[dict]:
+        """Read messages from the journal. limit=0 means all messages."""
+        if limit > 0:
+            rows = self._conn.execute(
+                "SELECT role, content, ts FROM conversation_messages "
+                "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                (self.session_id, limit),
+            ).fetchall()
+            return [dict(r) for r in reversed(rows)]
+        rows = self._conn.execute(
+            "SELECT role, content, ts FROM conversation_messages "
+            "WHERE session_id = ? ORDER BY id",
+            (self.session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_message_count(self) -> int:
+        """Return total message count for this session's journal."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) as cnt FROM conversation_messages WHERE session_id = ?",
+            (self.session_id,),
+        ).fetchone()
+        return row["cnt"] if row else 0
 
     @staticmethod
     def normalize_workspace_path(workspace_path: str | None = None) -> str:
@@ -198,6 +279,17 @@ class ConversationVersionManager:
                     if len(preview) > 100:
                         preview = preview[:100] + "..."
                     last_message_at = last_cp["created_at"] or row["updated_at"]
+
+                # Fallback: get preview from journal if question/answer empty
+                if not preview:
+                    last_msg = conn.execute(
+                        "SELECT content FROM conversation_messages "
+                        "WHERE session_id = ? AND role = 'user' "
+                        "ORDER BY id DESC LIMIT 1",
+                        (session_id,),
+                    ).fetchone()
+                    if last_msg:
+                        preview = last_msg["content"][:100] or ""
 
                 sessions.append({
                     "session_id": session_id,
@@ -288,22 +380,61 @@ class ConversationVersionManager:
         }
 
     def get_head_stm(self) -> str:
-        """Return the STM snapshot JSON for the current HEAD checkpoint."""
+        """Legacy alias — delegates to restore_stm()."""
+        return self.restore_stm()
+
+    def restore_stm(self, max_messages: int = 50) -> str:
+        """Reconstruct STM JSON for the current HEAD checkpoint.
+
+        Strategy:
+        1. If HEAD has a non-empty stm_snapshot (legacy data), return it directly.
+        2. Otherwise, replay messages from conversation_messages journal
+           up to the checkpoint's message_count, return as STM JSON.
+        """
         head = self._current_checkpoint()
         if head is None:
-            # Fallback: find the latest checkpoint for this session
+            # Fallback: latest checkpoint
             row = self._conn.execute(
-                "SELECT stm_snapshot FROM conversation_checkpoints "
+                "SELECT stm_snapshot, message_count FROM conversation_checkpoints "
                 "WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
                 (self.session_id,),
             ).fetchone()
-            return row["stm_snapshot"] if row else ""
-        return head["stm_snapshot"]
+            if row is None:
+                return ""
+            head = dict(row)
+
+        # Path 1: legacy snapshot exists
+        snapshot = head.get("stm_snapshot", "")
+        if snapshot:
+            return snapshot
+
+        # Path 2: replay from journal
+        msg_count = head.get("message_count")
+        if msg_count is None or msg_count <= 0:
+            # No journal data either — return empty
+            return ""
+
+        # Read the last msg_count messages from journal, capped by max_messages
+        limit = min(msg_count, max_messages)
+        offset = max(0, msg_count - limit)
+        rows = self._conn.execute(
+            "SELECT role, content, ts FROM conversation_messages "
+            "WHERE session_id = ? ORDER BY id LIMIT ? OFFSET ?",
+            (self.session_id, limit, offset),
+        ).fetchall()
+
+        messages = [dict(r) for r in rows]
+        import json
+        return json.dumps({"messages": messages, "summary": ""}, ensure_ascii=False)
 
     def reset(self):
-        """Delete all checkpoints for this session."""
+        """Delete all checkpoints and journal messages for this session."""
         self._conn.execute(
             "DELETE FROM conversation_checkpoints WHERE session_id = ?",
+            (self.session_id,),
+        )
+        self._conn.execute(
+            "DELETE FROM conversation_messages WHERE session_id = ?",
             (self.session_id,),
         )
         self._conn.commit()
@@ -315,6 +446,10 @@ class ConversationVersionManager:
         """Apply schema migrations for existing databases."""
         try:
             self._conn.execute(_MIGRATION_SQL)
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            self._conn.execute(_MIGRATION_MSG_COUNT_SQL)
         except sqlite3.OperationalError:
             pass  # Column already exists
 

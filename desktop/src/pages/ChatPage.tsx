@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Send, Square, Loader2, Undo2, Redo2, History,
@@ -34,6 +34,44 @@ const COMMAND_DEFS = [
   { cmd: '/switch', desc: 'Switch session (usage: /switch <id>)' },
 ]
 
+// Track which message IDs have already been animated (survives re-renders)
+const animatedIds = new Set<string>()
+
+// Memoized message bubble — only re-renders when its own props change
+const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message }) {
+  return (
+    <div
+      ref={(el) => {
+        if (el && !animatedIds.has(msg.id)) {
+          animatedIds.add(msg.id)
+          animateMessage(el, msg.role)
+        }
+      }}
+      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+    >
+      <div className={`max-w-[80%] ${msg.role === 'user' ? 'rounded-2xl rounded-br-md' : msg.role === 'tool' ? 'rounded-lg' : 'rounded-2xl rounded-bl-md'} px-4 py-2.5`} style={{
+        background: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--surface-2)' : msg.role === 'system' ? 'var(--surface-2)' : 'var(--surface-2)',
+        border: msg.role === 'tool' ? '1px solid var(--border)' : msg.role === 'system' ? '1px solid var(--border-subtle)' : 'none',
+        color: msg.role === 'user' ? 'white' : 'var(--fg)',
+      }}>
+        {msg.toolStatus === 'running' && <Loader2 size={12} className="inline mr-1.5 animate-spin" style={{ color: 'var(--accent)' }} />}
+        {msg.role === 'tool' && <span className="text-xs font-mono font-medium mr-1.5" style={{ color: 'var(--accent)' }}>{msg.toolName}</span>}
+        {msg.role === 'assistant' ? (
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+          </div>
+        ) : msg.role === 'system' ? (
+          <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>{msg.content}</pre>
+        ) : msg.role === 'tool' ? (
+          <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-secondary)' }}>{msg.content}</pre>
+        ) : (
+          <span className="text-sm">{msg.content}</span>
+        )}
+      </div>
+    </div>
+  )
+})
+
 export default function ChatPage() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const [messages, setMessages] = useState<Message[]>([])
@@ -48,6 +86,10 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const msgCounterRef = useRef(0)
   const messageQueueRef = useRef<string[]>([])
+
+  // Token batching buffer — accumulates tokens between animation frames
+  const tokenBufferRef = useRef<string>('')
+  const tokenFlushRef = useRef<number>(0)
 
   // HUD state
   const [versionStatus, setVersionStatus] = useState<any>(null)
@@ -64,12 +106,15 @@ export default function ChatPage() {
   const [showPalette, setShowPalette] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
 
-  const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [])
-
-  // Internal system markers that should NOT be displayed as chat bubbles
-  const INTERNAL_MARKERS = ['[会话摘要]', '[上下文已裁剪]', '[恢复文件]', '[最终答案]']
-  const isInternalMessage = (role: string, content: string) =>
-    role === 'system' && INTERNAL_MARKERS.some(marker => content.startsWith(marker))
+  // Throttled scroll — at most once per animation frame
+  const scrollRafRef = useRef<number>(0)
+  const scrollToBottom = useCallback(() => {
+    if (scrollRafRef.current) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    })
+  }, [])
 
   // Clean tool message: "Action: name[{args}]\nObservation: result" → show name + summary
   const cleanToolContent = (content: string): { name: string; display: string } => {
@@ -84,52 +129,137 @@ export default function ChatPage() {
   }
 
   // Load and display STM messages (used by restore, undo, redo)
+  //
+  // STM stores the raw agent conversation: user → assistant(thought) → tool → … → system([最终答案]).
+  // We need to reconstruct a clean user-facing view:
+  //   - user messages shown as-is
+  //   - intermediate assistant reasoning → shown as system messages (matches live "thinking" event)
+  //   - tool messages are kept (show what the agent did)
+  //   - [最终答案] content is extracted and shown as the assistant's reply
+  //   - [会话摘要] is shown as a collapsed system note (context was compacted)
+  //   - [上下文已裁剪] / [恢复文件] are hidden
   const loadAndDisplayMessages = useCallback(async () => {
     try {
-      const { messages: stm } = await api.listShortMemories()
-      // Always clear old messages first (BUG 4 fix)
+      // Prefer journal-based history (full, no compaction loss).
+      // Fall back to STM if history endpoint unavailable (e.g. old sessions).
+      let stm: Array<{ role: string; content: string; ts?: number }>
+      try {
+        const hist = await api.listSessionHistory()
+        stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
+      } catch {
+        stm = (await api.listShortMemories()).messages
+      }
       if (!stm || stm.length === 0) { setMessages([]); return }
+
       const transformed: Message[] = []
       let idx = 0
-      for (const m of stm) {
-        // Skip internal bookkeeping messages
-        if (isInternalMessage(m.role, m.content)) continue
-        if (!['user', 'assistant', 'system', 'tool'].includes(m.role)) continue
+      const ts = (m: any) => new Date(m.ts || Date.now())
 
-        if (m.role === 'tool') {
-          // Format tool messages: extract name + abbreviated result
-          const { name, display } = cleanToolContent(m.content)
+      // Track pending tool messages for the current turn, so we can
+      // group them before the final answer.
+      let pendingTools: Message[] = []
+
+      const flushPendingTools = () => {
+        for (const t of pendingTools) {
+          t.id = `h-${idx++}`
+          transformed.push(t)
+        }
+        pendingTools = []
+      }
+
+      for (const m of stm) {
+        const role = m.role
+        const content = (m.content || '').trim()
+
+        // --- Hidden markers ---
+        if (role === 'system' && content.startsWith('[上下文已裁剪]')) continue
+        if (role === 'system' && content.startsWith('[恢复文件]')) continue
+
+        // --- [最终答案] → show as assistant reply ---
+        if (role === 'system' && content.startsWith('[最终答案]')) {
+          const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
+          if (answer) {
+            flushPendingTools()
+            transformed.push({
+              id: `h-${idx++}`,
+              role: 'assistant',
+              content: answer,
+              timestamp: ts(m),
+            })
+          }
+          continue
+        }
+
+        // --- [会话摘要] → show as system note (context was compacted) ---
+        if (role === 'system' && content.startsWith('[会话摘要]')) {
+          const summary = content.replace(/^\[会话摘要\]\s*/, '').trim()
+          if (summary) {
+            flushPendingTools()
+            // Shorten for display but keep it visible
+            const display = summary.length > 300 ? summary.slice(0, 300) + '…' : summary
+            transformed.push({
+              id: `h-${idx++}`,
+              role: 'system',
+              content: `[Context compacted] ${display}`,
+              timestamp: ts(m),
+            })
+          }
+          continue
+        }
+
+        // --- User messages ---
+        if (role === 'user') {
+          flushPendingTools()
           transformed.push({
             id: `h-${idx++}`,
+            role: 'user',
+            content: content,
+            timestamp: ts(m),
+          })
+          continue
+        }
+
+        // --- Tool messages → collect, flush before next final answer ---
+        if (role === 'tool') {
+          const { name, display } = cleanToolContent(m.content)
+          pendingTools.push({
+            id: '', // assigned on flush
             role: 'tool',
             content: display,
             toolName: name,
             toolStatus: 'done',
-            timestamp: new Date((m as any).ts || Date.now()),
+            timestamp: ts(m),
           })
-        } else if (m.role === 'assistant') {
-          // Skip raw agent thought duplicates — the final answer is
-          // typically the last assistant message; intermediate ones are
-          // internal reasoning that would confuse the user.
-          // Only keep assistant messages that look like actual answers
-          // (not pure thought/reasoning fragments).
-          const trimmed = m.content.trim()
-          if (trimmed.length < 10) continue  // skip tiny fragments
+          continue
+        }
+
+        // --- Assistant reasoning fragments → show as system (matches live "thinking" event) ---
+        if (role === 'assistant') {
+          flushPendingTools()
           transformed.push({
             id: `h-${idx++}`,
-            role: 'assistant',
-            content: trimmed,
-            timestamp: new Date((m as any).ts || Date.now()),
+            role: 'system',
+            content: content,
+            timestamp: ts(m),
           })
-        } else {
+          continue
+        }
+
+        // --- Other system messages → show if meaningful ---
+        if (role === 'system' && content.length > 0) {
+          flushPendingTools()
           transformed.push({
             id: `h-${idx++}`,
-            role: m.role as 'user' | 'system',
-            content: m.content,
-            timestamp: new Date((m as any).ts || Date.now()),
+            role: 'system',
+            content: content,
+            timestamp: ts(m),
           })
         }
       }
+
+      // Flush any trailing tool messages (edge case: session ended mid-tool)
+      flushPendingTools()
+
       setMessages(transformed)
     } catch (err) { console.error('Failed to load messages:', err) }
   }, [])
@@ -144,6 +274,7 @@ export default function ChatPage() {
       sessionIdRef.current = sid
       setSessionId(sid)
       setMessages([])
+      animatedIds.clear()
       currentAssistantIdRef.current = null
       currentReasoningIdRef.current = null
       messageQueueRef.current = []
@@ -195,8 +326,24 @@ export default function ChatPage() {
       agentWs.on('token', (data) => {
         currentReasoningIdRef.current = null
         const tid = currentAssistantIdRef.current
-        if (tid) { setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: m.content + data.content } : m)) }
-        else { const nid = `a-${++msgCounterRef.current}`; currentAssistantIdRef.current = nid; setMessages(prev => [...prev, { id: nid, role: 'assistant', content: data.content, timestamp: new Date() }]) }
+        if (tid) {
+          // Batch token updates — buffer content and flush once per animation frame
+          tokenBufferRef.current += data.content
+          if (!tokenFlushRef.current) {
+            tokenFlushRef.current = requestAnimationFrame(() => {
+              tokenFlushRef.current = 0
+              const batch = tokenBufferRef.current
+              tokenBufferRef.current = ''
+              if (!batch) return
+              const id = currentAssistantIdRef.current
+              if (id) setMessages(prev => prev.map(m => m.id === id ? { ...m, content: m.content + batch } : m))
+            })
+          }
+        } else {
+          const nid = `a-${++msgCounterRef.current}`
+          currentAssistantIdRef.current = nid
+          setMessages(prev => [...prev, { id: nid, role: 'assistant', content: data.content, timestamp: new Date() }])
+        }
       }),
       agentWs.on('reasoning', (data) => {
         const tid = currentReasoningIdRef.current
@@ -204,6 +351,9 @@ export default function ChatPage() {
         else { const nid = `r-${++msgCounterRef.current}`; currentReasoningIdRef.current = nid; setMessages(prev => [...prev, { id: nid, role: 'system', content: data.content, timestamp: new Date() }]) }
       }),
       agentWs.on('answer', (data) => {
+        // Flush any buffered tokens before applying the final answer
+        if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
+        tokenBufferRef.current = ''
         const tid = currentAssistantIdRef.current
         if (tid) { setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: data.content } : m)) }
         else { setMessages(prev => { const li = [...prev].reverse().findIndex(m => m.role === 'assistant'); if (li !== -1) { const idx = prev.length - 1 - li; return prev.map((m, i) => i === idx ? { ...m, content: data.content } : m) } return [...prev, { id: `a-${++msgCounterRef.current}`, role: 'assistant' as const, content: data.content, timestamp: new Date() }] }) }
@@ -217,7 +367,11 @@ export default function ChatPage() {
       agentWs.on('done', () => { setIsRunning(false); setCurrentRunId(null); processQueue() }),
       agentWs.on('confirm_request', (data) => { setConfirmRequest({summary: data.summary}) }),
     ]
-    return () => unsubs.forEach(u => u())
+    return () => {
+      unsubs.forEach(u => u())
+      if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
+      if (scrollRafRef.current) { cancelAnimationFrame(scrollRafRef.current); scrollRafRef.current = 0 }
+    }
   }, [sessionId])
 
   useEffect(scrollToBottom, [messages, scrollToBottom])
@@ -243,7 +397,7 @@ export default function ChatPage() {
     const addSys = (c: string) => setMessages(prev => [...prev, { id: `cmd-${++msgCounterRef.current}`, role: 'system', content: c, timestamp: new Date() }])
     switch (cmd) {
       case '/help': addSys(COMMAND_DEFS.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n')); break
-      case '/clear': setMessages([]); messageQueueRef.current = []; break
+      case '/clear': setMessages([]); messageQueueRef.current = []; animatedIds.clear(); break
       case '/undo':
         try {
           const r = await api.versionUndo()
@@ -317,31 +471,7 @@ export default function ChatPage() {
             </div>
           )}
           {messages.map((msg) => (
-            <div
-              key={msg.id}
-              ref={(el) => { if (el) animateMessage(el, msg.role) }}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div className={`max-w-[80%] ${msg.role === 'user' ? 'rounded-2xl rounded-br-md' : msg.role === 'tool' ? 'rounded-lg' : 'rounded-2xl rounded-bl-md'} px-4 py-2.5`} style={{
-                background: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--surface-2)' : msg.role === 'system' ? 'var(--surface-2)' : 'var(--surface-2)',
-                border: msg.role === 'tool' ? '1px solid var(--border)' : msg.role === 'system' ? '1px solid var(--border-subtle)' : 'none',
-                color: msg.role === 'user' ? 'white' : 'var(--fg)',
-              }}>
-                {msg.toolStatus === 'running' && <Loader2 size={12} className="inline mr-1.5 animate-spin" style={{ color: 'var(--accent)' }} />}
-                {msg.role === 'tool' && <span className="text-xs font-mono font-medium mr-1.5" style={{ color: 'var(--accent)' }}>{msg.toolName}</span>}
-                {msg.role === 'assistant' ? (
-                  <div className="prose prose-sm prose-invert max-w-none" style={{ color: 'var(--fg)' }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                  </div>
-                ) : msg.role === 'system' ? (
-                  <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>{msg.content}</pre>
-                ) : msg.role === 'tool' ? (
-                  <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-secondary)' }}>{msg.content}</pre>
-                ) : (
-                  <span className="text-sm">{msg.content}</span>
-                )}
-              </div>
-            </div>
+            <MessageBubble key={msg.id} msg={msg} />
           ))}
           <div ref={messagesEndRef} />
         </div>

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
     metadata_json TEXT DEFAULT '{}',
     chroma_id TEXT,
     last_accessed_at TEXT,
+    superseded_by INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memories(session_id);
@@ -108,6 +109,21 @@ class LongTermMemory:
         )
         self._conn.commit()
 
+    # TTL per category (days). None = never expires.
+    _CATEGORY_TTL: dict[str, int | None] = {
+        "fact": None,           # permanent — facts don't auto-expire
+        "preference": None,     # permanent — preferences persist until explicitly changed
+        "note": 90,             # 90 days default, refreshed on access
+        # Legacy names (for existing data before migration)
+        "entity_fact": None,
+        "conclusion": None,
+        "user_preference": None,
+        "tool_preference": None,
+        "task_progress": 90,
+        "error_pattern": 90,
+        "conversation": 90,
+    }
+
     def _migrate(self) -> None:
         """Apply versioned migrations."""
         current = self._get_schema_version()
@@ -115,11 +131,9 @@ class LongTermMemory:
         if current < 1:
             self._migrate_v1()
             self._set_schema_version(1)
-
-        # Add future migrations here:
-        # if current < 2:
-        #     self._migrate_v2()
-        #     self._set_schema_version(2)
+        if current < 2:
+            self._migrate_v2()
+            self._set_schema_version(2)
 
     def _migrate_v1(self) -> None:
         """Migration v1: Ensure all current columns exist."""
@@ -133,6 +147,15 @@ class LongTermMemory:
         if "last_accessed_at" not in cols:
             self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN last_accessed_at TEXT")
 
+    def _migrate_v2(self) -> None:
+        """Migration v2: Add access_count and superseded_by columns."""
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "access_count" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN access_count INTEGER DEFAULT 0")
+        if "superseded_by" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN superseded_by INTEGER")
+
     @property
     def write_counter(self) -> int:
         return self._write_counter
@@ -142,15 +165,25 @@ class LongTermMemory:
             self._chroma_col = _get_ltm_collection()
 
     def _update_last_accessed(self, ids: list[int]):
-        """Update last_accessed_at for the given memory ids."""
+        """Update last_accessed_at and increment access_count for the given memory ids."""
         if not ids:
             return
         placeholders = ",".join("?" for _ in ids)
         self._conn.execute(
-            f"UPDATE long_term_memories SET last_accessed_at = datetime('now') WHERE id IN ({placeholders})",
+            f"UPDATE long_term_memories SET last_accessed_at = datetime('now'), "
+            f"access_count = COALESCE(access_count, 0) + 1 WHERE id IN ({placeholders})",
             ids,
         )
         self._conn.commit()
+
+    @staticmethod
+    def _effective_importance(row: dict) -> float:
+        """Compute dynamic importance: base + access boost - age decay."""
+        base = row.get("importance", 0.5) or 0.5
+        access_count = row.get("access_count", 0) or 0
+        # Logarithmic access boost: caps at ~0.2 for 50+ accesses
+        access_boost = 0.1 * min(2.0, math.log(1 + access_count))
+        return min(1.0, base + access_boost)
 
     def save(self, session_id: str, content: str, category: str = "general",
              importance: float = 0.5, metadata: dict | None = None,
@@ -246,9 +279,13 @@ class LongTermMemory:
 
             excess = current - self._max_memories
             # Fetch chroma_ids for evicted rows before deleting
+            # Use effective_importance (base + access boost) for eviction ordering
             to_evict = self._conn.execute(
-                "SELECT id, chroma_id FROM long_term_memories "
-                "ORDER BY (importance * 0.6 + (julianday('now') - julianday(COALESCE(last_accessed_at, created_at))) / 7.0 * 0.4) ASC "
+                "SELECT id, chroma_id, category, importance, access_count, "
+                "COALESCE(last_accessed_at, created_at) as ref_time "
+                "FROM long_term_memories "
+                "ORDER BY (importance + 0.1 * MIN(2.0, LOG(1 + COALESCE(access_count, 0)))) * 0.6 "
+                "+ (1.0 / (1.0 + (julianday('now') - julianday(COALESCE(last_accessed_at, created_at))) / 7.0)) * 0.4 ASC "
                 "LIMIT ?",
                 (excess,)
             ).fetchall()
@@ -318,13 +355,37 @@ class LongTermMemory:
             logger.info("Compacted %d medium-score '%s' memories into one", len(to_merge), category)
 
     def _cleanup_expired(self):
-        """Delete memories older than memory_ttl_days (both SQLite and ChromaDB)."""
-        expired = self._conn.execute(
-            "SELECT chroma_id FROM long_term_memories WHERE "
-            "datetime(created_at) < datetime('now', ?)",
-            (f"-{self._ttl_days} days",)
+        """Delete memories that have exceeded their category-specific TTL.
+
+        Uses last_accessed_at (if set) instead of created_at for age calculation,
+        so accessed memories get their TTL refreshed.
+        Categories with ttl=None (fact, preference) never expire.
+        """
+        rows = self._conn.execute(
+            "SELECT id, chroma_id, category, COALESCE(last_accessed_at, created_at) as ref_time "
+            "FROM long_term_memories"
         ).fetchall()
-        chroma_ids = [r["chroma_id"] for r in expired if r["chroma_id"]]
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        ids_to_delete: list[int] = []
+        chroma_ids: list[str] = []
+
+        for r in rows:
+            ttl_days = self._CATEGORY_TTL.get(r["category"])
+            if ttl_days is None:
+                continue  # permanent category
+            try:
+                ref = datetime.fromisoformat(r["ref_time"])
+            except (ValueError, TypeError):
+                continue
+            age_days = (now - ref).total_seconds() / 86400
+            if age_days > ttl_days:
+                ids_to_delete.append(r["id"])
+                if r["chroma_id"]:
+                    chroma_ids.append(r["chroma_id"])
+
+        if not ids_to_delete:
+            return
 
         if chroma_ids:
             try:
@@ -333,15 +394,13 @@ class LongTermMemory:
             except Exception as e:
                 logger.warning("ChromaDB cleanup of expired memories failed: %s", e)
 
+        placeholders = ",".join("?" for _ in ids_to_delete)
         self._conn.execute(
-            "DELETE FROM long_term_memories WHERE "
-            "datetime(created_at) < datetime('now', ?)",
-            (f"-{self._ttl_days} days",)
+            f"DELETE FROM long_term_memories WHERE id IN ({placeholders})",
+            ids_to_delete,
         )
-        removed = self._conn.total_changes
-        if removed:
-            self._conn.commit()
-            logger.info("Cleaned up %d expired memories (>%d days)", removed, self._ttl_days)
+        self._conn.commit()
+        logger.info("Cleaned up %d expired memories (category-based TTL)", len(ids_to_delete))
 
     def search(self, query_embedding: list[float] | None = None, category: str | None = None,
                limit: int = 5, min_similarity: float = 0.3) -> list[dict]:
@@ -356,10 +415,10 @@ class LongTermMemory:
 
         with trace_mgr.span("ltm_search", {"category": category, "limit": limit}):
             if query_embedding is None:
-                sql = "SELECT * FROM long_term_memories"
+                sql = "SELECT * FROM long_term_memories WHERE superseded_by IS NULL"
                 params = []
                 if category:
-                    sql += " WHERE category = ?"
+                    sql += " AND category = ?"
                     params.append(category)
                 sql += " ORDER BY created_at DESC LIMIT ?"
                 params.append(limit)
@@ -377,7 +436,7 @@ class LongTermMemory:
             try:
                 chroma_results = self._chroma_col.query(
                     query_embeddings=[query_embedding],
-                    n_results=limit * 3,
+                    n_results=limit * 5,  # wider net to catch entity_facts that rank lower
                     where=where_filter,
                 )
             except Exception as e:
@@ -401,15 +460,17 @@ class LongTermMemory:
             scored = []
             for cid, sim in id_sim_map.items():
                 r = row_map.get(cid)
-                if r is None or sim < min_similarity:
+                if r is None or sim < min_similarity or r.get("superseded_by"):
                     continue
                 try:
-                    created = datetime.fromisoformat(r["created_at"])
-                except ValueError:
-                    created = datetime.now(timezone.utc).replace(tzinfo=None)
-                age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - created).total_seconds() / 3600
+                    ref_time = r.get("last_accessed_at") or r["created_at"]
+                    ref = datetime.fromisoformat(ref_time)
+                except (ValueError, KeyError):
+                    ref = datetime.now(timezone.utc).replace(tzinfo=None)
+                age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
                 decay = 1.0 / (1.0 + age_hours / 168)
-                score = sim * 0.6 + r["importance"] * 0.2 + decay * 0.2
+                eff_imp = self._effective_importance(r)
+                score = sim * 0.5 + eff_imp * 0.2 + decay * 0.1 + min(1.0, 0.1 * math.log(1 + (r.get("access_count") or 0))) * 0.2
                 scored.append((score, dict(r)))
 
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -430,7 +491,7 @@ class LongTermMemory:
 
     def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,
                                  limit: int, min_similarity: float) -> list[dict]:
-        sql = "SELECT * FROM long_term_memories WHERE chroma_id IS NOT NULL"
+        sql = "SELECT * FROM long_term_memories WHERE chroma_id IS NOT NULL AND superseded_by IS NULL"
         params = []
         if category:
             sql += " AND category = ?"
@@ -474,12 +535,14 @@ class LongTermMemory:
                 continue
 
             try:
-                created = datetime.fromisoformat(r["created_at"])
-            except ValueError:
-                created = datetime.now(timezone.utc).replace(tzinfo=None)
-            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - created).total_seconds() / 3600
+                ref_time = r.get("last_accessed_at") or r["created_at"]
+                ref = datetime.fromisoformat(ref_time)
+            except (ValueError, KeyError):
+                ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
             decay = 1.0 / (1.0 + age_hours / 168)
-            score = sim * 0.6 + r["importance"] * 0.2 + decay * 0.2
+            eff_imp = self._effective_importance(r)
+            score = sim * 0.5 + eff_imp * 0.2 + decay * 0.1 + min(1.0, 0.1 * math.log(1 + (r.get("access_count") or 0))) * 0.2
             scored.append((score, dict(r)))
 
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -494,7 +557,7 @@ class LongTermMemory:
 
     def list_recent(self, limit: int = 10) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT id, category, content, importance, created_at "
+            "SELECT id, category, content, importance, access_count, created_at, last_accessed_at "
             "FROM long_term_memories ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -504,10 +567,21 @@ class LongTermMemory:
                 "category": r["category"],
                 "content": r["content"],
                 "importance": r["importance"],
+                "access_count": r["access_count"] or 0,
+                "effective_importance": round(self._effective_importance(dict(r)), 3),
                 "created_at": r["created_at"],
+                "last_accessed_at": r["last_accessed_at"],
             }
             for r in rows
         ]
+
+    def mark_superseded(self, old_id: int, new_id: int) -> None:
+        """Mark an old memory as superseded by a new one."""
+        self._conn.execute(
+            "UPDATE long_term_memories SET superseded_by = ? WHERE id = ?",
+            (new_id, old_id),
+        )
+        self._conn.commit()
 
     def delete(self, memory_id: int):
         with self._lock:
