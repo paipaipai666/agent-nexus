@@ -4,34 +4,12 @@ AgentLLM always uses stream=True. There is no explicit cancel mechanism;
 the streaming loop runs to completion. These tests verify:
 - Stream interruption via exception is handled gracefully
 - Stream with empty chunks
-- Stream with partial tool calls
 - Error during streaming does not leak resources
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentnexus.core.llm import AgentLLM
-
-
-class _MockStreamChunk:
-    """Simulate a single litellm streaming chunk."""
-
-    def __init__(self, content="", finish_reason=None, tool_calls=None,
-                 reasoning_content=None, usage=None):
-        self.choices = [
-            MagicMock(
-                delta=MagicMock(
-                    content=content,
-                    tool_calls=tool_calls,
-                    reasoning_content=reasoning_content,
-                ),
-                finish_reason=finish_reason,
-            )
-        ]
-        self.usage = usage
-
-
-def _chunk_iter(*chunks):
-    yield from chunks
+from agentnexus.core.providers.base import StreamResult
 
 
 class TestStreamingNormalFlow:
@@ -79,10 +57,11 @@ class TestStreamingErrorHandling:
         mock_trace.active = None
 
         llm = AgentLLM()
-        with patch("litellm.completion", side_effect=RuntimeError("connection failed")):
-            result = llm.think([{"role": "user", "content": "hi"}])
-            assert result == ""
-            assert llm.last_error is not None
+        with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("connection failed")):
+            with patch("litellm.completion", side_effect=RuntimeError("connection failed")):
+                result = llm.think([{"role": "user", "content": "hi"}])
+                assert result == ""
+                assert llm.last_error is not None
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -94,14 +73,14 @@ class TestStreamingErrorHandling:
         mock_trace.active = None
 
         llm = AgentLLM()
-        with patch("litellm.completion", side_effect=RuntimeError("timeout")):
-            llm.think([{"role": "user", "content": "hi"}])
-            assert "timeout" in (llm.last_error or "").lower()
+        with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("timeout")):
+            with patch("litellm.completion", side_effect=RuntimeError("timeout")):
+                llm.think([{"role": "user", "content": "hi"}])
+                assert "timeout" in (llm.last_error or "").lower()
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_non_transient_error_returns_immediately(self, mock_trace, mock_settings):
-        """Non-transient errors (e.g. bad request) do not retry."""
         mock_settings.return_value.llm_model_id = "test-model"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "http://localhost:9999"
@@ -111,14 +90,15 @@ class TestStreamingErrorHandling:
         llm = AgentLLM()
         call_count = [0]
 
-        def _fail_once(**kwargs):
+        def _fail(*args, **kwargs):
             call_count[0] += 1
             raise ValueError("bad request")
 
-        with patch("litellm.completion", side_effect=_fail_once):
-            result = llm.think([{"role": "user", "content": "hi"}])
-            assert result == ""
-            assert call_count[0] == 3  # think() retries 3 times, _call returns "" immediately
+        with patch.object(llm, "_call_via_provider", side_effect=_fail):
+            with patch("litellm.completion", side_effect=_fail):
+                result = llm.think([{"role": "user", "content": "hi"}])
+                assert result == ""
+                assert call_count[0] == 3
 
 
 class TestStreamingToolCalls:
@@ -147,9 +127,12 @@ class TestUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = _MockStreamChunk(content="hello", finish_reason="stop")
-        with patch("litellm.completion", return_value=_chunk_iter(chunk)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text="hello", usage={"input_tokens": 5, "output_tokens": 5},
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert isinstance(llm.last_usage, dict)
 
@@ -162,9 +145,11 @@ class TestUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = _MockStreamChunk(content="response", finish_reason="stop")
-        with patch("litellm.completion", return_value=_chunk_iter(chunk)):
-            with patch("litellm.token_counter", return_value=5):
-                llm = AgentLLM()
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-                assert llm.total_usage["input_tokens"] >= 5
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text="response", usage={"input_tokens": 10, "output_tokens": 10},
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            assert llm.total_usage["input_tokens"] >= 5

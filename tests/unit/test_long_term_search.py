@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 import agentnexus.memory.long_term as ltm_module
@@ -6,19 +8,21 @@ from agentnexus.memory.long_term import (
     _reset_long_term_memory,
     get_long_term_memory,
 )
-from agentnexus.storage.chroma import reset_storage_client as _reset_chroma_client
 
 
 def _fresh_ltm():
+    from agentnexus.storage.chroma import reset_storage_client
     ltm_module._ltm_collection = None
-    _reset_chroma_client()
+    reset_storage_client()
     _reset_long_term_memory()
     return get_long_term_memory()
 
 
 @pytest.fixture
 def ltm(temp_agentnexus_home):
-    yield _fresh_ltm()
+    with patch("agentnexus.rag.embeddings.get_embedding_model") as mock_embedder:
+        mock_embedder.return_value = None
+        yield _fresh_ltm()
 
 
 class TestSearch:

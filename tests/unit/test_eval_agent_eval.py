@@ -8,25 +8,7 @@ from agentnexus.evaluation.agent_eval import (
     TraceRecord,
     _cost,
     _percentile,
-    _resolve_model,
 )
-
-
-class TestResolveModel:
-    def test_alias_deepseek_chat(self):
-        assert _resolve_model("deepseek-chat") == "deepseek-v3"
-
-    def test_alias_deepseek_reasoner(self):
-        assert _resolve_model("deepseek-reasoner") == "deepseek-r1"
-
-    def test_direct_match(self):
-        assert _resolve_model("gpt-4o") == "gpt-4o"
-
-    def test_partial_match(self):
-        assert _resolve_model("custom-deepseek-v4-flash") == "deepseek-v4-flash"
-
-    def test_unknown_model(self):
-        assert _resolve_model("unknown-model") == "unknown-model"
 
 
 class TestCost:
@@ -34,7 +16,9 @@ class TestCost:
         assert _cost(1_000_000, 0, "deepseek-v4-flash") == 0.6
 
     def test_unknown_model(self):
-        assert _cost(1000, 500, "unknown") == 0.0
+        # Unknown models use default pricing: 10.0 CNY/M input + 30.0 CNY/M output
+        expected = (1000 * 10.0 + 500 * 30.0) / 1_000_000
+        assert _cost(1000, 500, "unknown") == pytest.approx(expected)
 
     def test_zero_tokens(self):
         assert _cost(0, 0, "deepseek-v4-flash") == 0.0

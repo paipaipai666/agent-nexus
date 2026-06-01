@@ -190,7 +190,9 @@ class SearchToolProvider:
                 "search_depth(搜索深度:basic/advanced,默认自动), "
                 "time_range(时间范围:day/week/month/year,默认不限), "
                 "topic(话题:general/news,默认general), "
-                "include_answer(是否返回直接摘要,默认false)",
+                "include_answer(是否返回直接摘要,默认false), "
+                "include_domains(限定搜索域名列表,如['arxiv.org']), "
+                "exclude_domains(排除域名列表,如['reddit.com'])",
                 web_search,
                 param_schema={
                     "type": "object",
@@ -221,6 +223,16 @@ class SearchToolProvider:
                             "type": "boolean",
                             "description": "是否包含 Tavily 生成的直接答案摘要",
                             "default": False,
+                        },
+                        "include_domains": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "限定搜索的域名列表，如 ['arxiv.org', 'github.com']",
+                        },
+                        "exclude_domains": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "排除的域名列表，如 ['reddit.com', 'pinterest.com']",
                         },
                     },
                     "required": ["query"],

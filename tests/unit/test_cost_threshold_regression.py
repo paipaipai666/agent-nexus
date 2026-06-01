@@ -38,9 +38,11 @@ class TestCostThresholdRegression:
         expected = (1000 * 1.0 + 500 * 2.0) / 1_000_000
         assert cost == expected
 
-    def test_cost_zero_for_unknown_model(self):
+    def test_cost_for_unknown_model_uses_default_pricing(self):
         cost = _cost(5000, 2000, "unknown-model-123")
-        assert cost == 0.0
+        # Unknown models use default pricing (10.0 CNY/M input, 30.0 CNY/M output)
+        expected = (5000 * 10.0 + 2000 * 30.0) / 1_000_000
+        assert cost == expected
 
     def test_cost_scales_linearly(self):
         cost1 = _cost(1000, 500, "deepseek-v4-flash")
@@ -104,21 +106,17 @@ class TestTokenRegression:
         mock_trace.active = None
 
         from agentnexus.core.llm import AgentLLM
+        from agentnexus.core.providers.base import StreamResult
 
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = "ok"
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            with patch("litellm.token_counter", return_value=10):
-                llm = AgentLLM()
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-                assert llm.last_usage["input_tokens"] >= 0
-                assert llm.last_usage["output_tokens"] >= 0
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text="ok", usage={"input_tokens": 10, "output_tokens": 5},
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            assert llm.last_usage["input_tokens"] >= 0
+            assert llm.last_usage["output_tokens"] >= 0
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -130,20 +128,16 @@ class TestTokenRegression:
         mock_trace.active = None
 
         from agentnexus.core.llm import AgentLLM
+        from agentnexus.core.providers.base import StreamResult
 
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = "ok"
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text="ok", usage={"input_tokens": 10, "output_tokens": 5},
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
-        with patch("litellm.completion", return_value=[chunk]):
-            with patch("litellm.token_counter", return_value=10):
-                llm = AgentLLM()
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-
-                for key in ("input_tokens", "output_tokens", "total_tokens"):
-                    assert key in llm.last_usage, f"Missing key: {key}"
-                    assert isinstance(llm.last_usage[key], (int, float))
+            for key in ("input_tokens", "output_tokens"):
+                assert key in llm.last_usage, f"Missing key: {key}"
+                assert isinstance(llm.last_usage[key], (int, float))

@@ -126,15 +126,15 @@ class CapabilityRuntime:
 
     def _unload_kind(self, kind: str) -> str:
         if kind == "tools":
-            self.executor.registry.unregister_source_type("builtin")
+            self.executor.unregister_source_type("builtin")
         elif kind == "skills" and self.skill_service is not None:
             self.skill_service.reset()
         elif kind == "mcp":
-            self.executor.registry.unregister_source_prefix("mcp:", source_type="mcp")
+            self.executor.unregister_source_prefix("mcp:", source_type="mcp")
             if self.mcp_manager is not None:
                 self.mcp_manager.close()
         elif kind == "plugins":
-            self.executor.registry.unregister_source_prefix("plugin:", source_type="plugin")
+            self.executor.unregister_source_prefix("plugin:", source_type="plugin")
         self.states[kind].loaded_generation = -1
         self._persist_states()
         return "unloaded"

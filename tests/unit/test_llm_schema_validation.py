@@ -4,9 +4,10 @@ Validates that LLM responses conform to expected JSON schemas,
 including nested objects, arrays, and required fields.
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentnexus.core.llm import AgentLLM
+from agentnexus.core.providers.base import StreamResult
 
 
 class TestLLMStructuredOutputSchema:
@@ -21,16 +22,12 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = '{"thought": "I need to search", "action": "web_search"}'
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text='{"thought": "I need to search", "action": "web_search"}',
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
                 [{"role": "user", "content": "test"}],
                 0, True, 0,
@@ -49,17 +46,12 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        response = '{"user": {"name": "Alice", "age": 30}, "items": [1, 2, 3]}'
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = response
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text='{"user": {"name": "Alice", "age": 30}, "items": [1, 2, 3]}',
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
                 [{"role": "user", "content": "test"}],
                 0, True, 0,
@@ -78,17 +70,12 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        response = '{"tools": [{"name": "search", "params": {"q": "test"}}]}'
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = response
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(
+            text='{"tools": [{"name": "search", "params": {"q": "test"}}]}',
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
                 [{"role": "user", "content": "test"}],
                 0, True, 0,
@@ -107,16 +94,9 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = "{}"
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(text="{}", finish_reason="stop")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
                 [{"role": "user", "content": "test"}],
                 0, True, 0,
@@ -134,16 +114,9 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = MagicMock()
-        delta = MagicMock()
-        delta.content = '{"incomplete": '
-        delta.tool_calls = []
-        delta.reasoning_content = None
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = None
-
-        with patch("litellm.completion", return_value=[chunk]):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(text='{"incomplete": ', finish_reason="stop")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
                 [{"role": "user", "content": "test"}],
                 0, True, 0,

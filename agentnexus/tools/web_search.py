@@ -7,12 +7,67 @@ try:
 except ImportError:
     TavilyClient = None  # type: ignore[assignment,misc]
 
-from agentnexus.core.config import get_settings
+import re
+from datetime import datetime
+from time import monotonic
 
 from agentnexus.core.config import get_settings
 
 _tavily_client: TavilyClient | None = None
 _seen_urls: set[str] = set()
+
+# --- Search result cache (TTL-based) ---
+_CACHE_TTL_SEC = 300  # 5 minutes
+_cache: dict[tuple, tuple[float, list[dict]]] = {}
+
+
+def _make_cache_key(
+    query: str,
+    max_results: int,
+    search_depth: str | None,
+    time_range: str | None,
+    topic: str,
+    include_answer: bool,
+    include_domains: tuple[str, ...] | None,
+    exclude_domains: tuple[str, ...] | None,
+) -> tuple:
+    """Build a hashable cache key from search parameters."""
+    return (
+        query,
+        max_results,
+        search_depth,
+        time_range,
+        topic,
+        include_answer,
+        include_domains,
+        exclude_domains,
+    )
+
+
+def _cache_get(key: tuple) -> list[dict] | None:
+    """Return cached results if still valid, else evict and return None."""
+    entry = _cache.get(key)
+    if entry is None:
+        return None
+    ts, results = entry
+    if monotonic() - ts > _CACHE_TTL_SEC:
+        del _cache[key]
+        return None
+    return results
+
+
+def _cache_set(key: tuple, results: list[dict]) -> None:
+    """Store results in cache with current timestamp."""
+    _cache[key] = (monotonic(), results)
+    # Evict oldest entries if cache grows too large
+    if len(_cache) > 256:
+        oldest_key = min(_cache, key=lambda k: _cache[k][0])
+        del _cache[oldest_key]
+
+
+def clear_search_cache() -> None:
+    """Clear the entire search result cache."""
+    _cache.clear()
 
 
 def _get_client() -> TavilyClient | None:
@@ -33,15 +88,31 @@ def _pick_depth(query: str) -> str:
     if any(kw in lower for kw in complex_kw):
         return "advanced"
     # 年份/时效性查询 → advanced
-    if any(kw in lower for kw in ("2025", "2026", "最新", "latest")):
+    now = datetime.now()
+    current_year = str(now.year)
+    if current_year in lower:
+        return "advanced"
+    # 具体日期/时间表达式 → advanced
+    time_patterns = (
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}",   # 2026-06-01, 2026/6/1
+        r"\d{1,2}月\d{1,2}[日号]?",          # 6月1日, 6月1号
+        r"\d{1,2}月",                         # 6月, 12月
+        r"(今[天日]|昨[天日]|明[天日]|前天|后天)",
+        r"(本[周星期礼拜]|上[周星期礼拜]|下[周星期礼拜])",
+        r"(本[月]|上[月]|下[月])",
+        r"(今年|去年|明年)",
+        r"(this\s+week|today|yesterday|tomorrow|last\s+week|next\s+week)",
+    )
+    if any(re.search(p, lower) for p in time_patterns):
         return "advanced"
     return "basic"
 
 
 def clear_seen_urls():
-    """清空 URL 去重缓存，供 research_agent 和 ReAct 步级重置使用。"""
+    """清空 URL 去重缓存和搜索结果缓存，供 research_agent 和 ReAct 步级重置使用。"""
     global _seen_urls
     _seen_urls.clear()
+    _cache.clear()
 
 
 def web_search_structured(
@@ -71,6 +142,17 @@ def web_search_structured(
         return []
 
     depth = search_depth or _pick_depth(query)
+
+    # Check cache (only for non-raw-content queries to avoid stale long text)
+    cache_key = _make_cache_key(
+        query, max_results, depth, time_range, topic, include_answer,
+        tuple(include_domains) if include_domains else None,
+        tuple(exclude_domains) if exclude_domains else None,
+    )
+    if include_raw_content is not True:
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
     if include_raw_content is None:
         include_raw_content = (depth == "advanced")
 
@@ -118,7 +200,13 @@ def web_search_structured(
     if include_answer and response.get("answer") and structured:
         structured[0]["answer"] = response["answer"]
 
-    return structured[:max_results]
+    result = structured[:max_results]
+
+    # Store in cache
+    if include_raw_content is not True:
+        _cache_set(cache_key, result)
+
+    return result
 
 
 def web_search(

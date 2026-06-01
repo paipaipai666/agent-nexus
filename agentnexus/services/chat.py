@@ -356,12 +356,16 @@ class ChatService:
         elif event_type == "DEGRADED":
             turn.record("degraded", payload.get("strategy", ""))
 
-    def stream_events(self, run_id: str) -> Iterator[AgentEvent]:
+    def stream_events(self, run_id: str, timeout: float = 30.0) -> Iterator[AgentEvent]:
         events = self._run_events.get(run_id)
         if events is None:
             raise KeyError(f"Unknown run_id: {run_id}")
         while True:
-            event = events.get()
+            try:
+                event = events.get(timeout=timeout)
+            except queue.Empty:
+                logger.warning("stream_events timed out for run_id=%s", run_id)
+                break
             if event is None:
                 break
             yield event

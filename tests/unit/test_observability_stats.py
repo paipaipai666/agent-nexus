@@ -20,8 +20,9 @@ class TestCost:
         # (1000*1.0 + 500*2.0) / 1_000_000 = (1000 + 1000) / 1_000_000 = 0.002
         assert _cost(1000, 500, "deepseek-chat") == 0.002
 
-    def test_unknown_model(self):
-        assert _cost(1000, 500, "unknown-model") == 0.0
+    def test_unknown_model_uses_default_pricing(self):
+        expected = (1000 * 10.0 + 500 * 30.0) / 1_000_000
+        assert _cost(1000, 500, "unknown-model") == expected
 
     def test_zero_tokens(self):
         assert _cost(0, 0, "deepseek-v4-flash") == 0.0

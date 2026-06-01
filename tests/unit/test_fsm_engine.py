@@ -96,7 +96,9 @@ class TestStateMachineDispatch:
         result = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {})
 
         assert fsm.current_state == ReActState.SELECT_STRATEGY
-        assert result == (None, [])
+        # FSM now returns an error message when exiting in non-terminal state
+        assert result[0] is not None
+        assert "exited in state" in result[0]
 
     def test_first_matching_transition_wins(self):
         """When multiple transitions match, the first in the table is chosen."""
@@ -218,7 +220,9 @@ class TestStateMachineRunLoop:
 
         answer, steps = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"nop": nop_handler})
         assert fsm.current_state == ReActState.SELECT_STRATEGY
-        assert answer is None
+        # FSM now returns an error message when exiting in non-terminal state
+        assert answer is not None
+        assert "exited in state" in answer
 
     def test_event_step_id_set_automatically(self):
         """Enqueued events get their step_id set to ctx.current_step."""

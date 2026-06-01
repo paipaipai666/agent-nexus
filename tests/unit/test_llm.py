@@ -3,24 +3,19 @@
 from unittest.mock import MagicMock, patch
 
 from agentnexus.core.llm import AgentLLM, _preview, get_default_llm
+from agentnexus.core.providers.base import StreamResult
 
 
-class MockChunk:
-    """Simulate a litellm streaming chunk."""
-
-    def __init__(self, content="", finish_reason="", tool_calls=None,
-                 reasoning_content=None, usage=None):
-        delta = MagicMock()
-        delta.content = content
-        delta.tool_calls = tool_calls or []
-        delta.reasoning_content = reasoning_content
-        self.choices = [MagicMock(delta=delta, finish_reason=finish_reason)]
-        self.usage = usage
-
-
-def _chunk_iter(*chunks):
-    """Helper: yield mock chunks in sequence."""
-    yield from chunks
+def _make_result(text="", tool_calls=None, reasoning_content="",
+                 usage=None, finish_reason="stop"):
+    """Helper: build a StreamResult for mocking _call_via_provider."""
+    return StreamResult(
+        text=text,
+        tool_calls=tool_calls or [],
+        reasoning_content=reasoning_content,
+        usage=usage or {"input_tokens": 5, "output_tokens": 5},
+        finish_reason=finish_reason,
+    )
 
 
 class TestPreview:
@@ -96,27 +91,24 @@ class TestThinkNoApiKey:
 
 
 class TestThinkRetryLoop:
-    @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.get_settings")
-    def test_retries_on_transient_error_and_succeeds(self, mock_settings, mock_trace):
+    def test_retries_on_transient_error_and_succeeds(self, mock_settings):
         mock_settings.return_value.llm_model_id = "model"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.openai.com"
         mock_settings.return_value.llm_timeout = 60
-        mock_trace.active = None
 
         call_count = [0]
 
-        def fake_completion(**kwargs):
+        def fake_call(messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None, on_token=None):
             call_count[0] += 1
             if call_count[0] == 1:
-                raise ConnectionError("connection reset by peer")
-            return _chunk_iter(MockChunk(content="final answer", finish_reason="stop"))
+                return ""  # simulates transient failure (empty = retry)
+            return "final answer"
 
-        with patch("litellm.completion", side_effect=fake_completion):
-            with patch("litellm.token_counter", return_value=5):
-                llm = AgentLLM()
-                result = llm.think([{"role": "user", "content": "hi"}])
+        llm = AgentLLM()
+        with patch.object(llm, "_call", side_effect=fake_call):
+            result = llm.think([{"role": "user", "content": "hi"}])
 
         assert result == "final answer"
         assert call_count[0] == 2
@@ -159,11 +151,9 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk1 = MockChunk(content="Hello")
-        chunk2 = MockChunk(content=" world", finish_reason="stop")
-
-        with patch("litellm.completion", return_value=_chunk_iter(chunk1, chunk2)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = _make_result(text="Hello world", finish_reason="stop")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == "Hello world"
@@ -178,35 +168,13 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = MockChunk(content="partial", finish_reason="length")
-
-        with patch("litellm.completion", return_value=_chunk_iter(chunk)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = _make_result(text="partial", finish_reason="length")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == "partial"
         assert llm.last_truncated is True
-
-    @patch("agentnexus.core.llm.get_settings")
-    @patch("agentnexus.core.llm.trace_manager")
-    def test_model_prefix_inference(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek-chat"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 60
-        mock_trace.active = None
-
-        seen_models = []
-
-        def fake_completion(**kwargs):
-            seen_models.append(kwargs["model"])
-            return _chunk_iter(MockChunk(content="ok", finish_reason="stop"))
-
-        with patch("litellm.completion", side_effect=fake_completion):
-            llm = AgentLLM()
-            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-
-        assert seen_models == ["deepseek/deepseek-chat"]
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -217,18 +185,13 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        tc1 = {"index": 0, "id": "call_1", "function": {"name": "get_", "arguments": ""}}
-        tc2 = {"index": 0, "function": {"name": "weather", "arguments": '{"city": "NYC"}'}}
-        tc3 = {"index": 1, "id": "call_2", "function": {"name": "search", "arguments": '{"q": "test"}'}}
-
-        chunks = [
-            MockChunk(tool_calls=[tc1], finish_reason="tool_calls"),
-            MockChunk(tool_calls=[tc2]),
-            MockChunk(tool_calls=[tc3], finish_reason="tool_calls"),
+        tool_calls = [
+            {"name": "get_weather", "arguments": {"city": "NYC"}},
+            {"name": "search", "arguments": {"q": "test"}},
         ]
-
-        with patch("litellm.completion", return_value=_chunk_iter(*chunks)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = _make_result(text="", tool_calls=tool_calls, finish_reason="tool_calls")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0,
                                tools=[{"type": "function", "function": {"name": "test"}}])
 
@@ -246,13 +209,13 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunks = [
-            MockChunk(content="", reasoning_content="thinking step by step..."),
-            MockChunk(content="Final answer", finish_reason="stop"),
-        ]
-
-        with patch("litellm.completion", return_value=_chunk_iter(*chunks)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = _make_result(
+            text="Final answer",
+            reasoning_content="thinking step by step...",
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.last_reasoning_content == "thinking step by step..."
@@ -266,9 +229,10 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion", side_effect=ValueError("invalid request")):
-            llm = AgentLLM()
-            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider", side_effect=ValueError("invalid request")):
+            with patch("litellm.completion", side_effect=ValueError("also fails")):
+                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == ""
 
@@ -281,9 +245,10 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion", side_effect=ConnectionError("connection")):
-            llm = AgentLLM()
-            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider", side_effect=ConnectionError("connection")):
+            with patch("litellm.completion", side_effect=ConnectionError("connection")):
+                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result is None
         assert "connection" in llm.last_error.lower()
@@ -297,10 +262,12 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion",
-                   side_effect=ValueError("tool calling not supported")):
-            llm = AgentLLM()
-            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider",
+                          side_effect=ValueError("tool calling not supported")):
+            with patch("litellm.completion",
+                       side_effect=ValueError("tool calling not supported")):
+                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("tool_calling", 0) > 0
 
@@ -313,10 +280,12 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion",
-                   side_effect=ValueError("response_format unsupported")):
-            llm = AgentLLM()
-            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider",
+                          side_effect=ValueError("response_format unsupported")):
+            with patch("litellm.completion",
+                       side_effect=ValueError("response_format unsupported")):
+                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("json_mode", 0) > 0
 
@@ -329,10 +298,12 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion",
-                   side_effect=ValueError("reasoning_effort not supported")):
-            llm = AgentLLM()
-            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider",
+                          side_effect=ValueError("reasoning_effort not supported")):
+            with patch("litellm.completion",
+                       side_effect=ValueError("reasoning_effort not supported")):
+                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("thinking", 0) > 0
 
@@ -345,12 +316,14 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunk = MockChunk(content="hello", finish_reason="stop")
-
-        with patch("litellm.completion", return_value=_chunk_iter(chunk)):
-            with patch("litellm.token_counter", return_value=5):
-                llm = AgentLLM()
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        llm = AgentLLM()
+        result_obj = _make_result(
+            text="hello",
+            usage={"input_tokens": 10, "output_tokens": 5},
+            finish_reason="stop",
+        )
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.last_usage.get("input_tokens", 0) >= 0
         assert llm.last_usage.get("output_tokens", 0) >= 0

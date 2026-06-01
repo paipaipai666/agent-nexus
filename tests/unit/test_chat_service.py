@@ -303,9 +303,10 @@ class TestChatService:
         assert workflow_event.payload["status"] == "ok"
         assert workflow_event.payload["summary"]
         assert skill.snapshot().last_run_status == "completed"
-        sent_text = agent.run.call_args[0][0]
-        assert "Workflow Runtime Context" in sent_text
-        assert "Inspect." in sent_text
+        # Workflow context is now passed via set_workflow_context(), not embedded in user text
+        agent.set_workflow_context.assert_called()
+        ctx = agent.set_workflow_context.call_args[0][0]
+        assert "Inspect." in ctx
         snapshot = service.get_run_snapshot(run.id)
         assert any("workflow:" in item for item in snapshot.journal)
 
@@ -365,8 +366,10 @@ class TestChatService:
         service.send_message(session.id, "hello")
 
         assert skill.current == entry
-        sent_text = agent.run.call_args[0][0]
-        assert "Inspect session skill." in sent_text
+        # Workflow context is now passed via set_workflow_context(), not embedded in user text
+        agent.set_workflow_context.assert_called()
+        ctx = agent.set_workflow_context.call_args[0][0]
+        assert "Inspect session skill." in ctx
 
     def test_send_message_auto_selects_skill_when_session_has_none(self):
         from agentnexus.services.skill import SkillService
@@ -400,8 +403,10 @@ class TestChatService:
         assert "skill_auto_selected" in event_types
         auto_event = next(event for event in events if event.type == "skill_auto_selected")
         assert auto_event.payload["source"] == "deterministic"
-        sent_text = agent.run.call_args[0][0]
-        assert "Draft concise release notes." in sent_text
+        # Workflow context is now passed via set_workflow_context(), not embedded in user text
+        agent.set_workflow_context.assert_called()
+        ctx = agent.set_workflow_context.call_args[0][0]
+        assert "Draft concise release notes." in ctx
 
     @staticmethod
     def _drain_queue(service, run_id):

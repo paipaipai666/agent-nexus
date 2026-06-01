@@ -154,49 +154,45 @@ class TestRenderDiffWithColors:
         assert "\\[bold\\]" in result
 
 
-# ── side_panel._truncate ─────────────────────────────────────────
+# ── observability.tracer._truncate ─────────────────────────────────
 
 
 class TestTruncate:
     def test_short_text_unchanged(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+        from agentnexus.observability.tracer import _truncate
 
         assert _truncate("hello", 10) == "hello"
 
     def test_long_text_truncated(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+        from agentnexus.observability.tracer import _truncate
 
         result = _truncate("hello world this is long", 10)
-        assert len(result) <= 10
-        assert result.endswith("…")
+        assert len(result) > 10  # includes suffix
+        assert "截断" in result
 
     def test_exact_limit(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+        from agentnexus.observability.tracer import _truncate
 
         assert _truncate("12345", 5) == "12345"
 
-    def test_collapses_whitespace(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+    def test_default_max_len(self):
+        from agentnexus.observability.tracer import _truncate
 
-        result = _truncate("hello   world", 20)
-        assert result == "hello world"
+        short = "a" * 100
+        assert _truncate(short) == short
 
-    def test_none_input(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
-
-        assert _truncate(None, 10) == ""
-
-    def test_empty_string(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+        long_text = "a" * 6000
+        result = _truncate(long_text)
+        assert "截断" in result
 
         assert _truncate("", 10) == ""
 
     def test_zero_limit(self):
-        from agentnexus.tui.widgets.side_panel import _truncate
+        from agentnexus.observability.tracer import _truncate
 
         result = _truncate("hello", 0)
-        # limit=0 → clean[:max(0,-1)] + "…" = "" + "…" = "…"
-        assert result == "…"
+        # limit=0 → text[:0] + suffix
+        assert "截断" in result
 
 
 # ── ConfirmDialog initialization ─────────────────────────────────

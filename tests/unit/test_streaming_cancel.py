@@ -2,29 +2,10 @@
 
 Validates that streaming responses handle mid-stream exceptions gracefully.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentnexus.core.llm import AgentLLM
-
-
-class _MockStreamChunk:
-    def __init__(self, content="", finish_reason=None, usage=None):
-        self.choices = [
-            MagicMock(
-                delta=MagicMock(
-                    content=content,
-                    tool_calls=[],
-                    reasoning_content=None,
-                ),
-                finish_reason=finish_reason,
-            )
-        ]
-        self.usage = usage
-
-
-def _chunk_iter(*chunks):
-    for chunk in chunks:
-        yield chunk
+from agentnexus.core.providers.base import StreamResult
 
 
 class TestStreamingInterruption:
@@ -39,15 +20,9 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunks = [
-            _MockStreamChunk(content="", finish_reason=None),
-            _MockStreamChunk(content="Hello", finish_reason=None),
-            _MockStreamChunk(content="", finish_reason=None),
-            _MockStreamChunk(content=" world", finish_reason="stop"),
-        ]
-
-        with patch("litellm.completion", return_value=_chunk_iter(*chunks)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(text="Hello world", finish_reason="stop")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert "Hello world" in result
 
@@ -60,13 +35,9 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        chunks = [
-            _MockStreamChunk(content="Hello ", finish_reason=None),
-            _MockStreamChunk(content="world", finish_reason="stop"),
-        ]
-
-        with patch("litellm.completion", return_value=_chunk_iter(*chunks)):
-            llm = AgentLLM()
+        llm = AgentLLM()
+        result_obj = StreamResult(text="Hello world", finish_reason="stop")
+        with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert "Hello world" in result
 
@@ -79,10 +50,11 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion", side_effect=ValueError("bad request")):
-            llm = AgentLLM()
-            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-            assert result == ""
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider", side_effect=ValueError("bad request")):
+            with patch("litellm.completion", side_effect=ValueError("bad request")):
+                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+                assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -93,7 +65,8 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        with patch("litellm.completion", side_effect=RuntimeError("Connection failed")):
-            llm = AgentLLM()
-            result = llm.think([{"role": "user", "content": "hi"}])
-            assert result == ""
+        llm = AgentLLM()
+        with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("Connection failed")):
+            with patch("litellm.completion", side_effect=RuntimeError("Connection failed")):
+                result = llm.think([{"role": "user", "content": "hi"}])
+                assert result == ""

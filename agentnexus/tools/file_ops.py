@@ -21,21 +21,13 @@ LARGE_FILE_LINES = 1000
 LARGE_FILE_PREVIEW_LINES = 20
 
 
-_ALLOWED_ROOTS: list[Path] | None = None
-
-
 def _get_allowed_roots() -> list[Path]:
-    """Build the set of allowed root directories (cached)."""
-    global _ALLOWED_ROOTS
-    if _ALLOWED_ROOTS is not None:
-        return _ALLOWED_ROOTS
-
+    """Build the set of allowed root directories (recomputed each call)."""
     workspace = Path(os.getcwd()).absolute()
-    home = Path.home().absolute()
     roots = [workspace]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
-    agentnexus_home = home / ".agentnexus"
+    agentnexus_home = Path.home().absolute() / ".agentnexus"
     if agentnexus_home not in roots:
         roots.append(agentnexus_home)
 
@@ -48,7 +40,6 @@ def _get_allowed_roots() -> list[Path]:
     except Exception:
         pass
 
-    _ALLOWED_ROOTS = roots
     return roots
 
 
