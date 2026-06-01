@@ -75,6 +75,39 @@ def condense_search_result(text: str) -> str:
     return "\n".join(out) if out else text[:500]
 
 
+def condense_fetch_result(text: str) -> str:
+    """Show only URL and first few lines from web_fetch; skip full body.
+
+    Input format (from web_fetch.py):
+      [Title]
+      URL: https://...
+
+      <full body>
+
+      ---
+
+      [抓取失败] ...
+    """
+    lines = text.split("\n")
+    out = []
+    content_lines = 0
+    max_content = 5
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("URL:") or stripped.startswith("[") and "]" in stripped:
+            out.append(line)
+            content_lines = 0
+        elif content_lines < max_content:
+            out.append(line)
+            content_lines += 1
+        elif content_lines == max_content:
+            out.append("  ...")
+            content_lines += 1
+    return "\n".join(out) if out else text[:500]
+
+
 def condense_file_result(text: str) -> str:
     """Show only file metadata line from file_read; skip full file content.
 

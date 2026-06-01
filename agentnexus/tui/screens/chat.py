@@ -29,6 +29,7 @@ from agentnexus.skills import (
     validate_session_profile,
 )
 from agentnexus.tools.result_format import (
+    condense_fetch_result,
     condense_file_result,
     condense_search_result,
     extract_diff_parts,
@@ -1566,6 +1567,8 @@ class ChatScreen(Screen):
                     use_markup = False
                     if tool_lower == "web_search":
                         result = condense_search_result(result)
+                    elif tool_lower == "web_fetch":
+                        result = condense_fetch_result(result)
                     elif tool_lower == "file_read":
                         result = condense_file_result(result)
                     elif tool_lower == "subagent_run":

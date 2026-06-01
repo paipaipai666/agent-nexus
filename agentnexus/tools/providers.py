@@ -142,6 +142,7 @@ class SearchToolProvider:
         from agentnexus.tools.grep_search import grep_search
         from agentnexus.tools.kb_search import kb_search
         from agentnexus.tools.web_search import web_search
+        from agentnexus.tools.web_fetch import web_fetch
 
         before = set(executor.list_tools())
         if context.want("grep_search"):
@@ -290,6 +291,39 @@ class SearchToolProvider:
                 risk_level="low",
                 rate_limit_per_min=20,
             )
+
+        if context.want("web_fetch"):
+            executor.register_tool(
+                "web_fetch",
+                "抓取指定URL的完整网页内容并返回正文。"
+                "参数: urls(要抓取的URL,必填,单个字符串或URL数组), "
+                "extract_depth(提取深度:basic/advanced,默认basic), "
+                "format(输出格式:markdown/text,默认markdown)",
+                web_fetch,
+                param_schema={
+                    "type": "object",
+                    "properties": {
+                        "urls": {
+                            "description": "要抓取的URL，单个字符串或URL数组",
+                        },
+                        "extract_depth": {
+                            "type": "string",
+                            "enum": ["basic", "advanced"],
+                            "description": "提取深度，basic=快速，advanced=深度",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["markdown", "text"],
+                            "description": "输出格式",
+                            "default": "markdown",
+                        },
+                    },
+                    "required": ["urls"],
+                },
+                risk_level="low",
+                rate_limit_per_min=5,
+            )
+
         context.mark_registered(executor, before)
 
 
