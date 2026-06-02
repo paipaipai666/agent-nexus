@@ -130,7 +130,7 @@ def extract_and_save_memories(
         if long_term and vec and category in ("fact", "preference"):
             candidates = long_term.search(
                 query_embedding=vec, category=category,
-                limit=3, min_similarity=0.50,
+                limit=3, min_similarity=0.70,
             )
             for c in candidates:
                 if c.get("_score", 0) >= 0.90:

@@ -124,6 +124,21 @@ class LongTermMemory:
         "conversation": 90,
     }
 
+    # Score decay half-life per category (hours). None = no decay (permanent).
+    _CATEGORY_HALF_LIFE_HOURS: dict[str, int | None] = {
+        "fact": None,
+        "preference": None,
+        "note": 48,
+        # Legacy names
+        "entity_fact": None,
+        "conclusion": None,
+        "user_preference": None,
+        "tool_preference": None,
+        "task_progress": 48,
+        "error_pattern": 48,
+        "conversation": 48,
+    }
+
     def _migrate(self) -> None:
         """Apply versioned migrations."""
         current = self._get_schema_version()
@@ -134,6 +149,9 @@ class LongTermMemory:
         if current < 2:
             self._migrate_v2()
             self._set_schema_version(2)
+        if current < 3:
+            self._migrate_v3()
+            self._set_schema_version(3)
 
     def _migrate_v1(self) -> None:
         """Migration v1: Ensure all current columns exist."""
@@ -155,6 +173,13 @@ class LongTermMemory:
             self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN access_count INTEGER DEFAULT 0")
         if "superseded_by" not in cols:
             self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN superseded_by INTEGER")
+
+    def _migrate_v3(self) -> None:
+        """Migration v3: Add embedding_synced flag for ChromaDB consistency tracking."""
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "embedding_synced" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN embedding_synced INTEGER DEFAULT 1")
 
     @property
     def write_counter(self) -> int:
@@ -254,6 +279,11 @@ class LongTermMemory:
                     )
                 except Exception as e:
                     logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
+                    self._conn.execute(
+                        "UPDATE long_term_memories SET embedding_synced = 0 WHERE chroma_id = ?",
+                        (chroma_id,),
+                    )
+                    self._conn.commit()
 
             count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
 
@@ -285,7 +315,8 @@ class LongTermMemory:
                 "COALESCE(last_accessed_at, created_at) as ref_time "
                 "FROM long_term_memories "
                 "ORDER BY (importance + 0.1 * MIN(2.0, LOG(1 + COALESCE(access_count, 0)))) * 0.6 "
-                "+ (1.0 / (1.0 + (julianday('now') - julianday(COALESCE(last_accessed_at, created_at))) / 7.0)) * 0.4 ASC "
+                "+ POWER(0.5, (julianday('now') - julianday("
+                "COALESCE(last_accessed_at, created_at))) * 24.0 / 48.0) * 0.4 ASC "
                 "LIMIT ?",
                 (excess,)
             ).fetchall()
@@ -436,7 +467,7 @@ class LongTermMemory:
             try:
                 chroma_results = self._chroma_col.query(
                     query_embeddings=[query_embedding],
-                    n_results=limit * 5,  # wider net to catch entity_facts that rank lower
+                    n_results=max(limit * 5, 50),  # wider net to catch entity_facts that rank lower
                     where=where_filter,
                 )
             except Exception as e:
@@ -471,9 +502,10 @@ class LongTermMemory:
                 except (ValueError, KeyError):
                     ref = datetime.now(timezone.utc).replace(tzinfo=None)
                 age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
-                decay = 1.0 / (1.0 + age_hours / 168)
+                half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
+                decay = 2 ** (-age_hours / half_life) if half_life else 1.0
                 eff_imp = self._effective_importance(r)
-                score = sim * 0.5 + eff_imp * 0.2 + decay * 0.1 + min(1.0, 0.1 * math.log(1 + (r.get("access_count") or 0))) * 0.2
+                score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
                 scored.append((score, dict(r)))
 
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -499,7 +531,7 @@ class LongTermMemory:
         if category:
             sql += " AND category = ?"
             params.append(category)
-        rows = self._conn.execute(sql, params).fetchall()
+        rows = [dict(r) for r in self._conn.execute(sql, params).fetchall()]
         if not rows:
             return []
 
@@ -543,9 +575,10 @@ class LongTermMemory:
             except (ValueError, KeyError):
                 ref = datetime.now(timezone.utc).replace(tzinfo=None)
             age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
-            decay = 1.0 / (1.0 + age_hours / 168)
+            half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
+            decay = 2 ** (-age_hours / half_life) if half_life else 1.0
             eff_imp = self._effective_importance(r)
-            score = sim * 0.5 + eff_imp * 0.2 + decay * 0.1 + min(1.0, 0.1 * math.log(1 + (r.get("access_count") or 0))) * 0.2
+            score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
             scored.append((score, dict(r)))
 
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -613,3 +646,41 @@ class LongTermMemory:
             self._conn.commit()
             self._write_counter = 0
             logger.info("Cleared all long-term memories")
+
+    def sync_unembedded(self, embed_model) -> int:
+        """Repair: re-embed memories where embedding_synced=0.
+
+        Returns the number of memories successfully re-synced.
+        """
+        rows = self._conn.execute(
+            "SELECT id, chroma_id, content, category, importance "
+            "FROM long_term_memories WHERE embedding_synced = 0"
+        ).fetchall()
+        if not rows:
+            return 0
+
+        synced = 0
+        for r in rows:
+            try:
+                from agentnexus.rag.embeddings import embedding_to_list
+                vec = embedding_to_list(
+                    embed_model.encode(r["content"], normalize_embeddings=True)
+                )
+                self._ensure_chroma()
+                self._chroma_col.upsert(
+                    ids=[r["chroma_id"]],
+                    embeddings=[vec],
+                    documents=[r["content"]],
+                    metadatas=[{"category": r["category"], "importance": r["importance"]}],
+                )
+                self._conn.execute(
+                    "UPDATE long_term_memories SET embedding_synced = 1 WHERE id = ?",
+                    (r["id"],),
+                )
+                self._conn.commit()
+                synced += 1
+            except Exception as e:
+                logger.warning("Re-sync failed for memory %d: %s", r["id"], e)
+        if synced:
+            logger.info("Re-synced %d / %d unembedded memories", synced, len(rows))
+        return synced
