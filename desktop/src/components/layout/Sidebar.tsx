@@ -69,23 +69,31 @@ export default function Sidebar() {
 
   return (
     <nav
-      className="w-[52px] flex flex-col items-center py-3 gap-0.5 shrink-0 relative"
+      className="w-[52px] flex flex-col items-center py-2.5 gap-0.5 shrink-0 relative"
       style={{
         background: 'var(--surface-1)',
-        borderRight: '1px solid var(--border)',
+        borderRight: '1px dashed var(--border)',
       }}
     >
-      {navItems.map(({ path, icon: Icon, label, isChat }) => {
+      {navItems.map(({ path, icon: Icon, label, isChat }, idx) => {
         const isActive = isChat ? isChatActive : location.pathname === path
+
+        // Insert divider before Settings
+        const showDivider = idx === 6
+
         return (
           <div key={path} className="relative">
+            {showDivider && (
+              <div className="w-5 h-px my-1.5 opacity-30" style={{ background: 'var(--fg-faint)' }} />
+            )}
             <button
               onClick={isChat ? handleChatClick : () => navigate(path)}
               title={label}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150"
+              className="w-9 h-9 flex items-center justify-center rounded transition-all duration-150 relative"
               style={{
                 color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
                 background: isActive ? 'var(--accent-subtle)' : 'transparent',
+                boxShadow: isActive ? 'inset 0 0 0 1px rgba(232,176,110,0.12)' : 'none',
               }}
               onMouseEnter={e => {
                 if (!isActive) {
@@ -102,6 +110,13 @@ export default function Sidebar() {
                 animateIconHover(e.currentTarget.querySelector('svg') || e.currentTarget, false)
               }}
             >
+              {/* Active indicator bar */}
+              {isActive && (
+                <div
+                  className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full"
+                  style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }}
+                />
+              )}
               <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
             </button>
 
@@ -112,18 +127,18 @@ export default function Sidebar() {
                 style={{
                   background: 'var(--surface-3)',
                   border: '1px solid var(--border-strong)',
-                  borderRadius: '12px',
+                  borderRadius: 'var(--radius)',
                   boxShadow: '0 16px 64px rgba(0,0,0,0.5)',
                 }}
               >
                 <button
                   onClick={handleNewChat}
                   className="w-full flex items-center gap-3 px-4 py-3 transition-colors"
-                  style={{ borderBottom: '1px solid var(--border)' }}
+                  style={{ borderBottom: '1px dashed var(--border)' }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent-muted)' }}>
+                  <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--accent-muted)' }}>
                     <Plus size={14} style={{ color: 'var(--accent)' }} />
                   </div>
                   <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>New Chat</span>

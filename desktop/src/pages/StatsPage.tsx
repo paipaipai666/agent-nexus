@@ -14,13 +14,29 @@ export default function StatsPage() {
   }, [days])
 
   const byDate = stats.by_date || {}
-  const chartData = Object.entries(byDate).map(([date, d]: [string, any]) => ({ date, input: d.input_tokens || 0, output: d.output_tokens || 0 })).sort((a, b) => a.date.localeCompare(b.date))
+  // by_date is { date: { model: { input, output, tasks } } }
+  // Rotated files produce keys like "2026-06-02_1" — merge into base date
+  const merged: Record<string, { input: number; output: number }> = {}
+  for (const [key, models] of Object.entries(byDate) as [string, any][]) {
+    const baseDate = key.replace(/_\d+$/, '')
+    if (!merged[baseDate]) merged[baseDate] = { input: 0, output: 0 }
+    if (typeof models === 'object' && models !== null) {
+      for (const model of Object.values(models) as any[]) {
+        merged[baseDate].input += model.input || 0
+        merged[baseDate].output += model.output || 0
+      }
+    }
+  }
+  const chartData = Object.entries(merged)
+    .filter(([, d]) => d.input > 0 || d.output > 0)
+    .map(([date, d]) => ({ date, input: d.input, output: d.output }))
+    .sort((a, b) => a.date.localeCompare(b.date))
   const totalCost = stats.total_cost_cny ?? null
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload) return null
     return (
-      <div style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', borderRadius: '8px', padding: '8px 12px', fontSize: '12px' }}>
+      <div style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius)', padding: '8px 12px', fontSize: '12px' }}>
         <p style={{ color: 'var(--fg-muted)', marginBottom: '4px' }}>{label}</p>
         {payload.map((p: any) => (
           <p key={p.name} style={{ color: p.color }}>{p.name}: {p.value.toLocaleString()}</p>
@@ -33,7 +49,7 @@ export default function StatsPage() {
     <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Stats & Logs</h1>
+          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Stats &amp; Logs</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Token usage and trace logs</p>
         </div>
         <select value={days} onChange={e => setDays(Number(e.target.value))} className="input-field text-sm">
@@ -54,7 +70,7 @@ export default function StatsPage() {
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="surface-card p-3.5">
             <div className="flex items-center gap-2 mb-1.5">
-              <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: `${color}15` }}><Icon size={12} style={{ color }} /></div>
+              <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: `${color}18` }}><Icon size={12} style={{ color }} /></div>
               <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
             </div>
             <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>{value}</p>
@@ -69,11 +85,11 @@ export default function StatsPage() {
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--fg-faint)' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: 'var(--fg-faint)' }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="input" fill="var(--accent)" name="Input" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="output" fill="var(--cyan)" name="Output" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="input" fill="var(--accent)" name="Input" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="output" fill="var(--cyan)" name="Output" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

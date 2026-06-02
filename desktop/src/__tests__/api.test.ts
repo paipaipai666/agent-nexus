@@ -16,7 +16,7 @@ function mockJsonResponse(data: any, ok = true, status = 200) {
 describe('api service', () => {
   beforeEach(() => {
     mockFetch.mockReset()
-    setApiKey(null)
+    setApiKey(null as unknown as string)
   })
 
   describe('setApiKey', () => {
@@ -31,7 +31,7 @@ describe('api service', () => {
     })
 
     it('does not send API key header when key is null', async () => {
-      setApiKey(null)
+      setApiKey(null as unknown as string)
       mockFetch.mockReturnValue(mockJsonResponse({ session_id: 's1' }))
 
       await api.createSession()

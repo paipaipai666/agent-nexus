@@ -1,1 +1,9 @@
-"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("electronAPI",{minimize:()=>e.ipcRenderer.send("window-minimize"),maximize:()=>e.ipcRenderer.send("window-maximize"),close:()=>e.ipcRenderer.send("window-close"),isMaximized:()=>e.ipcRenderer.invoke("window-is-maximized"),openExternal:i=>e.ipcRenderer.send("open-external",i)});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("electronAPI", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close"),
+  isMaximized: () => electron.ipcRenderer.invoke("window-is-maximized"),
+  openExternal: (url) => electron.ipcRenderer.send("open-external", url)
+});

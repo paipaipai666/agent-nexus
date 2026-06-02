@@ -45,7 +45,7 @@ export default function SkillsPage() {
           <div key={skill.id} className="surface-card p-4 transition-all duration-150 hover:border-[var(--border-strong)]" style={{ opacity: skill.enabled ? 1 : 0.6 }}>
             <div className="flex items-start justify-between mb-2.5">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>
+                <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>
                   <Zap size={14} style={{ color: skill.enabled ? 'var(--accent)' : 'var(--fg-faint)' }} />
                 </div>
                 <h3 className="text-sm font-medium truncate" style={{ color: 'var(--fg)' }}>{skill.display_name}</h3>

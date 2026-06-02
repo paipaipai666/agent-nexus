@@ -16,7 +16,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#111318',
   })
 
   if (process.env.VITE_DEV_SERVER_URL) {

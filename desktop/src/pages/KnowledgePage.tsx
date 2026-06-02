@@ -91,7 +91,7 @@ export default function KnowledgePage() {
       <div ref={(el) => { if (el && documents.length > 0) animateEntrance(Array.from(el.querySelectorAll('.surface-card')), { stagger: 0.04 }) }} className="flex-1 overflow-y-auto space-y-1.5">
         {documents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>
+            <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>
               <FileText size={24} style={{ color: 'var(--fg-faint)' }} />
             </div>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No documents ingested yet</p>
@@ -102,7 +102,7 @@ export default function KnowledgePage() {
             return (
               <div key={i} className="surface-card p-3 flex items-center justify-between group hover:border-[var(--border-strong)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--blue-muted)' }}>
+                  <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: 'var(--blue-muted)' }}>
                     <FileText size={14} style={{ color: 'var(--blue)' }} />
                   </div>
                   <div className="min-w-0">

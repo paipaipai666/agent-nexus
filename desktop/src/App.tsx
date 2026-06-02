@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import ThemeProvider from './components/theme/ThemeProvider'
+import SessionProvider from './components/session/SessionProvider'
 import ChatPage from './pages/ChatPage'
 import KnowledgePage from './pages/KnowledgePage'
 import SkillsPage from './pages/SkillsPage'
@@ -13,8 +14,9 @@ import StatsPage from './pages/StatsPage'
 export default function App() {
   return (
     <ThemeProvider>
-      <BrowserRouter>
-        <AppShell>
+      <SessionProvider>
+        <BrowserRouter>
+          <AppShell>
           <Routes>
             <Route path="/" element={<ChatPage />} />
             <Route path="/chat/:sessionId" element={<ChatPage />} />
@@ -26,8 +28,9 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/stats" element={<StatsPage />} />
           </Routes>
-        </AppShell>
-      </BrowserRouter>
+          </AppShell>
+        </BrowserRouter>
+      </SessionProvider>
     </ThemeProvider>
   )
 }

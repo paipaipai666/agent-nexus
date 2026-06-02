@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import Sidebar from './Sidebar'
+import StatusBar from './StatusBar'
 import Titlebar from '../titlebar/Titlebar'
 
 interface AppShellProps {
@@ -16,6 +17,7 @@ export default function AppShell({ children }: AppShellProps) {
           {children}
         </main>
       </div>
+      <StatusBar />
     </div>
   )
 }

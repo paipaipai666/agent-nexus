@@ -35,7 +35,7 @@ export default function PluginsPage() {
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{enabledCount} enabled · {errorCount} errors</p>
       </div>
 
-      {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
+      {error && <div className="rounded px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -56,14 +56,14 @@ export default function PluginsPage() {
       <div className="flex-1 overflow-y-auto space-y-2">
         {plugins.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Puzzle size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+            <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Puzzle size={24} style={{ color: 'var(--fg-faint)' }} /></div>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No plugins discovered</p>
           </div>
         ) : plugins.map(plugin => (
           <div key={plugin.name} className="surface-card p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: plugin.enabled ? 'var(--green-muted)' : 'var(--surface-3)' }}>
+                <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: plugin.enabled ? 'var(--green-muted)' : 'var(--surface-3)' }}>
                   <Puzzle size={14} style={{ color: plugin.enabled ? 'var(--green)' : 'var(--fg-faint)' }} />
                 </div>
                 <div className="min-w-0">

@@ -62,7 +62,7 @@ export default function MCPPage() {
         </div>
       </div>
 
-      {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
+      {error && <div className="rounded px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
 
       {/* Summary Cards */}
       <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.08 }) }} className="grid grid-cols-4 gap-3">
@@ -88,7 +88,7 @@ export default function MCPPage() {
       <div className="flex-1 overflow-y-auto space-y-2">
         {servers.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Server size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+            <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Server size={24} style={{ color: 'var(--fg-faint)' }} /></div>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No MCP servers configured</p>
           </div>
         ) : servers.map(server => (

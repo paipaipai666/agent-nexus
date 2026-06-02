@@ -115,7 +115,7 @@ export default function MemoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--surface-2)' }}>
+      <div className="flex gap-1 p-1 rounded w-fit" style={{ background: 'var(--surface-2)' }}>
         {(['long', 'short'] as const).map(t => (
           <button key={t} onClick={() => { setTab(t); if (t === 'long') setSearchResults(null) }} className="px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150" style={{ background: tab === t ? 'var(--accent)' : 'transparent', color: tab === t ? 'white' : 'var(--fg-muted)' }}>
             {t === 'long' ? `Long-term (${longMemories.length})` : `Short-term (${shortMessages.length})`}
@@ -139,7 +139,7 @@ export default function MemoryPage() {
 
       {/* Reflect result */}
       {reflectResult && (
-        <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--cyan-muted)', color: 'var(--cyan)' }}>
+        <div className="text-xs px-3 py-2 rounded" style={{ background: 'var(--cyan-muted)', color: 'var(--cyan)' }}>
           {reflectResult}
           <button onClick={() => setReflectResult(null)} className="ml-2 underline">dismiss</button>
         </div>
@@ -159,7 +159,7 @@ export default function MemoryPage() {
         {tab === 'long' ? (
           displayMemories.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+              <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>{searchResults ? 'No results found.' : 'No long-term memories.'}</p>
             </div>
           ) : displayMemories.map((m, i) => {
@@ -187,11 +187,11 @@ export default function MemoryPage() {
         ) : (
           shortMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+              <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No conversation history.</p>
             </div>
           ) : shortMessages.map((m, i) => (
-            <div key={i} className="rounded-lg px-3 py-2 text-sm animate-slide-up" style={{ animationDelay: `${i * 20}ms`, background: m.role === 'user' ? 'var(--accent-subtle)' : 'var(--surface-2)', border: `1px solid ${m.role === 'user' ? 'var(--accent-muted)' : 'var(--border)'}`, marginLeft: m.role === 'user' ? '2rem' : 0, marginRight: m.role !== 'user' ? '2rem' : 0 }}>
+            <div key={i} className="rounded px-3 py-2 text-sm animate-slide-up" style={{ animationDelay: `${i * 20}ms`, background: m.role === 'user' ? 'var(--accent-subtle)' : 'var(--surface-2)', border: `1px solid ${m.role === 'user' ? 'var(--accent-muted)' : 'var(--border)'}`, marginLeft: m.role === 'user' ? '2rem' : 0, marginRight: m.role !== 'user' ? '2rem' : 0 }}>
               <p className="text-xs mb-1 font-medium" style={{ color: m.role === 'user' ? 'var(--accent)' : 'var(--fg-faint)' }}>{m.role}</p>
               <p style={{ color: 'var(--fg)' }}>{m.content}</p>
             </div>

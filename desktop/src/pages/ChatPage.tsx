@@ -1,15 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  Send, Square, Loader2, Undo2, Redo2, History,
-  Wrench, CheckSquare, Server, Cpu,
-  PanelRightOpen, PanelRightClose, Sparkles
+  Send, Square, Undo2, Redo2, History,
+  Wrench, CheckSquare, Server,
+  PanelRightOpen, PanelRightClose
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
 import { agentWs } from '../services/ws'
 import { animateMessage, animateDropDown, animateScaleIn } from '../utils/animations'
+import { useSession } from '../components/session/SessionProvider'
 
 interface Message {
   id: string
@@ -34,10 +35,68 @@ const COMMAND_DEFS = [
   { cmd: '/switch', desc: 'Switch session (usage: /switch <id>)' },
 ]
 
-// Track which message IDs have already been animated (survives re-renders)
 const animatedIds = new Set<string>()
 
-// Memoized message bubble — only re-renders when its own props change
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/* ─── Tool Card (terminal style) ─── */
+const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
+  const statusColor = msg.toolStatus === 'running' ? 'var(--amber)' : msg.toolStatus === 'error' ? 'var(--red)' : 'var(--green)'
+  const statusBg = msg.toolStatus === 'running' ? 'var(--amber-muted)' : msg.toolStatus === 'error' ? 'var(--red-muted)' : 'var(--green-muted)'
+  const statusLabel = msg.toolStatus === 'running' ? 'running' : msg.toolStatus === 'error' ? 'error' : 'done'
+
+  // Parse diff content if present
+  const lines = msg.content.split('\n')
+  const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
+
+  return (
+    <div className="my-2.5 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[11px]" style={{ background: 'var(--surface-3)', borderBottom: '1px solid var(--border)' }}>
+        <div
+          className="w-4 h-4 rounded-sm flex items-center justify-center text-[9px] font-semibold"
+          style={{ background: statusBg, color: statusColor }}
+        >
+          {(msg.toolName || 'T')[0].toUpperCase()}
+        </div>
+        <span style={{ color: 'var(--accent)' }}>{msg.toolName || 'tool'}</span>
+        <div className="ml-auto flex items-center gap-1 text-[10px] font-medium" style={{ color: statusColor }}>
+          {msg.toolStatus === 'running' && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
+          )}
+          {msg.toolStatus === 'done' && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+          )}
+          {msg.toolStatus === 'error' && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          )}
+          {statusLabel}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="px-3.5 py-2.5 font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-secondary)' }}>
+        {hasDiff ? (
+          <div className="font-mono text-xs leading-[1.7]">
+            {lines.map((line, i) => {
+              if (line.startsWith('@@')) return <div key={i} style={{ color: 'var(--blue)' }}>{line}</div>
+              if (line.startsWith('+') && !line.startsWith('+++')) return <div key={i} style={{ color: 'var(--green)' }}>{line}</div>
+              if (line.startsWith('-') && !line.startsWith('---')) return <div key={i} style={{ color: 'var(--red)' }}>{line}</div>
+              if (line.startsWith('+++') || line.startsWith('---')) return <div key={i} style={{ color: 'var(--fg-faint)' }}>{line}</div>
+              return <div key={i}>{line || ' '}</div>
+            })}
+          </div>
+        ) : (
+          <pre className="whitespace-pre-wrap">{msg.content}</pre>
+        )}
+      </div>
+    </div>
+  )
+})
+
+/* ─── Message (timeline style) ─── */
 const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message }) {
   return (
     <div
@@ -47,31 +106,51 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
           animateMessage(el, msg.role)
         }
       }}
-      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+      className="flex gap-3.5 py-3.5"
+      style={{ borderBottom: '1px dashed rgba(255,255,255,0.03)' }}
     >
-      <div className={`max-w-[80%] ${msg.role === 'user' ? 'rounded-2xl rounded-br-md' : msg.role === 'tool' ? 'rounded-lg' : 'rounded-2xl rounded-bl-md'} px-4 py-2.5`} style={{
-        background: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--surface-2)' : msg.role === 'system' ? 'var(--surface-2)' : 'var(--surface-2)',
-        border: msg.role === 'tool' ? '1px solid var(--border)' : msg.role === 'system' ? '1px solid var(--border-subtle)' : 'none',
-        color: msg.role === 'user' ? 'white' : 'var(--fg)',
-      }}>
-        {msg.toolStatus === 'running' && <Loader2 size={12} className="inline mr-1.5 animate-spin" style={{ color: 'var(--accent)' }} />}
-        {msg.role === 'tool' && <span className="text-xs font-mono font-medium mr-1.5" style={{ color: 'var(--accent)' }}>{msg.toolName}</span>}
-        {msg.role === 'assistant' ? (
-          <div className="markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+      {/* Timestamp */}
+      <span className="font-mono text-[11px] w-10 shrink-0 pt-0.5 text-right" style={{ color: 'var(--fg-faint)' }}>
+        {formatTime(msg.timestamp)}
+      </span>
+
+      {/* Role label */}
+      <span
+        className="font-mono text-[10px] font-semibold uppercase tracking-wider w-11 shrink-0 pt-[3px] text-right"
+        style={{ color: msg.role === 'user' ? 'var(--accent)' : 'var(--blue)' }}
+      >
+        {msg.role === 'user' ? 'user' : msg.role === 'tool' ? 'tool' : msg.role === 'system' ? 'sys' : 'nexus'}
+      </span>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        {msg.role === 'tool' ? (
+          <ToolCard msg={msg} />
+        ) : msg.role === 'user' ? (
+          <div
+            className="text-[13px] px-3.5 py-2 rounded-sm"
+            style={{
+              background: 'var(--accent-subtle)',
+              borderLeft: '2px solid var(--accent)',
+              borderRadius: '0 var(--radius) var(--radius) 0',
+              color: 'var(--fg)',
+            }}
+          >
+            {msg.content}
           </div>
         ) : msg.role === 'system' ? (
           <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>{msg.content}</pre>
-        ) : msg.role === 'tool' ? (
-          <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-secondary)' }}>{msg.content}</pre>
         ) : (
-          <span className="text-sm">{msg.content}</span>
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+          </div>
         )}
       </div>
     </div>
   )
 })
 
+/* ─── Main Chat Page ─── */
 export default function ChatPage() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const [messages, setMessages] = useState<Message[]>([])
@@ -79,7 +158,7 @@ export default function ChatPage() {
   const [isRunning, setIsRunning] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
-  const [confirmRequest, setConfirmRequest] = useState<{summary: string} | null>(null)
+  const [confirmRequest, setConfirmRequest] = useState<{ summary: string } | null>(null)
   const currentAssistantIdRef = useRef<string | null>(null)
   const currentReasoningIdRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -87,7 +166,6 @@ export default function ChatPage() {
   const msgCounterRef = useRef(0)
   const messageQueueRef = useRef<string[]>([])
 
-  // Token batching buffer — accumulates tokens between animation frames
   const tokenBufferRef = useRef<string>('')
   const tokenFlushRef = useRef<number>(0)
 
@@ -102,11 +180,11 @@ export default function ChatPage() {
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
   const [showCheckpoints, setShowCheckpoints] = useState(false)
 
-  // Command palette
   const [showPalette, setShowPalette] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
 
-  // Throttled scroll — at most once per animation frame
+  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo } = useSession()
+
   const scrollRafRef = useRef<number>(0)
   const scrollToBottom = useCallback(() => {
     if (scrollRafRef.current) return
@@ -116,32 +194,17 @@ export default function ChatPage() {
     })
   }, [])
 
-  // Clean tool message: "Action: name[{args}]\nObservation: result" → show name + summary
   const cleanToolContent = (content: string): { name: string; display: string } => {
     const actionMatch = content.match(/^Action:\s*(\w+)\[/)
     const name = actionMatch ? actionMatch[1] : 'tool'
-    // Extract observation part
     const obsIdx = content.indexOf('\nObservation:')
     let display = obsIdx >= 0 ? content.slice(obsIdx + 13).trim() : content
-    // Truncate long results for display
     if (display.length > 500) display = display.slice(0, 500) + '\n...(truncated)'
     return { name, display }
   }
 
-  // Load and display STM messages (used by restore, undo, redo)
-  //
-  // STM stores the raw agent conversation: user → assistant(thought) → tool → … → system([最终答案]).
-  // We need to reconstruct a clean user-facing view:
-  //   - user messages shown as-is
-  //   - intermediate assistant reasoning → shown as system messages (matches live "thinking" event)
-  //   - tool messages are kept (show what the agent did)
-  //   - [最终答案] content is extracted and shown as the assistant's reply
-  //   - [会话摘要] is shown as a collapsed system note (context was compacted)
-  //   - [上下文已裁剪] / [恢复文件] are hidden
   const loadAndDisplayMessages = useCallback(async () => {
     try {
-      // Prefer journal-based history (full, no compaction loss).
-      // Fall back to STM if history endpoint unavailable (e.g. old sessions).
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
         const hist = await api.listSessionHistory()
@@ -154,16 +217,10 @@ export default function ChatPage() {
       const transformed: Message[] = []
       let idx = 0
       const ts = (m: any) => new Date(m.ts || Date.now())
-
-      // Track pending tool messages for the current turn, so we can
-      // group them before the final answer.
       let pendingTools: Message[] = []
 
       const flushPendingTools = () => {
-        for (const t of pendingTools) {
-          t.id = `h-${idx++}`
-          transformed.push(t)
-        }
+        for (const t of pendingTools) { t.id = `h-${idx++}`; transformed.push(t) }
         pendingTools = []
       }
 
@@ -171,106 +228,70 @@ export default function ChatPage() {
         const role = m.role
         const content = (m.content || '').trim()
 
-        // --- Hidden markers ---
         if (role === 'system' && content.startsWith('[上下文已裁剪]')) continue
         if (role === 'system' && content.startsWith('[恢复文件]')) continue
 
-        // --- [最终答案] → show as assistant reply ---
         if (role === 'system' && content.startsWith('[最终答案]')) {
           const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
-          if (answer) {
-            flushPendingTools()
-            transformed.push({
-              id: `h-${idx++}`,
-              role: 'assistant',
-              content: answer,
-              timestamp: ts(m),
-            })
-          }
+          if (answer) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
           continue
         }
 
-        // --- [会话摘要] → show as system note (context was compacted) ---
         if (role === 'system' && content.startsWith('[会话摘要]')) {
           const summary = content.replace(/^\[会话摘要\]\s*/, '').trim()
           if (summary) {
             flushPendingTools()
-            // Shorten for display but keep it visible
             const display = summary.length > 300 ? summary.slice(0, 300) + '…' : summary
-            transformed.push({
-              id: `h-${idx++}`,
-              role: 'system',
-              content: `[Context compacted] ${display}`,
-              timestamp: ts(m),
-            })
+            transformed.push({ id: `h-${idx++}`, role: 'system', content: `[Context compacted] ${display}`, timestamp: ts(m) })
           }
           continue
         }
 
-        // --- User messages ---
-        if (role === 'user') {
-          flushPendingTools()
-          transformed.push({
-            id: `h-${idx++}`,
-            role: 'user',
-            content: content,
-            timestamp: ts(m),
-          })
-          continue
-        }
+        if (role === 'user') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'user', content, timestamp: ts(m) }); continue }
 
-        // --- Tool messages → collect, flush before next final answer ---
         if (role === 'tool') {
           const { name, display } = cleanToolContent(m.content)
-          pendingTools.push({
-            id: '', // assigned on flush
-            role: 'tool',
-            content: display,
-            toolName: name,
-            toolStatus: 'done',
-            timestamp: ts(m),
-          })
+          pendingTools.push({ id: '', role: 'tool', content: display, toolName: name, toolStatus: 'done', timestamp: ts(m) })
           continue
         }
 
-        // --- Assistant reasoning fragments → show as system (matches live "thinking" event) ---
-        if (role === 'assistant') {
-          flushPendingTools()
-          transformed.push({
-            id: `h-${idx++}`,
-            role: 'system',
-            content: content,
-            timestamp: ts(m),
-          })
-          continue
-        }
+        if (role === 'assistant') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
 
-        // --- Other system messages → show if meaningful ---
-        if (role === 'system' && content.length > 0) {
-          flushPendingTools()
-          transformed.push({
-            id: `h-${idx++}`,
-            role: 'system',
-            content: content,
-            timestamp: ts(m),
-          })
-        }
+        if (role === 'system' && content.length > 0) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }) }
       }
 
-      // Flush any trailing tool messages (edge case: session ended mid-tool)
       flushPendingTools()
-
       setMessages(transformed)
     } catch (err) { console.error('Failed to load messages:', err) }
   }, [])
 
-  // BUG 3 fix: Register WS handlers FIRST via ref, connect AFTER state is set
   const sessionIdRef = useRef<string | null>(null)
 
-  // Init session
+  // Update global session context
+  useEffect(() => {
+    setGlobalSessionId(sessionId)
+  }, [sessionId, setGlobalSessionId])
+
+  useEffect(() => {
+    if (runtimeStatus?.model_id) {
+      setModelName(runtimeStatus.model_id.split('/').pop() || runtimeStatus.model_id)
+    }
+    if (runtimeStatus?.ctx_max > 0) {
+      setContextUsed(Math.round(runtimeStatus.stm_tokens / runtimeStatus.ctx_max * 100))
+    }
+    if (runtimeStatus) {
+      setRuntimeInfo({
+        stmTokens: runtimeStatus.stm_tokens,
+        ctxMax: runtimeStatus.ctx_max,
+        totalInput: runtimeStatus.total_usage?.input_tokens,
+        totalOutput: runtimeStatus.total_usage?.output_tokens,
+        stepCount: runtimeStatus.step_count,
+      })
+    }
+  }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
+
   useEffect(() => {
     const initNew = (sid: string) => {
-      // New session: clear everything immediately
       sessionIdRef.current = sid
       setSessionId(sid)
       setMessages([])
@@ -279,19 +300,15 @@ export default function ChatPage() {
       currentReasoningIdRef.current = null
       messageQueueRef.current = []
       agentWs.connect(sid)
-      // Clear server-side STM so old session messages don't leak
       api.clearShortMemory().catch(() => {})
-      // Load HUD data
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
     }
 
     const initRestore = (sid: string) => {
-      // Restoring existing session: load history
       sessionIdRef.current = sid
       setSessionId(sid)
       agentWs.connect(sid)
       loadAndDisplayMessages().catch(() => {})
-      // Load HUD data
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getMcpStatus().then(setMcpStatus).catch(() => {})
@@ -308,7 +325,6 @@ export default function ChatPage() {
     return () => agentWs.disconnect()
   }, [routeSessionId])
 
-  // WS events — registered once, uses refs for current state
   useEffect(() => {
     const unsubs = [
       agentWs.on('thinking', (data) => {
@@ -327,7 +343,6 @@ export default function ChatPage() {
         currentReasoningIdRef.current = null
         const tid = currentAssistantIdRef.current
         if (tid) {
-          // Batch token updates — buffer content and flush once per animation frame
           tokenBufferRef.current += data.content
           if (!tokenFlushRef.current) {
             tokenFlushRef.current = requestAnimationFrame(() => {
@@ -351,7 +366,6 @@ export default function ChatPage() {
         else { const nid = `r-${++msgCounterRef.current}`; currentReasoningIdRef.current = nid; setMessages(prev => [...prev, { id: nid, role: 'system', content: data.content, timestamp: new Date() }]) }
       }),
       agentWs.on('answer', (data) => {
-        // Flush any buffered tokens before applying the final answer
         if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
         tokenBufferRef.current = ''
         const tid = currentAssistantIdRef.current
@@ -365,7 +379,7 @@ export default function ChatPage() {
       }),
       agentWs.on('error', (data) => { setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: `Error: ${data.message}`, timestamp: new Date() }]); setIsRunning(false); setCurrentRunId(null); processQueue() }),
       agentWs.on('done', () => { setIsRunning(false); setCurrentRunId(null); processQueue() }),
-      agentWs.on('confirm_request', (data) => { setConfirmRequest({summary: data.summary}) }),
+      agentWs.on('confirm_request', (data) => { setConfirmRequest({ summary: data.summary }) }),
     ]
     return () => {
       unsubs.forEach(u => u())
@@ -422,7 +436,6 @@ export default function ChatPage() {
       case '/sessions': try { const { sessions } = await api.getRecentSessions(10); addSys(sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')) } catch (e: any) { addSys(`Sessions failed: ${e.message}`) }; break
       case '/switch':
         if (!args) { addSys('Usage: /switch <session_id>'); break }
-        // BUG 7 fix: navigate directly — the init useEffect will handle restore
         window.location.href = `/chat/${args}`
         break
       default: addSys(`Unknown command: ${cmd}. Type /help for commands.`)
@@ -440,7 +453,7 @@ export default function ChatPage() {
       setVersionStatus(await api.getVersionStatus())
       setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
       await loadAndDisplayMessages()
-    } catch {}
+    } catch { }
   }
   const handleRedo = async () => {
     try {
@@ -448,7 +461,7 @@ export default function ChatPage() {
       setVersionStatus(await api.getVersionStatus())
       setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
       await loadAndDisplayMessages()
-    } catch {}
+    } catch { }
   }
 
   const filteredCommands = COMMAND_DEFS.filter(c => c.cmd.startsWith(paletteFilter))
@@ -458,15 +471,22 @@ export default function ChatPage() {
       {/* Main Chat */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+        <div className="flex-1 overflow-y-auto px-8 py-6">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full gap-4 animate-fade-in">
-              <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent-muted), var(--cyan-muted))', border: '1px solid var(--border)' }}>
-                <Sparkles size={28} style={{ color: 'var(--accent)' }} />
+            <div className="flex flex-col items-center justify-center h-full gap-5 animate-fade-in">
+              <div
+                className="font-mono text-3xl font-semibold tracking-wider opacity-80"
+                style={{ color: 'var(--accent)', textShadow: '0 0 20px var(--accent-glow)' }}
+              >
+                NEXUS
               </div>
               <div className="text-center">
-                <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Start a conversation</p>
-                <p className="text-sm mt-1" style={{ color: 'var(--fg-muted)' }}>Type <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: 'var(--surface-3)', color: 'var(--fg-secondary)' }}>/help</kbd> for available commands</p>
+                <p className="text-[15px] italic" style={{ fontFamily: 'var(--font-serif)', color: 'var(--fg-muted)' }}>
+                  Your developer co-pilot awaits.
+                </p>
+                <p className="text-xs mt-2 font-mono" style={{ color: 'var(--fg-faint)' }}>
+                  Type <kbd className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--fg-secondary)' }}>/help</kbd> for commands · <kbd className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--fg-secondary)' }}>Ctrl+K</kbd> palette
+                </p>
               </div>
             </div>
           )}
@@ -478,11 +498,11 @@ export default function ChatPage() {
 
         {/* Confirm */}
         {confirmRequest && (
-          <div ref={(el) => { if (el) animateScaleIn(el) }} className="mx-5 mb-3 rounded-xl p-4" style={{ background: 'var(--amber-muted)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <div ref={(el) => { if (el) animateScaleIn(el) }} className="mx-8 mb-3 rounded p-4" style={{ background: 'var(--amber-muted)', border: '1px solid rgba(224,190,82,0.3)' }}>
             <div className="text-sm font-medium mb-2" style={{ color: 'var(--amber)' }}>Confirmation Required</div>
-            <pre className="text-xs rounded-lg p-2.5 mb-3 overflow-auto max-h-32" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
+            <pre className="text-xs rounded p-2.5 mb-3 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
             <div className="flex gap-2">
-              <button onClick={() => handleConfirm(true)} className="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors" style={{ background: 'var(--amber)', color: 'var(--surface-0)' }}>Approve</button>
+              <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
               <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
             </div>
           </div>
@@ -490,7 +510,7 @@ export default function ChatPage() {
 
         {/* Command Palette */}
         {showPalette && filteredCommands.length > 0 && (
-          <div ref={(el) => { if (el) animateDropDown(el) }} className="mx-5 mb-2 rounded-xl overflow-hidden" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+          <div ref={(el) => { if (el) animateDropDown(el) }} className="mx-8 mb-2 rounded overflow-hidden" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
             {filteredCommands.map(c => (
               <button key={c.cmd} onClick={() => handlePaletteSelect(c.cmd)} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors" style={{ color: 'var(--fg)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>
@@ -501,47 +521,72 @@ export default function ChatPage() {
         )}
 
         {/* Input Area */}
-        <div className="p-4 pt-0">
-          <div className="rounded-xl p-3" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
-            <div className="flex items-end gap-2">
-              <textarea ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={isRunning ? "Agent running... messages will be queued" : "Type a message... (/ for commands)"} className="flex-1 bg-transparent text-sm resize-none focus:outline-none max-h-32" style={{ color: 'var(--fg)' }} rows={1} />
+        <div className="px-8 pb-4">
+          <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+            <div className="flex items-end gap-2.5 p-3.5">
+              <span className="font-mono text-sm pt-px shrink-0" style={{ color: 'var(--accent)', textShadow: '0 0 8px var(--accent-glow)' }}>&gt;</span>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder={isRunning ? "Agent running... messages will be queued" : "Type a message... (/ for commands)"}
+                className="flex-1 bg-transparent text-sm resize-none focus:outline-none max-h-32"
+                style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
+                rows={1}
+              />
               {isRunning ? (
-                <button onClick={handleCancel} className="w-8 h-8 flex items-center justify-center rounded-lg transition-all" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
+                <button onClick={handleCancel} className="w-8 h-8 flex items-center justify-center rounded transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
               ) : (
-                <button onClick={handleSend} disabled={!input.trim()} className="w-8 h-8 flex items-center justify-center rounded-lg transition-all" style={{ background: input.trim() ? 'var(--accent)' : 'var(--surface-3)', color: input.trim() ? 'white' : 'var(--fg-faint)' }}><Send size={14} /></button>
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="w-8 h-8 flex items-center justify-center rounded transition-all shrink-0"
+                  style={{
+                    background: input.trim() ? 'var(--accent)' : 'var(--surface-3)',
+                    color: input.trim() ? 'var(--surface-0)' : 'var(--fg-faint)',
+                    boxShadow: input.trim() ? '0 0 12px var(--accent-glow)' : 'none',
+                  }}
+                >
+                  <Send size={14} />
+                </button>
               )}
             </div>
 
-            {/* HUD */}
-            <div className="mt-2.5 flex items-center gap-3 text-xs overflow-x-auto" style={{ color: 'var(--fg-faint)' }}>
+            {/* HUD row */}
+            <div className="flex items-center gap-1 px-3.5 py-2 font-mono text-[11px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px dashed rgba(255,255,255,0.04)', color: 'var(--fg-secondary)' }}>
               {runtimeStatus && (
-                <span className="flex items-center gap-1 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>
-                  <Cpu size={11} />
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }} />
                   {runtimeStatus.model_id?.split('/').pop() || runtimeStatus.model_id}
                 </span>
               )}
+              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
               {runtimeStatus && (
-                <span className="shrink-0" title={`STM: ${runtimeStatus.stm_tokens} / ${runtimeStatus.ctx_max}`}>
+                <span className="shrink-0">
                   ctx {Math.round(runtimeStatus.stm_tokens / 1000)}k/{Math.round(runtimeStatus.ctx_max / 1000)}k ({runtimeStatus.ctx_max > 0 ? Math.round(runtimeStatus.stm_tokens / runtimeStatus.ctx_max * 100) : 0}%)
                 </span>
               )}
+              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
               {runtimeStatus?.total_usage && (
                 <span className="shrink-0">in:{(runtimeStatus.total_usage.input_tokens || 0).toLocaleString()} out:{(runtimeStatus.total_usage.output_tokens || 0).toLocaleString()}</span>
               )}
+              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
               {versionStatus?.head && (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
                   {versionStatus.head.id?.slice(0, 8)}
                 </span>
               )}
+              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
               <div className="flex items-center gap-0.5 shrink-0">
-                <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}><Undo2 size={11} /></button>
-                <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}><Redo2 size={11} /></button>
-                <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}><History size={11} /></button>
+                <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={11} /></button>
+                <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={11} /></button>
+                <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={11} /></button>
               </div>
               {messageQueueRef.current.length > 0 && <span className="shrink-0" style={{ color: 'var(--amber)' }}>Queue: {messageQueueRef.current.length}</span>}
-              <span className="ml-auto shrink-0 font-mono">{sessionId?.slice(0, 12)}</span>
-              <button onClick={() => setShowSidePanel(!showSidePanel)} className="p-0.5 rounded transition-colors shrink-0" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}>
+              <span className="ml-auto shrink-0 font-mono" style={{ color: 'var(--fg-faint)' }}>{sessionId?.slice(0, 12)}</span>
+              <button onClick={() => setShowSidePanel(!showSidePanel)} className="p-0.5 rounded transition-colors shrink-0 ml-1 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}>
                 {showSidePanel ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
               </button>
             </div>
@@ -550,13 +595,13 @@ export default function ChatPage() {
 
         {/* Checkpoint Overlay */}
         {showCheckpoints && (
-          <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 16px 64px rgba(0,0,0,0.5)' }}>
-            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="absolute bottom-28 left-5 w-96 rounded overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 16px 64px rgba(0,0,0,0.5)' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px dashed var(--border)' }}>
               <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
               <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>
             </div>
             {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>No checkpoints</p> : checkpoints.map(cp => (
-              <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border-subtle)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
+              <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px dashed var(--border-subtle)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
                 <div className="flex items-center gap-2">
                   {cp.is_head && <span style={{ color: 'var(--accent)' }}>→</span>}
                   <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{cp.id}</span>
@@ -570,30 +615,30 @@ export default function ChatPage() {
 
       {/* Side Panel */}
       {showSidePanel && (
-        <div className="w-72 flex flex-col overflow-hidden shrink-0" style={{ background: 'var(--surface-1)', borderLeft: '1px solid var(--border)' }}>
-          <div className="flex" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="w-[260px] flex flex-col overflow-hidden shrink-0" style={{ background: 'var(--surface-1)', borderLeft: '1px dashed var(--border)' }}>
+          <div className="flex" style={{ borderBottom: '1px dashed var(--border)' }}>
             {(['tools', 'todo', 'mcp', 'version'] as const).map(tab => (
-              <button key={tab} onClick={() => setSidePanelTab(tab)} className="flex-1 py-2.5 text-xs font-medium transition-colors relative" style={{ color: sidePanelTab === tab ? 'var(--accent)' : 'var(--fg-muted)' }}>
+              <button key={tab} onClick={() => setSidePanelTab(tab)} className="flex-1 py-2.5 text-xs font-medium transition-colors relative" style={{ background: 'none', border: 'none', color: sidePanelTab === tab ? 'var(--accent)' : 'var(--fg-muted)' }}>
                 {tab === 'tools' && <Wrench size={11} className="inline mr-1" />}
                 {tab === 'todo' && <CheckSquare size={11} className="inline mr-1" />}
                 {tab === 'mcp' && <Server size={11} className="inline mr-1" />}
                 {tab === 'version' && <History size={11} className="inline mr-1" />}
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                {sidePanelTab === tab && <div className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full" style={{ background: 'var(--accent)' }} />}
+                {sidePanelTab === tab && <div className="absolute bottom-0 left-4 right-4 h-0.5 rounded-full" style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }} />}
               </button>
             ))}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-            {sidePanelTab === 'tools' && (registeredTools.length === 0 ? <p className="text-xs py-4 text-center" style={{ color: 'var(--fg-faint)' }}>Tools registered on agent start</p> : registeredTools.map(tool => (
-              <div key={tool.name} className="flex items-center gap-2 text-xs py-1.5 px-2 rounded-md" style={{ color: 'var(--fg-secondary)' }}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: tool.risk === 'high' ? 'var(--red)' : tool.risk === 'medium' ? 'var(--amber)' : 'var(--green)' }} />
+            {sidePanelTab === 'tools' && (registeredTools.length === 0 ? <p className="text-xs py-4 text-center font-mono" style={{ color: 'var(--fg-faint)' }}>Tools registered on agent start</p> : registeredTools.map(tool => (
+              <div key={tool.name} className="flex items-center gap-2 text-xs py-1.5 px-2 rounded" style={{ color: 'var(--fg-secondary)' }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: tool.risk === 'high' ? 'var(--red)' : tool.risk === 'medium' ? 'var(--amber)' : 'var(--green)', boxShadow: `0 0 4px ${tool.risk === 'high' ? 'var(--red-muted)' : tool.risk === 'medium' ? 'var(--amber-muted)' : 'var(--green-muted)'}` }} />
                 <span className="font-mono">{tool.name}</span>
               </div>
             )))}
 
             {sidePanelTab === 'todo' && (todos.length === 0 ? <p className="text-xs py-4 text-center" style={{ color: 'var(--fg-faint)' }}>No todo items</p> : todos.map(todo => (
-              <div key={todo.id} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded-md">
+              <div key={todo.id} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded">
                 <span className="mt-0.5" style={{ color: todo.status === 'done' ? 'var(--green)' : todo.status === 'in_progress' ? 'var(--accent)' : 'var(--fg-faint)' }}>{todo.status === 'done' ? '✓' : todo.status === 'in_progress' ? '→' : '·'}</span>
                 <span style={{ color: todo.status === 'done' ? 'var(--fg-faint)' : 'var(--fg)', textDecoration: todo.status === 'done' ? 'line-through' : 'none' }}>{todo.description}</span>
               </div>
@@ -601,13 +646,13 @@ export default function ChatPage() {
 
             {sidePanelTab === 'mcp' && (!mcpStatus ? <p className="text-xs py-4 text-center" style={{ color: 'var(--fg-faint)' }}>Loading...</p> : <>
               <div className="flex items-center gap-2 text-xs mb-2 px-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: mcpStatus.started ? 'var(--green)' : 'var(--fg-faint)' }} />
+                <span className="w-2 h-2 rounded-full" style={{ background: mcpStatus.started ? 'var(--green)' : 'var(--fg-faint)', boxShadow: mcpStatus.started ? '0 0 6px var(--green-muted)' : 'none' }} />
                 <span style={{ color: 'var(--fg-secondary)' }}>{mcpStatus.started ? 'Running' : 'Not started'}</span>
               </div>
               {(mcpStatus.servers || []).map((s: any) => (
-                <div key={s.name} className="flex items-center justify-between text-xs py-1.5 px-2 rounded-md" style={{ color: 'var(--fg-secondary)' }}>
+                <div key={s.name} className="flex items-center justify-between text-xs py-1.5 px-2 rounded" style={{ color: 'var(--fg-secondary)' }}>
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s.connected ? 'var(--green)' : 'var(--red)' }} />
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s.connected ? 'var(--green)' : 'var(--red)', boxShadow: `0 0 4px ${s.connected ? 'var(--green-muted)' : 'var(--red-muted)'}` }} />
                     <span className="truncate">{s.name}</span>
                   </div>
                   <span className="shrink-0 ml-2" style={{ color: 'var(--fg-faint)' }}>{s.tool_names?.length || 0} tools</span>
@@ -622,10 +667,10 @@ export default function ChatPage() {
                   <button onClick={handleUndo} disabled={!versionStatus.can_undo} className="btn-ghost text-xs flex items-center gap-1 flex-1 justify-center"><Undo2 size={11} /> Undo</button>
                   <button onClick={handleRedo} disabled={!versionStatus.can_redo} className="btn-ghost text-xs flex items-center gap-1 flex-1 justify-center"><Redo2 size={11} /> Redo</button>
                 </div>
-                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
-                  <p className="text-xs mb-1.5" style={{ color: 'var(--fg-faint)' }}>Recent:</p>
+                <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '8px' }}>
+                  <p className="text-xs mb-1.5 font-mono" style={{ color: 'var(--fg-faint)' }}>Recent:</p>
                   {checkpoints.map(cp => (
-                    <div key={cp.id} className="text-xs py-1" style={{ color: cp.is_head ? 'var(--accent)' : 'var(--fg-faint)' }}>{cp.is_head ? '→ ' : '  '}{cp.id} — {cp.question?.slice(0, 30) || '?'}</div>
+                    <div key={cp.id} className="text-xs py-1 font-mono" style={{ color: cp.is_head ? 'var(--accent)' : 'var(--fg-faint)' }}>{cp.is_head ? '→ ' : '  '}{cp.id} — {cp.question?.slice(0, 30) || '?'}</div>
                   ))}
                 </div>
               </div>

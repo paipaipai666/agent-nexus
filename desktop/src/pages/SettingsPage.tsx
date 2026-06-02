@@ -52,7 +52,7 @@ export default function SettingsPage() {
     <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
       <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Settings</h1>
 
-      {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
+      {error && <div className="rounded px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
       <div className="flex-1 overflow-y-auto space-y-4">
         {Object.entries(GROUPS).map(([group, keys]) => {

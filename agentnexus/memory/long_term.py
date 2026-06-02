@@ -460,7 +460,10 @@ class LongTermMemory:
             scored = []
             for cid, sim in id_sim_map.items():
                 r = row_map.get(cid)
-                if r is None or sim < min_similarity or r.get("superseded_by"):
+                if r is None:
+                    continue
+                r = dict(r)
+                if sim < min_similarity or r.get("superseded_by"):
                     continue
                 try:
                     ref_time = r.get("last_accessed_at") or r["created_at"]
