@@ -1,11 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentnexus.rag.query_expansion import (
-    dedupe_preserve_order,
+from agentnexus.rag.retriever import (
+    _dedupe_preserve_order as dedupe_preserve_order,
     expand_queries,
     generate_hypothetical_document,
-    looks_like_question,
+    _looks_like_question as looks_like_question,
     rewrite_query,
 )
 
@@ -83,14 +83,14 @@ class TestLooksLikeQuestion:
 class TestRewriteQuery:
     def test_returns_original_when_disabled(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_query_rewrite=False),
         )
         assert rewrite_query("原始问题") == "原始问题"
 
     def test_returns_rewritten_when_llm_succeeds(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_query_rewrite=True),
         )
         fake_llm = MagicMock()
@@ -99,7 +99,7 @@ class TestRewriteQuery:
 
     def test_returns_original_when_llm_returns_short(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_query_rewrite=True),
         )
         fake_llm = MagicMock()
@@ -108,7 +108,7 @@ class TestRewriteQuery:
 
     def test_returns_original_when_llm_raises(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_query_rewrite=True),
         )
         fake_llm = MagicMock()
@@ -119,7 +119,7 @@ class TestRewriteQuery:
 class TestExpandQueries:
     def test_returns_single_when_multi_query_disabled(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_query_rewrite=False, enable_multi_query=False),
         )
         result = expand_queries("test query")
@@ -127,7 +127,7 @@ class TestExpandQueries:
 
     def test_expands_with_mock_llm(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(
                 enable_query_rewrite=True,
                 enable_multi_query=True,
@@ -154,7 +154,7 @@ class TestExpandQueries:
 
     def test_deduplicates_across_rewrite_and_expansion(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(
                 enable_query_rewrite=True,
                 enable_multi_query=True,
@@ -181,21 +181,21 @@ class TestExpandQueries:
 class TestGenerateHypotheticalDocument:
     def test_returns_empty_when_hyde_disabled(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_hyde=False),
         )
         assert generate_hypothetical_document("what is BM25") == ""
 
     def test_returns_empty_when_question_only_and_not_question(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_hyde=True, hyde_question_only=True),
         )
         assert generate_hypothetical_document("install python") == ""
 
     def test_returns_doc_when_question_only_and_is_question(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_hyde=True, hyde_question_only=True),
         )
         fake_llm = MagicMock()
@@ -205,7 +205,7 @@ class TestGenerateHypotheticalDocument:
 
     def test_returns_doc_when_hyde_enabled_and_not_question_only(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_hyde=True, hyde_question_only=False),
         )
         fake_llm = MagicMock()
@@ -215,7 +215,7 @@ class TestGenerateHypotheticalDocument:
 
     def test_returns_empty_when_llm_raises(self, monkeypatch):
         monkeypatch.setattr(
-            "agentnexus.rag.query_expansion.get_settings",
+            "agentnexus.rag.retriever.get_settings",
             lambda: _make_settings(enable_hyde=True, hyde_question_only=False),
         )
         fake_llm = MagicMock()

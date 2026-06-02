@@ -8,15 +8,25 @@ from collections.abc import Callable
 _TRUNCATION_THRESHOLD = 1000
 _TRUNCATION_KEPT = 500
 _MICROCOMPACT_THRESHOLD = 2000
+# Messages with importance above this threshold are protected from truncation
+_IMPORTANCE_PROTECT = 0.7
 
 
-def project_mild(messages: list[dict]) -> list[dict]:
+def project_mild(
+    messages: list[dict],
+    importance_fn: Callable[[dict, int, int], float] | None = None,
+) -> list[dict]:
     projected = []
-    keep_recent = min(4, len(messages))
+    total = len(messages)
+    keep_recent = min(4, total)
     for index, message in enumerate(messages):
-        is_recent = index >= len(messages) - keep_recent
+        is_recent = index >= total - keep_recent
         content = message.get("content", "")
         if is_recent:
+            projected.append(dict(message))
+            continue
+        # Protect high-importance messages from truncation
+        if importance_fn and importance_fn(message, index, total) >= _IMPORTANCE_PROTECT:
             projected.append(dict(message))
             continue
         if message["role"] in ("assistant", "tool") and len(content) > _TRUNCATION_THRESHOLD:
@@ -86,12 +96,13 @@ def build_projection(
     ctx_max: int,
     parse_tool_message: Callable[[str], tuple[str | None, str | None]],
     is_recoverable_tool: Callable[[str | None], bool],
+    importance_fn: Callable[[dict, int, int], float] | None = None,
 ) -> list[dict]:
     ratio = token_count / max(ctx_max, 1)
     if ratio < 0.90:
         return messages
     if ratio < 0.95:
-        return project_mild(messages)
+        return project_mild(messages, importance_fn=importance_fn)
     return project_aggressive(
         messages,
         parse_tool_message=parse_tool_message,
@@ -104,8 +115,10 @@ def microcompact_messages(
     *,
     parse_tool_message: Callable[[str], tuple[str | None, str | None]],
     is_recoverable_tool: Callable[[str | None], bool],
+    importance_fn: Callable[[dict, int, int], float] | None = None,
 ) -> tuple[list[dict], bool]:
     compacted = [dict(message) for message in messages]
+    total = len(compacted)
     cleaned = False
     recoverable_indices = []
     for index, message in enumerate(compacted):
@@ -123,6 +136,9 @@ def microcompact_messages(
     for index in recoverable_indices:
         if index in skip_indices:
             continue
+        # Protect high-importance tool messages
+        if importance_fn and importance_fn(compacted[index], index, total) >= _IMPORTANCE_PROTECT:
+            continue
         message = compacted[index]
         tool_name, _ = parse_tool_message(message.get("content", ""))
         compacted[index] = {
@@ -133,6 +149,9 @@ def microcompact_messages(
 
     for index, message in enumerate(compacted):
         if message["role"] == "assistant":
+            # Protect high-importance assistant messages
+            if importance_fn and importance_fn(message, index, total) >= _IMPORTANCE_PROTECT:
+                continue
             content = message.get("content", "")
             if len(content) > _MICROCOMPACT_THRESHOLD:
                 compacted[index] = {

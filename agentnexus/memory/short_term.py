@@ -24,17 +24,59 @@ def _get_tiktoken_encoding():
     return _tiktoken_encoding
 
 
+# ── Importance scoring ────────────────────────────────────────────
+_ROLE_WEIGHTS = {"system": 0.9, "user": 0.8, "assistant": 0.5, "tool": 0.3}
+_IMPORTANCE_KEYWORDS = frozenset([
+    "记住", "重要", "约束", "决策", "规则", "必须", "不要", "禁止",
+    "优先", "关键", "核心", "目标", "需求", "偏好", "我是", "我叫",
+])
+
+
+def compute_importance(msg: dict, position: int, total: int) -> float:
+    """Compute an importance score for a message (0.0 ~ 1.0).
+
+    Considers role weight, recency, and content signals.
+    """
+    score = 0.0
+    # 1. Role weight (40%)
+    role = msg.get("role", "")
+    score += _ROLE_WEIGHTS.get(role, 0.4) * 0.4
+
+    # 2. Recency — newer is higher, but not the only factor (30%)
+    recency = position / max(total - 1, 1) if total > 1 else 1.0
+    score += recency * 0.3
+
+    # 3. Content signals (30%)
+    content = msg.get("content", "")
+    if any(kw in content for kw in _IMPORTANCE_KEYWORDS):
+        score += 0.2
+    if len(content) > 500:
+        score += 0.1
+
+    return min(score, 1.0)
+
+
 class ShortTermMemory:
-    def __init__(self, max_messages: int = 50, wal_path: str | None = None):
+    def __init__(self, max_messages: int = 50, max_tokens: int = 0,
+                 wal_path: str | None = None):
         self._messages: deque[dict] = deque(maxlen=max_messages)
         self._summary: str = ""
         self._append_count: int = 0
+        self._max_tokens: int = max_tokens  # 0 = no token budget limit
+        self._token_count: int = 0  # incremental token counter
         self._wal_path = wal_path
         if self._wal_path:
             self._recover_wal()
 
     def append(self, role: str, content: str):
-        self._messages.append({"role": role, "content": content, "ts": time.time()})
+        msg = {"role": role, "content": content, "ts": time.time()}
+        # Incremental token tracking
+        self._token_count += self._estimate_msg_tokens(msg)
+        # If deque is full, the evicted message's tokens should be subtracted
+        if self._messages.maxlen and len(self._messages) == self._messages.maxlen:
+            evicted = self._messages[0]
+            self._token_count -= self._estimate_msg_tokens(evicted)
+        self._messages.append(msg)
         self._append_count += 1
         if self._wal_path and self._append_count % 5 == 0:
             self._flush_wal()
@@ -49,8 +91,16 @@ class ShortTermMemory:
         for e in recent:
             self._messages.append(e)
         self._summary = summary
+        self._recalc_token_count()
 
-    def compact_full(self, summary: str, message_count: int = 0, is_auto: bool = True):
+    def compact_full(self, summary: str, message_count: int = 0, is_auto: bool = True,
+                     keep_recent: int = 6):
+        """Hybrid compaction: summary system message + last keep_recent original messages.
+
+        Preserves role structure in the tail so the LLM can distinguish
+        user vs assistant messages after compaction.
+        """
+        recent = list(self._messages)[-keep_recent:] if keep_recent > 0 else []
         self._messages.clear()
         boundary = (
             "本会话是从之前一次因上下文耗尽而中断的对话延续过来的。"
@@ -63,22 +113,45 @@ class ShortTermMemory:
             "content": boundary + summary,
             "ts": time.time(),
         })
+        for msg in recent:
+            self._messages.append(msg)
         self._summary = summary
+        self._recalc_token_count()
 
     def snip(self, keep_recent: int = 10) -> int:
         if len(self._messages) <= keep_recent:
             return 0
-        removed = len(self._messages) - keep_recent
-        recent = list(self._messages)[-keep_recent:]
+        all_msgs = list(self._messages)
+        total = len(all_msgs)
+        # Partition: recent tail is always kept
+        tail = all_msgs[-keep_recent:]
+        head = all_msgs[:-keep_recent]
+        # Score head messages and keep those above threshold
+        _IMPORTANCE_KEEP_THRESHOLD = 0.65
+        preserved_head = []
+        removed_count = 0
+        for i, msg in enumerate(head):
+            imp = compute_importance(msg, i, total)
+            if imp >= _IMPORTANCE_KEEP_THRESHOLD:
+                preserved_head.append(msg)
+            else:
+                removed_count += 1
+        if removed_count == 0:
+            return 0
+        # Rebuild deque
         self._messages.clear()
-        self._messages.append({
+        marker = {
             "role": "system",
-            "content": "[上下文已裁剪] 此标记之前的对话历史已被移除，共移除 {} 条消息。".format(removed),
+            "content": "[上下文已裁剪] 此标记之前的对话历史已被移除，共移除 {} 条消息。".format(removed_count),
             "ts": time.time(),
-        })
-        for msg in recent:
+        }
+        self._messages.append(marker)
+        for msg in preserved_head:
             self._messages.append(msg)
-        return removed
+        for msg in tail:
+            self._messages.append(msg)
+        self._recalc_token_count()
+        return removed_count
 
     def get_last_ts(self) -> float:
         if self._messages:
@@ -99,12 +172,38 @@ class ShortTermMemory:
         import re
         total = 0
         for m in self._messages:
-            content = m.get("content", "")
-            chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
-            ascii_chars = len(re.findall(r'[a-zA-Z0-9]', content))
-            other_chars = len(content) - chinese_chars - ascii_chars
-            total += int(chinese_chars * 1.8 + ascii_chars * 0.75 + other_chars * 0.3)
+            total += self._estimate_msg_tokens(m)
         return total
+
+    def _estimate_msg_tokens(self, msg: dict) -> int:
+        """Fast token estimate for a single message."""
+        content = msg.get("content", "")
+        enc = _get_tiktoken_encoding()
+        if enc is not None:
+            return len(enc.encode(content))
+        import re
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
+        ascii_chars = len(re.findall(r'[a-zA-Z0-9]', content))
+        other_chars = len(content) - chinese_chars - ascii_chars
+        return int(chinese_chars * 1.8 + ascii_chars * 0.75 + other_chars * 0.3)
+
+    @property
+    def token_count(self) -> int:
+        """Return the incremental token counter (fast, no re-encoding)."""
+        return self._token_count
+
+    @property
+    def max_tokens(self) -> int:
+        """Return the token budget (0 = unlimited)."""
+        return self._max_tokens
+
+    def is_over_token_budget(self) -> bool:
+        """Check if current tokens exceed the configured budget."""
+        return self._max_tokens > 0 and self._token_count > self._max_tokens
+
+    def _recalc_token_count(self):
+        """Recalculate the token counter from scratch (used after structural changes)."""
+        self._token_count = sum(self._estimate_msg_tokens(m) for m in self._messages)
 
     def get_summary(self) -> str:
         """Return the current compressed summary, or empty string if none."""
@@ -113,6 +212,7 @@ class ShortTermMemory:
     def clear(self):
         self._messages.clear()
         self._summary = ""
+        self._token_count = 0
 
     def _flush_wal(self):
         """Write current state to a lightweight WAL file for crash recovery."""
@@ -123,6 +223,7 @@ class ShortTermMemory:
                 "messages": list(self._messages),
                 "summary": self._summary,
                 "append_count": self._append_count,
+                "token_count": self._token_count,
             }
             Path(self._wal_path).parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self._wal_path + ".tmp"
@@ -146,6 +247,11 @@ class ShortTermMemory:
                 self._messages.append(msg)
             self._summary = wal_data.get("summary", "")
             self._append_count = wal_data.get("append_count", 0)
+            # Restore token count if available, otherwise recalculate
+            if "token_count" in wal_data:
+                self._token_count = wal_data["token_count"]
+            else:
+                self._recalc_token_count()
             logger.info("Recovered %d messages from STM WAL", len(self._messages))
             wal_file.unlink()
         except Exception as e:
@@ -159,13 +265,15 @@ class ShortTermMemory:
         }, ensure_ascii=False)
 
     @classmethod
-    def from_json(cls, json_str: str, max_messages: int = 50) -> "ShortTermMemory":
+    def from_json(cls, json_str: str, max_messages: int = 50,
+                  max_tokens: int = 0) -> "ShortTermMemory":
         """Restore from a JSON snapshot. Unknown keys are ignored for forward compat."""
         data = json.loads(json_str)
-        inst = cls(max_messages=max_messages)
+        inst = cls(max_messages=max_messages, max_tokens=max_tokens)
         for msg in data.get("messages", []):
             inst._messages.append(msg)
         inst._summary = data.get("summary", "")
+        inst._recalc_token_count()
         return inst
 
 

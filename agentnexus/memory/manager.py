@@ -16,8 +16,8 @@ from agentnexus.memory.extraction import extract_and_save_memories
 from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.memory.offload import offload_large_result
 from agentnexus.memory.projection import build_projection as build_projected_messages
-from agentnexus.memory.projection import microcompact_messages, project_aggressive, project_mild
-from agentnexus.memory.short_term import ShortTermMemory
+from agentnexus.memory.projection import microcompact_messages
+from agentnexus.memory.short_term import ShortTermMemory, compute_importance
 from agentnexus.prompts import load_prompt
 from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
 
@@ -58,6 +58,7 @@ class MemoryManager:
         self._compact_failures: int = 0
         self._circuit_open: bool = False
         self._circuit_opened_at: float = 0.0
+        self._circuit_half_open: bool = False  # half-open probe state
         self._microcompacts_since_open: int = 0
         self._compacting: bool = False
         self._last_api_call_ts: float = 0.0
@@ -83,8 +84,16 @@ class MemoryManager:
         self._on_after_compact: Callable[[], None] | None = None
 
     def estimate_stm_tokens(self) -> int:
-        """Return current STM token estimate."""
-        return self.short_term.estimate_tokens()
+        """Return current STM token estimate.
+
+        Prefers the incremental counter (O(1)) when available and populated,
+        falls back to full re-encoding.
+        """
+        # Use incremental counter if it has been populated (non-zero or messages are empty)
+        stm = self.short_term
+        if stm._token_count > 0 or len(stm._messages) == 0:
+            return stm._token_count
+        return stm.estimate_tokens()
 
     def _preload_embed_model(self):
         """Background thread: load embedding model without blocking startup."""
@@ -261,6 +270,56 @@ class MemoryManager:
         fpath.write_text("\n".join(lines), encoding="utf-8")
         self._fire_compact("transcript_saved", path=str(fpath), message_count=len(messages))
 
+    def _drain_to_ltm(self, messages: list[dict]):
+        """Sink high-importance messages to LTM before destructive compaction.
+
+        This ensures critical information (user constraints, key decisions)
+        survives even if the LLM summary loses them.
+        """
+        if not self.long_term:
+            return
+        embed_model = None
+        try:
+            embed_model = self._get_embed_model(timeout=5)
+        except Exception:
+            pass
+
+        drained = 0
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "")
+            # Skip tool results — not useful for LTM
+            if role == "tool":
+                continue
+            # Only drain high-importance messages
+            imp = compute_importance(msg, i, len(messages))
+            if imp < 0.7:
+                continue
+            content = msg.get("content", "")
+            if len(content) < 20:
+                continue
+            # Truncate very long content
+            save_content = content[:2000]
+            try:
+                embedding = None
+                if embed_model:
+                    from agentnexus.rag.embeddings import embedding_to_list
+                    embedding = embedding_to_list(
+                        embed_model.encode(save_content, normalize_embeddings=True)
+                    )
+                self.long_term.save(
+                    session_id=self.session_id,
+                    content=save_content,
+                    category="note",
+                    importance=imp,
+                    embedding=embedding,
+                )
+                drained += 1
+            except Exception as e:
+                logger.debug("LTM drain failed for message %d: %s", i, e)
+
+        if drained:
+            self._fire_compact("ltm_drain", drained=drained)
+
     def mark_api_call(self):
         """Record that an API call just happened for time-based microcompact tracking."""
         self._last_api_call_ts = time.time()
@@ -271,10 +330,10 @@ class MemoryManager:
         all_msgs = self.short_term.get_all()
         if len(all_msgs) <= keep_recent + 4:
             return 0
-        tokens_before = self.short_term.estimate_tokens()
+        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
         removed = self.short_term.snip(keep_recent)
         if removed:
-            tokens_after = self.short_term.estimate_tokens()
+            tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
             freed = max(0, tokens_before - tokens_after)
             self._snip_freed_tokens += freed
             self._fire_compact("snip", removed=removed, freed_tokens=freed)
@@ -293,9 +352,9 @@ class MemoryManager:
         elapsed = time.time() - self._last_api_call_ts
         if elapsed < interval:
             return False
-        tokens_before = self.short_term.estimate_tokens()
+        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
         self.microcompact()
-        tokens_after = self.short_term.estimate_tokens()
+        tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
         self._fire_compact("time_microcompact", tokens_before=tokens_before, elapsed=elapsed)
         return tokens_before != tokens_after
 
@@ -312,19 +371,7 @@ class MemoryManager:
             ctx_max=self._ctx_max,
             parse_tool_message=_parse_tool_message,
             is_recoverable_tool=is_recoverable_tool,
-        )
-
-    def _project_mild(self, messages: list[dict]) -> list[dict]:
-        """90% threshold: truncate long messages, keep last 4 intact."""
-        return project_mild(messages)
-
-    def _project_aggressive(self, messages: list[dict]) -> list[dict]:
-        """95% threshold: clear recoverable tool results, truncate all assistants,
-        insert boundary marker, keep last 3 intact."""
-        return project_aggressive(
-            messages,
-            parse_tool_message=_parse_tool_message,
-            is_recoverable_tool=is_recoverable_tool,
+            importance_fn=compute_importance,
         )
 
     def microcompact(self):
@@ -332,6 +379,7 @@ class MemoryManager:
             self.short_term.get_all(),
             parse_tool_message=_parse_tool_message,
             is_recoverable_tool=is_recoverable_tool,
+            importance_fn=compute_importance,
         )
         if cleaned:
             self.short_term._messages.clear()
@@ -353,40 +401,42 @@ class MemoryManager:
         })
 
         if self._circuit_open:
-            # Time-based backoff: 30s, 60s, 120s based on failure count
+            # Standard circuit breaker: closed → open → half-open → closed/open
             backoff = min(30 * (2 ** min(self._compact_failures - 3, 2)), 120)
-            elapsed = time.time() - getattr(self, '_circuit_opened_at', 0) or backoff
+            elapsed = time.time() - self._circuit_opened_at
+
             if elapsed < backoff:
+                # Still in cooldown — only do microcompact
                 logger.debug("Circuit breaker in cooldown (%.0fs remaining)", backoff - elapsed)
+                self.microcompact()
                 return 0
-            self.microcompact()
-            self._microcompacts_since_open += 1
-            if self._microcompacts_since_open >= 5:
-                logger.info("Circuit breaker reset after %d successful microcompacts",
-                            self._microcompacts_since_open)
-                self._circuit_open = False
-                self._compact_failures = 0
-                self._microcompacts_since_open = 0
-                self._fire_compact("circuit_reset")
-            else:
-                tokens_after = self.short_term.estimate_tokens()
-                self._fire_compact("circuit_active", tokens_after=tokens_after)
-            return 0
+
+            # Cooldown expired — enter half-open state
+            # Don't return here; let the LLM summarization below run as the probe.
+            # The success/failure branches below will handle closing/re-opening.
+            self._circuit_half_open = True
+            self._fire_compact("circuit_half_open", elapsed=elapsed)
 
         if threshold is None:
             threshold = self._compact_threshold
             if self._snip_freed_tokens > 0:
                 threshold = max(threshold - self._snip_freed_tokens, threshold // 2)
 
-        tokens_before = self.short_term.estimate_tokens()
-        if tokens_before < threshold:
-            if self._settings.time_microcompact_interval > 0:
-                self.microcompact_time_based()
-            return 0
+        # Prefer incremental counter (O(1)) over full re-encoding
+        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
 
-        all_msgs = self.short_term.get_all()
-        if len(all_msgs) <= 4:
-            return 0
+        # Half-open probe bypasses threshold — we need to test LLM health
+        if not self._circuit_half_open:
+            if tokens_before < threshold:
+                if self._settings.time_microcompact_interval > 0:
+                    self.microcompact_time_based()
+                return 0
+
+            all_msgs = self.short_term.get_all()
+            if len(all_msgs) <= 4:
+                return 0
+        else:
+            all_msgs = self.short_term.get_all()
 
         # Layer 2: Snip
         self.snip()
@@ -411,6 +461,9 @@ class MemoryManager:
         # Layer 5: Kairos transcript backup before destructive compact
         self._write_transcript()
 
+        # Layer 5b: Drain high-importance messages to LTM before summarization
+        self._drain_to_ltm(all_msgs_after)
+
         augmented = history_text
         if custom_instructions:
             augmented = f"[压缩指令] {custom_instructions}\n\n{augmented}"
@@ -424,7 +477,13 @@ class MemoryManager:
                 response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
                 if not response:
                     self._compact_failures += 1
-                    if self._compact_failures >= 3:
+                    if self._circuit_half_open:
+                        logger.warning("Half-open probe got empty response, re-opening circuit")
+                        self._circuit_half_open = False
+                        self._circuit_open = True
+                        self._circuit_opened_at = time.time()
+                        self._fire_compact("circuit_open")
+                    elif self._compact_failures >= 3:
                         self._circuit_open = True
                         self._circuit_opened_at = time.time()
                         self._microcompacts_since_open = 0
@@ -434,7 +493,13 @@ class MemoryManager:
                 summary_content = _extract_xml_tag(response, "summary")
                 final_summary = (summary_content or response).strip()
                 self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
-                                             is_auto=is_auto)
+                                             is_auto=is_auto, keep_recent=6)
+                # Close circuit if we were in half-open probe
+                if self._circuit_half_open:
+                    logger.info("Circuit breaker closed after successful half-open probe")
+                    self._fire_compact("circuit_reset")
+                self._circuit_open = False
+                self._circuit_half_open = False
                 self._compact_failures = 0
                 self._microcompacts_since_open = 0
                 self._snip_freed_tokens = 0
@@ -450,7 +515,7 @@ class MemoryManager:
                     except Exception as e:
                         logger.debug("After-compact callback failed: %s", e)
 
-                tokens_after = self.short_term.estimate_tokens()
+                tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
                 tokens_saved = max(0, tokens_before - tokens_after)
                 self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
 
@@ -462,7 +527,14 @@ class MemoryManager:
         except Exception as e:
             logger.warning("Compaction failed: %s", e)
             self._compact_failures += 1
-            if self._compact_failures >= 3:
+            if self._circuit_half_open:
+                # Half-open probe failed — re-open circuit
+                logger.warning("Half-open probe failed, re-opening circuit breaker")
+                self._circuit_half_open = False
+                self._circuit_open = True
+                self._circuit_opened_at = time.time()
+                self._fire_compact("circuit_open")
+            elif self._compact_failures >= 3:
                 self._circuit_open = True
                 self._circuit_opened_at = time.time()
                 self._microcompacts_since_open = 0

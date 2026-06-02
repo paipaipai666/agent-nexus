@@ -69,7 +69,7 @@ class RiskLevel(str, Enum):
 
 @dataclass
 class ToolMeta:
-    """Each tool must declare these 9 metadata fields before registration."""
+    """Each tool must declare these metadata fields before registration."""
 
     name: str                            # unique identifier
     description: str                     # human-readable, shown to LLM
@@ -85,6 +85,8 @@ class ToolMeta:
     source_id: str = "unknown"
     enabled: bool = True
     generation: int = 0
+    recoverable: bool = False            # result can be cleaned during STM compaction
+    max_retention: int = 5               # keep last N results when compacting
 
 
 @dataclass
@@ -132,6 +134,8 @@ class ToolRegistry:
         source_id: str = "unknown",
         enabled: bool = True,
         generation: int = 0,
+        recoverable: bool = False,
+        max_retention: int = 5,
     ) -> None:
         """Register a tool with flat parameters (convenience wrapper)."""
         risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
@@ -150,6 +154,8 @@ class ToolRegistry:
             source_id=source_id,
             enabled=enabled,
             generation=generation,
+            recoverable=recoverable,
+            max_retention=max_retention,
         )
         self.register(meta, func)
 
@@ -175,6 +181,11 @@ class ToolRegistry:
         self._output_validators.pop(name, None)
         self._rate_counters.pop(name, None)
         return existed
+
+    def get_meta(self, name: str) -> ToolMeta | None:
+        """Return ToolMeta for a registered tool, or None if not found."""
+        entry = self._tools.get(name)
+        return entry[0] if entry else None
 
     def unregister_source(self, source_id: str, source_type: str | None = None) -> list[str]:
         removed: list[str] = []

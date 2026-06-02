@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.rag.query_expansion import (
-    dedupe_preserve_order,
+from agentnexus.rag.retriever import (
+    _dedupe_preserve_order as dedupe_preserve_order,
     expand_queries,
-    looks_like_question,
+    _looks_like_question as looks_like_question,
 )
 
 # ── dedupe_preserve_order ─────────────────────────────────────

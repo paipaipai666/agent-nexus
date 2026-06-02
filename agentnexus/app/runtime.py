@@ -64,8 +64,15 @@ class AppRuntime:
         subagent_confirm = ConfirmBridge()
         mcp_manager = create_mcp_manager_from_settings(settings)
 
+        # Resolve session_id early so TodoList can persist to SQLite
+        prefix = profile or "runtime"
+        session_id = session_id or f"{prefix}_{uuid.uuid4().hex[:12]}"
+
         from agentnexus.memory.todo import SessionTodoList
-        todo_list = SessionTodoList()
+        todo_list = SessionTodoList(
+            session_id=session_id,
+            db_path=settings.memory_db_path,
+        )
 
         extension_manager = ExtensionManager(settings)
         extension_manager.discover()
@@ -87,8 +94,6 @@ class AppRuntime:
         except Exception as e:
             logger.debug("Audit log binding failed: %s", e)
 
-        prefix = profile or "runtime"
-        session_id = session_id or f"{prefix}_{uuid.uuid4().hex[:12]}"
         workspace_path = workspace_path or str(Path.cwd())
         memory = MemoryManager(session_id, llm=llm)
         version = ConversationVersionManager(

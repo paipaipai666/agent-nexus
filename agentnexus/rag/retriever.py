@@ -11,7 +11,6 @@ from agentnexus.prompts import load_prompt
 from agentnexus.storage.chroma import insert_documents, resolve_collection_name, upsert_documents
 from agentnexus.storage.chroma import search as chroma_search
 
-from . import query_expansion as _query_expansion
 from . import ranking as _ranking
 from .ids import make_chunk_id, make_document_version, make_source_id
 from .models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
@@ -60,7 +59,18 @@ def reciprocal_rank_fusion(
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
-    return _query_expansion.dedupe_preserve_order(values)
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
 
 
 def _looks_like_question(query: str) -> bool:

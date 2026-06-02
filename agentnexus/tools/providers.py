@@ -181,6 +181,7 @@ class SearchToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                recoverable=True,
             )
 
         if context.want("web_search"):
@@ -240,6 +241,7 @@ class SearchToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=10,
+                recoverable=True,
             )
 
         if context.want("kb_search"):
@@ -290,6 +292,7 @@ class SearchToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                recoverable=True,
             )
 
         if context.want("web_fetch"):
@@ -322,6 +325,7 @@ class SearchToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=5,
+                recoverable=True,
             )
 
         context.mark_registered(executor, before)
@@ -352,6 +356,7 @@ class FilesystemToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=30,
+                recoverable=True,
             )
 
         if context.want("file_list"):
@@ -373,6 +378,7 @@ class FilesystemToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                recoverable=True,
             )
 
         if context.want("file_write"):
