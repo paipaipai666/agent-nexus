@@ -54,3 +54,4 @@ error.txt
 **/.agentnexus/
 perf_test_compact_*.json
 perf_test_compact_*.jsonl
+AGENTS.md
