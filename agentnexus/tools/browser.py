@@ -220,11 +220,24 @@ class BrowserManager:
 
         if self._mode == "cdp":
             endpoint = settings.browser_cdp_endpoint
-            logger.info("Connecting to browser via CDP: %s", endpoint)
-            self._browser = await self._playwright.chromium.connect_over_cdp(endpoint)
-            logger.info("CDP connected, contexts: %d", len(self._browser.contexts))
+            # 先尝试连接已有 Chrome 实例
+            try:
+                logger.info("Connecting to browser via CDP: %s", endpoint)
+                self._browser = await self._playwright.chromium.connect_over_cdp(endpoint)
+                logger.info("CDP connected, contexts: %d", len(self._browser.contexts))
+            except Exception:
+                # 连不上，自动启动带调试端口的 Chrome
+                import re as _re
+                port_match = _re.search(r":(\d+)$", endpoint)
+                port = port_match.group(1) if port_match else "9222"
+                logger.info("CDP connection failed, launching Chrome with --remote-debugging-port=%s", port)
+                self._browser = await self._playwright.chromium.launch(
+                    headless=False,
+                    args=[f"--remote-debugging-port={port}"],
+                )
+                logger.info("Chrome launched with CDP on port %s", port)
         else:
-            logger.info("Launching headless Chromium (isolated mode)")
+            logger.info("Launching Chromium (isolated mode, headless=%s)", settings.browser_headless)
             self._browser = await self._playwright.chromium.launch(
                 headless=settings.browser_headless,
             )
