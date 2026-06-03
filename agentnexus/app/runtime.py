@@ -143,6 +143,13 @@ class AppRuntime:
         )
         trace_manager.configure(settings.traces_dir)
 
+        # 初始化告警管道
+        try:
+            from agentnexus.observability.alerting import setup_default_alerts
+            setup_default_alerts(settings.traces_dir)
+        except Exception as e:
+            logger.debug("Alerting setup failed (non-fatal): %s", e)
+
         hook_mgr.fire(HookType.AFTER_APP_BUILD, {
             "profile": profile, "session_id": session_id,
             "mcp_enabled": mcp_manager is not None,

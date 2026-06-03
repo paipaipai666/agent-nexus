@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, BookOpen, Zap, Brain, Settings, BarChart3, Plus, Clock, Server, Puzzle } from 'lucide-react'
+import { MessageSquare, BookOpen, Zap, Brain, Settings, BarChart3, Plus, Clock, Server, Puzzle, Heart, Bell, FileText } from 'lucide-react'
 import { api } from '../../services/api'
 import { animateIconHover } from '../../utils/animations'
 
@@ -22,6 +22,9 @@ const navItems = [
   { path: '/plugins', icon: Puzzle, label: 'Plugins' },
   { path: '/settings', icon: Settings, label: 'Settings' },
   { path: '/stats', icon: BarChart3, label: 'Stats' },
+  { path: '/health', icon: Heart, label: 'Health' },
+  { path: '/alerts', icon: Bell, label: 'Alerts' },
+  { path: '/audit', icon: FileText, label: 'Audit' },
 ]
 
 export default function Sidebar() {

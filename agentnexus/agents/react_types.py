@@ -128,6 +128,7 @@ class RunState:
     max_json_retries: int = 2
     thinking_enabled: bool = False
     cancel_checker: Any = None
+    _current_step_span: Any = None  # TraceSpan for current plan_node (avoid circular import)
 
 
 @dataclass

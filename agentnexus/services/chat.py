@@ -128,7 +128,19 @@ class ChatService:
                 self._agent._output = lambda _msg: None
             except Exception as e:
                 logger.debug("Failed to suppress agent output: %s", e)
-            result = self._agent.run(agent_text, memory_manager=self._memory)
+            # 启动 trace，记录任务级元数据
+            from agentnexus.observability.tracer import trace_manager as _tm
+            _tm.start_trace(agent_text, metadata={
+                "user_goal": text,
+                "model_version": self._agent.llm_client.model,
+                "agent_id": self._agent.agent_id,
+                "max_steps": self._agent.max_steps,
+                "session_id": session_id,
+            })
+            try:
+                result = self._agent.run(agent_text, memory_manager=self._memory)
+            finally:
+                _tm.end_trace()
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
             self._run_snapshots[run.id] = record

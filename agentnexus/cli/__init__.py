@@ -31,10 +31,12 @@ codegraph_app = typer.Typer(help="Code knowledge graph management")
 app.add_typer(codegraph_app, name="codegraph")
 
 from agentnexus.cli import (
+    alerts_cmd,  # noqa: E402
     audit,  # noqa: E402
     codegraph,  # noqa: E402
     config,  # noqa: E402
     eval_cmd,  # noqa: E402
+    health_cmd,  # noqa: E402
     kb,  # noqa: E402
     logs,  # noqa: E402
     memory_cmd,  # noqa: E402

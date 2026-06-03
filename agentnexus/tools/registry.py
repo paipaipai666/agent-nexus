@@ -99,6 +99,10 @@ class AuditEntry:
     hitl_triggered: bool
     error: str | None
     timestamp: float = field(default_factory=time.time)
+    risk_level: str = "low"              # ToolMeta.risk_level.value
+    schema_validation: str = ""          # 参数校验结果摘要
+    retry_count: int = 0                 # 重试次数
+    tool_selection_reason: str = ""      # 为什么选择这个工具
 
 
 class ToolRegistry:
@@ -310,7 +314,12 @@ class ToolRegistry:
                 if meta.output_schema:
                     self._validate_output(name, result, self._output_validators.get(name))
                 span.output = {"result_summary": result_str}
-                span.metadata = {"status": "ok", "caller": caller}
+                span.metadata = {
+                    "status": "ok",
+                    "caller": caller,
+                    "risk_level": meta.risk_level.value,
+                    "schema_validation": "passed",
+                }
                 return result
         except TimeoutError:
             raise
@@ -318,6 +327,16 @@ class ToolRegistry:
             if not error:
                 error = str(e)
             result_str = f"[error] {error}"
+            # Record schema validation failure in span metadata
+            if "span" in locals() and span is not None:
+                is_validation = "validation" in error.lower() or "schema" in error.lower()
+                span.metadata = {
+                    "status": "error",
+                    "error": error,
+                    "caller": caller,
+                    "risk_level": meta.risk_level.value,
+                    "schema_validation": "failed" if is_validation else "passed",
+                }
             raise
         finally:
             duration = (time.time() - start) * 1000
@@ -338,6 +357,8 @@ class ToolRegistry:
                     duration_ms=round(duration, 1),
                     hitl_triggered=hitl_triggered,
                     error=error,
+                    risk_level=meta.risk_level.value,
+                    schema_validation="passed" if not error else "failed",
                 ))
 
     # ── query API (for LLM prompt building) ───────────────────────

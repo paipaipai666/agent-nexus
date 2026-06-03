@@ -29,6 +29,14 @@ class TokenStats:
     total_cache_miss_tokens: int = 0
     cache_hit_rate: float = 0.0
     cache_saved_cost_cny: float = 0.0
+    # Phase 4: 任务级指标
+    task_success_count: int = 0
+    task_success_rate: float = 0.0
+    tool_error_count: int = 0
+    tool_total_count: int = 0
+    tool_failure_rate: float = 0.0
+    avg_context_length: int = 0
+    max_context_length: int = 0
 
 
 def _cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -50,6 +58,9 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
     seen_traces: set[str] = set()
     all_latencies: list[float] = []
     trace_plan_counts: dict[str, int] = defaultdict(int)
+    trace_has_answer: dict[str, bool] = defaultdict(bool)
+    trace_has_error: dict[str, bool] = defaultdict(bool)
+    context_lengths: list[int] = []
 
     date_model_traces: dict[str, dict[str, set[str]]] = defaultdict(
         lambda: defaultdict(set))
@@ -87,6 +98,21 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                     model = _short_model(meta.get("model", "deepseek-v4-flash"))
                     latency = span.get("latency_ms", 0)
 
+                    # 任务成功/失败追踪
+                    if span.get("name") == "final_answer":
+                        trace_has_answer[tid] = True
+
+                    # 工具错误追踪
+                    if span.get("name", "").startswith("tool"):
+                        stats.tool_total_count += 1
+                        if meta.get("status") == "error":
+                            stats.tool_error_count += 1
+                            trace_has_error[tid] = True
+
+                    # 上下文长度追踪
+                    if tokens_in > 0:
+                        context_lengths.append(tokens_in)
+
                     # Prompt cache metrics
                     cache_hit = meta.get("cache_hit_tokens", 0)
                     cache_miss = meta.get("cache_miss_tokens", 0)
@@ -109,6 +135,21 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
             continue
 
     stats.total_tasks = len(seen_traces)
+
+    # 任务成功率
+    if seen_traces:
+        success_count = sum(1 for tid in seen_traces if trace_has_answer.get(tid, False))
+        stats.task_success_count = success_count
+        stats.task_success_rate = round(success_count / len(seen_traces), 4)
+
+    # 工具失败率
+    if stats.tool_total_count > 0:
+        stats.tool_failure_rate = round(stats.tool_error_count / stats.tool_total_count, 4)
+
+    # 上下文长度
+    if context_lengths:
+        stats.avg_context_length = round(sum(context_lengths) / len(context_lengths))
+        stats.max_context_length = max(context_lengths)
 
     if trace_plan_counts:
         retries = [max(0, trace_plan_counts[t] - 1) for t in seen_traces if t in trace_plan_counts]

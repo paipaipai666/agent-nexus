@@ -43,6 +43,7 @@ def execute_tool(
         "name": name,
         "params": arguments,
         "caller": caller,
+        "selection_reason": f"LLM selected '{name}' tool",
     })
     if hook_ctx.aborted:
         return f"[{hook_ctx.abort_code}] {hook_ctx.abort_reason}"

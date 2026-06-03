@@ -119,10 +119,12 @@ class TraceManager:
     def active(self) -> Optional[TraceContext]:
         return getattr(self._local, "trace", None)
 
-    def start_trace(self, task: str) -> TraceContext:
-        """开始一次新 trace"""
+    def start_trace(self, task: str, metadata: Optional[dict[str, Any]] = None) -> TraceContext:
+        """开始一次新 trace，可选传入任务级元数据"""
         ctx = TraceContext(on_span_end=self._flush_span)
         root_span = ctx.start_span("task", {"task": _truncate(task)})
+        if metadata:
+            root_span.metadata = metadata
         # 根 span 不入栈，作为隐式上下文
         ctx._span_stack.clear()
         ctx._span_stack.append(root_span)
@@ -273,7 +275,9 @@ class _SpanContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.span is None:
             return
-        md = {"status": "error" if exc_type else "ok"}
+        # 合并调用方已设置的 metadata 与自动生成的 status/error
+        md = dict(self.span.metadata) if self.span.metadata else {}
+        md["status"] = "error" if exc_type else "ok"
         if exc_type:
             md["error"] = str(exc_val)
         ctx = self._manager.active

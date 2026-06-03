@@ -1608,7 +1608,12 @@ class ChatScreen(Screen):
         def _run_with_trace():
             """Run agent in a traced context — each user input is its own trace."""
             trace_manager.configure(get_settings().traces_dir)
-            trace_manager.start_trace(text)
+            trace_manager.start_trace(text, metadata={
+                "user_goal": text,
+                "model_version": self._agent.llm_client.model,
+                "agent_id": self._agent.agent_id,
+                "max_steps": self._agent.max_steps,
+            })
             try:
                 agent_question = self._prepare_agent_question(text)
                 if turn.cancel_checker():

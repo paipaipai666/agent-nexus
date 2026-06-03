@@ -53,6 +53,7 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     from agentnexus.server.error_handlers import register_error_handlers
     register_error_handlers(app)
 
+    from agentnexus.server.routes.alerts import router as alerts_router
     from agentnexus.server.routes.audit import router as audit_router
     from agentnexus.server.routes.chat import router as chat_router
     from agentnexus.server.routes.codegraph import router as codegraph_router
@@ -78,9 +79,18 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     app.include_router(mcp_router, prefix="/api/mcp")
     app.include_router(version_router, prefix="/api/version")
     app.include_router(runtime_router, prefix="/api/runtime")
+    app.include_router(alerts_router, prefix="/api")
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        try:
+            from agentnexus.server.health_checks import run_health_checks
+            rt = _get_runtime()
+            result = run_health_checks(rt)
+            status_code = 200 if result["status"] == "ok" else 503
+            from fastapi.responses import JSONResponse
+            return JSONResponse(content=result, status_code=status_code)
+        except Exception:
+            return {"status": "ok"}
 
     return app

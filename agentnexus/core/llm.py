@@ -134,11 +134,22 @@ class AgentLLM:
         ctx = trace_manager.active
         span = None
         if ctx:
+            # 提取上下文来源引用（context_refs）
+            context_refs = []
+            for msg in messages:
+                role = msg.get("role", "")
+                if role == "system":
+                    context_refs.append("system_prompt")
+                elif role == "tool":
+                    context_refs.append(f"tool_result:{msg.get('name', 'unknown')}")
+                elif role == "assistant" and msg.get("tool_calls"):
+                    context_refs.append("assistant_tool_calls")
             span = ctx.start_span("llm", {
                 "model": model,
                 "messages_count": len(messages),
                 "tool_count": len(tools) if tools else 0,
                 "input_preview": _preview(messages[-1]["content"]) if messages else "",
+                "context_refs": context_refs,
             })
 
         self._reasoning_buf = ""

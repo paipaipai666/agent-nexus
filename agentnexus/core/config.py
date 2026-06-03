@@ -142,6 +142,10 @@ class RuntimeSettings(BaseModel):
     file_read_max_mb: float
     shell_blacklist: list[str]
     runtime_profile: str
+    budget_simple_max_tokens: int = 5000
+    budget_complex_max_tokens: int = 50000
+    budget_high_value_max_tokens: int = 200000
+    budget_exceed_strategy: str = "compress"
 
 
 class MCPSettings(BaseModel):
@@ -250,6 +254,11 @@ class Settings(BaseSettings):
     skill_auto_route_min_score: float = Field(default=2.0, ge=0.1, le=100.0)
     skill_auto_route_margin: float = Field(default=0.75, ge=0.0, le=100.0)
     runtime_profile: str = Field(default="default")
+    # 预算分层配置
+    budget_simple_max_tokens: int = Field(default=5000, ge=1000, le=100000)
+    budget_complex_max_tokens: int = Field(default=50000, ge=5000, le=500000)
+    budget_high_value_max_tokens: int = Field(default=200000, ge=10000, le=2000000)
+    budget_exceed_strategy: str = Field(default="compress")
     # 浏览器自动化配置
     browser_mode: str = Field(default="isolated", description="浏览器模式: isolated=无状态新浏览器, cdp=连接用户浏览器")
     browser_cdp_endpoint: str = Field(default="http://localhost:9222", description="CDP连接地址(mode=cdp时使用)")
@@ -377,6 +386,10 @@ class Settings(BaseSettings):
             file_read_max_mb=self.file_read_max_mb,
             shell_blacklist=self.shell_blacklist,
             runtime_profile=self.runtime_profile,
+            budget_simple_max_tokens=self.budget_simple_max_tokens,
+            budget_complex_max_tokens=self.budget_complex_max_tokens,
+            budget_high_value_max_tokens=self.budget_high_value_max_tokens,
+            budget_exceed_strategy=self.budget_exceed_strategy,
         )
 
     @property

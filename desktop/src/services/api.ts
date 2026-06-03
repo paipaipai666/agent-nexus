@@ -170,6 +170,39 @@ export const api = {
 
   getLogs: (days = 7) => request<{ traces: any[] }>(`/api/logs?days=${days}`),
 
+  getTraceDetail: (traceId: string) =>
+    request<{ trace_id: string; spans: any[] }>(`/api/logs/${traceId}`),
+
+  // Health
+  getHealth: () =>
+    request<{
+      status: string
+      checks: Record<string, { status: string; detail?: string; model?: string; free_gb?: number; total_gb?: number; used_pct?: number }>
+      uptime_seconds: number
+      timestamp: number
+    }>('/health'),
+
+  // Alerts
+  getAlerts: (days = 7, severity?: string) =>
+    request<{
+      alerts: Array<{
+        alert_type: string
+        severity: string
+        message: string
+        details: Record<string, any>
+        timestamp: number
+        trace_id: string
+      }>
+      total: number
+    }>(`/api/alerts?days=${days}${severity ? `&severity=${severity}` : ''}`),
+
+  getAlertRules: () =>
+    request<{ rules: Array<{ type: string; index: number }>; total: number }>('/api/alerts/rules'),
+
+  // Audit
+  getAudit: (limit = 50, tool?: string) =>
+    request<{ entries: any[] }>(`/api/audit?limit=${limit}${tool ? `&tool=${tool}` : ''}`),
+
   // MCP
   getMcpStatus: () => request<Record<string, any>>('/api/mcp/status'),
 

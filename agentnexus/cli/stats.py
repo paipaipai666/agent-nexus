@@ -30,6 +30,7 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="Statistics for the l
 
     summary_lines = [
         f"[bold]Total tasks:[/bold] {s.total_tasks}",
+        f"[bold]Task success rate:[/bold] {s.task_success_rate:.1%} ({s.task_success_count}/{s.total_tasks})",
         f"[bold]Avg retries:[/bold] {s.avg_retries} per task",
         f"[bold]Total tokens:[/bold] input {s.total_input_tokens:,} / output {s.total_output_tokens:,}",
         f"[bold]Total cost:[/bold] CNY {s.total_cost_cny:.4f}",
@@ -37,6 +38,15 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="Statistics for the l
     ]
     if s.total_tasks > 0:
         summary_lines.append(f"[bold]Est. CNY/task:[/bold] CNY {s.total_cost_cny / s.total_tasks:.4f}")
+
+    # 工具调用指标
+    if s.tool_total_count > 0:
+        summary_lines.append("")
+        summary_lines.append(f"[bold]Tool calls:[/bold] {s.tool_total_count} total, {s.tool_error_count} errors ({s.tool_failure_rate:.1%} failure rate)")
+
+    # 上下文长度指标
+    if s.avg_context_length > 0:
+        summary_lines.append(f"[bold]Context length:[/bold] avg {s.avg_context_length:,} | max {s.max_context_length:,} tokens")
 
     # Prompt cache statistics
     if s.total_cache_hit_tokens + s.total_cache_miss_tokens > 0:

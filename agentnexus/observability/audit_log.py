@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import time
@@ -39,7 +40,12 @@ class ThreadSafeAuditLog:
                     date_str = time.strftime("%Y-%m-%d")
                     path = Path(self._persist_dir) / f"audit_{date_str}.jsonl"
                     with open(path, "a", encoding="utf-8") as f:
-                        entry_dict = entry if isinstance(entry, dict) else {"entry": str(entry)}
+                        if dataclasses.is_dataclass(entry) and not isinstance(entry, type):
+                            entry_dict = dataclasses.asdict(entry)
+                        elif isinstance(entry, dict):
+                            entry_dict = entry
+                        else:
+                            entry_dict = {"entry": str(entry)}
                         f.write(json.dumps(entry_dict, ensure_ascii=False, default=str) + "\n")
                 except OSError as e:
                     logger.debug("Audit log persistence failed (non-fatal): %s", e)

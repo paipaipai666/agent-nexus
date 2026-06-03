@@ -24,6 +24,7 @@ from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.tracer import trace_manager
+from agentnexus.observability.drift_detector import DriftDetector
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_session_profile
 from agentnexus.tools.registry import ToolRegistry
@@ -133,6 +134,10 @@ class ReActAgent:
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
         self._degrade_count = 0
         self._thought_retries = 0
+        self._drift_detector = DriftDetector(
+            original_goal=question,
+            max_steps=self.max_steps,
+        )
 
         try:
             ctx = ExecutionContext(
@@ -273,7 +278,52 @@ class ReActAgent:
 
     def _on_llm_params_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """PREPARE_LLM_CALL + LLM_PARAMS_READY -> set params, call LLM."""
+        # 关闭上一步的 plan_node span（如果存在）
+        prev_span = ctx.run_state._current_step_span
+        if prev_span is not None:
+            try:
+                trace_ctx = trace_manager.active
+                if trace_ctx:
+                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+            except Exception:
+                pass
+            ctx.run_state._current_step_span = None
+
         ctx.run_state.current_step += 1
+
+        # 创建当前步骤的 plan_node span
+        trace_ctx = trace_manager.active
+        if trace_ctx:
+            step_span = trace_ctx.start_span("plan_node", {
+                "step_index": ctx.run_state.current_step,
+                "strategy": ctx.run_state.strategy.name,
+                "question_preview": ctx.run_state.question[:200],
+            })
+            ctx.run_state._current_step_span = step_span
+
+        # 每 3 步执行一次漂移检测
+        if ctx.run_state.current_step > 0 and ctx.run_state.current_step % 3 == 0:
+            drift_signals = self._drift_detector.check(
+                step_index=ctx.run_state.current_step,
+                current_goal=ctx.run_state.question[:200],
+            )
+            if drift_signals:
+                # 记录漂移信号到 trace
+                if trace_ctx:
+                    with trace_ctx._lock:
+                        for signal in drift_signals:
+                            logger.warning(
+                                "[漂移检测] step=%d type=%s severity=%s: %s",
+                                signal.step_index, signal.signal_type.value,
+                                signal.severity.value, signal.detail,
+                            )
+                # 如果检测到 critical 漂移，注入提示让 Agent 重新聚焦
+                critical = [s for s in drift_signals if s.severity.value == "critical"]
+                if critical:
+                    ctx.messages.append({
+                        "role": "user",
+                        "content": f"[系统提示] 检测到任务可能偏离原始目标。原始目标: {self._drift_detector.original_goal[:200]}。请重新聚焦于原始目标。",
+                    })
 
         def _stream_token(token: str, is_reasoning: bool = False):
             if is_reasoning:
@@ -361,6 +411,19 @@ class ReActAgent:
 
     def _on_tool_done(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + TOOL_DONE -> execute next tool or finish."""
+        # 记录工具调用到漂移检测器
+        payload = event.payload
+        tool_name = payload.get("tool_name", "")
+        if tool_name and hasattr(self, "_drift_detector"):
+            import hashlib
+            params_str = str(payload.get("params", ""))
+            params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
+            self._drift_detector.record_step(
+                step_index=ctx.run_state.current_step,
+                tool_name=tool_name,
+                params_hash=params_hash,
+                tool_result=str(payload.get("result", ""))[:500],
+            )
         react_runtime.record_tool_done(ctx, event.payload)
         return [self._exec_next_tool(ctx)]
 
@@ -529,6 +592,17 @@ class ReActAgent:
 
     def _on_emit_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EMIT_ANSWER -> output answer, save memory, conclude."""
+        # 关闭最后一个 plan_node span
+        prev_span = ctx.run_state._current_step_span
+        if prev_span is not None:
+            try:
+                trace_ctx = trace_manager.active
+                if trace_ctx:
+                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+            except Exception:
+                pass
+            ctx.run_state._current_step_span = None
+
         answer = ctx.last_answer
         run_state = ctx.run_state
         memory_state = ctx.memory_state
