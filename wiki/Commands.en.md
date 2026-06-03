@@ -18,8 +18,10 @@
 | `nexus config` | View/set config (`--set <key> --value <val>`) |
 | `nexus version` | Show version |
 | `nexus tui` | Launch Textual TUI chat interface |
-| `nexus stats [--days N]` | Token cost statistics |
+| `nexus stats [--days N]` | Token cost statistics + task-level metrics |
 | `nexus audit [-n N] [-t tool]` | Tool audit log |
+| `nexus health` | System health checks (LLM/MCP/Memory/Disk) |
+| `nexus alerts [--days N] [-s severity]` | Alert history |
 
 ## Knowledge Base `nexus kb`
 

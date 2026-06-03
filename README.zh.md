@@ -29,7 +29,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | **Agent 控制** | FSM 驱动循环 — 16 状态、25 条确定性转移 | Prompt 驱动，行为不可预测 |
 | **代码沙箱** | 4 级降级：E2B → bubblewrap/Seatbelt → Docker → 本地 | 单一沙箱或无沙箱 |
 | **安全测试** | 213 项专项测试，覆盖 8 个类别 | 临时或无安全测试 |
-| **可观测性** | 完整 JSONL Trace + Token 成本统计 + 审计日志 | 基础日志 |
+| **可观测性** | 6 层体系：Trace + 漂移检测 + 故障归因 + 告警 + 健康检查 + 改进闭环 | 基础日志 |
 | **评估体系** | 8 个内置评估器（Agent、轨迹、幻觉、RAG、代码...） | 手动或无评估 |
 | **交互方式** | TUI + 桌面端 (Electron) + API Server | 单一界面 |
 
@@ -43,7 +43,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🌐 **浏览器自动化** | Playwright 驱动的浏览器控制，支持无障碍树和 CDP 模式 |
 | 🔒 **安全沙箱** | E2B 云端 → 原生 (bubblewrap/Seatbelt) → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
-| 📈 **可观测性** | JSONL Trace + Token 成本统计 |
+| 📈 **可观测性** | 6 层体系：JSONL Trace + 漂移检测 + 工具故障归因 + 告警管道 + 健康检查 + 改进闭环 |
 | 📊 **评估体系** | 8 个评估器（Agent/Trajectory/幻觉/RAG/代码等） |
 | 🎯 **技能系统** | 可复用工作流模板，TF-IDF + 学习型重排序路由 |
 | 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理 |
@@ -69,7 +69,10 @@ nexus tui
 
 ```bash
 nexus kb add ./docs              # 添加文档到知识库
-nexus stats --days 7             # 查看 Token 成本统计
+nexus stats --days 7             # 查看 Token 成本和任务指标
+nexus health                     # 运行系统健康检查
+nexus alerts --days 7            # 查看告警历史
+nexus audit --limit 20           # 查看工具审计日志
 nexus eval agent --days 1        # 运行 Agent 质量评估
 nexus codegraph build            # 构建代码知识图谱
 ```
@@ -91,7 +94,7 @@ nexus codegraph build            # 构建代码知识图谱
 | 🔒 [安全模型](wiki/Security.md) | PII 脱敏、沙箱逃逸防护 |
 | 🎯 [技能系统](wiki/Skill-System.md) | Skill 发现、路由、工作流执行 |
 | 🔌 [MCP 集成](wiki/MCP-Integration.md) | 外部工具导入、治理融合 |
-| 📈 [可观测性](wiki/Observability.md) | Trace 系统、Token 统计、审计日志 |
+| 📈 [可观测性](wiki/Observability.md) | 6 层可观测性：Trace、漂移检测、故障归因、告警、健康检查、改进闭环 |
 | 📝 [提示词系统](wiki/Prompt-System.md) | 模板分类、变量注入 |
 | 🛠 [开发指南](wiki/Development.md) | 环境搭建、测试、CI 流程 |
 | 🤝 [贡献指南](wiki/Contributing.md) | Issue/PR 规范、测试要求 |

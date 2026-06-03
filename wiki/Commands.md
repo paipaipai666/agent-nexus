@@ -18,8 +18,10 @@
 | `nexus config` | 查看/设置配置 (`--set <key> --value <val>`) |
 | `nexus version` | 显示版本 |
 | `nexus tui` | 启动 Textual TUI 对话界面 |
-| `nexus stats [--days N]` | Token 成本统计 |
+| `nexus stats [--days N]` | Token 成本统计 + 任务级指标 |
 | `nexus audit [-n N] [-t tool]` | 工具审计日志 |
+| `nexus health` | 系统健康检查（LLM/MCP/Memory/磁盘） |
+| `nexus alerts [--days N] [-s severity]` | 告警历史 |
 
 ## 知识库 `nexus kb`
 

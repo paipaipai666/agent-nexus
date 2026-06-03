@@ -29,7 +29,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | **Agent Control** | FSM-driven loop — 16 states, 25 deterministic transitions | Prompt-driven, unpredictable behavior |
 | **Code Sandbox** | 4-tier degradation: E2B → bubblewrap/Seatbelt → Docker → local | Single sandbox or none |
 | **Security Tests** | 213 dedicated tests across 8 categories | Ad-hoc or no security testing |
-| **Observability** | Full JSONL trace + token cost stats + audit log | Basic logging |
+| **Observability** | 6-layer system: trace + drift detection + fault attribution + alerting + health checks + improvement loop | Basic logging |
 | **Evaluation** | 8 built-in evaluators (agent, trajectory, hallucination, RAG, code...) | Manual or none |
 | **Interface** | TUI + Desktop (Electron) + API server | Single interface |
 
@@ -43,7 +43,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🌐 **Browser Automation** | Playwright-based browser control with accessibility tree, CDP support |
 | 🔒 **Security Sandbox** | E2B cloud → native (bubblewrap/Seatbelt) → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
-| 📈 **Observability** | JSONL Trace + Token cost statistics |
+| 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
 | 📊 **Evaluation** | 8 evaluators (Agent/Trajectory/Hallucination/RAG/Code, etc.) |
 | 🎯 **Skill System** | Reusable workflow templates, TF-IDF + learned reranker routing |
 | 🔌 **MCP Integration** | Import external tools via stdio/HTTP, full governance |
@@ -69,7 +69,10 @@ That's it. No API keys required for local models — just configure your LLM pro
 
 ```bash
 nexus kb add ./docs              # Add documents to knowledge base
-nexus stats --days 7             # View token cost statistics
+nexus stats --days 7             # View token cost & task metrics
+nexus health                     # Run system health checks
+nexus alerts --days 7            # View alert history
+nexus audit --limit 20           # View tool audit log
 nexus eval agent --days 1        # Run agent quality evaluation
 nexus codegraph build            # Build code knowledge graph
 ```
@@ -91,7 +94,7 @@ nexus codegraph build            # Build code knowledge graph
 | 🔒 [Security](wiki/Security.md) | PII masking, sandbox escape protection |
 | 🎯 [Skill System](wiki/Skill-System.en.md) | Skill discovery, routing, workflow execution |
 | 🔌 [MCP Integration](wiki/MCP-Integration.en.md) | External tool import, governance fusion |
-| 📈 [Observability](wiki/Observability.en.md) | Trace system, token statistics, audit logs |
+| 📈 [Observability](wiki/Observability.en.md) | 6-layer observability: trace, drift detection, fault attribution, alerting, health checks, improvement loop |
 | 📝 [Prompt System](wiki/Prompt-System.en.md) | Template categories, variable injection |
 | 🛠 [Development](wiki/Development.en.md) | Environment setup, testing, CI pipeline |
 | 🤝 [Contributing](wiki/Contributing.en.md) | Issue/PR guidelines, testing requirements |
