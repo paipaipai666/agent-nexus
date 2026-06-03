@@ -250,6 +250,18 @@ class Settings(BaseSettings):
     skill_auto_route_min_score: float = Field(default=2.0, ge=0.1, le=100.0)
     skill_auto_route_margin: float = Field(default=0.75, ge=0.0, le=100.0)
     runtime_profile: str = Field(default="default")
+    # 浏览器自动化配置
+    browser_mode: str = Field(default="isolated", description="浏览器模式: isolated=无状态新浏览器, cdp=连接用户浏览器")
+    browser_cdp_endpoint: str = Field(default="http://localhost:9222", description="CDP连接地址(mode=cdp时使用)")
+    browser_headless: bool = Field(default=False, description="无头模式(仅isolated模式生效,默认有头)")
+    browser_viewport_width: int = Field(default=1280, ge=320, le=3840)
+    browser_viewport_height: int = Field(default=720, ge=240, le=2160)
+    browser_default_timeout: int = Field(default=30000, ge=1000, le=120000, description="Playwright操作超时(ms)")
+    browser_networkidle_timeout: int = Field(default=5000, ge=1000, le=30000, description="networkidle独立超时(ms)")
+    browser_screenshot_dir: str = Field(default="", description="截图保存目录")
+    browser_context_ttl: int = Field(default=600, ge=60, le=3600, description="per-task context无操作自动回收时间(秒)")
+    browser_allow_js_execution: bool = Field(default=False, description="是否允许执行JavaScript(默认禁用)")
+    browser_snapshot_max_nodes: int = Field(default=100, ge=10, le=1000, description="snapshot最大节点数")
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod
@@ -257,6 +269,14 @@ class Settings(BaseSettings):
         if v and not v.startswith(("http://", "https://")):
             raise ValueError(f"必须以 http:// 或 https:// 开头: {v}")
         return v.rstrip("/")
+
+    @field_validator("browser_mode")
+    @classmethod
+    def normalize_browser_mode(cls, value: str) -> str:
+        normalized = (value or "isolated").strip().lower()
+        if normalized not in {"isolated", "cdp"}:
+            raise ValueError(f"不支持的浏览器模式: {value}，可选: isolated, cdp")
+        return normalized
 
     @field_validator("code_execution_backend")
     @classmethod

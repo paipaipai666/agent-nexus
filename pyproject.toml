@@ -52,10 +52,11 @@ server = [
     "uvicorn>=0.34",
 ]
 search = ["tavily-python>=0.5"]
+browser = ["playwright>=1.59"]
 sandbox = ["e2b-code-interpreter>=1.0"]
 tui = ["textual>=8.0"]
 all = [
-    "agentnexus[rag,server,search,sandbox,tui]",
+    "agentnexus[rag,server,search,sandbox,tui,browser]",
 ]
 dev = ["pytest>=8", "pytest-mock>=3", "pytest-cov>=5", "pytest-timeout>=2", "ruff>=0.3"]
 eval = ["pytest>=8", "ruff>=0.3", "pyinstaller>=6"]

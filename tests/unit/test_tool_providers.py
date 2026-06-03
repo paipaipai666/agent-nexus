@@ -19,6 +19,7 @@ def test_default_providers_expose_specs():
         "subagent",
         "todo",
         "codegraph",
+        "browser",
     ]
 
 
