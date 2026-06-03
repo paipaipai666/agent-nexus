@@ -24,15 +24,18 @@ interface Message {
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
 
 const COMMAND_DEFS = [
-  { cmd: '/help', desc: 'Show command help' },
-  { cmd: '/clear', desc: 'Clear screen' },
-  { cmd: '/undo', desc: 'Revert to previous checkpoint' },
-  { cmd: '/redo', desc: 'Redo to next checkpoint' },
-  { cmd: '/log', desc: 'View checkpoint log' },
-  { cmd: '/status', desc: 'View version status' },
-  { cmd: '/compact', desc: 'Compress conversation context' },
-  { cmd: '/sessions', desc: 'List recent sessions' },
-  { cmd: '/switch', desc: 'Switch session (usage: /switch <id>)' },
+  { cmd: '/help', desc: 'Show command help', category: 'system' },
+  { cmd: '/clear', desc: 'Clear screen', category: 'system' },
+  { cmd: '/undo', desc: 'Revert to previous checkpoint', category: 'system' },
+  { cmd: '/redo', desc: 'Redo to next checkpoint', category: 'system' },
+  { cmd: '/log', desc: 'View checkpoint log', category: 'system' },
+  { cmd: '/status', desc: 'View version status', category: 'system' },
+  { cmd: '/compact', desc: 'Compress conversation context', category: 'system' },
+  { cmd: '/sessions', desc: 'List recent sessions', category: 'system' },
+  { cmd: '/switch', desc: 'Switch session (usage: /switch <id>)', category: 'system' },
+  { cmd: '/skill', desc: 'Manage skills (list/status/use/enable/disable)', category: 'skill' },
+  { cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp' },
+  { cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin' },
 ]
 
 const animatedIds = new Set<string>()
@@ -182,6 +185,13 @@ export default function ChatPage() {
 
   const [showPalette, setShowPalette] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
+  const [paletteIndex, setPaletteIndex] = useState(0)
+  const paletteAnimDoneRef = useRef(false)
+
+  // Dynamic command sources
+  const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
+  const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
+  const [plugins, setPlugins] = useState<Record<string, any>>({})
 
   const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo } = useSession()
 
@@ -291,6 +301,12 @@ export default function ChatPage() {
   }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
 
   useEffect(() => {
+    const fetchDynamicCommands = () => {
+      api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
+      api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
+      api.getExtensions().then(setPlugins).catch(() => {})
+    }
+
     const initNew = (sid: string) => {
       sessionIdRef.current = sid
       setSessionId(sid)
@@ -302,6 +318,7 @@ export default function ChatPage() {
       agentWs.connect(sid)
       api.clearShortMemory().catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      fetchDynamicCommands()
     }
 
     const initRestore = (sid: string) => {
@@ -313,6 +330,7 @@ export default function ChatPage() {
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getMcpStatus().then(setMcpStatus).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      fetchDynamicCommands()
     }
 
     if (routeSessionId) {
@@ -438,13 +456,87 @@ export default function ChatPage() {
         if (!args) { addSys('Usage: /switch <session_id>'); break }
         window.location.href = `/chat/${args}`
         break
-      default: addSys(`Unknown command: ${cmd}. Type /help for commands.`)
+      // ── Skills ──
+      case '/skill':
+        if (!args || args === 'list') {
+          try {
+            const { skills: sk } = await api.listSkills()
+            addSys(sk.length === 0 ? 'No skills registered.' : sk.map(s => {
+              const short = s.id.includes('/') ? s.id.split('/').pop()! : s.id
+              return `${s.enabled ? '●' : '○'} ${short.padEnd(20)} ${s.display_name || s.description || ''}`
+            }).join('\n'))
+          } catch (e: any) { addSys(`Skills failed: ${e.message}`) }
+        } else if (args.startsWith('enable ')) {
+          const name = args.slice(7).trim()
+          const full = skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
+          try { await api.enableSkill(full); addSys(`Skill enabled: ${name}`); setSkills((await api.listSkills()).skills) } catch (e: any) { addSys(`Enable failed: ${e.message}`) }
+        } else if (args.startsWith('disable ')) {
+          const name = args.slice(8).trim()
+          const full = skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
+          try { await api.disableSkill(full); addSys(`Skill disabled: ${name}`); setSkills((await api.listSkills()).skills) } catch (e: any) { addSys(`Disable failed: ${e.message}`) }
+        } else { addSys('Usage: /skill [list | enable <id> | disable <id>]') }
+        break
+      // ── MCP ──
+      case '/mcp':
+        if (!args || args === 'status') {
+          try {
+            const s = await api.getMcpStatus()
+            const servers = s.servers || []
+            addSys(servers.length === 0 ? 'No MCP servers.' : servers.map((sv: any) => `${sv.connected ? '●' : '○'} ${sv.name}  ${sv.tool_names?.length || 0} tools`).join('\n'))
+          } catch (e: any) { addSys(`MCP status failed: ${e.message}`) }
+        } else if (args === 'tools') {
+          try {
+            const { tools } = await api.listMcpTools()
+            addSys(tools.length === 0 ? 'No MCP tools.' : tools.map(t => `${t.tool.padEnd(30)} [${t.server}]`).join('\n'))
+          } catch (e: any) { addSys(`MCP tools failed: ${e.message}`) }
+        } else if (args === 'reload') {
+          try { await api.reloadMcp(); addSys('MCP reloaded.') } catch (e: any) { addSys(`MCP reload failed: ${e.message}`) }
+        } else { addSys('Usage: /mcp [status | tools | reload]') }
+        break
+      // ── Plugins ──
+      case '/plugin':
+        try {
+          const ext = await api.getExtensions()
+          const names = Object.keys(ext)
+          addSys(names.length === 0 ? 'No plugins loaded.' : names.map(n => `● ${n}`).join('\n'))
+        } catch (e: any) { addSys(`Plugins failed: ${e.message}`) }
+        break
+      default: {
+        // Check if it's a dynamic skill command: /<skill-id> [instruction]
+        const skillMatch = skills.find(s => {
+          if (!s.enabled) return false
+          const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
+          return `/${shortId}` === cmd
+        })
+        if (skillMatch) {
+          // Send to agent — the backend handles skill activation
+          sendMessage(text)
+        } else {
+          addSys(`Unknown command: ${cmd}. Type /help for commands.`)
+        }
+      }
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { const v = e.target.value; setInput(v); setShowPalette(v.startsWith('/') && v.length > 0); setPaletteFilter(v) }
-  const handlePaletteSelect = (cmd: string) => { setInput(cmd + ' '); setShowPalette(false); inputRef.current?.focus() }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showPalette && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteIndex(i => (i + 1) % filteredCommands.length); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handlePaletteSelect(filteredCommands[paletteIndex].cmd); return }
+      if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); paletteAnimDoneRef.current = false; return }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value
+    setInput(v)
+    const show = v.startsWith('/') && v.length > 0
+    if (!show) paletteAnimDoneRef.current = false
+    setShowPalette(show)
+    setPaletteFilter(v)
+    setPaletteIndex(0)
+  }
+  const handlePaletteSelect = (cmd: string) => { setInput(cmd + ' '); setShowPalette(false); setPaletteIndex(0); paletteAnimDoneRef.current = false; inputRef.current?.focus() }
   const handleCancel = () => { if (currentRunId) agentWs.cancel(currentRunId) }
   const handleConfirm = (approved: boolean) => { agentWs.confirm('', approved); setConfirmRequest(null) }
   const handleUndo = async () => {
@@ -464,7 +556,29 @@ export default function ChatPage() {
     } catch { }
   }
 
-  const filteredCommands = COMMAND_DEFS.filter(c => c.cmd.startsWith(paletteFilter))
+  // Build combined command list: static + dynamic skills + MCP tools + plugins
+  const allCommands = [
+    ...COMMAND_DEFS,
+    ...skills.filter(s => s.enabled).map(s => {
+      const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
+      return { cmd: `/${shortId}`, desc: s.display_name || s.description || 'Invoke skill', category: 'skill' as const }
+    }),
+    ...mcpTools.map(t => ({
+      cmd: `/${t.tool}`,
+      desc: `MCP tool (${t.server})`,
+      category: 'mcp' as const,
+    })),
+    ...Object.keys(plugins).map(name => ({
+      cmd: `/${name}`,
+      desc: `Plugin`,
+      category: 'plugin' as const,
+    })),
+  ]
+
+  const filteredCommands = allCommands.filter(c => {
+    const q = paletteFilter.toLowerCase()
+    return c.cmd.startsWith(q) || c.desc.toLowerCase().includes(q)
+  })
 
   return (
     <div className="flex-1 flex overflow-hidden" style={{ background: 'var(--surface-0)' }}>
@@ -508,20 +622,55 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Command Palette */}
-        {showPalette && filteredCommands.length > 0 && (
-          <div ref={(el) => { if (el) animateDropDown(el) }} className="mx-8 mb-2 rounded overflow-hidden" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-            {filteredCommands.map(c => (
-              <button key={c.cmd} onClick={() => handlePaletteSelect(c.cmd)} className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors" style={{ color: 'var(--fg)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-4)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>
-                <span className="text-xs" style={{ color: 'var(--fg-faint)' }}>{c.desc}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Input Area */}
-        <div className="px-8 pb-4">
+        {/* Input Area + Palette (relative wrapper) */}
+        <div className="px-8 pb-4 relative">
+          {/* Command Palette — absolute above input, no layout shift */}
+          {showPalette && filteredCommands.length > 0 && (
+            <div
+              ref={(el) => {
+                if (el && !paletteAnimDoneRef.current) { paletteAnimDoneRef.current = true; animateDropDown(el) }
+              }}
+              className="absolute bottom-full left-0 right-0 mb-2 rounded overflow-hidden max-h-64 overflow-y-auto z-50"
+              style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+            >
+              {(() => {
+                const CATEGORY_LABELS: Record<string, string> = { system: 'System', skill: 'Skills', mcp: 'MCP Tools', plugin: 'Plugins' }
+                const CATEGORY_COLORS: Record<string, string> = { system: 'var(--fg-faint)', skill: 'var(--green)', mcp: 'var(--blue)', plugin: 'var(--amber)' }
+                let lastCat = ''
+                return filteredCommands.map((c, i) => {
+                  const showHeader = c.category !== lastCat && (lastCat = c.category)
+                  return (
+                    <React.Fragment key={c.cmd}>
+                      {showHeader && (
+                        <div className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: CATEGORY_COLORS[c.category] || 'var(--fg-faint)', borderTop: lastCat !== 'system' ? '1px dashed var(--border)' : 'none' }}>
+                          {CATEGORY_LABELS[c.category] || c.category}
+                        </div>
+                      )}
+                      <button
+                        ref={(el) => { if (el && i === paletteIndex) el.scrollIntoView({ block: 'nearest' }) }}
+                        onClick={() => handlePaletteSelect(c.cmd)}
+                        onMouseEnter={() => setPaletteIndex(i)}
+                        className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors"
+                        style={{
+                          color: 'var(--fg)',
+                          background: i === paletteIndex ? 'var(--accent-subtle)' : 'transparent',
+                          borderLeft: i === paletteIndex ? '2px solid var(--accent)' : '2px solid transparent',
+                        }}
+                      >
+                        <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>
+                        <span className="text-xs" style={{ color: i === paletteIndex ? 'var(--fg-secondary)' : 'var(--fg-faint)' }}>{c.desc}</span>
+                      </button>
+                    </React.Fragment>
+                  )
+                })
+              })()}
+              <div className="px-4 py-1.5 flex items-center gap-3 font-mono text-[10px]" style={{ borderTop: '1px dashed var(--border)', color: 'var(--fg-faint)' }}>
+                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>↑↓</kbd> navigate</span>
+                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>Tab</kbd> select</span>
+                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>Esc</kbd> dismiss</span>
+              </div>
+            </div>
+          )}
           <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
             <div className="flex items-end gap-2.5 p-3.5">
               <span className="font-mono text-sm pt-px shrink-0" style={{ color: 'var(--accent)', textShadow: '0 0 8px var(--accent-glow)' }}>&gt;</span>
