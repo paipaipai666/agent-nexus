@@ -11,6 +11,7 @@
 - [🏗 Architecture](Architecture.en.md)
 - [🤖 ReAct Agent](ReAct-Agent.en.md)
 - [🔧 Tool Governance](Tool-Governance.en.md)
+- [🌐 Browser Automation](Browser-Automation.en.md)
 - [⚡ Code Execution & Security](Code-Execution.en.md)
 - [🧠 Memory System](Memory-System.en.md)
 - [📚 RAG System](RAG-System.en.md)

@@ -39,13 +39,14 @@ code_execution_backend (默认 "auto")
 `subagent_run` 创建隔离的 Agent-in-Agent：
 
 | 角色 | 可用工具 |
-|------|----------|
+| --- | --- |
 | **explorer**（统一映射） | `web_search`, `grep_search`, `kb_search`, `file_read`, `file_list`, `memory_search`, `python_execute` |
 | **executor** | `python_execute`, `file_read`, `file_list`, `grep_search` |
 
 - 克隆父 Agent 的 LLM 配置
 - 首次失败后以 explorer 角色 +1 max_steps 重试
 - 返回 `{"status", "role", "answer", "steps_used", "allowed_tools"}`
+- 浏览器工具可通过 `allowed_tools` 配置添加到子代理（见 [Browser-Automation](Browser-Automation.md)）
 
 ## MCP 安全
 

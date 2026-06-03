@@ -39,13 +39,14 @@ code_execution_backend (default "auto")
 `subagent_run` creates an isolated Agent-in-Agent:
 
 | Role | Available Tools |
-|------|----------|
+| --- | --- |
 | **explorer** (unified mapping) | `web_search`, `grep_search`, `kb_search`, `file_read`, `file_list`, `memory_search`, `python_execute` |
 | **executor** | `python_execute`, `file_read`, `file_list`, `grep_search` |
 
 - Clones parent Agent's LLM config
 - Retries with explorer role +1 max_steps on first failure
 - Returns `{"status", "role", "answer", "steps_used", "allowed_tools"}`
+- Browser tools can be added to sub-agents via `allowed_tools` configuration (see [Browser-Automation](Browser-Automation.en.md))
 
 ## MCP Security
 

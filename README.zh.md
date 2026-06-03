@@ -2,21 +2,21 @@
 
 # AgentNexus
 
-**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 213 项安全测试。**
+**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 282 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Security Tests](https://img.shields.io/badge/Security%20Tests-213%20passed-00C853)](wiki/Security.md)
+[![Tests](https://img.shields.io/badge/Tests-282%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI 工具，完全运行在本地。无云端依赖，无数据泄露。向量、记忆、Trace 日志全部留在你的设备上。
 
 与纯 Prompt 驱动的 Agent 不同，AgentNexus 使用**有限状态机**（16 个状态、25 条转移规则）管控每个推理循环 —— 让 Agent 行为可确定、可审计。
 
-```
+```text
 用户 → CLI/TUI/桌面端 → ReAct Agent (FSM + 三级 LLM 策略)
-       → 工具网关 (7 道安全关卡) → 17 种内置工具 + MCP
+       → 工具网关 (7 道安全关卡) → 18 种内置工具 + MCP
        → 本地存储: ChromaDB | SQLite | JSONL
 ```
 
@@ -36,10 +36,11 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 ## 功能
 
 | 能力 | 说明 |
-|------|------|
+| --- | --- |
 | 🗣️ **对话与任务执行** | TUI 交互界面，ReAct 循环自动规划→执行→观察 |
 | 🧠 **本地记忆** | 短期（STM 压缩金字塔）+ 长期（SQLite+ChromaDB，评分驱逐） |
 | 📚 **知识库 RAG** | 混合检索（稠密+稀疏+RRF+重排序），8 种文件格式导入 |
+| 🌐 **浏览器自动化** | Playwright 驱动的浏览器控制，支持无障碍树和 CDP 模式 |
 | 🔒 **安全沙箱** | E2B 云端 → 原生 (bubblewrap/Seatbelt) → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
 | 📈 **可观测性** | JSONL Trace + Token 成本统计 |
@@ -76,15 +77,16 @@ nexus codegraph build            # 构建代码知识图谱
 ## 文档
 
 | 文档 | 内容 |
-|------|------|
+| --- | --- |
 | 🏠 [Wiki 首页](wiki/Home.md) | 架构图、核心能力表格 |
 | 🤖 [ReAct Agent](wiki/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
-| 🔧 [工具治理](wiki/Tool-Governance.md) | 7 道关卡、17 个工具参数表 |
+| 🔧 [工具治理](wiki/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
+| 🌐 [浏览器自动化](wiki/Browser-Automation.md) | Playwright 集成、CDP 模式、无障碍树 |
 | ⚡ [代码执行](wiki/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
 | 🧠 [记忆系统](wiki/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
 | 📚 [RAG 检索](wiki/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
 | ⚙️ [配置参考](wiki/Configuration.md) | 全部配置项速查 |
-| ⌨️ [命令参考](wiki/Commands.md) | 40 个命令速查 |
+| ⌨️ [命令参考](wiki/Commands.md) | 40+ 个命令速查 |
 | 📊 [评估体系](wiki/Evaluation.md) | 8 个评估器、RAG 指标 |
 | 🔒 [安全模型](wiki/Security.md) | PII 脱敏、沙箱逃逸防护 |
 | 🎯 [技能系统](wiki/Skill-System.md) | Skill 发现、路由、工作流执行 |
@@ -97,37 +99,38 @@ nexus codegraph build            # 构建代码知识图谱
 ## 架构
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                      AgentNexus                              │
-├─────────────┬─────────────┬──────────────┬─────────────────┤
-│  CLI/TUI    │  桌面端      │  API Server  │  MCP Client     │
-│  (Typer)    │  (Electron) │  (FastAPI)   │  (stdio/HTTP)   │
-├─────────────┴─────────────┴──────────────┴─────────────────┤
-│                   ReAct Agent 核心                           │
-│  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐   │
-│  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │   │
-│  │ (16→25)  │  │ (三级)       │  │ (模板)             │   │
-│  └──────────┘  └──────────────┘  └────────────────────┘   │
-├────────────────────────────────────────────────────────────┤
-│              工具网关 (7 道安全关卡)                         │
-│  RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计          │
-├────────────────────────────────────────────────────────────┤
-│                    工具执行层                                │
-│  code_executor · shell · file_ops · web_search · kb_search  │
-│  memory_save · subagent · grep_search · web_fetch · ...     │
-├──────────┬──────────────┬──────────────────────────────────┤
-│ ChromaDB │   SQLite     │  JSONL Trace 日志                 │
-│ (向量)   │  (关系型)    │  (可观测性)                       │
-└──────────┴──────────────┴──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        AgentNexus                                │
+├──────────────┬──────────────┬──────────────┬────────────────────┤
+│  CLI/TUI     │  桌面端       │  API Server  │  MCP Client        │
+│  (Typer)     │  (Electron)  │  (FastAPI)   │  (stdio/HTTP)      │
+├──────────────┴──────────────┴──────────────┴────────────────────┤
+│                    ReAct Agent 核心                              │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐        │
+│  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │        │
+│  │ (16→25)  │  │ (三级)       │  │ (模板)             │        │
+│  └──────────┘  └──────────────┘  └────────────────────┘        │
+├─────────────────────────────────────────────────────────────────┤
+│               工具网关 (7 道安全关卡)                            │
+│  RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计               │
+├─────────────────────────────────────────────────────────────────┤
+│                     工具执行层                                   │
+│  code_executor · shell · file_ops · web_search · kb_search      │
+│  memory_save · subagent · grep_search · web_fetch · browser     │
+│  codegraph_search · codegraph_relations · todo · ...            │
+├──────────┬──────────────┬───────────────────────────────────────┤
+│ ChromaDB │   SQLite     │  JSONL Trace 日志                     │
+│ (向量)   │  (关系型)    │  (可观测性)                           │
+└──────────┴──────────────┴───────────────────────────────────────┘
 ```
 
 ## 技术栈
 
-**后端**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers
+**后端**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
 
 **桌面端**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**测试**: pytest · 80+ 单元测试 · 213 安全测试 · 12 性能基准测试
+**测试**: pytest · 194 单元测试 · 17 安全测试 · 12 性能基准测试 · E2E 集成测试
 
 ## 贡献
 

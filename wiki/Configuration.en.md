@@ -118,10 +118,26 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 | `skill_auto_route_min_score` | `2.0` | |
 | `skill_auto_route_margin` | `0.75` | |
 
+### Browser Automation (12 items)
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `browser_mode` | `isolated` | isolated (fresh browser) / cdp (connect user browser) |
+| `browser_cdp_endpoint` | `http://localhost:9222` | CDP connection endpoint |
+| `browser_headless` | `False` | Headless mode (isolated only) |
+| `browser_viewport_width` | `1280` | Viewport width |
+| `browser_viewport_height` | `720` | Viewport height |
+| `browser_default_timeout` | `30000` | Operation timeout (ms) |
+| `browser_networkidle_timeout` | `5000` | networkidle timeout (ms) |
+| `browser_screenshot_dir` | `""` | Screenshot save directory |
+| `browser_context_ttl` | `600` | Idle task cleanup time (seconds) |
+| `browser_allow_js_execution` | `False` | Allow JavaScript execution |
+| `browser_snapshot_max_nodes` | `100` | Max accessibility tree nodes |
+
 ### Other
 
 | Field | Default | Description |
-|------|--------|------|
+| --- | --- | --- |
 | `trace_retention_days` | `30` | |
 | `file_read_max_mb` | `10.0` | |
 | `runtime_profile` | `default` | |

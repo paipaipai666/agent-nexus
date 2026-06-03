@@ -11,6 +11,7 @@
 - [🏗 整体架构](Architecture.md)
 - [🤖 ReAct Agent](ReAct-Agent.md)
 - [🔧 工具治理](Tool-Governance.md)
+- [🌐 浏览器自动化](Browser-Automation.md)
 - [⚡ 代码执行与安全](Code-Execution.md)
 - [🧠 记忆系统](Memory-System.md)
 - [📚 RAG 检索](RAG-System.md)

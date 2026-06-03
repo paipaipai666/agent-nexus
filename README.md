@@ -2,21 +2,21 @@
 
 # AgentNexus
 
-**A production-grade, fully local AI agent with FSM-driven safety and 213 security tests.**
+**A production-grade, fully local AI agent with FSM-driven safety, browser automation, and 282 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Security Tests](https://img.shields.io/badge/Security%20Tests-213%20passed-00C853)](wiki/Security.md)
+[![Tests](https://img.shields.io/badge/Tests-282%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus is a **ReAct (Thought→Action→Observe) single-agent** CLI tool that runs entirely on your machine. No cloud dependency. No data leakage. Your vectors, memory, and trace logs never leave your device.
 
 Unlike prompt-only agents, AgentNexus uses a **formal finite state machine** (16 states, 25 transitions) to govern every reasoning loop — making agent behavior deterministic and auditable.
 
-```
+```text
 User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
-       → Tool Gateway (7 Security Gates) → 17 Built-in Tools + MCP
+       → Tool Gateway (7 Security Gates) → 18 Built-in Tools + MCP
        → Local Storage: ChromaDB | SQLite | JSONL
 ```
 
@@ -36,10 +36,11 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 ## Features
 
 | Capability | Description |
-|------|-----------|
+| --- | --- |
 | 🗣️ **Conversation & Tasks** | TUI interface with ReAct loop: plan→execute→observe |
 | 🧠 **Local Memory** | STM compression pyramid + LTM (SQLite+ChromaDB, score-based eviction) |
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
+| 🌐 **Browser Automation** | Playwright-based browser control with accessibility tree, CDP support |
 | 🔒 **Security Sandbox** | E2B cloud → native (bubblewrap/Seatbelt) → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | JSONL Trace + Token cost statistics |
@@ -76,15 +77,16 @@ nexus codegraph build            # Build code knowledge graph
 ## Documentation
 
 | Document | Content |
-|------|------|
+| --- | --- |
 | 🏠 [Wiki Home](wiki/Home.en.md) | Architecture diagram, core capabilities |
 | 🤖 [ReAct Agent](wiki/ReAct-Agent.en.md) | FSM state machine, 3-tier LLM strategy, JSON fault tolerance |
-| 🔧 [Tool Governance](wiki/Tool-Governance.en.md) | 7 security gates, 17 tool parameter tables |
+| 🔧 [Tool Governance](wiki/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
+| 🌐 [Browser Automation](wiki/Browser-Automation.en.md) | Playwright integration, CDP mode, accessibility tree |
 | ⚡ [Code Execution](wiki/Code-Execution.en.md) | Sandbox degradation chain, shell blacklist, sub-agents |
 | 🧠 [Memory System](wiki/Memory-System.en.md) | STM/LTM architecture, compression pyramid, score eviction |
 | 📚 [RAG System](wiki/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
 | ⚙️ [Configuration](wiki/Configuration.en.md) | All configuration items reference |
-| ⌨️ [Commands](wiki/Commands.en.md) | 40 commands reference |
+| ⌨️ [Commands](wiki/Commands.en.md) | 40+ commands reference |
 | 📊 [Evaluation](wiki/Evaluation.en.md) | 8 evaluators, RAG metrics |
 | 🔒 [Security](wiki/Security.md) | PII masking, sandbox escape protection |
 | 🎯 [Skill System](wiki/Skill-System.en.md) | Skill discovery, routing, workflow execution |
@@ -97,37 +99,38 @@ nexus codegraph build            # Build code knowledge graph
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                      AgentNexus                              │
-├─────────────┬─────────────┬──────────────┬─────────────────┤
-│  CLI/TUI    │  Desktop    │  API Server  │  MCP Client     │
-│  (Typer)    │  (Electron) │  (FastAPI)   │  (stdio/HTTP)   │
-├─────────────┴─────────────┴──────────────┴─────────────────┤
-│                   ReAct Agent Core                           │
-│  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐   │
-│  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │   │
-│  │ (16→25)  │  │ (3-tier)     │  │ (templates)        │   │
-│  └──────────┘  └──────────────┘  └────────────────────┘   │
-├────────────────────────────────────────────────────────────┤
-│              Tool Gateway (7 Security Gates)                │
-│  RBAC → Schema → Rate-limit → Timeout → Risk → HITL → Log │
-├────────────────────────────────────────────────────────────┤
-│                    Tool Execution Layer                      │
-│  code_executor · shell · file_ops · web_search · kb_search  │
-│  memory_save · subagent · grep_search · web_fetch · ...     │
-├──────────┬──────────────┬──────────────────────────────────┤
-│ ChromaDB │   SQLite     │  JSONL Trace Logs                 │
-│ (vectors)│  (relational)│  (observability)                  │
-└──────────┴──────────────┴──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        AgentNexus                                │
+├──────────────┬──────────────┬──────────────┬────────────────────┤
+│  CLI/TUI     │  Desktop     │  API Server  │  MCP Client        │
+│  (Typer)     │  (Electron)  │  (FastAPI)   │  (stdio/HTTP)      │
+├──────────────┴──────────────┴──────────────┴────────────────────┤
+│                    ReAct Agent Core                              │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐        │
+│  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │        │
+│  │ (16→25)  │  │ (3-tier)     │  │ (templates)        │        │
+│  └──────────┘  └──────────────┘  └────────────────────┘        │
+├─────────────────────────────────────────────────────────────────┤
+│               Tool Gateway (7 Security Gates)                   │
+│  RBAC → Schema → Rate-limit → Timeout → Risk → HITL → Audit    │
+├─────────────────────────────────────────────────────────────────┤
+│                     Tool Execution Layer                         │
+│  code_executor · shell · file_ops · web_search · kb_search      │
+│  memory_save · subagent · grep_search · web_fetch · browser     │
+│  codegraph_search · codegraph_relations · todo · ...            │
+├──────────┬──────────────┬───────────────────────────────────────┤
+│ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
+│ (vectors)│  (relational)│  (observability)                      │
+└──────────┴──────────────┴───────────────────────────────────────┘
 ```
 
 ## Tech Stack
 
-**Backend**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers
+**Backend**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
 
 **Desktop**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**Testing**: pytest · 80+ unit tests · 213 security tests · 12 performance benchmarks
+**Testing**: pytest · 194 unit tests · 17 security tests · 12 performance benchmarks · E2E integration tests
 
 ## Contributing
 

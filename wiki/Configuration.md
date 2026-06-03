@@ -118,10 +118,26 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 | `skill_auto_route_min_score` | `2.0` | |
 | `skill_auto_route_margin` | `0.75` | |
 
+### 浏览器自动化（12 项）
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `browser_mode` | `isolated` | isolated（全新浏览器）/ cdp（连接用户浏览器） |
+| `browser_cdp_endpoint` | `http://localhost:9222` | CDP 连接地址 |
+| `browser_headless` | `False` | 无头模式（仅 isolated） |
+| `browser_viewport_width` | `1280` | 视口宽度 |
+| `browser_viewport_height` | `720` | 视口高度 |
+| `browser_default_timeout` | `30000` | 操作超时（ms） |
+| `browser_networkidle_timeout` | `5000` | networkidle 超时（ms） |
+| `browser_screenshot_dir` | `""` | 截图保存目录 |
+| `browser_context_ttl` | `600` | 空闲任务回收时间（秒） |
+| `browser_allow_js_execution` | `False` | 允许 JavaScript 执行 |
+| `browser_snapshot_max_nodes` | `100` | 无障碍树最大节点数 |
+
 ### 其他
 
 | 字段 | 默认值 | 说明 |
-|------|--------|------|
+| --- | --- | --- |
 | `trace_retention_days` | `30` | |
 | `file_read_max_mb` | `10.0` | |
 | `runtime_profile` | `default` | |
