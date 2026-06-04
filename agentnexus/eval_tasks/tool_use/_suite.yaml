@@ -1,0 +1,13 @@
+name: "tool_use"
+eval_type: "capability"
+description: "工具使用能力评估"
+tags: ["tools", "search"]
+version: "1.0"
+
+task_ids:
+  - "search_and_summarize"
+
+thresholds:
+  min_pass_rate: 0.5
+  max_regression_delta: 0.1
+  max_saturation: 0.95

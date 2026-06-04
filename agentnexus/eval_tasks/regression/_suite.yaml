@@ -1,0 +1,12 @@
+name: "regression"
+eval_type: "regression"
+description: "回归测试套件 — 从 capability suite graduated 的已通过任务"
+tags: ["regression"]
+version: "1.0"
+
+task_ids: []
+
+thresholds:
+  min_pass_rate: 0.95
+  max_regression_delta: 0.05
+  max_saturation: 1.0

@@ -1,0 +1,36 @@
+id: "multi_step_math"
+description: "多步数学推理题"
+category: "reasoning"
+difficulty: "medium"
+eval_type: "capability"
+tags: ["math", "reasoning"]
+
+input:
+  prompt: |
+    一个商店有以下促销活动：
+    1. 商品 A 原价 100 元，打 8 折
+    2. 商品 B 原价 200 元，满 200 减 30
+    3. 如果同时购买 A 和 B，总价再打 9 折
+
+    问：同时购买 A 和 B 的最终价格是多少？请给出详细计算过程。
+  tools: ["code_executor"]
+
+graders:
+  - type: "llm_rubric"
+    name: "correctness"
+    assertions:
+      - "商品 A 折后价为 80 元"
+      - "商品 B 折后价为 170 元"
+      - "合计 250 元再打 9 折为 225 元"
+      - "最终答案为 225 元"
+    weight: 0.7
+  - type: "llm_rubric"
+    name: "process"
+    assertions:
+      - "有清晰的计算步骤"
+      - "每一步的计算正确"
+    weight: 0.3
+
+reference_solution: "商品 A: 100 * 0.8 = 80 元; 商品 B: 200 - 30 = 170 元; 合计: (80 + 170) * 0.9 = 225 元"
+
+timeout_sec: 60

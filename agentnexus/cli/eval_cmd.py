@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 
-# Import command modules for Typer registration (required at import time for CLI).
-from agentnexus.cli import eval as _eval_commands  # noqa: F401,E402
+# NOTE: The old `from agentnexus.cli import eval` import was broken.
+# Commands are now registered via the eval/ subpackage.
+# This file only exports compatibility symbols.
 
 RAGEvaluator = None
 
@@ -17,6 +18,7 @@ def get_rag_evaluator_cls():
 
         RAGEvaluator = _RAGEvaluator
     return RAGEvaluator
+
 
 __all__ = [
     "RAGEvaluator",

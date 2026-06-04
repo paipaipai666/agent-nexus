@@ -273,4 +273,70 @@ export const api = {
       step_count: number
       skill_id: string | null
     }>('/api/runtime/status'),
+
+  // Eval — Tasks
+  listEvalTasks: (category?: string, difficulty?: string, evalType?: string) => {
+    const params = new URLSearchParams()
+    if (category) params.set('category', category)
+    if (difficulty) params.set('difficulty', difficulty)
+    if (evalType) params.set('eval_type', evalType)
+    const qs = params.toString()
+    return request<{ tasks: Array<{ id: string; description: string; category: string; difficulty: string; eval_type: string; tags: string[]; grader_count: number }> }>(
+      `/api/eval/tasks${qs ? `?${qs}` : ''}`
+    )
+  },
+
+  getEvalTask: (taskId: string) =>
+    request<any>(`/api/eval/tasks/${taskId}`),
+
+  validateEvalTasks: () =>
+    request<{ valid: boolean; errors: string[]; stats: any }>('/api/eval/tasks/validate'),
+
+  runEvalTask: (taskId: string, nTrials = 1) =>
+    request<any>(`/api/eval/tasks/${taskId}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ n_trials: nTrials }),
+    }),
+
+  // Eval — Suites
+  listEvalSuites: () =>
+    request<{ suites: Array<{ name: string; eval_type: string; description: string; task_count: number }> }>('/api/eval/suites'),
+
+  getEvalSuite: (suiteName: string) =>
+    request<any>(`/api/eval/suites/${suiteName}`),
+
+  runEvalSuite: (suiteName: string, nTrials = 1, concurrency = 4) =>
+    request<any>(`/api/eval/suites/${suiteName}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ n_trials: nTrials, concurrency }),
+    }),
+
+  getEvalBaseline: (suiteName: string) =>
+    request<any>(`/api/eval/suites/${suiteName}/baseline`),
+
+  saveEvalBaseline: (suiteName: string) =>
+    request<{ status: string; path: string }>(`/api/eval/suites/${suiteName}/baseline`, {
+      method: 'POST',
+    }),
+
+  compareEvalBaseline: (suiteName: string) =>
+    request<any>(`/api/eval/suites/${suiteName}/compare`, {
+      method: 'POST',
+    }),
+
+  // Eval — Legacy
+  listEvalDatasets: () =>
+    request<{ datasets: Array<{ name: string; filename: string; samples: number }> }>('/api/eval/datasets'),
+
+  runEvalRag: (quick = true, topK = 3) =>
+    request<{ status: string; results: any }>('/api/eval/run', {
+      method: 'POST',
+      body: JSON.stringify({ quick, top_k: topK }),
+    }),
+
+  listEvalReports: () =>
+    request<{ reports: any[] }>('/api/eval/reports'),
+
+  getEvalStats: () =>
+    request<any>('/api/eval/stats'),
 }

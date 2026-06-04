@@ -1,4 +1,25 @@
-"""Evaluation API routes."""
+"""Evaluation API routes — 完整的评估 REST API。
+
+端点:
+  GET  /api/eval/datasets      -- 列出 JSONL 数据集
+  POST /api/eval/run           -- 运行 RAG 评估
+  GET  /api/eval/reports       -- 列出评估报告
+  POST /api/eval/compare       -- 对比报告
+
+  GET  /api/eval/tasks         -- 列出 YAML 任务
+  GET  /api/eval/tasks/{id}    -- 获取任务详情
+  GET  /api/eval/tasks/validate -- 验证数据集
+  POST /api/eval/tasks/{id}/run -- 运行单个任务
+
+  GET  /api/eval/suites         -- 列出套件
+  GET  /api/eval/suites/{name}  -- 获取套件详情
+  POST /api/eval/suites/{name}/run    -- 运行套件
+  GET  /api/eval/suites/{name}/baseline -- 获取 baseline
+  POST /api/eval/suites/{name}/baseline -- 保存 baseline
+  POST /api/eval/suites/{name}/compare  -- 与 baseline 对比
+
+  GET  /api/eval/stats          -- 评估系统统计
+"""
 
 from __future__ import annotations
 
@@ -12,6 +33,19 @@ class CompareRequest(BaseModel):
     baseline: str
     candidate: str
 
+
+class RunSuiteRequest(BaseModel):
+    n_trials: int = 1
+    concurrency: int = 4
+
+
+class RunTaskRequest(BaseModel):
+    n_trials: int = 1
+
+
+# ------------------------------------------------------------------
+# Legacy JSONL endpoints (保留兼容)
+# ------------------------------------------------------------------
 
 @router.get("/datasets")
 def list_datasets():
@@ -102,3 +136,116 @@ def compare_reports(req: CompareRequest):
             delta[key] = {"baseline": b_val, "candidate": c_val, "diff": round(c_val - b_val, 4)}
 
     return {"baseline": req.baseline, "candidate": req.candidate, "delta": delta}
+
+
+# ------------------------------------------------------------------
+# New Task/Suite endpoints
+# ------------------------------------------------------------------
+
+def _get_eval_service():
+    from agentnexus.services.eval import EvalService
+    return EvalService()
+
+
+@router.get("/tasks")
+def list_tasks(
+    category: str | None = None,
+    difficulty: str | None = None,
+    eval_type: str | None = None,
+):
+    service = _get_eval_service()
+    return {"tasks": service.list_tasks(category=category, difficulty=difficulty, eval_type=eval_type)}
+
+
+@router.get("/tasks/validate")
+def validate_tasks():
+    service = _get_eval_service()
+    return service.validate_dataset()
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: str):
+    service = _get_eval_service()
+    task = service.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    return task
+
+
+@router.post("/tasks/{task_id}/run")
+def run_task(task_id: str, req: RunTaskRequest | None = None):
+    try:
+        service = _get_eval_service()
+        n_trials = req.n_trials if req else 1
+        result = service.run_task(task_id, n_trials=n_trials)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/suites")
+def list_suites():
+    service = _get_eval_service()
+    return {"suites": service.list_suites()}
+
+
+@router.get("/suites/{suite_name}")
+def get_suite(suite_name: str):
+    service = _get_eval_service()
+    suite = service.get_suite(suite_name)
+    if suite is None:
+        raise HTTPException(status_code=404, detail=f"Suite not found: {suite_name}")
+    return suite
+
+
+@router.post("/suites/{suite_name}/run")
+def run_suite(suite_name: str, req: RunSuiteRequest | None = None):
+    try:
+        service = _get_eval_service()
+        n_trials = req.n_trials if req else 1
+        concurrency = req.concurrency if req else 4
+        result = service.run_suite(suite_name, n_trials=n_trials, concurrency=concurrency)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/suites/{suite_name}/baseline")
+def get_baseline(suite_name: str):
+    service = _get_eval_service()
+    baseline = service.load_baseline(suite_name)
+    if baseline is None:
+        raise HTTPException(status_code=404, detail=f"No baseline for suite: {suite_name}")
+    return baseline
+
+
+@router.post("/suites/{suite_name}/baseline")
+def save_baseline(suite_name: str):
+    try:
+        service = _get_eval_service()
+        result = service.run_suite(suite_name)
+        path = service.save_baseline(suite_name, result)
+        return {"status": "saved", "path": path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/suites/{suite_name}/compare")
+def compare_with_baseline(suite_name: str):
+    try:
+        service = _get_eval_service()
+        current = service.run_suite(suite_name)
+        regression = service.compare_with_baseline(suite_name, current)
+        return regression
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats")
+def eval_stats():
+    service = _get_eval_service()
+    return service.get_eval_stats()

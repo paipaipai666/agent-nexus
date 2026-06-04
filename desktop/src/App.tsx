@@ -13,6 +13,7 @@ import StatsPage from './pages/StatsPage'
 import HealthPage from './pages/HealthPage'
 import AlertsPage from './pages/AlertsPage'
 import AuditPage from './pages/AuditPage'
+import EvalPage from './pages/EvalPage'
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="/health" element={<HealthPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/audit" element={<AuditPage />} />
+            <Route path="/eval" element={<EvalPage />} />
           </Routes>
           </AppShell>
         </BrowserRouter>

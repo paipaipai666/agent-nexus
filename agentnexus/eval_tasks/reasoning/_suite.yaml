@@ -1,0 +1,13 @@
+name: "reasoning"
+eval_type: "capability"
+description: "多步推理能力评估"
+tags: ["reasoning", "math"]
+version: "1.0"
+
+task_ids:
+  - "multi_step_math"
+
+thresholds:
+  min_pass_rate: 0.5
+  max_regression_delta: 0.1
+  max_saturation: 0.95
