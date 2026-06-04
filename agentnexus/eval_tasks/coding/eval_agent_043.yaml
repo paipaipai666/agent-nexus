@@ -1,0 +1,30 @@
+id: eval_agent_043
+description: 把代码中的魔法数字替换为命名常量
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- grep
+- read
+- edit
+input:
+  prompt: 把代码中的魔法数字替换为命名常量
+  tools:
+  - grep
+  - read
+  - edit
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: grep
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 扫描代码中的数字字面量，提取有意义的命名常量并替换。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 扫描代码中的数字字面量，提取有意义的命名常量并替换。

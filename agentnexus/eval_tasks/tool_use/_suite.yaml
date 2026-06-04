@@ -1,12 +1,36 @@
-name: "tool_use"
-eval_type: "capability"
-description: "工具使用能力评估"
-tags: ["tools", "search"]
-version: "1.0"
-
+name: tool_use
+eval_type: capability
+description: 工具使用能力评估
+tags:
+- tools
+- search
+version: '1.0'
 task_ids:
-  - "search_and_summarize"
-
+- eval_agent_002
+- eval_agent_003
+- eval_agent_005
+- eval_agent_006
+- eval_agent_008
+- eval_agent_009
+- eval_agent_014
+- eval_agent_020
+- eval_agent_022
+- eval_agent_023
+- eval_agent_024
+- eval_agent_025
+- eval_agent_026
+- eval_agent_029
+- eval_agent_031
+- eval_agent_033
+- eval_agent_036
+- eval_agent_040
+- eval_agent_042
+- eval_agent_044
+- eval_agent_045
+- eval_agent_046
+- eval_agent_048
+- eval_agent_049
+- search_and_summarize
 thresholds:
   min_pass_rate: 0.5
   max_regression_delta: 0.1

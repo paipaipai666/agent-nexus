@@ -1,0 +1,25 @@
+id: eval_agent_050
+description: 创建一个 Python 命令行工具入口
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+input:
+  prompt: 创建一个 Python 命令行工具入口
+  tools:
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 click 或 argparse 编写命令行工具，包含参数解析和帮助信息。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 click 或 argparse 编写命令行工具，包含参数解析和帮助信息。

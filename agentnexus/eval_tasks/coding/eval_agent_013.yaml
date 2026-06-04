@@ -1,0 +1,28 @@
+id: eval_agent_013
+description: 写一个 bash 脚本批量重命名 .jpg 文件为日期前缀
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+- bash
+input:
+  prompt: 写一个 bash 脚本批量重命名 .jpg 文件为日期前缀
+  tools:
+  - write
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 生成一个 bash 循环脚本遍历 .jpg 文件，用 stat 获取修改日期并重命名。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 生成一个 bash 循环脚本遍历 .jpg 文件，用 stat 获取修改日期并重命名。

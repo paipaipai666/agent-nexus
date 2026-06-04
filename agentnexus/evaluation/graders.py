@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentnexus.evaluation.task import GraderConfig, ScoringMode
-from agentnexus.evaluation.trial import GraderScore
+from agentnexus.evaluation.trial import GraderScore, TrialResult
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +542,11 @@ class CompositeGrader(BaseGrader):
 # ---------------------------------------------------------------------------
 
 class TrajectoryGraderAdapter(BaseGrader):
-    """将现有 trajectory.py 包装为标准 grader。"""
+    """将现有 trajectory.py 包装为标准 grader。
+
+    直接调用 _evaluate_one(trace_id, spans) 方法操作内存中的 spans，
+    而非从磁盘读取 JSONL 文件。
+    """
 
     name = "trajectory"
     grader_type = "deterministic"
@@ -558,10 +562,12 @@ class TrajectoryGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.trajectory import TrajectoryEvaluator
             evaluator = TrajectoryEvaluator()
-            report = evaluator.evaluate_transcript(transcript)
+            # 调用 _evaluate_one 直接操作内存 spans
+            report = evaluator._evaluate_one("inline", transcript)
             score = report.score / 10.0  # 归一化到 0-1
-            passed = report.score >= (config.threshold or 6.0)
-            issues = [f"{check}: {count}" for check, count in report.issues.items() if count > 0]
+            threshold = (config.threshold or 6.0) / 10.0
+            passed = score >= threshold
+            issues = [f"[{i.severity}] {i.check}: {i.detail}" for i in report.issues]
         except Exception as e:
             score = 0.0
             passed = False
@@ -579,7 +585,10 @@ class TrajectoryGraderAdapter(BaseGrader):
 
 
 class HallucinationGraderAdapter(BaseGrader):
-    """将现有 hallucination.py 包装为标准 grader。"""
+    """将现有 hallucination.py 包装为标准 grader。
+
+    直接调用 _evaluate_one(trace_id, answer, spans) 方法操作内存数据。
+    """
 
     name = "hallucination"
     grader_type = "deterministic"
@@ -595,12 +604,26 @@ class HallucinationGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.hallucination import HallucinationDetector
             detector = HallucinationDetector()
-            report = detector.detect(transcript)
+            # 提取答案
+            answer = ""
+            for span in reversed(transcript):
+                if span.get("name") == "final_answer":
+                    answer = span.get("output", {}).get("answer", "")
+                    break
+            if not answer:
+                return GraderScore(
+                    name=config.name or self.name, grader_type=self.grader_type,
+                    score=1.0, passed=True,
+                    details="No answer to check for hallucination",
+                    weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+                )
+            # 调用 _evaluate_one 直接操作内存数据
+            report = detector._evaluate_one("inline", answer, transcript)
             # 幻觉率越低越好，score = 1 - hallucination_rate
             score = max(0.0, 1.0 - report.hallucination_rate)
             threshold = config.threshold or 0.98  # 默认 < 2% 幻觉率
             passed = score >= threshold
-            details = f"Hallucination rate: {report.hallucination_rate:.1%}"
+            details = f"Hallucination rate: {report.hallucination_rate:.1%} ({report.unsupported_claims}/{report.total_claims} claims)"
         except Exception as e:
             score = 0.0
             passed = False
@@ -618,7 +641,10 @@ class HallucinationGraderAdapter(BaseGrader):
 
 
 class CoherenceGraderAdapter(BaseGrader):
-    """将现有 coherence.py 包装为标准 grader。"""
+    """将现有 coherence.py 包装为标准 grader。
+
+    直接调用 _evaluate_one(trace_id, spans) 方法操作内存中的 spans。
+    """
 
     name = "coherence"
     grader_type = "model_based"
@@ -634,11 +660,14 @@ class CoherenceGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.coherence import CoherenceEvaluator
             evaluator = CoherenceEvaluator()
-            report = evaluator.evaluate(transcript)
+            # 调用 _evaluate_one 直接操作内存 spans
+            report = evaluator._evaluate_one("inline", transcript)
             score = report.coherence_score / 10.0  # 归一化到 0-1
             threshold = (config.threshold or 8.5) / 10.0
             passed = score >= threshold
             details = f"Coherence: {report.coherence_score:.1f}/10"
+            if report.issues:
+                details += f" | Issues: {report.issues[:100]}"
         except Exception as e:
             score = 0.0
             passed = False
@@ -655,6 +684,358 @@ class CoherenceGraderAdapter(BaseGrader):
         )
 
 
+class CodeExecutionGrader(BaseGrader):
+    """代码执行评分器 — 在隔离子进程中运行测试断言。
+
+    对应 Anthropic 方法论中的 code-based grader。
+    支持 YAML task 中的 test_files 断言列表。
+    """
+
+    name = "code_execution"
+    grader_type = "deterministic"
+
+    def grade(
+        self,
+        task_input: dict[str, Any],
+        transcript: list[dict[str, Any]],
+        outcome: dict[str, Any],
+        config: GraderConfig,
+    ) -> GraderScore:
+        import subprocess
+        import tempfile
+
+        start = time.monotonic()
+
+        if not config.test_files:
+            return GraderScore(
+                name=config.name or self.name, grader_type=self.grader_type,
+                score=1.0, passed=True,
+                details="No test assertions specified",
+                weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+            )
+
+        # 从 transcript 提取 agent 生成的代码
+        code = self._extract_code(transcript)
+        if not code:
+            return GraderScore(
+                name=config.name or self.name, grader_type=self.grader_type,
+                score=0.0, passed=False,
+                details="No code found in transcript",
+                weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+            )
+
+        # 组装测试脚本
+        test_script = code.rstrip() + "\n\n"
+        for assertion in config.test_files:
+            test_script += f"assert {assertion}\n"
+        test_script += "print('ALL_TESTS_PASSED')\n"
+
+        # 在子进程中执行
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(test_script)
+                tmp_path = f.name
+
+            result = subprocess.run(
+                ["python", tmp_path],
+                capture_output=True, text=True, timeout=30,
+            )
+
+            passed = result.returncode == 0 and "ALL_TESTS_PASSED" in result.stdout
+            if passed:
+                details = f"All {len(config.test_files)} assertions passed"
+                score = 1.0
+            else:
+                stderr = result.stderr.strip()[:200]
+                details = f"Test failed: {stderr}"
+                score = 0.0
+        except subprocess.TimeoutExpired:
+            details = "Test execution timed out (30s)"
+            score = 0.0
+            passed = False
+        except Exception as e:
+            details = f"Execution error: {e}"
+            score = 0.0
+            passed = False
+        finally:
+            import os
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+        return GraderScore(
+            name=config.name or self.name,
+            grader_type=self.grader_type,
+            score=score,
+            passed=passed,
+            details=details,
+            weight=config.weight,
+            duration_ms=(time.monotonic() - start) * 1000,
+        )
+
+    def _extract_code(self, transcript: list[dict[str, Any]]) -> str:
+        """从 transcript 提取 agent 生成的代码。"""
+        # 优先从 final_answer 中提取代码块
+        for span in reversed(transcript):
+            if span.get("name") == "final_answer":
+                answer = span.get("output", {}).get("answer", "")
+                # 提取 ```python ... ``` 代码块
+                import re
+                code_blocks = re.findall(r'```(?:python)?\n(.*?)```', answer, re.DOTALL)
+                if code_blocks:
+                    return "\n\n".join(code_blocks)
+                # 如果没有代码块，整个答案可能就是代码
+                if "def " in answer or "class " in answer or "import " in answer:
+                    return answer
+        # 从 tool 结果中提取
+        for span in transcript:
+            if span.get("name") == "tool":
+                result = str(span.get("output", {}).get("result_summary", ""))
+                if "def " in result or "class " in result:
+                    return result
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Agent Runner — 将 ReActAgent 包装为 harness 可调用的 runner
+# ---------------------------------------------------------------------------
+
+class ReActAgentRunner:
+    """将 ReActAgent 包装为 EvalHarness 可调用的 AgentRunner。
+
+    执行流程:
+    1. 创建隔离的 agent 实例
+    2. 执行 task.input.prompt
+    3. 收集 transcript (从 trace 系统)
+    4. 返回 TrialResult
+    """
+
+    def __init__(self, settings: Any | None = None):
+        self._settings = settings
+
+    def __call__(self, task: EvalTask, trial_index: int) -> TrialResult:
+        """运行单次 trial。"""
+        import time as _time
+
+        start = _time.monotonic()
+        transcript: list[dict[str, Any]] = []
+        outcome: dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
+        error: str | None = None
+
+        try:
+            # 延迟导入避免循环依赖
+            from agentnexus.agents.re_act_agent import ReActAgent
+            from agentnexus.core.config import get_settings
+            from agentnexus.core.llm import AgentLLM
+            from agentnexus.tools.registry import ToolRegistry
+
+            settings = self._settings or get_settings()
+
+            # AgentLLM 接受 model/apiKey/baseUrl/timeout 参数，不接受 settings 对象
+            llm = AgentLLM()
+            tool_registry = ToolRegistry()
+            agent = ReActAgent(
+                llm_client=llm,
+                tool_executor=tool_registry,
+                max_steps=task.max_turns or getattr(settings, "max_agent_steps", 5),
+            )
+
+            # 执行 agent
+            prompt = task.input.get("prompt", "")
+
+            # 运行 agent 并收集结果
+            result = agent.run(question=prompt)
+
+            # 从 agent 的 trace 中收集 transcript
+            transcript = self._collect_transcript(agent, result)
+            outcome = self._collect_outcome(result)
+            metadata = {
+                "runner": "react_agent",
+                "model": getattr(settings, "llm_model_id", "unknown"),
+                "trial_index": trial_index,
+            }
+
+            # 提取 token 统计 (从 agent 的 _total_usage)
+            usage = getattr(agent, "_total_usage", {})
+            if isinstance(usage, dict):
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                metadata["input_tokens"] = in_tok
+                metadata["output_tokens"] = out_tok
+                metadata["n_total_tokens"] = in_tok + out_tok
+
+        except Exception as e:
+            error = str(e)
+            metadata = {"runner": "react_agent", "error": error, "trial_index": trial_index}
+
+        elapsed = (_time.monotonic() - start) * 1000
+
+        return TrialResult(
+            task_id=task.id,
+            trial_index=trial_index,
+            transcript=transcript,
+            outcome=outcome,
+            metadata=metadata,
+            duration_ms=elapsed,
+            error=error,
+        )
+
+    def _collect_transcript(self, agent: Any, result: Any) -> list[dict[str, Any]]:
+        """从 agent 执行结果中收集 transcript spans。
+
+        将 AgentStep 对象转换为标准 span 格式:
+        - LLM 调用 → name="llm" span
+        - 工具调用 → name="tool" span
+        - 最终答案 → name="final_answer" span
+        """
+        spans: list[dict[str, Any]] = []
+
+        # 从 result.steps (AgentStep 列表) 收集
+        steps = getattr(result, "steps", []) or []
+        for i, step in enumerate(steps):
+            # LLM 调用 span
+            content = getattr(step, "content", "") or ""
+            reasoning = getattr(step, "reasoning_content", "") or ""
+            error = getattr(step, "error_message", None)
+            strategy = getattr(step, "strategy_used", None)
+            strategy_name = strategy.name if strategy else "unknown"
+
+            llm_span: dict[str, Any] = {
+                "name": "llm",
+                "start_time": i * 2.0,
+                "end_time": i * 2.0 + 1.0,
+                "input": {"step_id": getattr(step, "step_id", i)},
+                "output": {"content": content[:500]},
+                "metadata": {
+                    "status": "error" if error else "ok",
+                    "strategy": strategy_name,
+                    "reasoning": reasoning[:300],
+                },
+            }
+            if error:
+                llm_span["output"]["error"] = str(error)[:200]
+            spans.append(llm_span)
+
+            # 工具调用 spans
+            tool_calls = getattr(step, "tool_calls", []) or []
+            tool_outputs = getattr(step, "tool_outputs", []) or []
+            for j, tc in enumerate(tool_calls):
+                tool_name = tc.get("name", "") or tc.get("function", {}).get("name", "")
+                tool_params = tc.get("arguments", {}) or tc.get("function", {}).get("arguments", {})
+                if isinstance(tool_params, str):
+                    try:
+                        import json as _json
+                        tool_params = _json.loads(tool_params)
+                    except Exception:
+                        tool_params = {"raw": tool_params[:200]}
+
+                output_data: dict[str, Any] = {}
+                if j < len(tool_outputs):
+                    out = tool_outputs[j]
+                    output_data = {
+                        "result_summary": str(out.get("output", ""))[:300],
+                    }
+                    if out.get("error"):
+                        output_data["error"] = str(out["error"])[:200]
+
+                tool_span: dict[str, Any] = {
+                    "name": "tool",
+                    "start_time": i * 2.0 + 1.0,
+                    "end_time": i * 2.0 + 1.5,
+                    "input": {
+                        "tool_name": tool_name,
+                        "params": tool_params,
+                    },
+                    "output": output_data,
+                    "metadata": {
+                        "status": "error" if (j < len(tool_outputs) and tool_outputs[j].get("error")) else "ok",
+                    },
+                }
+                spans.append(tool_span)
+
+        # 最终答案 span
+        answer = getattr(result, "answer", None)
+        if answer:
+            spans.append({
+                "name": "final_answer",
+                "start_time": len(steps) * 2.0,
+                "end_time": len(steps) * 2.0 + 0.5,
+                "input": {},
+                "output": {"answer": answer},
+                "metadata": {"status": "ok"},
+            })
+
+        return spans
+
+    def _collect_outcome(self, result: Any) -> dict[str, Any]:
+        """从 agent 结果中收集 outcome。"""
+        outcome: dict[str, Any] = {}
+        if hasattr(result, "answer"):
+            outcome["answer"] = result.answer
+        if hasattr(result, "steps"):
+            outcome["steps_count"] = len(result.steps) if result.steps else 0
+        return outcome
+
+
+# ---------------------------------------------------------------------------
+# Transcript Collector — 从 TraceManager 收集 spans
+# ---------------------------------------------------------------------------
+
+class TranscriptCollector:
+    """从现有的 TraceManager 收集 trial 的完整 transcript。
+
+    订阅 TraceManager 的 span 事件，收集属于特定 trial 的所有 spans。
+    """
+
+    def __init__(self):
+        self._spans: list[dict[str, Any]] = []
+        self._active = False
+        self._trace_id: str | None = None
+
+    def start(self, trace_id: str | None = None) -> None:
+        """开始收集。"""
+        self._spans = []
+        self._active = True
+        self._trace_id = trace_id
+
+        # 注册 span 回调
+        try:
+            from agentnexus.observability.tracer import TraceManager
+            tm = TraceManager()
+            if hasattr(tm, "on_span_end"):
+                tm.on_span_end(self._on_span)
+        except Exception:
+            pass
+
+    def stop(self) -> list[dict[str, Any]]:
+        """停止收集并返回 spans。"""
+        self._active = False
+        return list(self._spans)
+
+    def _on_span(self, span: dict[str, Any]) -> None:
+        """span 结束回调。"""
+        if not self._active:
+            return
+        if self._trace_id and span.get("trace_id") != self._trace_id:
+            return
+        self._spans.append(span)
+
+    def get_tool_calls(self) -> list[dict[str, Any]]:
+        """获取工具调用列表。"""
+        return [s for s in self._spans if s.get("name") == "tool"]
+
+    def get_outcome(self) -> dict[str, Any]:
+        """获取最终状态。"""
+        for s in reversed(self._spans):
+            if s.get("name") == "final_answer":
+                return s.get("output", {})
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Grader Factory
 # ---------------------------------------------------------------------------
@@ -669,6 +1050,7 @@ _BUILTIN_GRADERS: dict[str, type[BaseGrader]] = {
     "trajectory": TrajectoryGraderAdapter,
     "hallucination": HallucinationGraderAdapter,
     "coherence": CoherenceGraderAdapter,
+    "code_execution": CodeExecutionGrader,
 }
 
 

@@ -1,0 +1,25 @@
+id: eval_agent_046
+description: 计算 Git 仓库中每个人的代码贡献量
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 计算 Git 仓库中每个人的代码贡献量
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 git shortlog -sne 统计每个作者的提交次数和变更行数。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 git shortlog -sne 统计每个作者的提交次数和变更行数。

@@ -159,8 +159,13 @@ class EvalHarness:
         for i in range(trials):
             if self._config.verbose:
                 logger.info("Running task %s trial %d/%d", task.id, i + 1, trials)
+            # 环境隔离: setup
+            env_state = self._setup_environment(task)
             try:
                 result = agent_runner(task, i)
+                # 补充 outcome 中的环境状态
+                if env_state:
+                    result.outcome.setdefault("environment", env_state)
                 # 评分
                 result = self._grade_trial(task, result)
                 trial_results.append(result)
@@ -171,6 +176,9 @@ class EvalHarness:
                     trial_index=i,
                     error=str(e),
                 ))
+            finally:
+                # 环境隔离: teardown
+                self._teardown_environment(task)
 
         # 计算 pass 指标
         n_success = sum(1 for t in trial_results if t.passed)
@@ -213,6 +221,58 @@ class EvalHarness:
         result.passed = score.passed
 
         return result
+
+    # ------------------------------------------------------------------
+    # Environment isolation
+    # ------------------------------------------------------------------
+
+    def _setup_environment(self, task: EvalTask) -> dict[str, Any]:
+        """为 trial 创建隔离环境。
+
+        如果 task 定义了 environment，执行 setup_cmd 并返回初始状态。
+        """
+        import subprocess
+
+        env = task.environment
+        if not env:
+            return {}
+
+        env_state: dict[str, Any] = {"type": env.get("type", "default")}
+
+        # 执行 setup 命令
+        setup_cmd = env.get("setup_cmd")
+        if setup_cmd:
+            try:
+                result = subprocess.run(
+                    setup_cmd, shell=True, capture_output=True, text=True, timeout=30,
+                )
+                env_state["setup_returncode"] = result.returncode
+                env_state["setup_stdout"] = result.stdout[:500]
+                if result.returncode != 0:
+                    logger.warning("Task %s setup failed: %s", task.id, result.stderr[:200])
+            except subprocess.TimeoutExpired:
+                logger.warning("Task %s setup timed out", task.id)
+            except Exception as e:
+                logger.warning("Task %s setup error: %s", task.id, e)
+
+        return env_state
+
+    def _teardown_environment(self, task: EvalTask) -> None:
+        """trial 结束后清理环境。"""
+        import subprocess
+
+        env = task.environment
+        if not env:
+            return
+
+        teardown_cmd = env.get("teardown_cmd")
+        if teardown_cmd:
+            try:
+                subprocess.run(
+                    teardown_cmd, shell=True, capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                logger.debug("Task %s teardown error: %s", task.id, e)
 
     # ------------------------------------------------------------------
     # Internal execution

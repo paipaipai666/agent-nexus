@@ -1,12 +1,48 @@
-name: "coding"
-eval_type: "capability"
-description: "代码生成和修复能力评估"
-tags: ["coding", "python"]
-version: "1.0"
-
+name: coding
+eval_type: capability
+description: 代码生成和修复能力评估
+tags:
+- coding
+- python
+version: '1.0'
 task_ids:
-  - "fix_simple_bug"
-
+- eval_agent_001
+- eval_agent_004
+- eval_agent_007
+- eval_agent_010
+- eval_agent_011
+- eval_agent_012
+- eval_agent_013
+- eval_agent_015
+- eval_agent_016
+- eval_agent_017
+- eval_agent_018
+- eval_agent_019
+- eval_agent_021
+- eval_agent_027
+- eval_agent_028
+- eval_agent_030
+- eval_agent_032
+- eval_agent_034
+- eval_agent_035
+- eval_agent_037
+- eval_agent_038
+- eval_agent_039
+- eval_agent_041
+- eval_agent_043
+- eval_agent_047
+- eval_agent_050
+- fix_simple_bug
+- humaneval_001
+- humaneval_002
+- humaneval_003
+- humaneval_004
+- humaneval_005
+- humaneval_006
+- humaneval_007
+- humaneval_008
+- humaneval_009
+- humaneval_010
 thresholds:
   min_pass_rate: 0.6
   max_regression_delta: 0.1

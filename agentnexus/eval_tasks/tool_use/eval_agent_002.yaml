@@ -1,0 +1,28 @@
+id: eval_agent_002
+description: 当前目录有哪些文件？
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+- glob
+input:
+  prompt: 当前目录有哪些文件？
+  tools:
+  - bash
+  - glob
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  - tool: glob
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 列出当前工作目录下的所有文件和子目录。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 列出当前工作目录下的所有文件和子目录。

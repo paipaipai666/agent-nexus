@@ -1,0 +1,28 @@
+id: eval_agent_034
+description: 将 Python 2 代码升级到 Python 3 语法
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- edit
+input:
+  prompt: 将 Python 2 代码升级到 Python 3 语法
+  tools:
+  - read
+  - edit
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: edit
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 识别 Python 2 特有的语法（print 语句、异常语法等），逐个转换为 Python 3 等效语法。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 识别 Python 2 特有的语法（print 语句、异常语法等），逐个转换为 Python 3 等效语法。

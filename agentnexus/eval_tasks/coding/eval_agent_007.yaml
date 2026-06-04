@@ -1,0 +1,31 @@
+id: eval_agent_007
+description: 将 src/ 目录下的所有 .py 文件中的 print 替换为 logging
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- glob
+- read
+- edit
+input:
+  prompt: 将 src/ 目录下的所有 .py 文件中的 print 替换为 logging
+  tools:
+  - glob
+  - read
+  - edit
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: glob
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 批量读取 .py 文件，用 logging 替换 print，写回文件。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 批量读取 .py 文件，用 logging 替换 print，写回文件。

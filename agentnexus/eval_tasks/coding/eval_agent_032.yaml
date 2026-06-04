@@ -1,0 +1,25 @@
+id: eval_agent_032
+description: 实现一个简单的 LRU 缓存
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+input:
+  prompt: 实现一个简单的 LRU 缓存
+  tools:
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 OrderedDict 实现 LRU 缓存类，包含 get、put 方法，容量限制。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 OrderedDict 实现 LRU 缓存类，包含 get、put 方法，容量限制。

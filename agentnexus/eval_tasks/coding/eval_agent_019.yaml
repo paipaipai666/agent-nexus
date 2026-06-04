@@ -1,0 +1,28 @@
+id: eval_agent_019
+description: 将 CSV 文件转换为 JSON 格式
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+input:
+  prompt: 将 CSV 文件转换为 JSON 格式
+  tools:
+  - read
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 读取 CSV 文件，解析表头和数据行，输出 JSON 数组格式。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 读取 CSV 文件，解析表头和数据行，输出 JSON 数组格式。

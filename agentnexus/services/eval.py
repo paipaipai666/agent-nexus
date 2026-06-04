@@ -233,17 +233,12 @@ class EvalService:
         }
 
     # ------------------------------------------------------------------
-    # Default Agent Runner (mock)
+    # Default Agent Runner
     # ------------------------------------------------------------------
 
     def _default_agent_runner(self, task: EvalTask, trial_index: int) -> Any:
-        """默认 agent runner — 返回空结果，用于测试 harness 框架。"""
-        from agentnexus.evaluation.trial import TrialResult
+        """默认 agent runner — 使用 ReActAgentRunner 执行真实 agent。"""
+        from agentnexus.evaluation.graders import ReActAgentRunner
 
-        return TrialResult(
-            task_id=task.id,
-            trial_index=trial_index,
-            transcript=[],
-            outcome={},
-            metadata={"runner": "mock"},
-        )
+        runner = ReActAgentRunner(self.settings)
+        return runner(task, trial_index)

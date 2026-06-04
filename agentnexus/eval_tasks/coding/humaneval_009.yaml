@@ -1,0 +1,28 @@
+id: humaneval_009
+description: 编写一个函数 `is_palindrome(text)`，判断字符串是否为回文。
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- humaneval
+- code-generation
+input:
+  prompt: "编写一个函数 `is_palindrome(text)`，判断字符串是否为回文。\n\n```python\ndef is_palindrome(text:\
+    \ str) -> bool:\n    \"\"\"Check if a string is a palindrome.\"\"\"\n```"
+  tools:
+  - code_executor
+graders:
+- type: code_execution
+  test_files:
+  - is_palindrome('') == True
+  - is_palindrome('racecar') == True
+  - is_palindrome('hello') == False
+  weight: 0.7
+- type: llm_rubric
+  name: code_quality
+  assertions:
+  - 代码语法正确
+  - 实现逻辑清晰
+  weight: 0.3
+reference_solution: "```python\ndef is_palindrome(text):\n    return text == text[::-1]\n\
+  ```"

@@ -1,0 +1,28 @@
+id: eval_agent_015
+description: 帮我创建一个 React 组件：可排序表格
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+- read
+input:
+  prompt: 帮我创建一个 React 组件：可排序表格
+  tools:
+  - write
+  - read
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 生成一个支持点击表头排序的 React 表格组件 TypeScript 代码。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 生成一个支持点击表头排序的 React 表格组件 TypeScript 代码。

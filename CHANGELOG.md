@@ -27,17 +27,31 @@ All notable changes to AgentNexus will be documented in this file.
 - **Bootstrap confidence intervals** — for all LLM-judged metrics
 - **Eval saturation monitoring** — automatic suggestions when evals are saturated
 
+### Bug Fixes
+
+- Fixed `TrajectoryGraderAdapter` — was calling non-existent `evaluate_transcript()`, now calls `_evaluate_one()` directly
+- Fixed `HallucinationGraderAdapter` — was calling non-existent `detect()`, now calls `_evaluate_one()` directly
+- Fixed `CoherenceGraderAdapter` — was calling non-existent `evaluate()`, now calls `_evaluate_one()` directly
+- Implemented `CodeExecutionGrader` — runs test assertions in isolated subprocess
+- Implemented `ReActAgentRunner` — real agent runner that integrates with ReActAgent
+- Implemented `TranscriptCollector` — collects spans from TraceManager
+- Added environment isolation (setup/teardown) to `EvalHarness`
+- Fixed broken `eval_cmd.py` import
+- Fixed syntax error in `graders.py` (Chinese text with unescaped braces)
+
 ### Files Added
 
 - `agentnexus/evaluation/task.py` — Task/Suite/GraderConfig models + YAML loader
 - `agentnexus/evaluation/trial.py` — TrialResult/TaskReport/GraderScore models
-- `agentnexus/evaluation/graders.py` — Grader interface hierarchy (8 types + composite)
-- `agentnexus/evaluation/harness.py` — EvalHarness + SuiteReport
+- `agentnexus/evaluation/graders.py` — Grader interface hierarchy (9 types + composite + agent runner + transcript collector)
+- `agentnexus/evaluation/harness.py` — EvalHarness + SuiteReport + environment isolation
 - `agentnexus/evaluation/statistics.py` — pass@k, pass^k, bootstrap CI, consistency, saturation
 - `agentnexus/evaluation/baseline.py` — BaselineManager + RegressionReport
 - `agentnexus/evaluation/dataset.py` — EvalDataset + JSONL migration
-- `agentnexus/eval_tasks/` — YAML task definitions (5 tasks across 5 categories + regression)
+- `agentnexus/eval_tasks/` — 65 YAML task definitions across 6 suites (coding, tool_use, reasoning, conversation, rag, regression)
 - `agentnexus/cli/eval/task.py` — CLI commands for task/suite/baseline management
+- `agentnexus/cli/eval/transcript.py` — CLI commands for transcript viewing and analysis
+- `scripts/migrate_eval_tasks.py` — Migration script for JSONL → YAML conversion
 - `desktop/src/pages/EvalPage.tsx` — Desktop GUI evaluation page
 
 ### Files Modified

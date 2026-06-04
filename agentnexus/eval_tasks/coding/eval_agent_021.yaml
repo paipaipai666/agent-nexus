@@ -1,0 +1,30 @@
+id: eval_agent_021
+description: 使用 pytest 为现有模块编写单元测试
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+- bash
+input:
+  prompt: 使用 pytest 为现有模块编写单元测试
+  tools:
+  - read
+  - write
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 分析现有模块的接口，为每个函数编写 pytest 测试用例，覆盖正常和异常路径。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 分析现有模块的接口，为每个函数编写 pytest 测试用例，覆盖正常和异常路径。

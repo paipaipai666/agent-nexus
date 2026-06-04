@@ -1,0 +1,27 @@
+id: humaneval_004
+description: 编写一个函数 `strlen(string)`，返回字符串长度（不使用 len）。
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- humaneval
+- code-generation
+input:
+  prompt: "编写一个函数 `strlen(string)`，返回字符串长度（不使用 len）。\n\n```python\ndef strlen(string:\
+    \ str) -> int:\n    \"\"\"Return length of given string.\"\"\"\n```"
+  tools:
+  - code_executor
+graders:
+- type: code_execution
+  test_files:
+  - strlen('') == 0
+  - strlen('abc') == 3
+  weight: 0.7
+- type: llm_rubric
+  name: code_quality
+  assertions:
+  - 代码语法正确
+  - 实现逻辑清晰
+  weight: 0.3
+reference_solution: "```python\ndef strlen(string):\n    count = 0\n    for _ in string:\n\
+  \        count += 1\n    return count\n```"

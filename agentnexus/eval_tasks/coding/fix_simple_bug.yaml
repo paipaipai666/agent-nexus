@@ -19,9 +19,9 @@ input:
 graders:
   - type: "code_execution"
     test_files:
-      - "assert add(1, 2) == 3"
-      - "assert add(-1, 1) == 0"
-      - "assert isinstance(add(1, 2), int)"
+      - "add(1, 2) == 3"
+      - "add(-1, 1) == 0"
+      - "isinstance(add(1, 2), int)"
     weight: 0.7
   - type: "llm_rubric"
     name: "code_quality"

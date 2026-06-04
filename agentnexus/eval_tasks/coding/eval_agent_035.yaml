@@ -1,0 +1,28 @@
+id: eval_agent_035
+description: 创建 Git 仓库并做初始提交
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+- write
+input:
+  prompt: 创建 Git 仓库并做初始提交
+  tools:
+  - bash
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 运行 git init，添加 .gitignore，做初始提交。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 运行 git init，添加 .gitignore，做初始提交。

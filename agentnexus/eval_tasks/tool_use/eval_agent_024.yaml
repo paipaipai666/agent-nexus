@@ -1,0 +1,28 @@
+id: eval_agent_024
+description: 搜索 Node.js 事件循环机制并总结
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+- search
+input:
+  prompt: 搜索 Node.js 事件循环机制并总结
+  tools:
+  - web_search
+  - search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  - tool: search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 搜索 Node.js 事件循环的资料，总结事件循环的阶段和异步 I/O 模型。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 搜索 Node.js 事件循环的资料，总结事件循环的阶段和异步 I/O 模型。

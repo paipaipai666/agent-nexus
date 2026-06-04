@@ -219,7 +219,8 @@ def get_baseline(suite_name: str):
     service = _get_eval_service()
     baseline = service.load_baseline(suite_name)
     if baseline is None:
-        raise HTTPException(status_code=404, detail=f"No baseline for suite: {suite_name}")
+        return {"suite_name": suite_name, "exists": False, "message": "No baseline saved yet"}
+    baseline["exists"] = True
     return baseline
 
 

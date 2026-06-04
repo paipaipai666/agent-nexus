@@ -1,0 +1,32 @@
+id: humaneval_002
+description: 编写一个函数 `separate_paren_groups(paren_string)`，分离嵌套括号组。
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- humaneval
+- code-generation
+input:
+  prompt: "编写一个函数 `separate_paren_groups(paren_string)`，分离嵌套括号组。\n\n```python\ndef\
+    \ separate_paren_groups(paren_string: str) -> List[str]:\n    \"\"\"Separate groups\
+    \ of nested parentheses, ignoring spaces.\"\"\"\n```"
+  tools:
+  - code_executor
+graders:
+- type: code_execution
+  test_files:
+  - separate_paren_groups('( ) (( )) (( )( ))') == ['()', '(())', '(()())']
+  - separate_paren_groups('((()))') == ['((()))']
+  weight: 0.7
+- type: llm_rubric
+  name: code_quality
+  assertions:
+  - 代码语法正确
+  - 实现逻辑清晰
+  weight: 0.3
+reference_solution: "```python\ndef separate_paren_groups(paren_string):\n    paren_string\
+  \ = paren_string.replace(' ', '')\n    result = []\n    start = 0\n    depth = 0\n\
+  \    for i, ch in enumerate(paren_string):\n        if ch == '(':\n            if\
+  \ depth == 0:\n                start = i\n            depth += 1\n        elif ch\
+  \ == ')':\n            depth -= 1\n            if depth == 0:\n                result.append(paren_string[start:i+1])\n\
+  \    return result\n```"

@@ -1,0 +1,29 @@
+id: humaneval_006
+description: 编写一个函数 `triangle_area(a, b, c)`，计算三角形的面积（海伦公式）。
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- humaneval
+- code-generation
+input:
+  prompt: "编写一个函数 `triangle_area(a, b, c)`，计算三角形的面积（海伦公式）。\n\n```python\ndef triangle_area(a:\
+    \ float, b: float, c: float) -> float:\n    \"\"\"Return area of triangle with\
+    \ side lengths a, b, c.\"\"\"\n```"
+  tools:
+  - code_executor
+graders:
+- type: code_execution
+  test_files:
+  - triangle_area(3, 4, 5) == 6.0
+  - triangle_area(1, 1, 1) == 0.43
+  weight: 0.7
+- type: llm_rubric
+  name: code_quality
+  assertions:
+  - 代码语法正确
+  - 实现逻辑清晰
+  weight: 0.3
+reference_solution: "```python\ndef triangle_area(a, b, c):\n    s = (a + b + c) /\
+  \ 2\n    area = (s * (s - a) * (s - b) * (s - c)) ** 0.5\n    return round(area,\
+  \ 2)\n```"

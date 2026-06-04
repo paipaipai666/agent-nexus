@@ -1,0 +1,31 @@
+id: humaneval_001
+description: 编写一个函数 `has_close_elements(numbers, threshold)`，判断列表中是否有任意两个元素之差的绝对值小于等于阈值。
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- humaneval
+- code-generation
+input:
+  prompt: "编写一个函数 `has_close_elements(numbers, threshold)`，判断列表中是否有任意两个元素之差的绝对值小于等于阈值。\n\
+    \n```python\ndef has_close_elements(numbers: List[float], threshold: float) ->\
+    \ bool:\n    \"\"\"Check if in given list of numbers, are any two numbers closer\
+    \ to each other than given threshold.\"\"\"\n```"
+  tools:
+  - code_executor
+graders:
+- type: code_execution
+  test_files:
+  - has_close_elements([1.0, 2.0, 3.0], 0.5) == False
+  - has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3) == True
+  weight: 0.7
+- type: llm_rubric
+  name: code_quality
+  assertions:
+  - 代码语法正确
+  - 实现逻辑清晰
+  weight: 0.3
+reference_solution: "```python\ndef has_close_elements(numbers, threshold):\n    for\
+  \ i in range(len(numbers)):\n        for j in range(i+1, len(numbers)):\n      \
+  \      if abs(numbers[i] - numbers[j]) <= threshold:\n                return True\n\
+  \    return False\n```"

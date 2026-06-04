@@ -1,0 +1,28 @@
+id: eval_agent_012
+description: 查找项目中所有 TODO 注释并生成报告
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- grep
+- write
+input:
+  prompt: 查找项目中所有 TODO 注释并生成报告
+  tools:
+  - grep
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: grep
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 grep 搜索 TODO 关键字，统计每个文件的数量，生成 Markdown 报告。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 grep 搜索 TODO 关键字，统计每个文件的数量，生成 Markdown 报告。

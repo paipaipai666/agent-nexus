@@ -1,0 +1,28 @@
+id: eval_agent_039
+description: 配置 nginx 反向代理到本地 8080 端口
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+- read
+input:
+  prompt: 配置 nginx 反向代理到本地 8080 端口
+  tools:
+  - write
+  - read
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 生成 nginx 配置文件片段，包含 proxy_pass 到 localhost:8080。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 生成 nginx 配置文件片段，包含 proxy_pass 到 localhost:8080。

@@ -1,0 +1,28 @@
+id: eval_agent_003
+description: 搜索 Python 异常处理相关文档
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- search
+- web_search
+input:
+  prompt: 搜索 Python 异常处理相关文档
+  tools:
+  - search
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: search
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 在知识库中搜索并返回与 Python 异常处理相关的文档片段。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 在知识库中搜索并返回与 Python 异常处理相关的文档片段。

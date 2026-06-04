@@ -1,0 +1,25 @@
+id: eval_agent_014
+description: 解释 Python 的 GIL 是什么以及如何绕过
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 解释 Python 的 GIL 是什么以及如何绕过
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解释全局解释器锁的概念，介绍多线程、多进程、异步等替代方案。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解释全局解释器锁的概念，介绍多线程、多进程、异步等替代方案。

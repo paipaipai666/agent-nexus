@@ -1,0 +1,28 @@
+id: eval_agent_028
+description: 把 JSON Schema 转换为 Python 数据类
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+input:
+  prompt: 把 JSON Schema 转换为 Python 数据类
+  tools:
+  - read
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解析 JSON Schema 定义，自动生成对应的 Python dataclass 代码。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解析 JSON Schema 定义，自动生成对应的 Python dataclass 代码。
