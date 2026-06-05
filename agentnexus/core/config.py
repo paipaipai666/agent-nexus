@@ -271,6 +271,10 @@ class Settings(BaseSettings):
     browser_context_ttl: int = Field(default=600, ge=60, le=3600, description="per-task context无操作自动回收时间(秒)")
     browser_allow_js_execution: bool = Field(default=False, description="是否允许执行JavaScript(默认禁用)")
     browser_snapshot_max_nodes: int = Field(default=100, ge=10, le=1000, description="snapshot最大节点数")
+    browser_hitl_rules: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="HITL触发规则列表，格式: [{action:'click', role:'button', name_pattern:'支付|确认'}]",
+    )
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod

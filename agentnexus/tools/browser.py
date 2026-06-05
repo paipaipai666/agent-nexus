@@ -160,6 +160,77 @@ def _in_viewport(box: list[float] | None, vp_w: int, vp_h: int) -> bool:
     return x < vp_w and y < vp_h and x + w > 0 and y + h > 0
 
 
+def _truncate_by_priority(
+    nodes: list[dict],
+    max_nodes: int,
+) -> list[dict]:
+    """Truncate nodes by priority: in-viewport interactive > in-viewport reading > offscreen.
+
+    Uses viewport_status field (set by get_a11y_tree) to determine visibility.
+    """
+    if len(nodes) <= max_nodes:
+        return nodes
+
+    bucket_vp_interactive = []
+    bucket_vp_reading = []
+    bucket_offscreen = []
+
+    for n in nodes:
+        in_vp = n.get("viewport_status") != "below viewport"
+        if in_vp and n.get("role") in INTERACTIVE_ROLES:
+            bucket_vp_interactive.append(n)
+        elif in_vp and n.get("role") in READING_ROLES:
+            bucket_vp_reading.append(n)
+        else:
+            bucket_offscreen.append(n)
+
+    result = []
+    remaining = max_nodes
+    for bucket in [bucket_vp_interactive, bucket_vp_reading, bucket_offscreen]:
+        if remaining <= 0:
+            break
+        take = bucket[:remaining]
+        result.extend(take)
+        remaining -= len(take)
+
+    return result
+
+
+def _check_hitl_rules(action: str, role: str | None, name: str | None) -> bool:
+    """Check if an action matches any HITL rule requiring human confirmation.
+
+    Returns True if the action should be blocked for HITL review.
+    """
+    settings = get_settings()
+    rules = settings.browser_hitl_rules
+    if not rules:
+        return False
+
+    for rule in rules:
+        if rule.get("action") and rule["action"] != action:
+            continue
+        if rule.get("role") and rule.get("role") != (role or ""):
+            continue
+        if rule.get("name_pattern"):
+            import re as _re
+            if not _re.search(rule["name_pattern"], name or "", _re.IGNORECASE):
+                continue
+        return True  # Rule matched — HITL required
+    return False
+
+
+def _is_closed_error(exc: Exception) -> bool:
+    """Check if an exception indicates the browser/context/page was closed externally."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in (
+        "target page, context or browser has been closed",
+        "browser has been closed",
+        "session deleted",
+        "target closed",
+        "connection closed",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # BrowserManager — singleton browser + per-task page isolation
 # ---------------------------------------------------------------------------
@@ -183,12 +254,15 @@ class BrowserManager:
         # per-task resources
         self._contexts: dict[str, Any] = {}  # task_id -> BrowserContext (isolated mode)
         self._shared_context: Any = None  # BrowserContext (cdp mode)
-        self._pages: dict[str, Any] = {}  # task_id -> Page
+        self._pages: dict[str, list[Any]] = {}  # task_id -> [Page, ...] (multiple tabs)
+        self._active_page_idx: dict[str, int] = {}  # task_id -> active page index
+        self._pending_new_page: dict[str, Any] = {}  # task_id -> newly opened Page (to be consumed)
         self._last_access: dict[str, float] = {}  # task_id -> monotonic timestamp
         self._active_tasks: set[str] = set()
         self._ttl_task: Any = None  # asyncio.Task for TTL cleanup
         self._browser_ready = False
         self._ttl_enabled: bool = True  # Set to False to disable TTL cleanup (for testing)
+        self._evicted_snapshots: dict[str, dict] = {}  # task_id -> {url, title, evicted_at}
 
     @classmethod
     def instance(cls) -> BrowserManager:
@@ -255,18 +329,21 @@ class BrowserManager:
 
         - isolated mode: creates a new BrowserContext + Page per task
         - cdp mode: reuses user's existing context, creates a new Page per task
+        - registers context.on('page') listener for new tab detection
         """
         if task_id in self._pages:
             self._last_access[task_id] = monotonic()
             self._active_tasks.add(task_id)
-            return self._pages[task_id]
+            idx = self._active_page_idx.get(task_id, 0)
+            return self._pages[task_id][idx]
 
         async with self._lock:
             # Double-check after acquiring lock
             if task_id in self._pages:
                 self._last_access[task_id] = monotonic()
                 self._active_tasks.add(task_id)
-                return self._pages[task_id]
+                idx = self._active_page_idx.get(task_id, 0)
+                return self._pages[task_id][idx]
 
             browser = await self._ensure_browser_inner()
             settings = get_settings()
@@ -292,11 +369,66 @@ class BrowserManager:
                 )
                 self._contexts[task_id] = ctx
 
+            # Register new-tab listener on this context
+            ctx.on("page", lambda page: self._on_new_page(task_id, page))
+
             page = await ctx.new_page()
-            self._pages[task_id] = page
+            self._pages[task_id] = [page]
+            self._active_page_idx[task_id] = 0
             self._last_access[task_id] = monotonic()
             self._active_tasks.add(task_id)
             return page
+
+    def _on_new_page(self, task_id: str, page: Any) -> None:
+        """Callback when BrowserContext opens a new tab/page.
+
+        Appends the page to the task's page list, switches active index to it,
+        and marks it as pending for notification.
+        """
+        if task_id not in self._pages:
+            self._pages[task_id] = []
+        self._pages[task_id].append(page)
+        self._active_page_idx[task_id] = len(self._pages[task_id]) - 1
+        self._pending_new_page[task_id] = page
+        logger.info("New tab detected for task %s: %s", task_id, page.url)
+
+    def consume_pending_new_page(self, task_id: str) -> Any:
+        """Pop and return the pending new page for a task, or None."""
+        return self._pending_new_page.pop(task_id, None)
+
+    async def list_pages(self, task_id: str) -> list[dict]:
+        """List all open pages for a task with their url, title, and active status."""
+        pages = self._pages.get(task_id, [])
+        active_idx = self._active_page_idx.get(task_id, 0)
+        result = []
+        for i, page in enumerate(pages):
+            try:
+                url = page.url
+                title = await page.title()
+            except Exception:
+                url = "unknown"
+                title = "unknown"
+            result.append({
+                "index": i,
+                "url": url,
+                "title": title,
+                "active": i == active_idx,
+            })
+        return result
+
+    async def switch_page(self, task_id: str, index: int) -> Any:
+        """Switch the active page for a task by index. Returns the Page object."""
+        pages = self._pages.get(task_id, [])
+        if not pages:
+            raise ValueError(f"任务 {task_id} 没有打开的页面。")
+        if index < 0 or index >= len(pages):
+            raise ValueError(
+                f"页面索引 {index} 超出范围（共 {len(pages)} 个页面，索引 0-{len(pages)-1}）。"
+                f"请先调用 browser_list_pages() 查看所有打开的标签页。"
+            )
+        self._active_page_idx[task_id] = index
+        self._last_access[task_id] = monotonic()
+        return pages[index]
 
     async def navigate(self, task_id: str, url: str, wait_until: str = "load") -> dict:
         """Navigate to URL. Returns dict with title, url, readyState, timed_out."""
@@ -340,11 +472,12 @@ class BrowserManager:
         }
 
     async def close_task(self, task_id: str) -> None:
-        """Close a task's page and context."""
+        """Close all pages and context for a task."""
         self._active_tasks.discard(task_id)
 
-        page = self._pages.pop(task_id, None)
-        if page:
+        # Close all pages (not just the active one)
+        pages = self._pages.pop(task_id, [])
+        for page in pages:
             try:
                 await page.close()
             except Exception:
@@ -358,11 +491,56 @@ class BrowserManager:
                 except Exception:
                     pass
 
+        self._active_page_idx.pop(task_id, None)
+        self._pending_new_page.pop(task_id, None)
         self._last_access.pop(task_id, None)
 
     async def mark_task_inactive(self, task_id: str) -> None:
         """Mark a task as inactive (allows TTL cleanup)."""
         self._active_tasks.discard(task_id)
+
+    async def _save_task_snapshot(self, task_id: str) -> dict:
+        """Save active page state before eviction for potential recovery."""
+        pages = self._pages.get(task_id, [])
+        if not pages:
+            return {}
+        idx = self._active_page_idx.get(task_id, 0)
+        page = pages[idx]
+        try:
+            return {
+                "url": page.url,
+                "title": await page.title(),
+                "evicted_at": monotonic(),
+            }
+        except Exception:
+            return {"url": "unknown", "evicted_at": monotonic()}
+
+    def get_evicted_snapshot(self, task_id: str) -> dict | None:
+        """Retrieve saved state of an evicted task. Returns None if not found."""
+        return self._evicted_snapshots.pop(task_id, None)
+
+    async def reset_stale_browser(self, task_id: str) -> None:
+        """Clear stale state when browser/context/page was closed externally.
+
+        After calling this, the next get_page() will reinitialize the browser.
+        """
+        # Clear this task's pages and index
+        self._pages.pop(task_id, [])
+        self._active_page_idx.pop(task_id, None)
+        self._pending_new_page.pop(task_id, None)
+        self._contexts.pop(task_id, None)
+
+        # Try to close the old browser instance (ignore errors — it may already be dead)
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+
+        # Reset flag so next get_page() triggers _ensure_browser_inner
+        self._browser_ready = False
+        logger.info("Stale browser state cleared for task %s, will reinitialize", task_id)
 
     async def close_all(self) -> None:
         """Close all task resources and the browser."""
@@ -407,7 +585,11 @@ class BrowserManager:
         BrowserManager._instance = None
 
     async def _ttl_cleanup_loop(self) -> None:
-        """Background task: periodically clean up idle task resources."""
+        """Background task: periodically clean up idle task resources.
+
+        Before eviction, saves a snapshot (url + title) so the LLM can
+        recover the page state if needed.
+        """
         try:
             while True:
                 await asyncio.sleep(60)
@@ -419,10 +601,45 @@ class BrowserManager:
                         continue
                     elapsed = now - self._last_access.get(task_id, 0)
                     if elapsed > ttl:
-                        logger.info("TTL cleanup: closing idle task %s (idle %.0fs)", task_id, elapsed)
+                        # Save state before eviction for recovery
+                        snapshot = await self._save_task_snapshot(task_id)
+                        self._evicted_snapshots[task_id] = snapshot
+                        logger.info(
+                            "TTL eviction: task %s (idle %.0fs), snapshot saved (url=%s)",
+                            task_id, elapsed, snapshot.get("url", "unknown"),
+                        )
                         await self.close_task(task_id)
         except asyncio.CancelledError:
             return
+
+    async def _wait_dom_stable(
+        self,
+        page: Any,
+        timeout: int = 3000,
+        poll_interval: float = 0.3,
+    ) -> None:
+        """Wait until two consecutive aria_snapshot calls return identical output.
+
+        This ensures the DOM has settled before taking a snapshot, avoiding
+        capturing intermediate SPA rendering states (loading spinners, empty shells).
+        Times out gracefully without blocking.
+        """
+        deadline = monotonic() + timeout / 1000
+        prev_hash = ""
+        root = page.locator("body")
+
+        while monotonic() < deadline:
+            try:
+                raw = await root.aria_snapshot(mode="ai", boxes=True)
+                curr_hash = hash(raw)
+                if curr_hash == prev_hash and prev_hash != "":
+                    return  # Two consecutive snapshots match — DOM is stable
+                prev_hash = curr_hash
+            except Exception:
+                pass
+            await asyncio.sleep(poll_interval)
+
+        logger.debug("DOM stability timeout (%dms), proceeding with current state", timeout)
 
     async def get_a11y_tree(
         self,
@@ -430,8 +647,13 @@ class BrowserManager:
         scope: str | None = None,
         mode: str = "reading",
         include_offscreen: bool = False,
+        wait_stable: bool = True,
     ) -> dict:
         """Extract accessibility tree with filtering.
+
+        Args:
+            wait_stable: If True, wait for DOM to stabilize before snapshot.
+                Set to False for fast polling scenarios.
 
         Returns {"skeleton": [...], "detail": [...]}.
         """
@@ -444,6 +666,10 @@ class BrowserManager:
             root = page.locator(scope)
         else:
             root = page.locator("body")
+
+        # Wait for DOM to stabilize before snapshotting
+        if wait_stable:
+            await self._wait_dom_stable(page)
 
         # Get a11y tree via aria_snapshot (Playwright 1.59+)
         try:
@@ -469,21 +695,22 @@ class BrowserManager:
         else:  # full — all semantic roles, excluding generic/none/presentation
             detail = [n for n in all_nodes if n.get("role") in NON_GENERIC_ROLES]
 
-        # Viewport marking (mark rather than remove)
-        if not include_offscreen:
-            vp = page.viewport_size
-            vp_w = vp["width"] if vp else 1280
-            vp_h = vp["height"] if vp else 720
-            for n in detail:
-                box = n.get("box")
-                if box and not _in_viewport(box, vp_w, vp_h):
-                    n["viewport_status"] = "below viewport"
-                else:
-                    n["viewport_status"] = "visible"
+        # Viewport marking
+        vp = page.viewport_size
+        vp_w = vp["width"] if vp else 1280
+        vp_h = vp["height"] if vp else 720
 
-        # Limit nodes
-        if len(detail) > max_nodes:
-            detail = detail[:max_nodes]
+        for n in detail:
+            box = n.get("box")
+            if box and not _in_viewport(box, vp_w, vp_h):
+                n["viewport_status"] = "below viewport"
+            else:
+                n["viewport_status"] = "visible"
+
+        # Priority-based truncation: in-viewport interactive > in-viewport reading > offscreen
+        if not include_offscreen:
+            detail = [n for n in detail if n.get("viewport_status") != "below viewport"]
+        detail = _truncate_by_priority(detail, max_nodes)
 
         return {"skeleton": skeleton, "detail": detail}
 
@@ -609,12 +836,36 @@ def _run_async(coro) -> Any:
 # Async implementations (internal)
 # ---------------------------------------------------------------------------
 
+async def _with_browser_recovery(coro_factory, task_id: str):
+    """Execute an async operation with automatic recovery on browser closed errors.
+
+    Args:
+        coro_factory: A callable that returns a coroutine (called fresh for retry)
+        task_id: The task ID for recovery context
+
+    Returns:
+        The result of the coroutine, or raises if non-closed error or retry fails.
+    """
+    try:
+        return await coro_factory()
+    except Exception as e:
+        if _is_closed_error(e):
+            logger.warning("Browser closed externally, resetting and retrying for task %s", task_id)
+            mgr = BrowserManager.instance()
+            await mgr.reset_stale_browser(task_id)
+            return await coro_factory()
+        raise
+
+
 async def _async_navigate(url: str, wait_until: str, task_id: str) -> str:
     if wait_until not in ("load", "domcontentloaded", "networkidle"):
         wait_until = "load"
 
     mgr = BrowserManager.instance()
-    result = await mgr.navigate(task_id, url, wait_until)
+
+    result = await _with_browser_recovery(
+        lambda: mgr.navigate(task_id, url, wait_until), task_id,
+    )
 
     if "error" in result:
         return _error(
@@ -645,13 +896,22 @@ async def _async_navigate(url: str, wait_until: str, task_id: str) -> str:
     return "\n".join(parts)
 
 
-async def _async_snapshot(scope: str | None, mode: str, include_offscreen: bool, task_id: str) -> str:
+async def _async_snapshot(
+    scope: str | None, mode: str, include_offscreen: bool, task_id: str,
+    wait_stable: bool = True,
+) -> str:
     if mode not in ("interactive", "reading", "full"):
         mode = "reading"
 
     mgr = BrowserManager.instance()
     try:
-        tree = await mgr.get_a11y_tree(task_id, scope=scope, mode=mode, include_offscreen=include_offscreen)
+        tree = await _with_browser_recovery(
+            lambda: mgr.get_a11y_tree(
+                task_id, scope=scope, mode=mode,
+                include_offscreen=include_offscreen, wait_stable=wait_stable,
+            ),
+            task_id,
+        )
     except Exception as e:
         return _error(f"获取页面快照失败: {e}")
 
@@ -676,77 +936,164 @@ async def _async_snapshot(scope: str | None, mode: str, include_offscreen: bool,
     return "\n".join(parts)
 
 
-async def _async_click(ref, role, name, selector, double_click, pos, task_id) -> str:
-    mgr = BrowserManager.instance()
-    try:
-        result = await mgr.find_element(task_id, ref=ref, role=role, name=name, selector=selector, pos=pos)
-    except ValueError as e:
-        return _error(str(e))
-
-    try:
-        # pos returns raw "x,y,w,h" string — do coordinate click
-        if isinstance(result, str):
-            parts = result.split(",")
-            if len(parts) == 4:
-                x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-                cx, cy = x + w // 2, y + h // 2
-                page = await mgr.get_page(task_id)
-                if double_click:
-                    await page.mouse.dblclick(cx, cy)
-                else:
-                    await page.mouse.click(cx, cy)
-                return f"已点击坐标 ({cx}, {cy})。"
-            return _error(f"pos 格式错误，需要 x,y,w,h，收到: {result}")
-
-        if double_click:
-            await result.dblclick(timeout=5000)
-        else:
-            await result.click(timeout=5000)
-        return "已点击元素。"
-    except Exception as e:
-        return _error(
-            f"点击失败: {e}",
-            hint="元素可能不可见或被遮挡。尝试用 pos 坐标点击: browser_click(pos='x,y,w,h')。",
+async def _post_click_result(mgr: BrowserManager, task_id: str, base_msg: str) -> str:
+    """After a click, briefly wait for a new tab, then return result with tab info if any."""
+    # Give the browser a moment to open a new tab
+    await asyncio.sleep(1.0)
+    new_page = mgr.consume_pending_new_page(task_id)
+    if new_page:
+        try:
+            title = await new_page.title()
+            url = new_page.url
+        except Exception:
+            title = "unknown"
+            url = "unknown"
+        return (
+            f"{base_msg}\n"
+            f"点击打开了新标签页: \"{title}\" ({url})，已自动切换到新标签页。"
         )
+    return base_msg
+
+
+async def _async_click(ref, role, name, selector, double_click, pos, task_id) -> str:
+    # HITL gate: check if this click matches a human-in-the-loop rule
+    if _check_hitl_rules("click", role, name):
+        return _warning(
+            f"操作需要人工确认: click role={role} name={name}",
+            detail="此操作匹配了 HITL 安全规则。",
+        ) + "\nCONFIRMATION_REQUIRED"
+
+    mgr = BrowserManager.instance()
+    max_retries = 2
+
+    for attempt in range(max_retries + 1):
+        try:
+            result = await mgr.find_element(
+                task_id, ref=ref, role=role, name=name, selector=selector, pos=pos,
+            )
+        except ValueError as e:
+            if attempt < max_retries:
+                await asyncio.sleep(0.5)  # Element may be loading
+                continue
+            return _error(str(e))
+        except Exception as e:
+            if _is_closed_error(e):
+                await mgr.reset_stale_browser(task_id)
+                return _error(
+                    "浏览器已关闭，已自动重置。请重新导航到目标页面后再操作。",
+                    hint="调用 browser_navigate(url) 打开新页面。",
+                )
+            return _error(f"查找元素失败: {e}")
+
+        try:
+            # pos returns raw "x,y,w,h" string — do coordinate click
+            if isinstance(result, str):
+                parts = result.split(",")
+                if len(parts) == 4:
+                    x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                    cx, cy = x + w // 2, y + h // 2
+                    page = await mgr.get_page(task_id)
+                    if double_click:
+                        await page.mouse.dblclick(cx, cy)
+                    else:
+                        await page.mouse.click(cx, cy)
+                    return await _post_click_result(mgr, task_id, f"已点击坐标 ({cx}, {cy})。")
+                return _error(f"pos 格式错误，需要 x,y,w,h，收到: {result}")
+
+            if double_click:
+                await result.dblclick(timeout=5000)
+            else:
+                await result.click(timeout=5000)
+            return await _post_click_result(mgr, task_id, "已点击元素。")
+        except Exception as e:
+            if _is_closed_error(e):
+                await mgr.reset_stale_browser(task_id)
+                return _error(
+                    "浏览器已关闭，已自动重置。请重新导航到目标页面后再操作。",
+                    hint="调用 browser_navigate(url) 打开新页面。",
+                )
+            if attempt < max_retries:
+                await asyncio.sleep(0.5)
+                continue
+            return _error(
+                f"点击失败: {e}",
+                hint="元素可能不可见或被遮挡。尝试用 pos 坐标点击: browser_click(pos='x,y,w,h')。",
+            )
+
+    return _error("点击失败: 超过最大重试次数。")
 
 
 async def _async_type(ref, role, name, selector, text, clear, press_enter, pos, task_id) -> str:
+    # HITL gate: check if this typing action matches a human-in-the-loop rule
+    if _check_hitl_rules("type", role, name):
+        return _warning(
+            f"操作需要人工确认: type role={role} name={name}",
+            detail="此操作匹配了 HITL 安全规则。",
+        ) + "\nCONFIRMATION_REQUIRED"
+
     mgr = BrowserManager.instance()
-    try:
-        result = await mgr.find_element(task_id, ref=ref, role=role, name=name, selector=selector, pos=pos)
-    except ValueError as e:
-        return _error(str(e))
+    max_retries = 2
 
-    try:
-        # pos returns raw "x,y,w,h" string — click to focus, then type
-        if isinstance(result, str):
-            parts = result.split(",")
-            if len(parts) == 4:
-                x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-                cx, cy = x + w // 2, y + h // 2
-                page = await mgr.get_page(task_id)
-                await page.mouse.click(cx, cy)
-                if clear:
-                    await page.keyboard.press("Control+a")
-                await page.keyboard.type(text)
-                if press_enter:
-                    await page.keyboard.press("Enter")
-                return "已输入文本。"
-            return _error(f"pos 格式错误，需要 x,y,w,h，收到: {result}")
+    for attempt in range(max_retries + 1):
+        try:
+            result = await mgr.find_element(
+                task_id, ref=ref, role=role, name=name, selector=selector, pos=pos,
+            )
+        except ValueError as e:
+            if attempt < max_retries:
+                await asyncio.sleep(0.5)
+                continue
+            return _error(str(e))
+        except Exception as e:
+            if _is_closed_error(e):
+                await mgr.reset_stale_browser(task_id)
+                return _error(
+                    "浏览器已关闭，已自动重置。请重新导航到目标页面后再操作。",
+                    hint="调用 browser_navigate(url) 打开新页面。",
+                )
+            return _error(f"查找元素失败: {e}")
 
-        if clear:
-            await result.clear(timeout=5000)
-        await result.fill(text, timeout=5000)
-        if press_enter:
-            await result.press("Enter")
-        return "已输入文本。"
-    except Exception as e:
-        return _error(f"输入失败: {e}")
+        try:
+            # pos returns raw "x,y,w,h" string — click to focus, then type
+            if isinstance(result, str):
+                parts = result.split(",")
+                if len(parts) == 4:
+                    x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                    cx, cy = x + w // 2, y + h // 2
+                    page = await mgr.get_page(task_id)
+                    await page.mouse.click(cx, cy)
+                    if clear:
+                        await page.keyboard.press("Control+a")
+                    await page.keyboard.type(text)
+                    if press_enter:
+                        await page.keyboard.press("Enter")
+                    return "已输入文本。"
+                return _error(f"pos 格式错误，需要 x,y,w,h，收到: {result}")
+
+            if clear:
+                await result.clear(timeout=5000)
+            await result.fill(text, timeout=5000)
+            if press_enter:
+                await result.press("Enter")
+            return "已输入文本。"
+        except Exception as e:
+            if _is_closed_error(e):
+                await mgr.reset_stale_browser(task_id)
+                return _error(
+                    "浏览器已关闭，已自动重置。请重新导航到目标页面后再操作。",
+                    hint="调用 browser_navigate(url) 打开新页面。",
+                )
+            if attempt < max_retries:
+                await asyncio.sleep(0.5)
+                continue
+            return _error(f"输入失败: {e}")
+
+    return _error("输入失败: 超过最大重试次数。")
 
 
 async def _async_read(selector, ref, max_chars, task_id) -> str:
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     try:
         if ref:
@@ -773,7 +1120,7 @@ async def _async_screenshot(path, full_page, task_id) -> str:
     from pathlib import Path
 
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     settings = get_settings()
     if not path:
@@ -801,7 +1148,7 @@ async def _async_evaluate(expression, task_id) -> str:
         )
 
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     try:
         result = await page.evaluate(expression)
@@ -815,24 +1162,26 @@ async def _async_wait(role, name, ref, text, timeout, task_id) -> str:
         return _error("必须指定 role+name、ref 或 text 中的至少一个参数。")
 
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    deadline = monotonic() + timeout / 1000
+    poll_interval = 0.5
 
-    try:
-        if ref:
-            loc = page.locator(f"[aria-ref='{ref}']")
-            await loc.wait_for(state="visible", timeout=timeout)
-            return f"元素 ref={ref} 已出现。"
-        elif role and name:
-            loc = page.get_by_role(role, name=name)
-            await loc.wait_for(state="visible", timeout=timeout)
-            return f"元素 role={role} name={name} 已出现。"
-        elif text:
-            loc = page.get_by_text(text)
-            await loc.wait_for(state="visible", timeout=timeout)
-            return f"文本 \"{text}\" 已出现。"
-    except Exception as e:
-        return _warning(f"等待超时 ({timeout}ms): {e}")
-    return ""
+    while monotonic() < deadline:
+        # Use wait_stable=False for fast polling — we just need the current state
+        tree = await mgr.get_a11y_tree(task_id, mode="reading", wait_stable=False)
+        nodes = tree.get("detail", [])
+
+        for node in nodes:
+            if ref and node.get("ref") == ref:
+                return f"元素 ref={ref} 已出现。"
+            if role and name and node.get("role") == role:
+                if name.lower() in node.get("name", "").lower():
+                    return f"元素 role={role} name={name} 已出现。"
+            if text and text.lower() in node.get("name", "").lower():
+                return f"文本 \"{text}\" 已出现。"
+
+        await asyncio.sleep(poll_interval)
+
+    return _warning(f"等待超时 ({timeout}ms): 未找到匹配元素")
 
 
 async def _async_scroll(direction, amount, task_id) -> str:
@@ -840,7 +1189,7 @@ async def _async_scroll(direction, amount, task_id) -> str:
         return _error(f"不支持的滚动方向: {direction}，可选: up, down, left, right")
 
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     dx, dy = 0, 0
     if direction == "down":
@@ -864,7 +1213,7 @@ async def _async_scroll_to(landmark, ref, selector, task_id) -> str:
         return _error("必须指定 landmark、ref 或 selector 中的至少一个参数。")
 
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     try:
         if landmark:
@@ -899,7 +1248,7 @@ async def _async_scroll_to(landmark, ref, selector, task_id) -> str:
 
 async def _async_wait_navigation(url_contains, timeout, task_id) -> str:
     mgr = BrowserManager.instance()
-    page = await mgr.get_page(task_id)
+    page = await _with_browser_recovery(lambda: mgr.get_page(task_id), task_id)
 
     try:
         if url_contains:
@@ -944,6 +1293,7 @@ def browser_snapshot(
     scope: str | None = None,
     mode: str = "reading",
     include_offscreen: bool = False,
+    wait_stable: bool = True,
     *,
     task_id: str = "",
 ) -> str:
@@ -953,9 +1303,10 @@ def browser_snapshot(
         scope: CSS选择器限定区域（可选）
         mode: interactive=仅可交互元素, reading=可交互+阅读元素（默认）, full=全量
         include_offscreen: 是否包含视口外元素
+        wait_stable: 是否等待DOM稳定后再快照（默认True，轮询时可设False）
         task_id: 框架自动注入
     """
-    return _run_async(_async_snapshot(scope, mode, include_offscreen, task_id))
+    return _run_async(_async_snapshot(scope, mode, include_offscreen, task_id, wait_stable))
 
 
 def browser_click(
@@ -1124,6 +1475,55 @@ def browser_wait_navigation(
         task_id: 框架自动注入
     """
     return _run_async(_async_wait_navigation(url_contains, timeout, task_id))
+
+
+async def _async_list_pages(task_id: str) -> str:
+    mgr = BrowserManager.instance()
+    pages = await mgr.list_pages(task_id)
+    if not pages:
+        return "当前任务没有打开的页面。"
+
+    parts = ["## 打开的标签页"]
+    for p in pages:
+        marker = " ← 当前" if p["active"] else ""
+        parts.append(f"  [{p['index']}] \"{p['title']}\" ({p['url']}){marker}")
+    return "\n".join(parts)
+
+
+def browser_list_pages(*, task_id: str = "") -> str:
+    """列出当前任务所有打开的标签页。
+
+    Returns:
+        格式化的标签页列表，包含索引、标题、URL和活跃状态。
+    """
+    return _run_async(_async_list_pages(task_id))
+
+
+async def _async_switch_page(index: int, task_id: str) -> str:
+    mgr = BrowserManager.instance()
+    try:
+        page = await mgr.switch_page(task_id, index)
+    except ValueError as e:
+        return _error(str(e))
+
+    try:
+        title = await page.title()
+        url = page.url
+    except Exception:
+        title = "unknown"
+        url = "unknown"
+
+    return f"已切换到标签页 [{index}]: \"{title}\" ({url})"
+
+
+def browser_switch_page(index: int, *, task_id: str = "") -> str:
+    """切换到指定索引的标签页。
+
+    Args:
+        index: 标签页索引（从 browser_list_pages 获取）
+        task_id: 框架自动注入
+    """
+    return _run_async(_async_switch_page(index, task_id))
 
 
 # Note: atexit cleanup is intentionally omitted.

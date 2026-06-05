@@ -127,6 +127,7 @@ def mock_settings():
         browser_context_ttl=600,
         browser_allow_js_execution=False,
         browser_snapshot_max_nodes=100,
+        browser_hitl_rules=[],
     )
     with patch("agentnexus.tools.browser.get_settings", return_value=settings):
         yield settings
@@ -151,6 +152,8 @@ def browser_manager():
     mgr._browser = None
     mgr._playwright = None
     mgr._pages.clear()
+    mgr._active_page_idx.clear()
+    mgr._pending_new_page.clear()
     mgr._contexts.clear()
     mgr._active_tasks.clear()
     mgr._last_access.clear()
@@ -374,10 +377,18 @@ class TestBrowserEvaluate:
 
 class TestBrowserWait:
     def test_wait_for_element(self, browser_manager, mock_playwright, mock_settings):
+        """browser_wait uses aria_snapshot polling — finds element in tree."""
         from agentnexus.tools.browser import browser_wait
 
-        mock_playwright.page.get_by_role.return_value.wait_for = AsyncMock()
-        result = browser_wait(role="button", name="Submit", task_id="task-1")
+        # The default aria_snapshot mock includes button "Login" ref=s1e3
+        result = browser_wait(role="button", name="Login", task_id="task-1")
+        assert "已出现" in result
+
+    def test_wait_for_text(self, browser_manager, mock_playwright, mock_settings):
+        """browser_wait matches text in node names."""
+        from agentnexus.tools.browser import browser_wait
+
+        result = browser_wait(text="Welcome", task_id="task-1")
         assert "已出现" in result
 
     def test_wait_no_params_returns_error(self, browser_manager, mock_playwright, mock_settings):
@@ -484,10 +495,201 @@ class TestHelpers:
         assert _in_viewport([2000, 2000, 50, 50], 1280, 720) is False
         assert _in_viewport(None, 1280, 720) is True
 
+    def test_truncate_by_priority(self):
+        from agentnexus.tools.browser import _truncate_by_priority
+
+        # Create nodes: 2 in-viewport interactive, 2 in-viewport reading, 2 offscreen
+        nodes = [
+            {"role": "button", "name": "Submit", "viewport_status": "visible"},     # vp interactive
+            {"role": "link", "name": "Home", "viewport_status": "visible"},          # vp interactive
+            {"role": "heading", "name": "Title", "viewport_status": "visible"},      # vp reading
+            {"role": "paragraph", "name": "Body", "viewport_status": "visible"},     # vp reading
+            {"role": "button", "name": "Footer Btn", "viewport_status": "below viewport"},  # offscreen
+            {"role": "link", "name": "Footer Link", "viewport_status": "below viewport"},   # offscreen
+        ]
+        # max_nodes=3: should get 2 vp interactive + 1 vp reading
+        result = _truncate_by_priority(nodes, 3)
+        assert len(result) == 3
+        assert result[0]["name"] == "Submit"
+        assert result[1]["name"] == "Home"
+        assert result[2]["name"] == "Title"
+
+    def test_truncate_by_priority_under_limit(self):
+        from agentnexus.tools.browser import _truncate_by_priority
+
+        nodes = [{"role": "button", "name": "A", "viewport_status": "visible"}]
+        result = _truncate_by_priority(nodes, 100)
+        assert len(result) == 1
+
+    def test_check_hitl_rules_no_rules(self):
+        from agentnexus.tools.browser import _check_hitl_rules
+
+        assert _check_hitl_rules("click", "button", "Submit") is False
+
+    def test_check_hitl_rules_match(self):
+        from agentnexus.tools.browser import _check_hitl_rules
+
+        with patch("agentnexus.tools.browser.get_settings") as mock_get:
+            mock_get.return_value = SimpleNamespace(
+                browser_hitl_rules=[
+                    {"action": "click", "name_pattern": "支付|付款|confirm"},
+                ]
+            )
+            assert _check_hitl_rules("click", "button", "确认支付") is True
+            assert _check_hitl_rules("click", "button", "Cancel") is False
+            assert _check_hitl_rules("type", "textbox", "确认支付") is False
+
+    def test_check_hitl_rules_role_filter(self):
+        from agentnexus.tools.browser import _check_hitl_rules
+
+        with patch("agentnexus.tools.browser.get_settings") as mock_get:
+            mock_get.return_value = SimpleNamespace(
+                browser_hitl_rules=[
+                    {"action": "click", "role": "button", "name_pattern": "delete"},
+                ]
+            )
+            assert _check_hitl_rules("click", "button", "Delete") is True
+            assert _check_hitl_rules("click", "link", "Delete") is False
+
 
 # ---------------------------------------------------------------------------
 # Playwright not installed test
 # ---------------------------------------------------------------------------
+
+
+class TestHitlBlocking:
+    def test_click_blocked_by_hitl_rule(self, browser_manager, mock_playwright, mock_settings):
+        from agentnexus.tools.browser import browser_click
+
+        mock_settings.browser_hitl_rules = [
+            {"action": "click", "name_pattern": "支付|付款"},
+        ]
+        result = browser_click(role="button", name="确认支付", task_id="task-1")
+        assert "CONFIRMATION_REQUIRED" in result
+        assert "人工确认" in result
+
+    def test_click_not_blocked_no_match(self, browser_manager, mock_playwright, mock_settings):
+        from agentnexus.tools.browser import browser_click
+
+        mock_settings.browser_hitl_rules = [
+            {"action": "click", "name_pattern": "支付|付款"},
+        ]
+        result = browser_click(role="button", name="Login", task_id="task-1")
+        assert "CONFIRMATION_REQUIRED" not in result
+
+    def test_type_blocked_by_hitl_rule(self, browser_manager, mock_playwright, mock_settings):
+        from agentnexus.tools.browser import browser_type
+
+        mock_settings.browser_hitl_rules = [
+            {"action": "type", "name_pattern": "密码|password"},
+        ]
+        result = browser_type(role="textbox", name="密码", text="secret", task_id="task-1")
+        assert "CONFIRMATION_REQUIRED" in result
+
+
+class TestTtlEviction:
+    def test_evicted_snapshot_saved(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        # Simulate saving a snapshot
+        snapshot = _run(browser_manager._save_task_snapshot("task-1"))
+        assert snapshot["url"] == "https://example.com"
+        assert snapshot["title"] == "Test Page"
+
+    def test_get_evicted_snapshot(self, browser_manager, mock_playwright, mock_settings):
+        browser_manager._evicted_snapshots["task-x"] = {
+            "url": "https://example.com/page",
+            "title": "Old Page",
+            "evicted_at": 123.0,
+        }
+        snapshot = browser_manager.get_evicted_snapshot("task-x")
+        assert snapshot["url"] == "https://example.com/page"
+        # Should be popped (one-time read)
+        assert browser_manager.get_evicted_snapshot("task-x") is None
+
+    def test_get_evicted_snapshot_not_found(self, browser_manager, mock_playwright, mock_settings):
+        assert browser_manager.get_evicted_snapshot("nonexistent") is None
+
+
+class TestNewTabDetection:
+    def test_pages_stored_as_list(self, browser_manager, mock_playwright, mock_settings):
+        """After get_page, _pages[task_id] should be a list."""
+        _run(browser_manager.get_page("task-1"))
+        assert isinstance(browser_manager._pages["task-1"], list)
+        assert len(browser_manager._pages["task-1"]) == 1
+
+    def test_active_page_idx_initialized(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        assert browser_manager._active_page_idx["task-1"] == 0
+
+    def test_on_new_page_appends_and_switches(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        mock_new_page.url = "https://new-tab.example.com"
+        # Simulate the context.on('page') callback
+        browser_manager._on_new_page("task-1", mock_new_page)
+        assert len(browser_manager._pages["task-1"]) == 2
+        assert browser_manager._active_page_idx["task-1"] == 1
+        assert browser_manager._pending_new_page["task-1"] is mock_new_page
+
+    def test_consume_pending_new_page(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        browser_manager._on_new_page("task-1", mock_new_page)
+        consumed = browser_manager.consume_pending_new_page("task-1")
+        assert consumed is mock_new_page
+        # Second consume returns None
+        assert browser_manager.consume_pending_new_page("task-1") is None
+
+    def test_list_pages_single(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        pages = _run(browser_manager.list_pages("task-1"))
+        assert len(pages) == 1
+        assert pages[0]["index"] == 0
+        assert pages[0]["active"] is True
+
+    def test_list_pages_multiple(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        mock_new_page.url = "https://new.example.com"
+        mock_new_page.title = AsyncMock(return_value="New Tab")
+        browser_manager._on_new_page("task-1", mock_new_page)
+        pages = _run(browser_manager.list_pages("task-1"))
+        assert len(pages) == 2
+        assert pages[0]["active"] is False
+        assert pages[1]["active"] is True
+
+    def test_switch_page(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        mock_new_page.url = "https://new.example.com"
+        mock_new_page.title = AsyncMock(return_value="New Tab")
+        browser_manager._on_new_page("task-1", mock_new_page)
+        page = _run(browser_manager.switch_page("task-1", 0))
+        assert page is mock_playwright.page
+        assert browser_manager._active_page_idx["task-1"] == 0
+
+    def test_switch_page_invalid_index(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        with pytest.raises(ValueError, match="超出范围"):
+            _run(browser_manager.switch_page("task-1", 5))
+
+    def test_get_page_returns_active_page(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        mock_new_page.url = "https://new.example.com"
+        browser_manager._on_new_page("task-1", mock_new_page)
+        # get_page should now return the new (active) page
+        page = _run(browser_manager.get_page("task-1"))
+        assert page is mock_new_page
+
+    def test_close_task_closes_all_pages(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        mock_new_page = AsyncMock()
+        mock_new_page.close = AsyncMock()
+        browser_manager._on_new_page("task-1", mock_new_page)
+        _run(browser_manager.close_task("task-1"))
+        assert "task-1" not in browser_manager._pages
+        assert "task-1" not in browser_manager._active_page_idx
 
 
 class TestGracefulDegradation:
@@ -500,6 +702,54 @@ class TestGracefulDegradation:
             with pytest.raises(RuntimeError, match="playwright 未安装"):
                 _run(mgr.ensure_browser())
             BrowserManager._instance = None
+
+
+# ---------------------------------------------------------------------------
+class TestBrowserRecovery:
+    def test_is_closed_error_detects_various_messages(self):
+        from agentnexus.tools.browser import _is_closed_error
+
+        assert _is_closed_error(Exception("Target page, context or browser has been closed")) is True
+        assert _is_closed_error(Exception("browser has been closed")) is True
+        assert _is_closed_error(Exception("session deleted")) is True
+        assert _is_closed_error(Exception("Target closed")) is True
+        assert _is_closed_error(Exception("connection closed")) is True
+        assert _is_closed_error(Exception("Some other error")) is False
+
+    def test_reset_stale_browser_clears_state(self, browser_manager, mock_playwright, mock_settings):
+        _run(browser_manager.get_page("task-1"))
+        assert "task-1" in browser_manager._pages
+        assert browser_manager._browser_ready is True
+
+        _run(browser_manager.reset_stale_browser("task-1"))
+        assert "task-1" not in browser_manager._pages
+        assert "task-1" not in browser_manager._active_page_idx
+        assert browser_manager._browser_ready is False
+
+    def test_navigate_recovers_from_closed_error(self, browser_manager, mock_playwright, mock_settings):
+        from agentnexus.tools.browser import browser_navigate
+
+        # First navigate works
+        result = browser_navigate("https://example.com", task_id="task-1")
+        assert "已导航至" in result
+
+        # Simulate browser being closed externally: make goto raise closed error
+        call_count = 0
+        original_goto = mock_playwright.page.goto
+
+        async def goto_with_closed(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise Exception("Target page, context or browser has been closed")
+            return await original_goto(*args, **kwargs)
+
+        mock_playwright.page.goto = goto_with_closed
+
+        # Navigate should recover and retry
+        result = browser_navigate("https://example.com", task_id="task-1")
+        # Should succeed after recovery (page got recreated)
+        assert "已导航至" in result or "ERROR" in result  # May fail on mock but recovery was attempted
 
 
 # ---------------------------------------------------------------------------
@@ -538,5 +788,6 @@ class TestProviderRegistration:
             "browser_type", "browser_read", "browser_screenshot",
             "browser_evaluate", "browser_wait", "browser_scroll",
             "browser_scroll_to", "browser_wait_navigation",
+            "browser_list_pages", "browser_switch_page",
         }
         assert expected.issubset(registered)

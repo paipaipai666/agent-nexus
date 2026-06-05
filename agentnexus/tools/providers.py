@@ -735,12 +735,14 @@ class BrowserToolProvider:
         from agentnexus.tools.browser import (
             browser_click,
             browser_evaluate,
+            browser_list_pages,
             browser_navigate,
             browser_read,
             browser_screenshot,
             browser_scroll,
             browser_scroll_to,
             browser_snapshot,
+            browser_switch_page,
             browser_type,
             browser_wait,
             browser_wait_navigation,
@@ -801,6 +803,11 @@ class BrowserToolProvider:
                             "type": "boolean",
                             "description": "是否包含视口外元素",
                             "default": False,
+                        },
+                        "wait_stable": {
+                            "type": "boolean",
+                            "description": "是否等待DOM稳定后再快照（默认true，快速轮询时可设false）",
+                            "default": True,
                         },
                     },
                     "required": [],
@@ -1006,6 +1013,43 @@ class BrowserToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=10,
+            )
+
+        if context.want("browser_list_pages"):
+            executor.register_tool(
+                "browser_list_pages",
+                "列出当前任务所有打开的标签页。"
+                "返回每个标签页的索引、标题、URL和是否为当前活跃页。"
+                "用于在多标签场景下了解有哪些页面可切换。",
+                browser_list_pages,
+                param_schema={
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                risk_level="low",
+                rate_limit_per_min=30,
+            )
+
+        if context.want("browser_switch_page"):
+            executor.register_tool(
+                "browser_switch_page",
+                "切换到指定索引的标签页。"
+                "参数: index(标签页索引,从browser_list_pages获取)。"
+                "切换后后续所有浏览器操作将在新标签页上执行。",
+                browser_switch_page,
+                param_schema={
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "标签页索引（从 browser_list_pages 获取）",
+                        },
+                    },
+                    "required": ["index"],
+                },
+                risk_level="low",
+                rate_limit_per_min=30,
             )
 
         context.mark_registered(executor, before)

@@ -4,6 +4,7 @@ Thought -> Action -> Observation loop driven by a transfer-table state machine.
 Each decision point is an explicit state; each transition is a handler method.
 """
 
+import logging
 from typing import Callable
 
 from agentnexus.agents import json_helpers, react_runtime
@@ -28,6 +29,8 @@ from agentnexus.observability.drift_detector import DriftDetector
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_session_profile
 from agentnexus.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
