@@ -648,12 +648,15 @@ class BrowserManager:
         mode: str = "reading",
         include_offscreen: bool = False,
         wait_stable: bool = True,
+        include_generic: bool = False,
     ) -> dict:
         """Extract accessibility tree with filtering.
 
         Args:
             wait_stable: If True, wait for DOM to stabilize before snapshot.
                 Set to False for fast polling scenarios.
+            include_generic: If True, include generic/none/presentation role nodes.
+                Useful for SPA pages (Douyin, Bilibili) where content is in non-semantic divs.
 
         Returns {"skeleton": [...], "detail": [...]}.
         """
@@ -692,6 +695,9 @@ class BrowserManager:
             detail = [n for n in all_nodes if n.get("role") in INTERACTIVE_ROLES]
         elif mode == "reading":
             detail = [n for n in all_nodes if n.get("role") in READING_ROLES]
+        elif include_generic:
+            # Include all nodes including generic (for SPA pages with non-semantic divs)
+            detail = [n for n in all_nodes if n.get("role") not in {"none", "presentation"}]
         else:  # full — all semantic roles, excluding generic/none/presentation
             detail = [n for n in all_nodes if n.get("role") in NON_GENERIC_ROLES]
 
@@ -712,7 +718,18 @@ class BrowserManager:
             detail = [n for n in detail if n.get("viewport_status") != "below viewport"]
         detail = _truncate_by_priority(detail, max_nodes)
 
-        return {"skeleton": skeleton, "detail": detail}
+        # Suggest content-rich scopes for detailed exploration
+        scopes = []
+        for n in skeleton:
+            if n.get("role") in ("main", "region", "search", "form"):
+                name = n.get("name", "")
+                ref = n.get("ref", "")
+                if name:
+                    scopes.append(f'{n["role"]}[name="{name}"]')
+                elif ref:
+                    scopes.append(f'[aria-ref="{ref}"]')
+
+        return {"skeleton": skeleton, "detail": detail, "suggested_scopes": scopes}
 
     async def find_element(
         self,
@@ -863,9 +880,14 @@ async def _async_navigate(url: str, wait_until: str, task_id: str) -> str:
 
     mgr = BrowserManager.instance()
 
-    result = await _with_browser_recovery(
-        lambda: mgr.navigate(task_id, url, wait_until), task_id,
-    )
+    result = await mgr.navigate(task_id, url, wait_until)
+
+    # navigate() catches page.goto() exceptions internally and returns error dict.
+    # We need to detect closed-browser errors here and trigger recovery.
+    if "error" in result and _is_closed_error(Exception(result["error"])):
+        logger.warning("Browser closed during navigate, resetting and retrying")
+        await mgr.reset_stale_browser(task_id)
+        result = await mgr.navigate(task_id, url, wait_until)
 
     if "error" in result:
         return _error(
@@ -898,7 +920,7 @@ async def _async_navigate(url: str, wait_until: str, task_id: str) -> str:
 
 async def _async_snapshot(
     scope: str | None, mode: str, include_offscreen: bool, task_id: str,
-    wait_stable: bool = True,
+    wait_stable: bool = True, include_generic: bool = False,
 ) -> str:
     if mode not in ("interactive", "reading", "full"):
         mode = "reading"
@@ -909,6 +931,7 @@ async def _async_snapshot(
             lambda: mgr.get_a11y_tree(
                 task_id, scope=scope, mode=mode,
                 include_offscreen=include_offscreen, wait_stable=wait_stable,
+                include_generic=include_generic,
             ),
             task_id,
         )
@@ -925,10 +948,19 @@ async def _async_snapshot(
 
     detail = tree.get("detail", [])
     if detail:
-        parts.append(f"## 可交互元素 (mode={mode})")
+        label = f"mode={mode}" + (",generic" if include_generic else "")
+        parts.append(f"## 可交互元素 ({label})")
         parts.append(_format_a11y_tree(detail))
     else:
         parts.append("当前页面无可交互元素。")
+
+    # Suggest scopes for detailed exploration when content is sparse
+    suggested_scopes = tree.get("suggested_scopes", [])
+    if suggested_scopes and len(detail) < 10:
+        parts.append("\n## 内容较少，建议对以下区域做精细快照:")
+        for s in suggested_scopes:
+            parts.append(f"  scope={s}")
+        parts.append("使用 browser_snapshot(scope='...', mode='full', include_generic=true) 获取更多内容。")
 
     if tree.get("error"):
         parts.append(f"\n[警告] a11y tree 提取异常: {tree['error']}")
@@ -1294,6 +1326,7 @@ def browser_snapshot(
     mode: str = "reading",
     include_offscreen: bool = False,
     wait_stable: bool = True,
+    include_generic: bool = False,
     *,
     task_id: str = "",
 ) -> str:
@@ -1304,9 +1337,10 @@ def browser_snapshot(
         mode: interactive=仅可交互元素, reading=可交互+阅读元素（默认）, full=全量
         include_offscreen: 是否包含视口外元素
         wait_stable: 是否等待DOM稳定后再快照（默认True，轮询时可设False）
+        include_generic: 是否包含generic/none/presentation等非语义节点（用于抖音、B站等SPA页面）
         task_id: 框架自动注入
     """
-    return _run_async(_async_snapshot(scope, mode, include_offscreen, task_id, wait_stable))
+    return _run_async(_async_snapshot(scope, mode, include_offscreen, task_id, wait_stable, include_generic))
 
 
 def browser_click(

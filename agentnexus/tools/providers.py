@@ -809,6 +809,11 @@ class BrowserToolProvider:
                             "description": "是否等待DOM稳定后再快照（默认true，快速轮询时可设false）",
                             "default": True,
                         },
+                        "include_generic": {
+                            "type": "boolean",
+                            "description": "是否包含generic等非语义节点（抖音/B站等SPA页面内容在非语义div中时设true）",
+                            "default": False,
+                        },
                     },
                     "required": [],
                 },
