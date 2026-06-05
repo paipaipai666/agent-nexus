@@ -196,6 +196,8 @@ export default function ChatPage() {
   const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo } = useSession()
 
   const scrollRafRef = useRef<number>(0)
+  const lastEscapeAtRef = useRef<number>(0)
+  const ESC_DOUBLE_TAP_MS = 600
   const scrollToBottom = useCallback(() => {
     if (scrollRafRef.current) return
     scrollRafRef.current = requestAnimationFrame(() => {
@@ -395,7 +397,12 @@ export default function ChatPage() {
         api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
         processQueue()
       }),
-      agentWs.on('error', (data) => { setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: `Error: ${data.message}`, timestamp: new Date() }]); setIsRunning(false); setCurrentRunId(null); processQueue() }),
+      agentWs.on('error', (data) => {
+        const isCancelled = data.message === 'cancelled' || data.run_id
+        const label = isCancelled ? '⏹ Agent 已中断' : `Error: ${data.message}`
+        setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: label, timestamp: new Date() }])
+        setIsRunning(false); setCurrentRunId(null); processQueue()
+      }),
       agentWs.on('done', () => { setIsRunning(false); setCurrentRunId(null); processQueue() }),
       agentWs.on('confirm_request', (data) => { setConfirmRequest({ summary: data.summary }) }),
     ]
@@ -524,6 +531,18 @@ export default function ChatPage() {
       if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handlePaletteSelect(filteredCommands[paletteIndex].cmd); return }
       if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); paletteAnimDoneRef.current = false; return }
+    }
+    // Double-ESC: cancel running agent (same as TUI)
+    if (e.key === 'Escape' && isRunning) {
+      e.preventDefault()
+      const now = Date.now()
+      if (now - lastEscapeAtRef.current <= ESC_DOUBLE_TAP_MS) {
+        lastEscapeAtRef.current = 0
+        handleCancel()
+        return
+      }
+      lastEscapeAtRef.current = now
+      return
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
