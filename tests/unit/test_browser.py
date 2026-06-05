@@ -788,6 +788,6 @@ class TestProviderRegistration:
             "browser_type", "browser_read", "browser_screenshot",
             "browser_evaluate", "browser_wait", "browser_scroll",
             "browser_scroll_to", "browser_wait_navigation",
-            "browser_list_pages", "browser_switch_page",
+            "browser_list_pages", "browser_switch_page", "browser_dismiss_popup",
         }
         assert expected.issubset(registered)

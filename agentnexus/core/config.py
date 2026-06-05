@@ -188,7 +188,7 @@ class Settings(BaseSettings):
     judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
     e2b_api_key: SecretStr = Field(default=SecretStr(""))
-    max_agent_steps: int = Field(default=5, ge=1, le=50)
+    max_agent_steps: int = Field(default=50, ge=1, le=200)
     enable_contextual_retrieval: bool = Field(default=False)
     enable_query_rewrite: bool = Field(default=True)
     enable_multi_query: bool = Field(default=True)

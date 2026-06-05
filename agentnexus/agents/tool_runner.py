@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import time
 import traceback
 from typing import Any, Callable
 
@@ -62,7 +63,23 @@ def execute_tool(
                 tool_policy=tool_policy,
             )
             try:
-                result = future.result(timeout=60)
+                # Poll for completion with periodic cancel checks.
+                # future.result(timeout=60) would block the full 60s,
+                # making cancel signals invisible during tool execution.
+                deadline = time.monotonic() + 60
+                while True:
+                    if cancel_checker is not None and cancel_checker():
+                        future.cancel()
+                        raise RuntimeError("cancelled")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        result = f"[错误: 工具 {name} 执行超时 (60s)]"
+                        break
+                    try:
+                        result = future.result(timeout=min(remaining, 1.0))
+                        break
+                    except concurrent.futures.TimeoutError:
+                        continue
             except concurrent.futures.TimeoutError:
                 result = f"[错误: 工具 {name} 执行超时 (60s)]"
 

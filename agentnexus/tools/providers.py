@@ -746,6 +746,7 @@ class BrowserToolProvider:
             browser_type,
             browser_wait,
             browser_wait_navigation,
+            browser_dismiss_popup,
         )
 
         before = set(executor.list_tools())
@@ -1014,6 +1015,22 @@ class BrowserToolProvider:
                         },
                         "timeout": {"type": "integer", "description": "超时毫秒数", "default": 10000},
                     },
+                    "required": [],
+                },
+                risk_level="low",
+                rate_limit_per_min=10,
+            )
+
+        if context.want("browser_dismiss_popup"):
+            executor.register_tool(
+                "browser_dismiss_popup",
+                "自动检测并关闭页面弹窗（登录弹窗、cookie同意框、广告弹窗等）。"
+                "按优先级尝试: 关闭按钮 → 取消按钮 → Escape键。"
+                "无需参数，自动检测当前页面弹窗。",
+                browser_dismiss_popup,
+                param_schema={
+                    "type": "object",
+                    "properties": {},
                     "required": [],
                 },
                 risk_level="low",

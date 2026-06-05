@@ -38,6 +38,7 @@ INTERACTIVE_ROLES = {
     "checkbox", "radio", "switch", "slider", "spinbutton",
     "menuitem", "menuitemcheckbox", "menuitemradio",
     "tab", "option", "scrollbar", "tablist",
+    "dialog", "alertdialog",
 }
 
 READING_ROLES = INTERACTIVE_ROLES | {
@@ -729,7 +730,14 @@ class BrowserManager:
                 elif ref:
                     scopes.append(f'[aria-ref="{ref}"]')
 
-        return {"skeleton": skeleton, "detail": detail, "suggested_scopes": scopes}
+        # Detect popup/dialog hints
+        popup_nodes = [n for n in detail if n.get("role") in ("dialog", "alertdialog")]
+        popup_hint = None
+        if popup_nodes:
+            names = [n.get("name", "") for n in popup_nodes if n.get("name")]
+            popup_hint = names[0] if names else "unknown popup"
+
+        return {"skeleton": skeleton, "detail": detail, "suggested_scopes": scopes, "popup_hint": popup_hint}
 
     async def find_element(
         self,
@@ -962,6 +970,12 @@ async def _async_snapshot(
             parts.append(f"  scope={s}")
         parts.append("使用 browser_snapshot(scope='...', mode='full', include_generic=true) 获取更多内容。")
 
+    # Popup detection hint
+    popup_hint = tree.get("popup_hint")
+    if popup_hint:
+        parts.append(f"\n[弹窗检测] 页面存在弹窗: \"{popup_hint}\"，可能遮挡主内容。")
+        parts.append("建议: browser_dismiss_popup() 自动关闭，或手动点击弹窗中的关闭按钮。")
+
     if tree.get("error"):
         parts.append(f"\n[警告] a11y tree 提取异常: {tree['error']}")
 
@@ -985,6 +999,66 @@ async def _post_click_result(mgr: BrowserManager, task_id: str, base_msg: str) -
             f"点击打开了新标签页: \"{title}\" ({url})，已自动切换到新标签页。"
         )
     return base_msg
+
+
+async def _async_dismiss_popup(task_id: str) -> str:
+    """Auto-detect and dismiss common popups (login, cookie consent, ads)."""
+    mgr = BrowserManager.instance()
+
+    # Common dismiss button patterns (Chinese + English)
+    CLOSE_PATTERNS = [
+        "×", "✕", "✖", "✕",  # Unicode close symbols
+        "关闭", "close", "Close",
+        "以后再说", "暂不", "稍后", "不用了", "不需要",
+        "later", "Later", "Maybe later", "Not now",
+        "跳过", "skip", "Skip",
+        "我知道了", "知道了", "got it", "Got it",
+        "接受", "Accept", "accept", "同意", "Agree",
+    ]
+    CANCEL_PATTERNS = [
+        "取消", "cancel", "Cancel",
+    ]
+
+    # Strategy 1: Find and click close/dismiss buttons in dialogs
+    tree = await mgr.get_a11y_tree(task_id, mode="interactive", wait_stable=False)
+    nodes = tree.get("detail", [])
+
+    # Look for buttons matching close patterns
+    for pattern in CLOSE_PATTERNS + CANCEL_PATTERNS:
+        for node in nodes:
+            if node.get("role") != "button":
+                continue
+            name = node.get("name", "")
+            if pattern.lower() in name.lower():
+                ref = node.get("ref", "")
+                box = node.get("box")
+                try:
+                    if box:
+                        cx, cy = box[0] + box[2] // 2, box[1] + box[3] // 2
+                        page = await mgr.get_page(task_id)
+                        await page.mouse.click(cx, cy)
+                    else:
+                        page = await mgr.get_page(task_id)
+                        loc = page.get_by_role("button", name=name, exact=False)
+                        if await loc.count() > 0:
+                            await loc.first.click(timeout=3000)
+                    return f"已关闭弹窗: 点击了 \"{name}\" 按钮。"
+                except Exception:
+                    continue
+
+    # Strategy 2: Press ESC to dismiss
+    try:
+        page = await mgr.get_page(task_id)
+        await page.keyboard.press("Escape")
+        # Check if dialog disappeared
+        await asyncio.sleep(0.5)
+        tree2 = await mgr.get_a11y_tree(task_id, mode="interactive", wait_stable=False)
+        dialogs2 = [n for n in tree2.get("detail", []) if n.get("role") in ("dialog", "alertdialog")]
+        if not dialogs2:
+            return "已关闭弹窗: 按下了 Escape 键，弹窗已消失。"
+        return "已按下 Escape 键，但弹窗仍然存在。可能需要手动操作。"
+    except Exception as e:
+        return _warning(f"尝试关闭弹窗失败: {e}")
 
 
 async def _async_click(ref, role, name, selector, double_click, pos, task_id) -> str:
@@ -1319,6 +1393,14 @@ def browser_navigate(url: str, wait_until: str = "load", *, task_id: str = "") -
         task_id: 框架自动注入
     """
     return _run_async(_async_navigate(url, wait_until, task_id))
+
+
+def browser_dismiss_popup(*, task_id: str = "") -> str:
+    """自动检测并关闭页面上的弹窗（登录弹窗、cookie同意框、广告弹窗等）。
+
+    按优先级尝试: 关闭按钮 → 取消按钮 → Escape键。
+    """
+    return _run_async(_async_dismiss_popup(task_id))
 
 
 def browser_snapshot(
