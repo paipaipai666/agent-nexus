@@ -12,9 +12,9 @@ interface Alert {
 }
 
 const severityConfig: Record<string, { icon: typeof Bell; color: string; bg: string }> = {
-  critical: { icon: AlertOctagon, color: 'var(--red)', bg: 'rgba(239,68,68,0.1)' },
-  warning: { icon: AlertTriangle, color: 'var(--amber)', bg: 'rgba(245,158,11,0.1)' },
-  info: { icon: Info, color: 'var(--blue)', bg: 'rgba(59,130,246,0.1)' },
+  critical: { icon: AlertOctagon, color: 'var(--red)', bg: 'var(--red-muted)' },
+  warning: { icon: AlertTriangle, color: 'var(--amber)', bg: 'var(--amber-muted)' },
+  info: { icon: Info, color: 'var(--blue)', bg: 'var(--blue-muted)' },
 }
 
 const typeLabels: Record<string, string> = {
@@ -51,8 +51,8 @@ export default function AlertsPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
         <div>
           <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Alerts</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>
@@ -81,24 +81,24 @@ export default function AlertsPage() {
         </div>
       </div>
 
-      {/* Alert Rules */}
-      <div className="surface-card p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Shield size={14} style={{ color: 'var(--accent)' }} />
-          <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Active Rules ({rules.length})</h2>
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        {/* Alert Rules */}
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Shield size={14} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Active Rules ({rules.length})</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {rules.map((rule, i) => (
+              <span key={i} className="text-xs px-2.5 py-1 rounded-full" style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}>
+                {rule.type}
+              </span>
+            ))}
+            {rules.length === 0 && <span className="text-xs" style={{ color: 'var(--fg-faint)' }}>No rules configured</span>}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {rules.map((rule, i) => (
-            <span key={i} className="text-xs px-2.5 py-1 rounded-full" style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)', border: '1px solid var(--border)' }}>
-              {rule.type}
-            </span>
-          ))}
-          {rules.length === 0 && <span className="text-xs" style={{ color: 'var(--fg-faint)' }}>No rules configured</span>}
-        </div>
-      </div>
 
-      {/* Alert List */}
-      <div className="flex-1 overflow-y-auto">
+        {/* Alert List */}
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
@@ -114,9 +114,9 @@ export default function AlertsPage() {
               const config = severityConfig[alert.severity] || severityConfig.info
               const Icon = config.icon
               return (
-                <div key={i} className="surface-card p-3.5" style={{ borderLeft: `3px solid ${config.color}` }}>
+                <div key={i} className="p-3.5 rounded-lg" style={{ background: `linear-gradient(to right, ${config.bg}, var(--surface-1))`, border: '1px solid var(--border)' }}>
                   <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded flex items-center justify-center shrink-0 mt-0.5" style={{ background: config.bg }}>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ background: config.bg }}>
                       <Icon size={14} style={{ color: config.color }} />
                     </div>
                     <div className="flex-1 min-w-0">

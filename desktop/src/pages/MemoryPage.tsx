@@ -6,7 +6,6 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; label: string 
   fact: { bg: 'var(--purple-muted)', text: 'var(--purple)', label: 'Fact' },
   preference: { bg: 'var(--blue-muted)', text: 'var(--blue)', label: 'Preference' },
   note: { bg: 'var(--surface-3)', text: 'var(--fg-muted)', label: 'Note' },
-  // Legacy names
   entity_fact: { bg: 'var(--purple-muted)', text: 'var(--purple)', label: 'Fact' },
   conclusion: { bg: 'var(--purple-muted)', text: 'var(--purple)', label: 'Fact' },
   user_preference: { bg: 'var(--blue-muted)', text: 'var(--blue)', label: 'Preference' },
@@ -78,7 +77,7 @@ export default function MemoryPage() {
         setReflectResult(r.error || r.reason || 'Unknown result')
       } else {
         setReflectResult(`Found ${r.patterns_found} patterns, saved ${r.patterns_saved} from ${r.memories_reviewed} memories`)
-        loadMemories() // refresh list
+        loadMemories()
       }
     } catch (e: any) {
       setReflectResult(`Error: ${e.message || 'Unknown error'}`)
@@ -87,7 +86,6 @@ export default function MemoryPage() {
 
   const displayMemories = searchResults ?? longMemories
 
-  // Category counts
   const catCounts = longMemories.reduce((acc: Record<string, number>, m: any) => {
     const cat = m.category || 'unknown'
     acc[cat] = (acc[cat] || 0) + 1
@@ -95,8 +93,8 @@ export default function MemoryPage() {
   }, {})
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
         <div>
           <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Memory</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{longMemories.length} long-term · {shortMessages.length} short-term</p>
@@ -114,89 +112,91 @@ export default function MemoryPage() {
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded w-fit" style={{ background: 'var(--surface-2)' }}>
-        {(['long', 'short'] as const).map(t => (
-          <button key={t} onClick={() => { setTab(t); if (t === 'long') setSearchResults(null) }} className="px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150" style={{ background: tab === t ? 'var(--accent)' : 'transparent', color: tab === t ? 'white' : 'var(--fg-muted)' }}>
-            {t === 'long' ? `Long-term (${longMemories.length})` : `Short-term (${shortMessages.length})`}
-          </button>
-        ))}
-      </div>
-
-      {/* Category chips */}
-      {tab === 'long' && longMemories.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {Object.entries(catCounts).map(([cat, count]) => {
-            const style = getCategoryStyle(cat)
-            return (
-              <span key={cat} className="px-2 py-0.5 rounded-full text-2xs font-medium" style={{ background: style.bg, color: style.text }}>
-                {style.label}: {count}
-              </span>
-            )
-          })}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        {/* Tabs */}
+        <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--surface-2)' }}>
+          {(['long', 'short'] as const).map(t => (
+            <button key={t} onClick={() => { setTab(t); if (t === 'long') setSearchResults(null) }} className="px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150" style={{ background: tab === t ? 'var(--accent)' : 'transparent', color: tab === t ? 'white' : 'var(--fg-muted)' }}>
+              {t === 'long' ? `Long-term (${longMemories.length})` : `Short-term (${shortMessages.length})`}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Reflect result */}
-      {reflectResult && (
-        <div className="text-xs px-3 py-2 rounded" style={{ background: 'var(--cyan-muted)', color: 'var(--cyan)' }}>
-          {reflectResult}
-          <button onClick={() => setReflectResult(null)} className="ml-2 underline">dismiss</button>
-        </div>
-      )}
-
-      {/* Search */}
-      {tab === 'long' && (
-        <div className="flex gap-2">
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search memories..." className="input-field flex-1" />
-          <button onClick={handleSearch} disabled={isSearching} className="btn-primary flex items-center gap-1.5"><Search size={14} /> Search</button>
-          {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery('') }} className="btn-ghost">Clear</button>}
-        </div>
-      )}
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto space-y-1.5">
-        {tab === 'long' ? (
-          displayMemories.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
-              <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>{searchResults ? 'No results found.' : 'No long-term memories.'}</p>
-            </div>
-          ) : displayMemories.map((m, i) => {
-            const memId = m.id || m.memory_id || ''
-            const catStyle = getCategoryStyle(m.category)
-            return (
-              <div key={memId || i} className="surface-card p-3 group hover:border-[var(--border-strong)] transition-colors">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="px-1.5 py-0.5 rounded text-2xs font-medium" style={{ background: catStyle.bg, color: catStyle.text }}>{catStyle.label}</span>
-                  <ImportanceBar value={m.importance || 0.5} effective={m.effective_importance} />
-                  {m.access_count > 0 && (
-                    <span className="flex items-center gap-0.5 text-2xs" style={{ color: 'var(--fg-faint)' }} title={`${m.access_count} times accessed`}>
-                      <Zap size={9} /> {m.access_count}
-                    </span>
-                  )}
-                  <div className="ml-auto flex items-center gap-2">
-                    {m.score != null && <span className="text-xs font-mono" style={{ color: 'var(--fg-faint)' }}>{Number(m.score).toFixed(3)}</span>}
-                    {memId && <button onClick={() => handleDelete(memId)} disabled={deletingId === memId} className="p-1 rounded transition-all opacity-0 group-hover:opacity-100" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.background = 'var(--red-muted)' }} onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-faint)'; e.currentTarget.style.background = 'transparent' }}>{deletingId === memId ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}</button>}
-                  </div>
-                </div>
-                <p className="text-sm" style={{ color: 'var(--fg)' }}>{m.content || m.text || JSON.stringify(m)}</p>
-              </div>
-            )
-          })
-        ) : (
-          shortMessages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <div className="w-12 h-12 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
-              <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No conversation history.</p>
-            </div>
-          ) : shortMessages.map((m, i) => (
-            <div key={i} className="rounded px-3 py-2 text-sm animate-slide-up" style={{ animationDelay: `${i * 20}ms`, background: m.role === 'user' ? 'var(--accent-subtle)' : 'var(--surface-2)', border: `1px solid ${m.role === 'user' ? 'var(--accent-muted)' : 'var(--border)'}`, marginLeft: m.role === 'user' ? '2rem' : 0, marginRight: m.role !== 'user' ? '2rem' : 0 }}>
-              <p className="text-xs mb-1 font-medium" style={{ color: m.role === 'user' ? 'var(--accent)' : 'var(--fg-faint)' }}>{m.role}</p>
-              <p style={{ color: 'var(--fg)' }}>{m.content}</p>
-            </div>
-          ))
+        {/* Category chips */}
+        {tab === 'long' && longMemories.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(catCounts).map(([cat, count]) => {
+              const style = getCategoryStyle(cat)
+              return (
+                <span key={cat} className="px-2 py-0.5 rounded-full text-2xs font-medium" style={{ background: style.bg, color: style.text }}>
+                  {style.label}: {count}
+                </span>
+              )
+            })}
+          </div>
         )}
+
+        {/* Reflect result */}
+        {reflectResult && (
+          <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--cyan-muted)', color: 'var(--cyan)' }}>
+            {reflectResult}
+            <button onClick={() => setReflectResult(null)} className="ml-2 underline">dismiss</button>
+          </div>
+        )}
+
+        {/* Search */}
+        {tab === 'long' && (
+          <div className="flex gap-2">
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search memories..." className="input-field flex-1" />
+            <button onClick={handleSearch} disabled={isSearching} className="btn-primary flex items-center gap-1.5 text-sm"><Search size={14} /> Search</button>
+            {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery('') }} className="btn-ghost text-sm">Clear</button>}
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="space-y-1.5">
+          {tab === 'long' ? (
+            displayMemories.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-2)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+                <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>{searchResults ? 'No results found.' : 'No long-term memories.'}</p>
+              </div>
+            ) : displayMemories.map((m, i) => {
+              const memId = m.id || m.memory_id || ''
+              const catStyle = getCategoryStyle(m.category)
+              return (
+                <div key={memId || i} className="p-3 rounded-lg group transition-colors" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="px-1.5 py-0.5 rounded text-2xs font-medium" style={{ background: catStyle.bg, color: catStyle.text }}>{catStyle.label}</span>
+                    <ImportanceBar value={m.importance || 0.5} effective={m.effective_importance} />
+                    {m.access_count > 0 && (
+                      <span className="flex items-center gap-0.5 text-2xs" style={{ color: 'var(--fg-faint)' }} title={`${m.access_count} times accessed`}>
+                        <Zap size={9} /> {m.access_count}
+                      </span>
+                    )}
+                    <div className="ml-auto flex items-center gap-2">
+                      {m.score != null && <span className="text-xs font-mono" style={{ color: 'var(--fg-faint)' }}>{Number(m.score).toFixed(3)}</span>}
+                      {memId && <button onClick={() => handleDelete(memId)} disabled={deletingId === memId} className="p-1 rounded transition-all opacity-0 group-hover:opacity-100" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.background = 'var(--red-muted)' }} onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-faint)'; e.currentTarget.style.background = 'transparent' }}>{deletingId === memId ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}</button>}
+                    </div>
+                  </div>
+                  <p className="text-sm" style={{ color: 'var(--fg)' }}>{m.content || m.text || JSON.stringify(m)}</p>
+                </div>
+              )
+            })
+          ) : (
+            shortMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-2)' }}><Brain size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+                <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No conversation history.</p>
+              </div>
+            ) : shortMessages.map((m, i) => (
+              <div key={i} className="rounded-lg px-3 py-2 text-sm animate-slide-up" style={{ animationDelay: `${i * 20}ms`, background: m.role === 'user' ? 'var(--accent-subtle)' : 'var(--surface-1)', border: `1px solid ${m.role === 'user' ? 'var(--accent-muted)' : 'var(--border)'}`, marginLeft: m.role === 'user' ? '2rem' : 0, marginRight: m.role !== 'user' ? '2rem' : 0 }}>
+                <p className="text-xs mb-1 font-medium" style={{ color: m.role === 'user' ? 'var(--accent)' : 'var(--fg-faint)' }}>{m.role}</p>
+                <p style={{ color: 'var(--fg)' }}>{m.content}</p>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )

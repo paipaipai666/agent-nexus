@@ -8,39 +8,26 @@ export default function Titlebar() {
 
   return (
     <div
-      className="h-11 flex items-center select-none shrink-0 relative z-[100]"
+      className="h-10 flex items-center select-none shrink-0 relative z-[100]"
       style={{
         background: 'var(--surface-1)',
-        borderBottom: '1px dashed var(--border)',
+        borderBottom: '1px solid var(--border)',
         WebkitAppRegion: 'drag',
       } as React.CSSProperties}
     >
-      {/* App Identity */}
-      <div className="flex items-center px-4 gap-2.5">
-        <span
-          className="font-mono font-semibold text-[15px] tracking-wider"
-          style={{ color: 'var(--accent)', textShadow: '0 0 12px var(--accent-glow)' }}
-        >
-          N
-        </span>
-        <span className="text-[13px] font-semibold tracking-tight" style={{ color: 'var(--fg)' }}>
-          AgentNexus
-        </span>
-      </div>
-
-      {/* Separator */}
-      <div className="w-px h-[18px] mx-3.5 opacity-40" style={{ background: 'var(--fg-faint)' }} />
+      {/* Spacer for sidebar width */}
+      <div className="w-[200px] shrink-0" />
 
       {/* Session Info */}
       {sessionId && (
-        <div className="flex items-center gap-2 font-mono text-xs" style={{ color: 'var(--fg-secondary)' }}>
+        <div className="flex items-center gap-2 font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
           <span
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: 'var(--green)', boxShadow: '0 0 6px rgba(142,196,122,0.5)' }}
+            style={{ background: 'var(--green)', boxShadow: '0 0 6px var(--green-muted)' }}
           />
           <span className="truncate max-w-[180px]">{sessionId.slice(0, 16)}</span>
           {modelName && (
-            <span className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+            <span className="text-[11px]" style={{ color: 'var(--fg-faint)' }}>
               {modelName}
             </span>
           )}
@@ -51,7 +38,7 @@ export default function Titlebar() {
 
       {/* Context Bar */}
       {contextUsed != null && (
-        <div className="flex items-center gap-1.5 mr-4 font-mono text-[11px]" style={{ color: 'var(--fg-secondary)' }}>
+        <div className="flex items-center gap-1.5 mr-4 font-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>
           <span>ctx</span>
           <div className="w-12 h-1 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
             <div

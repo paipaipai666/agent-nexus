@@ -6,13 +6,13 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Deep dark surfaces
+        // Tonal surface stack (darker = deeper)
         surface: {
-          0: 'var(--surface-0)',     // deepest background
-          1: 'var(--surface-1)',     // base surface
-          2: 'var(--surface-2)',     // elevated cards
-          3: 'var(--surface-3)',     // highest elevation
-          4: 'var(--surface-4)',     // hover/active
+          0: 'var(--surface-0)',
+          1: 'var(--surface-1)',
+          2: 'var(--surface-2)',
+          3: 'var(--surface-3)',
+          4: 'var(--surface-4)',
         },
         // Foreground text
         fg: {
@@ -21,7 +21,7 @@ export default {
           muted: 'var(--fg-muted)',
           faint: 'var(--fg-faint)',
         },
-        // Accent
+        // Accent — Electric Blue
         accent: {
           DEFAULT: 'var(--accent)',
           hover: 'var(--accent-hover)',
@@ -61,23 +61,24 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
+        sans: ['DM Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+        serif: ['Source Serif 4', 'Georgia', 'serif'],
+        mono: ['Fira Code', 'Consolas', 'monospace'],
       },
       fontSize: {
-        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],  // 10px
-        'xs': ['0.75rem', { lineHeight: '1rem' }],         // 12px
-        'sm': ['0.8125rem', { lineHeight: '1.125rem' }],   // 13px
-        'base': ['0.875rem', { lineHeight: '1.375rem' }],  // 14px
-        'lg': ['1rem', { lineHeight: '1.5rem' }],           // 16px
-        'xl': ['1.125rem', { lineHeight: '1.625rem' }],    // 18px
-        '2xl': ['1.375rem', { lineHeight: '1.875rem' }],   // 22px
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
+        'xs': ['0.75rem', { lineHeight: '1rem' }],
+        'sm': ['0.8125rem', { lineHeight: '1.125rem' }],
+        'base': ['0.875rem', { lineHeight: '1.375rem' }],
+        'lg': ['1rem', { lineHeight: '1.5rem' }],
+        'xl': ['1.125rem', { lineHeight: '1.625rem' }],
+        '2xl': ['1.375rem', { lineHeight: '1.875rem' }],
       },
       borderRadius: {
-        sm: '6px',
-        md: '8px',
-        lg: '12px',
-        xl: '16px',
+        sm: '4px',
+        md: '6px',
+        lg: '8px',
+        xl: '12px',
       },
       boxShadow: {
         'glow': '0 0 20px var(--accent-muted)',
@@ -87,9 +88,9 @@ export default {
       },
       animation: {
         'fade-in': 'fadeIn 0.2s ease-out',
-        'slide-up': 'slideUp 0.25s ease-out',
-        'slide-down': 'slideDown 0.25s ease-out',
-        'scale-in': 'scaleIn 0.15s ease-out',
+        'slide-up': 'slideUp 0.25s cubic-bezier(0.25, 1, 0.5, 1)',
+        'slide-down': 'slideDown 0.25s cubic-bezier(0.25, 1, 0.5, 1)',
+        'scale-in': 'scaleIn 0.15s cubic-bezier(0.25, 1, 0.5, 1)',
         'pulse-subtle': 'pulseSubtle 2s ease-in-out infinite',
         'shimmer': 'shimmer 1.5s ease-in-out infinite',
       },

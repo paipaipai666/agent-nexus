@@ -34,18 +34,18 @@ export default function SkillsPage() {
   if (loading) return <div className="flex-1 flex items-center justify-center"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} /></div>
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
-      <div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
         <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Skills</h1>
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{skills.filter(s => s.enabled).length} of {skills.length} enabled</p>
       </div>
 
-      <div ref={gridRef} className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
+      <div ref={gridRef} className="flex-1 overflow-y-auto px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
         {skills.map((skill) => (
-          <div key={skill.id} className="surface-card p-4 transition-all duration-150 hover:border-[var(--border-strong)]" style={{ opacity: skill.enabled ? 1 : 0.6 }}>
+          <div key={skill.id} className="p-4 rounded-lg transition-all duration-150" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', opacity: skill.enabled ? 1 : 0.6 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
             <div className="flex items-start justify-between mb-2.5">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>
                   <Zap size={14} style={{ color: skill.enabled ? 'var(--accent)' : 'var(--fg-faint)' }} />
                 </div>
                 <h3 className="text-sm font-medium truncate" style={{ color: 'var(--fg)' }}>{skill.display_name}</h3>

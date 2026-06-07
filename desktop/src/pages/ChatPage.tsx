@@ -1,15 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  Send, Square, Undo2, Redo2, History,
-  Wrench, CheckSquare, Server,
-  PanelRightOpen, PanelRightClose
-} from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
 import { agentWs } from '../services/ws'
-import { animateMessage, animateDropDown, animateScaleIn } from '../utils/animations'
+import { animateMessage } from '../utils/animations'
 import { useSession } from '../components/session/SessionProvider'
 
 interface Message {
@@ -44,22 +40,20 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-/* ─── Tool Card (terminal style) ─── */
+/* ─── Tool Card ─── */
 const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
   const statusColor = msg.toolStatus === 'running' ? 'var(--amber)' : msg.toolStatus === 'error' ? 'var(--red)' : 'var(--green)'
   const statusBg = msg.toolStatus === 'running' ? 'var(--amber-muted)' : msg.toolStatus === 'error' ? 'var(--red-muted)' : 'var(--green-muted)'
   const statusLabel = msg.toolStatus === 'running' ? 'running' : msg.toolStatus === 'error' ? 'error' : 'done'
 
-  // Parse diff content if present
   const lines = msg.content.split('\n')
   const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
 
   return (
-    <div className="my-2.5 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-      {/* Header */}
+    <div className="my-3 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}>
       <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[11px]" style={{ background: 'var(--surface-3)', borderBottom: '1px solid var(--border)' }}>
         <div
-          className="w-4 h-4 rounded-sm flex items-center justify-center text-[9px] font-semibold"
+          className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-semibold"
           style={{ background: statusBg, color: statusColor }}
         >
           {(msg.toolName || 'T')[0].toUpperCase()}
@@ -69,17 +63,9 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
           {msg.toolStatus === 'running' && (
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
           )}
-          {msg.toolStatus === 'done' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
-          )}
-          {msg.toolStatus === 'error' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-          )}
           {statusLabel}
         </div>
       </div>
-
-      {/* Body */}
       <div className="px-3.5 py-2.5 font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-secondary)' }}>
         {hasDiff ? (
           <div className="font-mono text-xs leading-[1.7]">
@@ -87,8 +73,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
               if (line.startsWith('@@')) return <div key={i} style={{ color: 'var(--blue)' }}>{line}</div>
               if (line.startsWith('+') && !line.startsWith('+++')) return <div key={i} style={{ color: 'var(--green)' }}>{line}</div>
               if (line.startsWith('-') && !line.startsWith('---')) return <div key={i} style={{ color: 'var(--red)' }}>{line}</div>
-              if (line.startsWith('+++') || line.startsWith('---')) return <div key={i} style={{ color: 'var(--fg-faint)' }}>{line}</div>
-              return <div key={i}>{line || ' '}</div>
+              return <div key={i}>{line || ' '}</div>
             })}
           </div>
         ) : (
@@ -99,7 +84,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
   )
 })
 
-/* ─── Message (timeline style) ─── */
+/* ─── Message Bubble ─── */
 const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message }) {
   return (
     <div
@@ -109,36 +94,28 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
           animateMessage(el, msg.role)
         }
       }}
-      className="flex gap-3.5 py-3.5"
-      style={{ borderBottom: '1px dashed rgba(255,255,255,0.03)' }}
+      className="py-4"
+      style={{ borderBottom: '1px solid var(--border)' }}
     >
-      {/* Timestamp */}
-      <span className="font-mono text-[11px] w-10 shrink-0 pt-0.5 text-right" style={{ color: 'var(--fg-faint)' }}>
-        {formatTime(msg.timestamp)}
-      </span>
+      <div className="max-w-3xl mx-auto px-6">
+        {/* Role label */}
+        <div className="flex items-center gap-2 mb-2">
+          <span
+            className="text-[11px] font-semibold uppercase tracking-wider"
+            style={{ color: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--amber)' : 'var(--fg-muted)' }}
+          >
+            {msg.role === 'user' ? 'You' : msg.role === 'tool' ? 'Tool' : msg.role === 'system' ? 'System' : 'Nexus'}
+          </span>
+          <span className="font-mono text-[10px]" style={{ color: 'var(--fg-faint)' }}>
+            {formatTime(msg.timestamp)}
+          </span>
+        </div>
 
-      {/* Role label */}
-      <span
-        className="font-mono text-[10px] font-semibold uppercase tracking-wider w-11 shrink-0 pt-[3px] text-right"
-        style={{ color: msg.role === 'user' ? 'var(--accent)' : 'var(--blue)' }}
-      >
-        {msg.role === 'user' ? 'user' : msg.role === 'tool' ? 'tool' : msg.role === 'system' ? 'sys' : 'nexus'}
-      </span>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
+        {/* Content */}
         {msg.role === 'tool' ? (
           <ToolCard msg={msg} />
         ) : msg.role === 'user' ? (
-          <div
-            className="text-[13px] px-3.5 py-2 rounded-sm"
-            style={{
-              background: 'var(--accent-subtle)',
-              borderLeft: '2px solid var(--accent)',
-              borderRadius: '0 var(--radius) var(--radius) 0',
-              color: 'var(--fg)',
-            }}
-          >
+          <div className="text-[14px] leading-relaxed" style={{ color: 'var(--fg)' }}>
             {msg.content}
           </div>
         ) : msg.role === 'system' ? (
@@ -175,11 +152,6 @@ export default function ChatPage() {
   // HUD state
   const [versionStatus, setVersionStatus] = useState<any>(null)
   const [runtimeStatus, setRuntimeStatus] = useState<any>(null)
-  const [showSidePanel, setShowSidePanel] = useState(true)
-  const [sidePanelTab, setSidePanelTab] = useState<'tools' | 'todo' | 'mcp' | 'version'>('tools')
-  const [registeredTools] = useState<any[]>([])
-  const [todos, setTodos] = useState<any[]>([])
-  const [mcpStatus, setMcpStatus] = useState<any>(null)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
   const [showCheckpoints, setShowCheckpoints] = useState(false)
 
@@ -188,7 +160,6 @@ export default function ChatPage() {
   const [paletteIndex, setPaletteIndex] = useState(0)
   const paletteAnimDoneRef = useRef(false)
 
-  // Dynamic command sources
   const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
@@ -279,7 +250,6 @@ export default function ChatPage() {
 
   const sessionIdRef = useRef<string | null>(null)
 
-  // Update global session context
   useEffect(() => {
     setGlobalSessionId(sessionId)
   }, [sessionId, setGlobalSessionId])
@@ -330,7 +300,6 @@ export default function ChatPage() {
       loadAndDisplayMessages().catch(() => {})
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
-      api.getMcpStatus().then(setMcpStatus).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
       fetchDynamicCommands()
     }
@@ -357,7 +326,6 @@ export default function ChatPage() {
       }),
       agentWs.on('tool_result', (data) => {
         setMessages(prev => prev.map(m => m.toolName === data.tool_name && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` } : m))
-        if (sessionId) api.getTodos(sessionId).then(d => setTodos(d.items || [])).catch(() => {})
       }),
       agentWs.on('token', (data) => {
         currentReasoningIdRef.current = null
@@ -399,7 +367,7 @@ export default function ChatPage() {
       }),
       agentWs.on('error', (data) => {
         const isCancelled = data.message === 'cancelled' || data.run_id
-        const label = isCancelled ? '⏹ Agent 已中断' : `Error: ${data.message}`
+        const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
         setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: label, timestamp: new Date() }])
         setIsRunning(false); setCurrentRunId(null); processQueue()
       }),
@@ -464,7 +432,6 @@ export default function ChatPage() {
         if (!args) { addSys('Usage: /switch <session_id>'); break }
         window.location.href = `/chat/${args}`
         break
-      // ── Skills ──
       case '/skill':
         if (!args || args === 'list') {
           try {
@@ -484,7 +451,6 @@ export default function ChatPage() {
           try { await api.disableSkill(full); addSys(`Skill disabled: ${name}`); setSkills((await api.listSkills()).skills) } catch (e: any) { addSys(`Disable failed: ${e.message}`) }
         } else { addSys('Usage: /skill [list | enable <id> | disable <id>]') }
         break
-      // ── MCP ──
       case '/mcp':
         if (!args || args === 'status') {
           try {
@@ -501,7 +467,6 @@ export default function ChatPage() {
           try { await api.reloadMcp(); addSys('MCP reloaded.') } catch (e: any) { addSys(`MCP reload failed: ${e.message}`) }
         } else { addSys('Usage: /mcp [status | tools | reload]') }
         break
-      // ── Plugins ──
       case '/plugin':
         try {
           const ext = await api.getExtensions()
@@ -510,14 +475,12 @@ export default function ChatPage() {
         } catch (e: any) { addSys(`Plugins failed: ${e.message}`) }
         break
       default: {
-        // Check if it's a dynamic skill command: /<skill-id> [instruction]
         const skillMatch = skills.find(s => {
           if (!s.enabled) return false
           const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
           return `/${shortId}` === cmd
         })
         if (skillMatch) {
-          // Send to agent — the backend handles skill activation
           sendMessage(text)
         } else {
           addSys(`Unknown command: ${cmd}. Type /help for commands.`)
@@ -533,7 +496,6 @@ export default function ChatPage() {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handlePaletteSelect(filteredCommands[paletteIndex].cmd); return }
       if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); paletteAnimDoneRef.current = false; return }
     }
-    // Double-ESC: cancel running agent (same as TUI)
     if (e.key === 'Escape' && isRunning) {
       e.preventDefault()
       const now = Date.now()
@@ -576,7 +538,6 @@ export default function ChatPage() {
     } catch { }
   }
 
-  // Build combined command list: static + dynamic skills + MCP tools + plugins
   const allCommands = [
     ...COMMAND_DEFS,
     ...skills.filter(s => s.enabled).map(s => {
@@ -601,250 +562,180 @@ export default function ChatPage() {
   })
 
   return (
-    <div className="flex-1 flex overflow-hidden" style={{ background: 'var(--surface-0)' }}>
-      {/* Main Chat */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full gap-5 animate-fade-in">
-              <div
-                className="font-mono text-3xl font-semibold tracking-wider opacity-80"
-                style={{ color: 'var(--accent)', textShadow: '0 0 20px var(--accent-glow)' }}
+    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--surface-0)' }}>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
+            <div className="text-center">
+              <h1
+                className="text-3xl font-semibold tracking-tight mb-3"
+                style={{ color: 'var(--fg)' }}
               >
-                NEXUS
-              </div>
-              <div className="text-center">
-                <p className="text-[15px] italic" style={{ fontFamily: 'var(--font-serif)', color: 'var(--fg-muted)' }}>
-                  Your developer co-pilot awaits.
-                </p>
-                <p className="text-xs mt-2 font-mono" style={{ color: 'var(--fg-faint)' }}>
-                  Type <kbd className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--fg-secondary)' }}>/help</kbd> for commands · <kbd className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--fg-secondary)' }}>Ctrl+K</kbd> palette
-                </p>
-              </div>
+                How can I help you?
+              </h1>
+              <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
+                I'm your local AI agent. Ask me to write code, search knowledge, run tools, or help with tasks.
+              </p>
             </div>
-          )}
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
+            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+              {['Write a Python script', 'Search my knowledge base', 'Explain this code', 'Run a shell command'].map(suggestion => (
+                <button
+                  key={suggestion}
+                  onClick={() => { setInput(suggestion); inputRef.current?.focus() }}
+                  className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+                  style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)', border: '1px solid var(--border)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--fg-secondary)' }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} msg={msg} />
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
 
-        {/* Confirm */}
-        {confirmRequest && (
-          <div ref={(el) => { if (el) animateScaleIn(el) }} className="mx-8 mb-3 rounded p-4" style={{ background: 'var(--amber-muted)', border: '1px solid rgba(224,190,82,0.3)' }}>
+      {/* Confirm */}
+      {confirmRequest && (
+        <div className="max-w-3xl mx-auto w-full px-6 mb-3">
+          <div className="rounded-lg p-4" style={{ background: 'var(--amber-muted)', border: '1px solid var(--amber-muted)' }}>
             <div className="text-sm font-medium mb-2" style={{ color: 'var(--amber)' }}>Confirmation Required</div>
-            <pre className="text-xs rounded p-2.5 mb-3 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
+            <pre className="text-xs rounded-lg p-2.5 mb-3 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
             <div className="flex gap-2">
               <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
               <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
             </div>
           </div>
-        )}
-
-        {/* Input Area + Palette (relative wrapper) */}
-        <div className="px-8 pb-4 relative">
-          {/* Command Palette — absolute above input, no layout shift */}
-          {showPalette && filteredCommands.length > 0 && (
-            <div
-              ref={(el) => {
-                if (el && !paletteAnimDoneRef.current) { paletteAnimDoneRef.current = true; animateDropDown(el) }
-              }}
-              className="absolute bottom-full left-0 right-0 mb-2 rounded overflow-hidden max-h-64 overflow-y-auto z-50"
-              style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
-            >
-              {(() => {
-                const CATEGORY_LABELS: Record<string, string> = { system: 'System', skill: 'Skills', mcp: 'MCP Tools', plugin: 'Plugins' }
-                const CATEGORY_COLORS: Record<string, string> = { system: 'var(--fg-faint)', skill: 'var(--green)', mcp: 'var(--blue)', plugin: 'var(--amber)' }
-                let lastCat = ''
-                return filteredCommands.map((c, i) => {
-                  const showHeader = c.category !== lastCat && (lastCat = c.category)
-                  return (
-                    <React.Fragment key={c.cmd}>
-                      {showHeader && (
-                        <div className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: CATEGORY_COLORS[c.category] || 'var(--fg-faint)', borderTop: lastCat !== 'system' ? '1px dashed var(--border)' : 'none' }}>
-                          {CATEGORY_LABELS[c.category] || c.category}
-                        </div>
-                      )}
-                      <button
-                        ref={(el) => { if (el && i === paletteIndex) el.scrollIntoView({ block: 'nearest' }) }}
-                        onClick={() => handlePaletteSelect(c.cmd)}
-                        onMouseEnter={() => setPaletteIndex(i)}
-                        className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors"
-                        style={{
-                          color: 'var(--fg)',
-                          background: i === paletteIndex ? 'var(--accent-subtle)' : 'transparent',
-                          borderLeft: i === paletteIndex ? '2px solid var(--accent)' : '2px solid transparent',
-                        }}
-                      >
-                        <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>
-                        <span className="text-xs" style={{ color: i === paletteIndex ? 'var(--fg-secondary)' : 'var(--fg-faint)' }}>{c.desc}</span>
-                      </button>
-                    </React.Fragment>
-                  )
-                })
-              })()}
-              <div className="px-4 py-1.5 flex items-center gap-3 font-mono text-[10px]" style={{ borderTop: '1px dashed var(--border)', color: 'var(--fg-faint)' }}>
-                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>↑↓</kbd> navigate</span>
-                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>Tab</kbd> select</span>
-                <span><kbd className="px-1 rounded" style={{ background: 'var(--surface-4)', border: '1px solid var(--border)' }}>Esc</kbd> dismiss</span>
-              </div>
-            </div>
-          )}
-          <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-            <div className="flex items-end gap-2.5 p-3.5">
-              <span className="font-mono text-sm pt-px shrink-0" style={{ color: 'var(--accent)', textShadow: '0 0 8px var(--accent-glow)' }}>&gt;</span>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder={isRunning ? "Agent running... messages will be queued" : "Type a message... (/ for commands)"}
-                className="flex-1 bg-transparent text-sm resize-none focus:outline-none max-h-32"
-                style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
-                rows={1}
-              />
-              {isRunning ? (
-                <button onClick={handleCancel} className="w-8 h-8 flex items-center justify-center rounded transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim()}
-                  className="w-8 h-8 flex items-center justify-center rounded transition-all shrink-0"
-                  style={{
-                    background: input.trim() ? 'var(--accent)' : 'var(--surface-3)',
-                    color: input.trim() ? 'var(--surface-0)' : 'var(--fg-faint)',
-                    boxShadow: input.trim() ? '0 0 12px var(--accent-glow)' : 'none',
-                  }}
-                >
-                  <Send size={14} />
-                </button>
-              )}
-            </div>
-
-            {/* HUD row */}
-            <div className="flex items-center gap-1 px-3.5 py-2 font-mono text-[11px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px dashed rgba(255,255,255,0.04)', color: 'var(--fg-secondary)' }}>
-              {runtimeStatus && (
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }} />
-                  {runtimeStatus.model_id?.split('/').pop() || runtimeStatus.model_id}
-                </span>
-              )}
-              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-              {runtimeStatus && (
-                <span className="shrink-0">
-                  ctx {Math.round(runtimeStatus.stm_tokens / 1000)}k/{Math.round(runtimeStatus.ctx_max / 1000)}k ({runtimeStatus.ctx_max > 0 ? Math.round(runtimeStatus.stm_tokens / runtimeStatus.ctx_max * 100) : 0}%)
-                </span>
-              )}
-              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-              {runtimeStatus?.total_usage && (
-                <span className="shrink-0">in:{(runtimeStatus.total_usage.input_tokens || 0).toLocaleString()} out:{(runtimeStatus.total_usage.output_tokens || 0).toLocaleString()}</span>
-              )}
-              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-              {versionStatus?.head && (
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-                  {versionStatus.head.id?.slice(0, 8)}
-                </span>
-              )}
-              <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={11} /></button>
-                <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={11} /></button>
-                <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={11} /></button>
-              </div>
-              {messageQueueRef.current.length > 0 && <span className="shrink-0" style={{ color: 'var(--amber)' }}>Queue: {messageQueueRef.current.length}</span>}
-              <span className="ml-auto shrink-0 font-mono" style={{ color: 'var(--fg-faint)' }}>{sessionId?.slice(0, 12)}</span>
-              <button onClick={() => setShowSidePanel(!showSidePanel)} className="p-0.5 rounded transition-colors shrink-0 ml-1 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}>
-                {showSidePanel ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
-              </button>
-            </div>
-          </div>
         </div>
+      )}
 
-        {/* Checkpoint Overlay */}
-        {showCheckpoints && (
-          <div className="absolute bottom-28 left-5 w-96 rounded overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-3)', border: '1px solid var(--border-strong)', boxShadow: '0 16px 64px rgba(0,0,0,0.5)' }}>
-            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px dashed var(--border)' }}>
-              <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
-              <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>
-            </div>
-            {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>No checkpoints</p> : checkpoints.map(cp => (
-              <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px dashed var(--border-subtle)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
-                <div className="flex items-center gap-2">
-                  {cp.is_head && <span style={{ color: 'var(--accent)' }}>→</span>}
-                  <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{cp.id}</span>
-                  <span className="text-xs truncate" style={{ color: 'var(--fg-muted)' }}>{cp.question || '(no question)'}</span>
-                </div>
-              </div>
-            ))}
+      {/* Input Area */}
+      <div className="px-6 pb-6 relative">
+        {/* Command Palette */}
+        {showPalette && filteredCommands.length > 0 && (
+          <div
+            className="absolute bottom-full left-6 right-6 mb-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
+          >
+            {(() => {
+              const CATEGORY_LABELS: Record<string, string> = { system: 'System', skill: 'Skills', mcp: 'MCP Tools', plugin: 'Plugins' }
+              const CATEGORY_COLORS: Record<string, string> = { system: 'var(--fg-faint)', skill: 'var(--green)', mcp: 'var(--blue)', plugin: 'var(--amber)' }
+              let lastCat = ''
+              return filteredCommands.map((c, i) => {
+                const showHeader = c.category !== lastCat && (lastCat = c.category)
+                return (
+                  <React.Fragment key={c.cmd}>
+                    {showHeader && (
+                      <div className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: CATEGORY_COLORS[c.category] || 'var(--fg-faint)', borderTop: lastCat !== 'system' ? '1px solid var(--border)' : 'none' }}>
+                        {CATEGORY_LABELS[c.category] || c.category}
+                      </div>
+                    )}
+                    <button
+                      ref={(el) => { if (el && i === paletteIndex) el.scrollIntoView({ block: 'nearest' }) }}
+                      onClick={() => handlePaletteSelect(c.cmd)}
+                      onMouseEnter={() => setPaletteIndex(i)}
+                      className="w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors"
+                      style={{
+                        color: 'var(--fg)',
+                        background: i === paletteIndex ? 'var(--accent-subtle)' : 'transparent',
+                      }}
+                    >
+                      <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>{c.cmd}</span>
+                      <span className="text-xs" style={{ color: i === paletteIndex ? 'var(--fg-secondary)' : 'var(--fg-faint)' }}>{c.desc}</span>
+                    </button>
+                  </React.Fragment>
+                )
+              })
+            })()}
           </div>
         )}
-      </div>
 
-      {/* Side Panel */}
-      {showSidePanel && (
-        <div className="w-[260px] flex flex-col overflow-hidden shrink-0" style={{ background: 'var(--surface-1)', borderLeft: '1px dashed var(--border)' }}>
-          <div className="flex" style={{ borderBottom: '1px dashed var(--border)' }}>
-            {(['tools', 'todo', 'mcp', 'version'] as const).map(tab => (
-              <button key={tab} onClick={() => setSidePanelTab(tab)} className="flex-1 py-2.5 text-xs font-medium transition-colors relative" style={{ background: 'none', border: 'none', color: sidePanelTab === tab ? 'var(--accent)' : 'var(--fg-muted)' }}>
-                {tab === 'tools' && <Wrench size={11} className="inline mr-1" />}
-                {tab === 'todo' && <CheckSquare size={11} className="inline mr-1" />}
-                {tab === 'mcp' && <Server size={11} className="inline mr-1" />}
-                {tab === 'version' && <History size={11} className="inline mr-1" />}
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                {sidePanelTab === tab && <div className="absolute bottom-0 left-4 right-4 h-0.5 rounded-full" style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }} />}
+        {/* Floating Input */}
+        <div
+          className="max-w-3xl mx-auto"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}
+        >
+          <div className="flex items-end gap-2.5 p-3">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={isRunning ? "Agent running... messages will be queued" : "Message Nexus..."}
+              className="flex-1 bg-transparent text-sm resize-none focus:outline-none max-h-32 min-h-[24px]"
+              style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
+              rows={1}
+            />
+            {isRunning ? (
+              <button onClick={handleCancel} className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0"
+                style={{
+                  background: input.trim() ? 'var(--accent)' : 'var(--surface-3)',
+                  color: input.trim() ? '#ffffff' : 'var(--fg-faint)',
+                }}
+              >
+                <Send size={14} />
               </button>
-            ))}
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-            {sidePanelTab === 'tools' && (registeredTools.length === 0 ? <p className="text-xs py-4 text-center font-mono" style={{ color: 'var(--fg-faint)' }}>Tools registered on agent start</p> : registeredTools.map(tool => (
-              <div key={tool.name} className="flex items-center gap-2 text-xs py-1.5 px-2 rounded" style={{ color: 'var(--fg-secondary)' }}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: tool.risk === 'high' ? 'var(--red)' : tool.risk === 'medium' ? 'var(--amber)' : 'var(--green)', boxShadow: `0 0 4px ${tool.risk === 'high' ? 'var(--red-muted)' : tool.risk === 'medium' ? 'var(--amber-muted)' : 'var(--green-muted)'}` }} />
-                <span className="font-mono">{tool.name}</span>
-              </div>
-            )))}
-
-            {sidePanelTab === 'todo' && (todos.length === 0 ? <p className="text-xs py-4 text-center" style={{ color: 'var(--fg-faint)' }}>No todo items</p> : todos.map(todo => (
-              <div key={todo.id} className="flex items-start gap-2 text-xs py-1.5 px-2 rounded">
-                <span className="mt-0.5" style={{ color: todo.status === 'done' ? 'var(--green)' : todo.status === 'in_progress' ? 'var(--accent)' : 'var(--fg-faint)' }}>{todo.status === 'done' ? '✓' : todo.status === 'in_progress' ? '→' : '·'}</span>
-                <span style={{ color: todo.status === 'done' ? 'var(--fg-faint)' : 'var(--fg)', textDecoration: todo.status === 'done' ? 'line-through' : 'none' }}>{todo.description}</span>
-              </div>
-            )))}
-
-            {sidePanelTab === 'mcp' && (!mcpStatus ? <p className="text-xs py-4 text-center" style={{ color: 'var(--fg-faint)' }}>Loading...</p> : <>
-              <div className="flex items-center gap-2 text-xs mb-2 px-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: mcpStatus.started ? 'var(--green)' : 'var(--fg-faint)', boxShadow: mcpStatus.started ? '0 0 6px var(--green-muted)' : 'none' }} />
-                <span style={{ color: 'var(--fg-secondary)' }}>{mcpStatus.started ? 'Running' : 'Not started'}</span>
-              </div>
-              {(mcpStatus.servers || []).map((s: any) => (
-                <div key={s.name} className="flex items-center justify-between text-xs py-1.5 px-2 rounded" style={{ color: 'var(--fg-secondary)' }}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s.connected ? 'var(--green)' : 'var(--red)', boxShadow: `0 0 4px ${s.connected ? 'var(--green-muted)' : 'var(--red-muted)'}` }} />
-                    <span className="truncate">{s.name}</span>
-                  </div>
-                  <span className="shrink-0 ml-2" style={{ color: 'var(--fg-faint)' }}>{s.tool_names?.length || 0} tools</span>
-                </div>
-              ))}
-            </>)}
-
-            {sidePanelTab === 'version' && versionStatus && (
-              <div className="space-y-3 px-2">
-                <div className="text-xs"><span style={{ color: 'var(--fg-faint)' }}>HEAD: </span><span className="font-mono" style={{ color: 'var(--accent)' }}>{versionStatus.head?.id || 'none'}</span></div>
-                <div className="flex gap-2">
-                  <button onClick={handleUndo} disabled={!versionStatus.can_undo} className="btn-ghost text-xs flex items-center gap-1 flex-1 justify-center"><Undo2 size={11} /> Undo</button>
-                  <button onClick={handleRedo} disabled={!versionStatus.can_redo} className="btn-ghost text-xs flex items-center gap-1 flex-1 justify-center"><Redo2 size={11} /> Redo</button>
-                </div>
-                <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '8px' }}>
-                  <p className="text-xs mb-1.5 font-mono" style={{ color: 'var(--fg-faint)' }}>Recent:</p>
-                  {checkpoints.map(cp => (
-                    <div key={cp.id} className="text-xs py-1 font-mono" style={{ color: cp.is_head ? 'var(--accent)' : 'var(--fg-faint)' }}>{cp.is_head ? '→ ' : '  '}{cp.id} — {cp.question?.slice(0, 30) || '?'}</div>
-                  ))}
-                </div>
-              </div>
             )}
           </div>
+
+          {/* HUD row */}
+          <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
+            {runtimeStatus && (
+              <span className="flex items-center gap-1 shrink-0">
+                <span className="w-[4px] h-[4px] rounded-full" style={{ background: 'var(--accent)' }} />
+                {runtimeStatus.model_id?.split('/').pop() || runtimeStatus.model_id}
+              </span>
+            )}
+            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
+            {runtimeStatus && (
+              <span className="shrink-0">
+                ctx {Math.round(runtimeStatus.stm_tokens / 1000)}k/{Math.round(runtimeStatus.ctx_max / 1000)}k
+              </span>
+            )}
+            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
+            {versionStatus?.head && (
+              <span className="flex items-center gap-1 shrink-0">
+                <span className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)' }} />
+                {versionStatus.head.id?.slice(0, 8)}
+              </span>
+            )}
+            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={10} /></button>
+              <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={10} /></button>
+              <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={10} /></button>
+            </div>
+            <span className="ml-auto shrink-0 font-mono" style={{ color: 'var(--fg-faint)' }}>{sessionId?.slice(0, 12)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Checkpoint Overlay */}
+      {showCheckpoints && (
+        <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: '0 16px 64px rgba(0,0,0,0.4)' }}>
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+            <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
+            <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>
+          </div>
+          {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>No checkpoints</p> : checkpoints.map(cp => (
+            <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
+              <div className="flex items-center gap-2">
+                {cp.is_head && <span style={{ color: 'var(--accent)' }}>→</span>}
+                <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{cp.id}</span>
+                <span className="text-xs truncate" style={{ color: 'var(--fg-muted)' }}>{cp.question || '(no question)'}</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

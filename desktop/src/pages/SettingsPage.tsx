@@ -49,17 +49,19 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
-      <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Settings</h1>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Settings</h1>
+      </div>
 
-      {error && <div className="rounded px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
-      <div className="flex-1 overflow-y-auto space-y-4">
         {Object.entries(GROUPS).map(([group, keys]) => {
           const visibleKeys = keys.filter(k => k in config)
           if (visibleKeys.length === 0) return null
           return (
-            <div key={group} className="surface-card p-4">
+            <div key={group} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
               <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>{group}</h2>
               <div className="space-y-2.5">
                 {visibleKeys.map(key => (

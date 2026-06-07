@@ -55,8 +55,8 @@ export default function AuditPage() {
   const uniqueTools = [...new Set(entries.map(e => e.tool_name))].sort()
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
         <div>
           <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Audit Log</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Tool call audit trail with risk levels</p>
@@ -84,26 +84,26 @@ export default function AuditPage() {
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Total Calls', value: entries.length, icon: FileText, color: 'var(--accent)' },
-          { label: 'Errors', value: entries.filter(e => e.error).length, icon: AlertTriangle, color: 'var(--red)' },
-          { label: 'HITL Triggered', value: entries.filter(e => e.hitl_triggered).length, icon: Shield, color: 'var(--amber)' },
-          { label: 'Avg Duration', value: entries.length ? `${Math.round(entries.reduce((s, e) => s + e.duration_ms, 0) / entries.length)}ms` : '-', icon: Clock, color: 'var(--cyan)' },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="surface-card p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Icon size={12} style={{ color }} />
-              <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        {/* Summary */}
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: 'Total Calls', value: entries.length, icon: FileText, color: 'var(--accent)' },
+            { label: 'Errors', value: entries.filter(e => e.error).length, icon: AlertTriangle, color: 'var(--red)' },
+            { label: 'HITL Triggered', value: entries.filter(e => e.hitl_triggered).length, icon: Shield, color: 'var(--amber)' },
+            { label: 'Avg Duration', value: entries.length ? `${Math.round(entries.reduce((s, e) => s + e.duration_ms, 0) / entries.length)}ms` : '-', icon: Clock, color: 'var(--cyan)' },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="p-3 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+              <div className="flex items-center gap-2 mb-1">
+                <Icon size={12} style={{ color }} />
+                <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
+              </div>
+              <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>{value}</p>
             </div>
-            <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>{value}</p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
 
-      {/* Entry List */}
-      <div className="flex-1 overflow-y-auto">
+        {/* Entry List */}
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
@@ -121,8 +121,8 @@ export default function AuditPage() {
               return (
                 <div
                   key={i}
-                  className="surface-card px-3.5 py-3"
-                  style={{ borderLeft: isError ? '3px solid var(--red)' : entry.hitl_triggered ? '3px solid var(--amber)' : 'none' }}
+                  className="px-3.5 py-3 rounded-lg"
+                  style={{ background: isError ? 'var(--red-muted)' : entry.hitl_triggered ? 'var(--amber-muted)' : 'var(--surface-1)', border: '1px solid var(--border)' }}
                 >
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-xs font-mono font-medium px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-3)', color: 'var(--accent)' }}>
@@ -130,15 +130,15 @@ export default function AuditPage() {
                     </span>
                     <span className="text-xs" style={{ color: 'var(--fg-faint)' }}>by {entry.caller}</span>
                     {entry.risk_level && entry.risk_level !== 'low' && (
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${riskColor}18`, color: riskColor }}>
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-3)', color: riskColor }}>
                         {entry.risk_level}
                       </span>
                     )}
                     {entry.hitl_triggered && (
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--amber)' }}>HITL</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--amber-muted)', color: 'var(--amber)' }}>HITL</span>
                     )}
                     {entry.schema_validation === 'failed' && (
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--red)' }}>schema fail</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>schema fail</span>
                     )}
                     <span className="text-xs ml-auto font-mono" style={{ color: 'var(--fg-faint)' }}>
                       {entry.duration_ms.toFixed(0)}ms

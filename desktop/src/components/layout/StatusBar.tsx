@@ -8,16 +8,16 @@ export default function StatusBar() {
       className="h-7 flex items-center shrink-0 font-mono text-[10px] gap-0.5"
       style={{
         background: 'var(--surface-1)',
-        borderTop: '1px dashed var(--border)',
-        color: 'var(--fg-secondary)',
+        borderTop: '1px solid var(--border)',
+        color: 'var(--fg-muted)',
         paddingLeft: 14,
         paddingRight: 14,
       }}
     >
       <StatusItem>
         <span
-          className="w-[5px] h-[5px] rounded-full"
-          style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)', boxShadow: sessionId ? '0 0 6px rgba(142,196,122,0.5)' : 'none' }}
+          className="w-[4px] h-[4px] rounded-full"
+          style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)', boxShadow: sessionId ? '0 0 6px var(--green-muted)' : 'none' }}
         />
         {sessionId ? 'connected' : 'disconnected'}
       </StatusItem>
@@ -55,12 +55,12 @@ export default function StatusBar() {
 
 function StatusItem({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1 px-2 h-full hover:bg-[var(--surface-3)] transition-colors cursor-default">
+    <div className="flex items-center gap-1 px-2 h-full hover:bg-[var(--surface-2)] transition-colors cursor-default rounded">
       {children}
     </div>
   )
 }
 
 function Sep() {
-  return <div className="w-px h-3.5 opacity-20" style={{ background: 'var(--fg-faint)' }} />
+  return <div className="w-px h-3 opacity-20" style={{ background: 'var(--fg-faint)' }} />
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   FlaskConical, Play, CheckCircle, XCircle, BarChart3, Layers, ChevronDown, ChevronRight,
-  RefreshCw, Save, GitCompare, AlertTriangle, Clock, Zap, Target, TrendingUp,
+  RefreshCw, Save, GitCompare, AlertTriangle, Clock, Zap, Target,
 } from 'lucide-react'
 import { api } from '../services/api'
 
@@ -172,9 +172,9 @@ export default function EvalPage() {
   ]
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-5 gap-4">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
           <FlaskConical size={20} style={{ color: 'var(--accent)' }} />
           <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Evaluation</h1>
@@ -189,28 +189,12 @@ export default function EvalPage() {
         </div>
       </div>
 
-      {/* Validation Result */}
-      {validation && (
-        <div className="surface-card p-3 text-sm" style={{ borderColor: validation.valid ? 'var(--green)' : 'var(--red)' }}>
-          {validation.valid ? (
-            <span style={{ color: 'var(--green)' }}>✓ Dataset valid — {validation.stats?.total || 0} tasks</span>
-          ) : (
-            <div>
-              <span style={{ color: 'var(--red)' }}>✗ {validation.errors.length} errors</span>
-              {validation.errors.slice(0, 5).map((e, i) => (
-                <div key={i} className="text-xs mt-1" style={{ color: 'var(--fg-muted)' }}>• {e}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Tabs */}
-      <div className="flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="px-6 flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
         {tabs.map(t => (
           <button
             key={t.id}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2.5 text-sm transition-colors"
             style={{
               color: activeTab === t.id ? 'var(--accent)' : 'var(--fg-muted)',
               borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -223,7 +207,23 @@ export default function EvalPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto space-y-3">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+        {/* Validation Result */}
+        {validation && (
+          <div className="p-3 rounded-lg text-sm" style={{ background: validation.valid ? 'var(--green-muted)' : 'var(--red-muted)', border: '1px solid var(--border)' }}>
+            {validation.valid ? (
+              <span style={{ color: 'var(--green)' }}>✓ Dataset valid — {validation.stats?.total || 0} tasks</span>
+            ) : (
+              <div>
+                <span style={{ color: 'var(--red)' }}>✗ {validation.errors.length} errors</span>
+                {validation.errors.slice(0, 5).map((e, i) => (
+                  <div key={i} className="text-xs mt-1" style={{ color: 'var(--fg-muted)' }}>• {e}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Tasks Tab */}
         {activeTab === 'tasks' && (
           <>
@@ -246,15 +246,15 @@ export default function EvalPage() {
             {tasks.length === 0 ? (
               <div className="text-center py-8" style={{ color: 'var(--fg-muted)' }}>No tasks found</div>
             ) : tasks.map(task => (
-              <div key={task.id} className="surface-card p-3 cursor-pointer" onClick={() => handleShowTaskDetail(task.id)}>
+              <div key={task.id} className="p-3 rounded-lg cursor-pointer" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }} onClick={() => handleShowTaskDetail(task.id)} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span>{categoryIcon(task.category)}</span>
                     <span className="font-medium text-sm" style={{ color: 'var(--fg)' }}>{task.id}</span>
-                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: difficultyColor(task.difficulty) + '20', color: difficultyColor(task.difficulty) }}>
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: task.difficulty === 'easy' ? 'var(--green-muted)' : task.difficulty === 'hard' ? 'var(--red-muted)' : 'var(--amber-muted)', color: difficultyColor(task.difficulty) }}>
                       {task.difficulty}
                     </span>
-                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--accent)20', color: 'var(--accent)' }}>
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}>
                       {task.eval_type}
                     </span>
                   </div>
@@ -265,7 +265,7 @@ export default function EvalPage() {
                 </div>
                 <div className="text-xs mt-1" style={{ color: 'var(--fg-muted)' }}>{task.description}</div>
                 {expandedTask === task.id && taskDetail && (
-                  <div className="mt-3 p-2 rounded text-xs" style={{ background: 'var(--surface-1)' }}>
+                  <div className="mt-3 p-2 rounded text-xs" style={{ background: 'var(--surface-3)' }}>
                     <div className="mb-2"><strong>Graders:</strong></div>
                     {taskDetail.graders?.map((g: any, i: number) => (
                       <div key={i} className="ml-2 mb-1">• {g.type} (weight: {g.weight})</div>
@@ -292,11 +292,11 @@ export default function EvalPage() {
             {suites.length === 0 ? (
               <div className="text-center py-8" style={{ color: 'var(--fg-muted)' }}>No suites found</div>
             ) : suites.map(suite => (
-              <div key={suite.name} className="surface-card p-4">
+              <div key={suite.name} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <span className="font-medium" style={{ color: 'var(--fg)' }}>{suite.name}</span>
-                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded" style={{ background: 'var(--accent)20', color: 'var(--accent)' }}>
+                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}>
                       {suite.eval_type}
                     </span>
                   </div>
@@ -337,11 +337,11 @@ export default function EvalPage() {
             {suiteResult ? (
               <div className="space-y-3">
                 {/* Summary Card */}
-                <div className="surface-card p-4">
+                <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-medium" style={{ color: 'var(--fg)' }}>{suiteResult.suite_name} ({suiteResult.eval_type})</h3>
                     <span className="text-sm font-medium px-2 py-0.5 rounded" style={{
-                      background: suiteResult.passed ? 'var(--green)20' : 'var(--red)20',
+                      background: suiteResult.passed ? 'var(--green-muted)' : 'var(--red-muted)',
                       color: suiteResult.passed ? 'var(--green)' : 'var(--red)',
                     }}>
                       {suiteResult.passed ? 'PASSED' : 'FAILED'}
@@ -358,7 +358,7 @@ export default function EvalPage() {
                 {/* Per-Task Results */}
                 <h3 className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Task Results</h3>
                 {suiteResult.task_reports?.map((tr: any) => (
-                  <div key={tr.task_id} className="surface-card p-3">
+                  <div key={tr.task_id} className="p-3 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {tr.passed ? <CheckCircle size={14} style={{ color: 'var(--green)' }} /> : <XCircle size={14} style={{ color: 'var(--red)' }} />}
@@ -374,7 +374,7 @@ export default function EvalPage() {
 
                 {/* Regression Result */}
                 {regression && (
-                  <div className="surface-card p-4" style={{ borderColor: regression.has_regression ? 'var(--red)' : 'var(--green)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: regression.has_regression ? 'var(--red-muted)' : 'var(--green-muted)', border: '1px solid var(--border)' }}>
                     <h3 className="font-medium mb-2" style={{ color: 'var(--fg)' }}>Regression Report</h3>
                     <div className="text-sm" style={{ color: 'var(--fg-muted)' }}>
                       <div>Pass Rate Change: <span style={{ color: regression.pass_rate_diff >= 0 ? 'var(--green)' : 'var(--red)' }}>{(regression.pass_rate_diff * 100).toFixed(1)}%</span></div>
@@ -407,7 +407,7 @@ export default function EvalPage() {
                 <p>No baselines saved yet</p>
               </div>
             ) : baselines.map(bl => (
-              <div key={bl.suite} className="surface-card p-4">
+              <div key={bl.suite} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium" style={{ color: 'var(--fg)' }}>{bl.suite}</span>
                   <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{bl.timestamp?.slice(0, 19)}</span>
@@ -427,7 +427,7 @@ export default function EvalPage() {
 
 function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="p-3 rounded-lg" style={{ background: 'var(--surface-1)' }}>
+    <div className="p-3 rounded-lg" style={{ background: 'var(--surface-3)' }}>
       <div className="flex items-center gap-1.5 mb-1" style={{ color: 'var(--fg-muted)' }}>
         {icon}
         <span className="text-xs">{label}</span>

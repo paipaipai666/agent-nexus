@@ -115,9 +115,9 @@ export function animatePageTransition(container: Element, direction: 'in' | 'out
 export function animateGlow(el: Element) {
   gsap.fromTo(
     el,
-    { boxShadow: '0 0 0px rgba(232, 176, 110, 0)' },
+    { boxShadow: '0 0 0px var(--accent-subtle)' },
     {
-      boxShadow: '0 0 20px rgba(232, 176, 110, 0.3)',
+      boxShadow: '0 0 20px var(--accent-muted)',
       duration: 0.6,
       ease: 'sine.inOut',
       repeat: -1,
