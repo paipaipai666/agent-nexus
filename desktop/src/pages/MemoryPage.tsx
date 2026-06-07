@@ -94,9 +94,9 @@ export default function MemoryPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Memory</h1>
+          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Memory</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{longMemories.length} long-term · {shortMessages.length} short-term</p>
         </div>
         {tab === 'long' && (

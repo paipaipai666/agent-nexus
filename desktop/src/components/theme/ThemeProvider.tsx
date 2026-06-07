@@ -7,7 +7,7 @@ interface ThemeContextType {
   toggleTheme: () => void
 }
 
-const ThemeContext = createContext<ThemeContextType>({ theme: 'dark', toggleTheme: () => {} })
+const ThemeContext = createContext<ThemeContextType>({ theme: 'light', toggleTheme: () => {} })
 
 export function useTheme() {
   return useContext(ThemeContext)
@@ -20,7 +20,7 @@ interface ThemeProviderProps {
 export default function ThemeProvider({ children }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem('agentnexus-theme')
-    return saved === 'light' ? 'light' : 'dark'
+    return saved === 'dark' ? 'dark' : 'light'
   })
 
   useEffect(() => {

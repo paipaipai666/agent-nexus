@@ -73,7 +73,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
   const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
 
   return (
-    <div className="my-3 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}>
+    <div className="my-3 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
       <Collapsible
         defaultExpanded={msg.toolStatus === 'running'}
         header={
@@ -130,7 +130,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
         {/* Role label — only for user messages */}
         {msg.role === 'user' && (
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[11px] font-semibold" style={{ color: 'var(--accent)' }}>
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>
               You
             </span>
           </div>
@@ -602,31 +602,51 @@ export default function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-8 animate-fade-in px-6">
+          <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
             <div className="text-center">
               <h1
-                className="text-[28px] font-semibold tracking-tight mb-4"
-                style={{ color: 'var(--fg)' }}
+                className="text-[42px] mb-2 tracking-wide uppercase"
+                style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}
               >
-                How can I help you?
+                What are we building?
               </h1>
-              <p className="text-[15px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
-                I'm your local AI agent. Ask me to write code, search knowledge, run tools, or help with tasks.
+              <p className="text-[16px] max-w-md mx-auto" style={{ color: 'var(--fg-secondary)' }}>
+                Code. Debug. Create. Ship.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-              {['Write a Python script', 'Search my knowledge base', 'Explain this code', 'Run a shell command'].map(suggestion => (
-                <button
-                  key={suggestion}
-                  onClick={() => { setInput(suggestion); inputRef.current?.focus() }}
-                  className="px-4 py-2 rounded-md text-[13px] transition-colors"
-                  style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--fg-secondary)' }}
-                >
-                  {suggestion}
-                </button>
-              ))}
+
+            {/* Quick Actions */}
+            <div className="w-full max-w-2xl mt-4">
+              <div className="text-[11px] font-medium tracking-widest mb-3 uppercase" style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+                Start a conversation
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { icon: '🐛', label: 'Debug', desc: 'Find and fix errors' },
+                  { icon: '🔧', label: 'Refactor', desc: 'Clean up code' },
+                  { icon: '🧪', label: 'Test', desc: 'Write tests' },
+                  { icon: '🌿', label: 'Branch', desc: 'Git operations' },
+                  { icon: '📄', label: 'Document', desc: 'Write docs' },
+                  { icon: '💡', label: 'Architect', desc: 'Plan systems' },
+                ].map(action => (
+                  <button
+                    key={action.label}
+                    onClick={() => { setInput(action.desc); inputRef.current?.focus() }}
+                    className="flex items-center gap-3 p-3 rounded-md text-left transition-colors"
+                    style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-1)' }}
+                  >
+                    <div className="w-10 h-10 rounded-md flex items-center justify-center text-lg" style={{ background: 'var(--accent-muted)' }}>
+                      {action.icon}
+                    </div>
+                    <div>
+                      <div className="text-[13px] font-medium" style={{ color: 'var(--fg)' }}>{action.label}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>{action.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -694,7 +714,7 @@ export default function ChatPage() {
         {/* Floating Input */}
         <div
           className="max-w-3xl mx-auto"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}
+          style={{ background: 'var(--surface-1)', border: '2px solid var(--border-strong)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-hard)' }}
         >
           <div className="flex items-end gap-2.5 p-3">
             <textarea

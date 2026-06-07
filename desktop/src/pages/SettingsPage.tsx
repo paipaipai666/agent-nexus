@@ -97,8 +97,8 @@ export default function SettingsPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-        <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Settings</h1>
+      <div className="px-6 py-4">
+        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Settings</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">

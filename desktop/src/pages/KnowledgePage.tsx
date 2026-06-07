@@ -50,9 +50,9 @@ export default function KnowledgePage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Knowledge Base</h1>
+          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Knowledge Base</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{documents.length} documents · {totalChunks} chunks</p>
         </div>
         <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".txt,.md,.pdf,.html,.doc,.docx,.json,.csv" />

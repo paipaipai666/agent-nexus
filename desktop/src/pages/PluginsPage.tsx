@@ -30,8 +30,8 @@ export default function PluginsPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-        <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Plugins & Extensions</h1>
+      <div className="px-6 py-4">
+        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Plugins & Extensions</h1>
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{enabledCount} enabled · {errorCount} errors</p>
       </div>
 
