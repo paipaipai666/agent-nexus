@@ -55,3 +55,4 @@ error.txt
 perf_test_compact_*.json
 perf_test_compact_*.jsonl
 **/.impeccable/
+**/designs/

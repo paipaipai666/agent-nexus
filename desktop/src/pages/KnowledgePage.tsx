@@ -92,7 +92,7 @@ export default function KnowledgePage() {
         <div ref={(el) => { if (el && documents.length > 0) animateEntrance(Array.from(el.children), { stagger: 0.04 }) }} className="space-y-1.5">
           {documents.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-2)' }}>
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center" style={{ background: 'var(--surface-2)' }}>
                 <FileText size={24} style={{ color: 'var(--fg-faint)' }} />
               </div>
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No documents ingested yet</p>

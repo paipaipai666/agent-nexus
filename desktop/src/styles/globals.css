@@ -1,5 +1,21 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Fira+Code:wght@400;500;600&display=swap');
 
+@font-face {
+  font-family: 'DM Sans';
+  font-display: swap;
+  src: local('DM Sans');
+}
+@font-face {
+  font-family: 'Source Serif 4';
+  font-display: swap;
+  src: local('Source Serif 4');
+}
+@font-face {
+  font-family: 'Fira Code';
+  font-display: swap;
+  src: local('Fira Code');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -10,12 +26,12 @@
    ═══════════════════════════════════════════ */
 :root,
 [data-theme="dark"] {
-  /* Backgrounds — tonal layering: darker = deeper */
-  --surface-0: #0d1117;
-  --surface-1: #161b22;
-  --surface-2: #1c2128;
-  --surface-3: #252b33;
-  --surface-4: #2d333b;
+  /* Backgrounds — tonal layering with clear contrast between levels */
+  --surface-0: #0a0e14;
+  --surface-1: #141921;
+  --surface-2: #1c2333;
+  --surface-3: #2d3a50;
+  --surface-4: #384660;
 
   /* Foregrounds — bright, high contrast */
   --fg: #e6edf3;
@@ -43,10 +59,10 @@
   --cyan: #39d3f5;
   --cyan-muted: rgba(57, 211, 245, 0.15);
 
-  /* Borders — visible but not heavy */
-  --border: rgba(255, 255, 255, 0.10);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  /* Borders — more visible for better separation */
+  --border: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.22);
   --border-active: rgba(88, 166, 255, 0.35);
 
   /* Scrollbar */
@@ -56,7 +72,12 @@
   /* Glass */
   --glass-bg: rgba(255, 255, 255, 0.03);
   --glass-bg-strong: rgba(255, 255, 255, 0.06);
-  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* Shadows — minimal, for depth only where needed */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.25);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.25);
 
   /* Typography */
   --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -65,8 +86,8 @@
 
   /* Misc */
   --radius: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
 }
 
 /* ═══════════════════════════════════════════
@@ -117,8 +138,8 @@
   --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.08);
 
   --radius: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
 }
 
 * {
@@ -136,27 +157,12 @@ body {
   font-family: var(--font-sans);
   background-color: var(--surface-0);
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Noise texture overlay — subtle in dark, absent in light */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  opacity: 0.015;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 200px;
-  pointer-events: none;
-  z-index: 9999;
-}
-
-[data-theme="light"] body::before {
-  opacity: 0;
-}
 
 #root {
   height: 100%;
@@ -212,7 +218,7 @@ body::before {
    ═══════════════════════════════════════════ */
 .markdown-body {
   font-family: var(--font-serif);
-  font-size: 14.5px;
+  font-size: 15px;
   line-height: 1.7;
   color: var(--fg);
   word-break: break-word;
@@ -403,11 +409,10 @@ body::before {
     background: var(--surface-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: var(--shadow-elevated);
   }
 
   .glow-accent {
-    box-shadow: 0 0 20px var(--accent-muted), 0 0 60px var(--accent-subtle);
+    box-shadow: inset 0 0 0 1px var(--accent-muted);
   }
 
   .btn-primary {
@@ -415,21 +420,19 @@ body::before {
     color: #ffffff;
     border: none;
     border-radius: var(--radius);
-    padding: 8px 16px;
+    padding: 7px 14px;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
-    box-shadow: none;
+    transition: background 0.15s ease;
   }
 
   .btn-primary:hover {
     background: var(--accent-hover);
-    box-shadow: 0 0 12px var(--accent-glow);
   }
 
   .btn-primary:active {
-    transform: scale(0.97);
+    transform: scale(0.98);
   }
 
   .btn-ghost {
@@ -437,17 +440,16 @@ body::before {
     color: var(--fg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 8px 16px;
+    padding: 7px 14px;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+    transition: all 0.15s ease;
   }
 
   .btn-ghost:hover {
-    background: var(--surface-3);
+    background: var(--surface-2);
     color: var(--fg);
-    border-color: var(--border-strong);
   }
 
   .input-field {
@@ -455,15 +457,14 @@ body::before {
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 8px 12px;
-    font-size: 13px;
+    padding: 7px 12px;
+    font-size: 14px;
     font-family: var(--font-sans);
-    transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+    transition: border-color 0.15s ease;
   }
 
   .input-field:focus {
     border-color: var(--border-active);
-    box-shadow: 0 0 0 1px var(--border-active), 0 0 16px var(--accent-glow);
     outline: none;
   }
 

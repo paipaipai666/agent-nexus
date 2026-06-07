@@ -17,26 +17,20 @@ export default function StatusBar() {
       <StatusItem>
         <span
           className="w-[4px] h-[4px] rounded-full"
-          style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)', boxShadow: sessionId ? '0 0 6px var(--green-muted)' : 'none' }}
+          style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)' }}
         />
         {sessionId ? 'connected' : 'disconnected'}
       </StatusItem>
       <Sep />
-      {sessionId && (
+      {modelName && (
         <>
-          <StatusItem>session:{sessionId.slice(0, 8)}</StatusItem>
+          <StatusItem>{modelName}</StatusItem>
           <Sep />
         </>
       )}
       {stmTokens != null && ctxMax != null && ctxMax > 0 && (
         <>
           <StatusItem>ctx {Math.round(stmTokens / 1000)}k/{Math.round(ctxMax / 1000)}k ({contextUsed ?? Math.round(stmTokens / ctxMax * 100)}%)</StatusItem>
-          <Sep />
-        </>
-      )}
-      {modelName && (
-        <>
-          <StatusItem>{modelName}</StatusItem>
           <Sep />
         </>
       )}

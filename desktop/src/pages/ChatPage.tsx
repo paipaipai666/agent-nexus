@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
@@ -36,8 +36,31 @@ const COMMAND_DEFS = [
 
 const animatedIds = new Set<string>()
 
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+/* ─── Collapsible Section ─── */
+function Collapsible({ header, children, defaultExpanded = false, className = '' }: {
+  header: React.ReactNode
+  children: React.ReactNode
+  defaultExpanded?: boolean
+  className?: string
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+
+  return (
+    <div className={className}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 w-full text-left hover:opacity-80 transition-opacity"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {header}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 ml-4">
+          {children}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /* ─── Tool Card ─── */
@@ -51,35 +74,42 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
 
   return (
     <div className="my-3 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}>
-      <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[11px]" style={{ background: 'var(--surface-3)', borderBottom: '1px solid var(--border)' }}>
-        <div
-          className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-semibold"
-          style={{ background: statusBg, color: statusColor }}
-        >
-          {(msg.toolName || 'T')[0].toUpperCase()}
-        </div>
-        <span style={{ color: 'var(--accent)' }}>{msg.toolName || 'tool'}</span>
-        <div className="ml-auto flex items-center gap-1 text-[10px] font-medium" style={{ color: statusColor }}>
-          {msg.toolStatus === 'running' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
-          )}
-          {statusLabel}
-        </div>
-      </div>
-      <div className="px-3.5 py-2.5 font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-secondary)' }}>
-        {hasDiff ? (
-          <div className="font-mono text-xs leading-[1.7]">
-            {lines.map((line, i) => {
-              if (line.startsWith('@@')) return <div key={i} style={{ color: 'var(--blue)' }}>{line}</div>
-              if (line.startsWith('+') && !line.startsWith('+++')) return <div key={i} style={{ color: 'var(--green)' }}>{line}</div>
-              if (line.startsWith('-') && !line.startsWith('---')) return <div key={i} style={{ color: 'var(--red)' }}>{line}</div>
-              return <div key={i}>{line || ' '}</div>
-            })}
+      <Collapsible
+        defaultExpanded={msg.toolStatus === 'running'}
+        header={
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div
+              className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-semibold shrink-0"
+              style={{ background: statusBg, color: statusColor }}
+            >
+              {(msg.toolName || 'T')[0].toUpperCase()}
+            </div>
+            <span className="font-mono text-[11px] truncate" style={{ color: 'var(--accent)' }}>{msg.toolName || 'tool'}</span>
+            <div className="ml-auto flex items-center gap-1 text-[10px] font-medium shrink-0" style={{ color: statusColor }}>
+              {msg.toolStatus === 'running' && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
+              )}
+              {statusLabel}
+            </div>
           </div>
-        ) : (
-          <pre className="whitespace-pre-wrap">{msg.content}</pre>
-        )}
-      </div>
+        }
+        className="px-3 py-1.5 font-mono"
+      >
+        <div className="px-3.5 py-2.5 font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-secondary)' }}>
+          {hasDiff ? (
+            <div className="font-mono text-xs leading-[1.7]">
+              {lines.map((line, i) => {
+                if (line.startsWith('@@')) return <div key={i} style={{ color: 'var(--blue)' }}>{line}</div>
+                if (line.startsWith('+') && !line.startsWith('+++')) return <div key={i} style={{ color: 'var(--green)' }}>{line}</div>
+                if (line.startsWith('-') && !line.startsWith('---')) return <div key={i} style={{ color: 'var(--red)' }}>{line}</div>
+                return <div key={i}>{line || ' '}</div>
+              })}
+            </div>
+          ) : (
+            <pre className="whitespace-pre-wrap">{msg.content}</pre>
+          )}
+        </div>
+      </Collapsible>
     </div>
   )
 })
@@ -94,22 +124,17 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
           animateMessage(el, msg.role)
         }
       }}
-      className="py-4"
-      style={{ borderBottom: '1px solid var(--border)' }}
+      className="py-2"
     >
       <div className="max-w-3xl mx-auto px-6">
-        {/* Role label */}
-        <div className="flex items-center gap-2 mb-2">
-          <span
-            className="text-[11px] font-semibold uppercase tracking-wider"
-            style={{ color: msg.role === 'user' ? 'var(--accent)' : msg.role === 'tool' ? 'var(--amber)' : 'var(--fg-muted)' }}
-          >
-            {msg.role === 'user' ? 'You' : msg.role === 'tool' ? 'Tool' : msg.role === 'system' ? 'System' : 'Nexus'}
-          </span>
-          <span className="font-mono text-[10px]" style={{ color: 'var(--fg-faint)' }}>
-            {formatTime(msg.timestamp)}
-          </span>
-        </div>
+        {/* Role label — only for user messages */}
+        {msg.role === 'user' && (
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--accent)' }}>
+              You
+            </span>
+          </div>
+        )}
 
         {/* Content */}
         {msg.role === 'tool' ? (
@@ -119,7 +144,18 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
             {msg.content}
           </div>
         ) : msg.role === 'system' ? (
-          <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>{msg.content}</pre>
+          <Collapsible
+            defaultExpanded={false}
+            header={
+              <span className="text-[11px] font-mono" style={{ color: 'var(--fg-muted)' }}>
+                {msg.content.slice(0, 60)}{msg.content.length > 60 ? '...' : ''}
+              </span>
+            }
+          >
+            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-muted)' }}>
+              {msg.content}
+            </pre>
+          </Collapsible>
         ) : (
           <div className="markdown-body">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
@@ -566,15 +602,15 @@ export default function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
+          <div className="flex flex-col items-center justify-center h-full gap-8 animate-fade-in px-6">
             <div className="text-center">
               <h1
-                className="text-3xl font-semibold tracking-tight mb-3"
+                className="text-[28px] font-semibold tracking-tight mb-4"
                 style={{ color: 'var(--fg)' }}
               >
                 How can I help you?
               </h1>
-              <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
+              <p className="text-[15px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
                 I'm your local AI agent. Ask me to write code, search knowledge, run tools, or help with tasks.
               </p>
             </div>
@@ -583,8 +619,8 @@ export default function ChatPage() {
                 <button
                   key={suggestion}
                   onClick={() => { setInput(suggestion); inputRef.current?.focus() }}
-                  className="px-3 py-1.5 rounded-lg text-sm transition-colors"
-                  style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)', border: '1px solid var(--border)' }}
+                  className="px-4 py-2 rounded-md text-[13px] transition-colors"
+                  style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--fg-secondary)' }}
                 >
@@ -619,7 +655,7 @@ export default function ChatPage() {
         {/* Command Palette */}
         {showPalette && filteredCommands.length > 0 && (
           <div
-            className="absolute bottom-full left-6 right-6 mb-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
+            className="absolute bottom-full left-6 right-6 mb-2 rounded-lg overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
             style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
           >
             {(() => {
@@ -658,7 +694,7 @@ export default function ChatPage() {
         {/* Floating Input */}
         <div
           className="max-w-3xl mx-auto"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}
         >
           <div className="flex items-end gap-2.5 p-3">
             <textarea
@@ -688,41 +724,26 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* HUD row */}
+          {/* HUD row — session actions only */}
           <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
-            {runtimeStatus && (
-              <span className="flex items-center gap-1 shrink-0">
-                <span className="w-[4px] h-[4px] rounded-full" style={{ background: 'var(--accent)' }} />
-                {runtimeStatus.model_id?.split('/').pop() || runtimeStatus.model_id}
-              </span>
-            )}
-            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-            {runtimeStatus && (
-              <span className="shrink-0">
-                ctx {Math.round(runtimeStatus.stm_tokens / 1000)}k/{Math.round(runtimeStatus.ctx_max / 1000)}k
-              </span>
-            )}
-            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
             {versionStatus?.head && (
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)' }} />
-                {versionStatus.head.id?.slice(0, 8)}
+                checkpoint: {versionStatus.head.id?.slice(0, 8)}
               </span>
             )}
-            <span className="shrink-0" style={{ color: 'var(--fg-faint)' }}>·</span>
-            <div className="flex items-center gap-0.5 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
               <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={10} /></button>
               <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={10} /></button>
               <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={10} /></button>
             </div>
-            <span className="ml-auto shrink-0 font-mono" style={{ color: 'var(--fg-faint)' }}>{sessionId?.slice(0, 12)}</span>
           </div>
         </div>
       </div>
 
       {/* Checkpoint Overlay */}
       {showCheckpoints && (
-        <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: '0 16px 64px rgba(0,0,0,0.4)' }}>
+        <div className="absolute bottom-28 left-5 w-96 rounded-lg overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-lg)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
             <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>

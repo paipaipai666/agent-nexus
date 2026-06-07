@@ -89,7 +89,7 @@ export default function MCPPage() {
         <div className="space-y-2">
           {servers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'var(--surface-2)' }}><Server size={24} style={{ color: 'var(--fg-faint)' }} /></div>
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center" style={{ background: 'var(--surface-2)' }}><Server size={24} style={{ color: 'var(--fg-faint)' }} /></div>
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No MCP servers configured</p>
             </div>
           ) : servers.map(server => (

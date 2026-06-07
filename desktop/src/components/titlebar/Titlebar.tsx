@@ -1,58 +1,32 @@
 import { Minus, Square, X, Sun, Moon } from 'lucide-react'
 import { useTheme } from '../theme/ThemeProvider'
-import { useSession } from '../session/SessionProvider'
 
 export default function Titlebar() {
   const { theme, toggleTheme } = useTheme()
-  const { sessionId, modelName, contextUsed } = useSession()
 
   return (
     <div
-      className="h-10 flex items-center select-none shrink-0 relative z-[100]"
+      className="h-10 flex items-center select-none shrink-0 relative z-[10]"
       style={{
         background: 'var(--surface-1)',
         borderBottom: '1px solid var(--border)',
         WebkitAppRegion: 'drag',
       } as React.CSSProperties}
     >
-      {/* Spacer for sidebar width */}
-      <div className="w-[200px] shrink-0" />
-
-      {/* Session Info */}
-      {sessionId && (
-        <div className="flex items-center gap-2 font-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-          <span
-            className="w-1.5 h-1.5 rounded-full"
-            style={{ background: 'var(--green)', boxShadow: '0 0 6px var(--green-muted)' }}
-          />
-          <span className="truncate max-w-[180px]">{sessionId.slice(0, 16)}</span>
-          {modelName && (
-            <span className="text-[11px]" style={{ color: 'var(--fg-faint)' }}>
-              {modelName}
-            </span>
-          )}
-        </div>
-      )}
+      {/* App Identity */}
+      <div className="w-[220px] shrink-0 px-4 flex items-center gap-2.5">
+        <span
+          className="font-mono font-semibold text-[15px] tracking-wider"
+          style={{ color: 'var(--accent)' }}
+        >
+          N
+        </span>
+        <span className="text-[13px] font-semibold tracking-tight" style={{ color: 'var(--fg)' }}>
+          AgentNexus
+        </span>
+      </div>
 
       <div className="flex-1" />
-
-      {/* Context Bar */}
-      {contextUsed != null && (
-        <div className="flex items-center gap-1.5 mr-4 font-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>
-          <span>ctx</span>
-          <div className="w-12 h-1 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(contextUsed, 100)}%`,
-                background: 'var(--accent)',
-                boxShadow: '0 0 6px var(--accent-glow)',
-              }}
-            />
-          </div>
-          <span>{contextUsed}%</span>
-        </div>
-      )}
 
       {/* Window Controls */}
       <div className="flex items-center h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
