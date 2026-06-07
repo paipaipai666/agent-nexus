@@ -10,11 +10,15 @@ interface SessionContextType {
   totalOutput: number | null
   stepCount: number | null
   cwd: string | null
+  toolCount: number
+  todoCount: number
   setSessionId: (id: string | null) => void
   setModelName: (name: string | null) => void
   setContextUsed: (pct: number | null) => void
   setRuntimeInfo: (info: { stmTokens?: number; ctxMax?: number; totalInput?: number; totalOutput?: number; stepCount?: number } | null) => void
   setCwd: (cwd: string | null) => void
+  setToolCount: (count: number) => void
+  setTodoCount: (count: number) => void
 }
 
 const SessionContext = createContext<SessionContextType>({
@@ -27,11 +31,15 @@ const SessionContext = createContext<SessionContextType>({
   totalOutput: null,
   stepCount: null,
   cwd: null,
+  toolCount: 0,
+  todoCount: 0,
   setSessionId: () => {},
   setModelName: () => {},
   setContextUsed: () => {},
   setRuntimeInfo: () => {},
   setCwd: () => {},
+  setToolCount: () => {},
+  setTodoCount: () => {},
 })
 
 export function useSession() {
@@ -48,6 +56,8 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   const [totalOutput, setTotalOutput] = useState<number | null>(null)
   const [stepCount, setStepCount] = useState<number | null>(null)
   const [cwd, setCwd] = useState<string | null>(null)
+  const [toolCount, setToolCount] = useState(0)
+  const [todoCount, setTodoCount] = useState(0)
 
   const handleSetSessionId = useCallback((id: string | null) => setSessionId(id), [])
   const handleSetModelName = useCallback((name: string | null) => setModelName(name), [])
@@ -63,12 +73,14 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
 
   return (
     <SessionContext.Provider value={{
-      sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd,
+      sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd, toolCount, todoCount,
       setSessionId: handleSetSessionId,
       setModelName: handleSetModelName,
       setContextUsed: handleSetContextUsed,
       setRuntimeInfo: handleSetRuntimeInfo,
       setCwd,
+      setToolCount,
+      setTodoCount,
     }}>
       {children}
     </SessionContext.Provider>

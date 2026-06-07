@@ -7,6 +7,7 @@ import { api } from '../services/api'
 import { agentWs } from '../services/ws'
 import { animateMessage } from '../utils/animations'
 import { useSession } from '../components/session/SessionProvider'
+import InfoPanel from '../components/layout/InfoPanel'
 
 interface Message {
   id: string
@@ -200,7 +201,7 @@ export default function ChatPage() {
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
 
-  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd } = useSession()
+  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount } = useSession()
 
   const scrollRafRef = useRef<number>(0)
   const lastEscapeAtRef = useRef<number>(0)
@@ -329,6 +330,13 @@ export default function ChatPage() {
       api.getConfig().then((config: any) => {
         if (config.cwd) setCwd(config.cwd)
       }).catch(() => {})
+      Promise.all([
+        api.listMcpTools().catch(() => ({ tools: [] })),
+        api.listSkills().catch(() => ({ skills: [] })),
+      ]).then(([mcpData, skillsData]) => {
+        setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
+      }).catch(() => {})
+      api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
       fetchDynamicCommands()
     }
 
@@ -343,6 +351,13 @@ export default function ChatPage() {
       api.getConfig().then((config: any) => {
         if (config.cwd) setCwd(config.cwd)
       }).catch(() => {})
+      Promise.all([
+        api.listMcpTools().catch(() => ({ tools: [] })),
+        api.listSkills().catch(() => ({ skills: [] })),
+      ]).then(([mcpData, skillsData]) => {
+        setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
+      }).catch(() => {})
+      api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
       fetchDynamicCommands()
     }
 
@@ -604,7 +619,9 @@ export default function ChatPage() {
   })
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--surface-0)' }}>
+    <div className="flex-1 flex overflow-hidden" style={{ background: 'var(--surface-0)' }}>
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && (
@@ -785,6 +802,9 @@ export default function ChatPage() {
           ))}
         </div>
       )}
+      </div>
+      {/* Info Panel */}
+      <InfoPanel sessionId={sessionId} />
     </div>
   )
 }

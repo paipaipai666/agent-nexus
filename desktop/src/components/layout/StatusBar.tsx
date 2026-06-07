@@ -1,12 +1,12 @@
 import { useSession } from '../session/SessionProvider'
-import { Folder } from 'lucide-react'
+import { Folder, Wrench, ListTodo } from 'lucide-react'
 
 export default function StatusBar() {
-  const { sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd } = useSession()
+  const { sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd, toolCount, todoCount } = useSession()
 
   return (
     <div
-      className="h-7 flex items-center shrink-0 font-mono text-[10px] gap-0.5"
+      className="h-8 flex items-center shrink-0 font-mono text-[11px] gap-0.5"
       style={{
         background: 'var(--surface-1)',
         borderTop: '1px solid var(--border)',
@@ -28,6 +28,24 @@ export default function StatusBar() {
           <StatusItem>
             <Folder size={10} />
             <span className="truncate max-w-[200px]" title={cwd}>{cwd}</span>
+          </StatusItem>
+          <Sep />
+        </>
+      )}
+      {toolCount > 0 && (
+        <>
+          <StatusItem>
+            <Wrench size={10} />
+            {toolCount} tools
+          </StatusItem>
+          <Sep />
+        </>
+      )}
+      {todoCount > 0 && (
+        <>
+          <StatusItem>
+            <ListTodo size={10} />
+            {todoCount} todos
           </StatusItem>
           <Sep />
         </>
