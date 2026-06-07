@@ -275,6 +275,22 @@ class Settings(BaseSettings):
         default_factory=list,
         description="HITL触发规则列表，格式: [{action:'click', role:'button', name_pattern:'支付|确认'}]",
     )
+    # 桌面自动化配置
+    computer_use_enabled: bool = Field(default=False, description="是否启用桌面自动化功能")
+    computer_use_backend: str = Field(default="auto", description="后端: auto/windows/linux/macos")
+    computer_use_snapshot_max_nodes: int = Field(default=100, ge=10, le=1000, description="snapshot最大节点数")
+    computer_use_hitl_rules: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="HITL触发规则列表，格式: [{action:'click', role:'button', name_pattern:'支付|确认'}]",
+    )
+    computer_use_allowed_apps: list[str] = Field(
+        default_factory=list,
+        description="允许操控的应用白名单（空=全部允许）",
+    )
+    computer_use_blocked_apps: list[str] = Field(
+        default_factory=lambda: ["taskmgr", "regedit", "cmd", "powershell", "terminal"],
+        description="禁止操控的应用黑名单",
+    )
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod
@@ -289,6 +305,14 @@ class Settings(BaseSettings):
         normalized = (value or "isolated").strip().lower()
         if normalized not in {"isolated", "cdp"}:
             raise ValueError(f"不支持的浏览器模式: {value}，可选: isolated, cdp")
+        return normalized
+
+    @field_validator("computer_use_backend")
+    @classmethod
+    def normalize_computer_use_backend(cls, value: str) -> str:
+        normalized = (value or "auto").strip().lower()
+        if normalized not in {"auto", "windows", "linux", "macos"}:
+            raise ValueError(f"不支持的桌面自动化后端: {value}，可选: auto, windows, linux, macos")
         return normalized
 
     @field_validator("code_execution_backend")

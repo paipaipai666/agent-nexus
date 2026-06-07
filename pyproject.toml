@@ -53,10 +53,15 @@ server = [
 ]
 search = ["tavily-python>=0.5"]
 browser = ["playwright>=1.59"]
+computer-use = [
+    "pywinauto>=0.6.8; sys_platform == 'win32'",
+    "pyobjc-framework-ApplicationServices>=10.0; sys_platform == 'darwin'",
+    "pyperclip>=1.8",
+]
 sandbox = ["e2b-code-interpreter>=1.0"]
 tui = ["textual>=8.0"]
 all = [
-    "agentnexus[rag,server,search,sandbox,tui,browser]",
+    "agentnexus[rag,server,search,sandbox,tui,browser,computer-use]",
 ]
 dev = ["pytest>=8", "pytest-mock>=3", "pytest-cov>=5", "pytest-timeout>=2", "ruff>=0.3"]
 eval = ["pytest>=8", "ruff>=0.3", "pyinstaller>=6"]
