@@ -394,27 +394,34 @@ class ChatService:
             yield event
 
     def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
-        events = self._run_events.get(run_id)
         turn = self._turns.get(run_id)
-        if events is not None and turn is not None:
+        if turn is not None:
             record = turn.cancel(reason)
             self._run_snapshots[run_id] = record
-            events.put(AgentEvent(
+            self._put_event(run_id, AgentEvent(
                 "run_interrupted",
                 {"error": reason, "status": record.status, "answer": record.answer, "reason": record.reason},
                 run_id=run_id,
                 session_id=record.session_id,
             ))
-            events.put(AgentEvent(
+            self._put_event(run_id, AgentEvent(
                 "run_persisted",
                 {"status": record.status},
                 run_id=run_id,
                 session_id=record.session_id,
             ))
-            events.put(None)
-        elif events is not None:
-            events.put(AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
-            events.put(None)
+        else:
+            self._put_event(run_id, AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
+        # 同步和异步队列都需要 None 哨兵来终止 stream
+        sync_q = self._run_events.get(run_id)
+        if sync_q is not None:
+            sync_q.put(None)
+        async_q = self._async_run_events.get(run_id)
+        if async_q is not None:
+            try:
+                async_q.put_nowait(None)
+            except Exception:
+                pass
 
     def confirm_tool_call(self, run_id: str, approved: bool) -> None:
         events = self._run_events.get(run_id)

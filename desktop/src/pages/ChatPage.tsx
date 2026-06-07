@@ -404,6 +404,7 @@ export default function ChatPage() {
         setIsRunning(false); setCurrentRunId(null); processQueue()
       }),
       agentWs.on('done', () => { setIsRunning(false); setCurrentRunId(null); processQueue() }),
+      agentWs.on('run_started', (data) => { if (data.run_id) setCurrentRunId(data.run_id) }),
       agentWs.on('confirm_request', (data) => { setConfirmRequest({ summary: data.summary }) }),
     ]
     return () => {

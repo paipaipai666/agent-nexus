@@ -329,6 +329,10 @@ class ReActAgent:
                     })
 
         def _stream_token(token: str, is_reasoning: bool = False):
+            # 检查取消信号——流式输出期间也能响应 ESC 中断
+            checker = ctx.run_state.cancel_checker
+            if checker is not None and checker():
+                raise RuntimeError("cancelled")
             if is_reasoning:
                 ctx.emit(ReActEventType.STREAM_REASONING, token=token)
             else:

@@ -431,6 +431,8 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
                 if new_run_id:
                     asyncio.create_task(stream_events(new_run_id))
+                    # 发送 run_id 给 GUI，用于取消操作
+                    await ws.send_json({"type": "run_started", "run_id": new_run_id, "seq": 0})
                 # Don't await task — let agent run in background so
                 # the handler can continue receiving messages (confirm, cancel)
 

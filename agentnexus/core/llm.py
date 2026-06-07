@@ -239,6 +239,10 @@ class AgentLLM:
             return result
 
         except Exception as e:
+            # 取消信号必须直接传播，不能被重试逻辑吞掉
+            if isinstance(e, RuntimeError) and str(e) == "cancelled":
+                raise
+
             error_msg = str(e)
             self.last_error = error_msg
 
