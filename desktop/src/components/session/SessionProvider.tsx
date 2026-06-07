@@ -9,10 +9,12 @@ interface SessionContextType {
   totalInput: number | null
   totalOutput: number | null
   stepCount: number | null
+  cwd: string | null
   setSessionId: (id: string | null) => void
   setModelName: (name: string | null) => void
   setContextUsed: (pct: number | null) => void
   setRuntimeInfo: (info: { stmTokens?: number; ctxMax?: number; totalInput?: number; totalOutput?: number; stepCount?: number } | null) => void
+  setCwd: (cwd: string | null) => void
 }
 
 const SessionContext = createContext<SessionContextType>({
@@ -24,10 +26,12 @@ const SessionContext = createContext<SessionContextType>({
   totalInput: null,
   totalOutput: null,
   stepCount: null,
+  cwd: null,
   setSessionId: () => {},
   setModelName: () => {},
   setContextUsed: () => {},
   setRuntimeInfo: () => {},
+  setCwd: () => {},
 })
 
 export function useSession() {
@@ -43,6 +47,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   const [totalInput, setTotalInput] = useState<number | null>(null)
   const [totalOutput, setTotalOutput] = useState<number | null>(null)
   const [stepCount, setStepCount] = useState<number | null>(null)
+  const [cwd, setCwd] = useState<string | null>(null)
 
   const handleSetSessionId = useCallback((id: string | null) => setSessionId(id), [])
   const handleSetModelName = useCallback((name: string | null) => setModelName(name), [])
@@ -58,11 +63,12 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
 
   return (
     <SessionContext.Provider value={{
-      sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount,
+      sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd,
       setSessionId: handleSetSessionId,
       setModelName: handleSetModelName,
       setContextUsed: handleSetContextUsed,
       setRuntimeInfo: handleSetRuntimeInfo,
+      setCwd,
     }}>
       {children}
     </SessionContext.Provider>

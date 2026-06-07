@@ -200,7 +200,7 @@ export default function ChatPage() {
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
 
-  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo } = useSession()
+  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd } = useSession()
 
   const scrollRafRef = useRef<number>(0)
   const lastEscapeAtRef = useRef<number>(0)
@@ -326,6 +326,9 @@ export default function ChatPage() {
       agentWs.connect(sid)
       api.clearShortMemory().catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getConfig().then((config: any) => {
+        if (config.cwd) setCwd(config.cwd)
+      }).catch(() => {})
       fetchDynamicCommands()
     }
 
@@ -337,6 +340,9 @@ export default function ChatPage() {
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getConfig().then((config: any) => {
+        if (config.cwd) setCwd(config.cwd)
+      }).catch(() => {})
       fetchDynamicCommands()
     }
 

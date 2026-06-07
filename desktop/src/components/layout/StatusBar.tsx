@@ -1,7 +1,8 @@
 import { useSession } from '../session/SessionProvider'
+import { Folder } from 'lucide-react'
 
 export default function StatusBar() {
-  const { sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount } = useSession()
+  const { sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd } = useSession()
 
   return (
     <div
@@ -22,6 +23,15 @@ export default function StatusBar() {
         {sessionId ? 'connected' : 'disconnected'}
       </StatusItem>
       <Sep />
+      {cwd && (
+        <>
+          <StatusItem>
+            <Folder size={10} />
+            <span className="truncate max-w-[200px]" title={cwd}>{cwd}</span>
+          </StatusItem>
+          <Sep />
+        </>
+      )}
       {modelName && (
         <>
           <StatusItem>{modelName}</StatusItem>
