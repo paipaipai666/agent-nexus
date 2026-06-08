@@ -34,20 +34,24 @@ JSON Schema 校验参数结构，注册时自动编译缓存校验器。
 
 ## 工具注册
 
-`ToolProvider` 协议，10 个提供者按顺序注册：
+`ToolProvider` 协议，11 个提供者按顺序注册：
 
 ```text
-MemoryToolProvider     → memory_search, memory_save
-SearchToolProvider     → grep_search, web_search, web_fetch, kb_search
-FilesystemToolProvider → file_read, file_list, file_write
-ExecutionToolProvider  → python_execute, shell_exec
-SubagentToolProvider   → subagent_run
-McpBridgeToolProvider  → MCP 动态导入
-TodoToolProvider       → todo_add, todo_update, todo_list
-CodeGraphToolProvider  → codegraph_search, codegraph_relations, codegraph_context
-BrowserToolProvider    → browser_navigate, browser_snapshot, browser_click, browser_type,
-                         browser_read, browser_screenshot, browser_evaluate, browser_wait,
-                         browser_scroll, browser_scroll_to
+MemoryToolProvider       → memory_search, memory_save
+SearchToolProvider       → grep_search, web_search, web_fetch, kb_search
+FilesystemToolProvider   → file_read, file_list, file_write
+ExecutionToolProvider    → python_execute, shell_exec
+SubagentToolProvider     → subagent_run
+McpBridgeToolProvider    → MCP 动态导入
+TodoToolProvider         → todo_add, todo_update, todo_list
+CodeGraphToolProvider    → codegraph_search, codegraph_relations, codegraph_context
+BrowserToolProvider      → browser_navigate, browser_snapshot, browser_click, browser_type,
+                           browser_read, browser_screenshot, browser_evaluate, browser_wait,
+                           browser_scroll, browser_scroll_to, browser_wait_navigation,
+                           browser_dismiss_popup, browser_list_pages, browser_switch_page
+ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_switch_window,
+                           computer_launch, computer_click, computer_type, computer_key,
+                           computer_select, computer_toggle, computer_scroll
 ```
 
 ## 内置工具参数
@@ -82,8 +86,22 @@ BrowserToolProvider    → browser_navigate, browser_snapshot, browser_click, br
 | `browser_wait` | `role?`, `name?`, `ref?`, `text?`, `timeout?`, `task_id?` | 20/min | LOW |
 | `browser_scroll` | `direction?`, `amount?`, `task_id?` | 20/min | LOW |
 | `browser_scroll_to` | `landmark?`, `ref?`, `selector?`, `task_id?` | 20/min | LOW |
+| `browser_wait_navigation` | `url_contains?`, `timeout?`, `task_id?` | 10/min | LOW |
+| `browser_dismiss_popup` | 无参数 | 10/min | LOW |
+| `browser_list_pages` | 无参数 | 30/min | LOW |
+| `browser_switch_page` | `index` | 30/min | LOW |
+| `computer_snapshot` | `app_name?`, `window_title?`, `mode?`, `task_id?` | 10/min | LOW |
+| `computer_list_windows` | `task_id?` | 30/min | LOW |
+| `computer_switch_window` | `window_index?`, `app_name?`, `window_title?`, `task_id?` | 30/min | LOW |
+| `computer_launch` | `app_path`, `args?`, `task_id?` | 10/min | MEDIUM |
+| `computer_click` | `element_id`, `button?`, `clicks?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_type` | `element_id`, `text`, `clear?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_key` | `keys`, `task_id?` | 30/min | MEDIUM |
+| `computer_select` | `element_id`, `value`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_toggle` | `element_id`, `checked?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_scroll` | `element_id?`, `direction?`, `amount?`, `task_id?` | 30/min | LOW |
 
-> 见 [Code-Execution](Code-Execution.md) 了解沙箱细节，[MCP-Integration](MCP-Integration.md) 了解外部工具集成，[Browser-Automation](Browser-Automation.md) 了解浏览器自动化。
+> 见 [Code-Execution](Code-Execution.md) 了解沙箱细节，[MCP-Integration](MCP-Integration.md) 了解外部工具集成，[Browser-Automation](Browser-Automation.md) 了解浏览器自动化，[Computer-Use](Computer-Use.md) 了解桌面自动化。
 
 ## grep_search glob 模式
 

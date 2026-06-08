@@ -2,7 +2,7 @@
 
 # ⌨ 命令参考
 
-40 个命令入口，6 顶层 + 6 子命令组。
+50+ 命令入口，8 顶层 + 7 子命令组。
 
 ## 全局行为
 
@@ -18,6 +18,8 @@
 | `nexus config` | 查看/设置配置 (`--set <key> --value <val>`) |
 | `nexus version` | 显示版本 |
 | `nexus tui` | 启动 Textual TUI 对话界面 |
+| `nexus --continue [session_id]` | 恢复上一次 TUI 会话 |
+| `nexus serve [--port N] [--host H] [--no-auth]` | 启动 HTTP/WebSocket API 服务（供桌面 GUI 连接） |
 | `nexus stats [--days N]` | Token 成本统计 + 任务级指标 |
 | `nexus audit [-n N] [-t tool]` | 工具审计日志 |
 | `nexus health` | 系统健康检查（LLM/MCP/Memory/磁盘） |
@@ -88,3 +90,25 @@
 | `codegraph context <symbol>` | 获取实体完整上下文 |
 | `codegraph stats` | 显示图谱统计信息 |
 | `codegraph verify [--fix]` | 一致性诊断 |
+
+## Wiki `nexus wiki`
+
+知识库管理，提供基于置信度路由的 RAG 查询与健康检查。
+
+| 命令 | 说明 |
+|------|------|
+| `wiki init <namespace>` | 为 RAG 命名空间初始化 wiki |
+| `wiki ingest <source> [-n namespace] [-t type]` | 将源文档摄入 wiki |
+| `wiki query <question> [-n namespace] [-r] [-k N]` | 基于置信度路由查询 wiki |
+| `wiki lint [-n namespace]` | 运行 wiki 健康检查 |
+| `wiki calibrate <sample_file>` | 运行阈值校准 |
+| `wiki full-check [-n namespace]` | 运行完整 wiki 健康检查 |
+| `wiki stats [-n namespace]` | 显示 wiki 健康统计信息 |
+
+### Wiki Review 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `wiki review list [-s status] [-l N]` | 列出审核队列中的条目 |
+| `wiki review resolve <item_id>` | 解决一个审核条目 |
+| `wiki review process` | 处理过期的审核条目 |

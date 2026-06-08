@@ -2,7 +2,7 @@
 
 # ⌨ Commands Reference
 
-40 command entry points, 6 top-level + 6 subcommand groups.
+50+ command entry points, 8 top-level + 7 subcommand groups.
 
 ## Global Behavior
 
@@ -18,6 +18,8 @@
 | `nexus config` | View/set config (`--set <key> --value <val>`) |
 | `nexus version` | Show version |
 | `nexus tui` | Launch Textual TUI chat interface |
+| `nexus --continue [session_id]` | Resume a previous TUI session |
+| `nexus serve [--port N] [--host H] [--no-auth]` | Start HTTP/WebSocket API server for desktop GUI |
 | `nexus stats [--days N]` | Token cost statistics + task-level metrics |
 | `nexus audit [-n N] [-t tool]` | Tool audit log |
 | `nexus health` | System health checks (LLM/MCP/Memory/Disk) |
@@ -88,3 +90,25 @@
 | `codegraph context <symbol>` | Get entity full context |
 | `codegraph stats` | Display graph statistics |
 | `codegraph verify [--fix]` | Consistency diagnostics |
+
+## Wiki `nexus wiki`
+
+Knowledge base management with confidence-based routing for RAG queries and health checks.
+
+| Command | Description |
+|------|------|
+| `wiki init <namespace>` | Initialize wiki for a RAG namespace |
+| `wiki ingest <source> [-n namespace] [-t type]` | Ingest source document into wiki |
+| `wiki query <question> [-n namespace] [-r] [-k N]` | Query wiki with confidence-based routing |
+| `wiki lint [-n namespace]` | Run wiki health checks |
+| `wiki calibrate <sample_file>` | Run threshold calibration |
+| `wiki full-check [-n namespace]` | Run full wiki health check |
+| `wiki stats [-n namespace]` | Show wiki health statistics |
+
+### Wiki Review Sub-commands
+
+| Command | Description |
+|------|------|
+| `wiki review list [-s status] [-l N]` | List review queue items |
+| `wiki review resolve <item_id>` | Resolve a review item |
+| `wiki review process` | Process overdue review items |

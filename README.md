@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**A production-grade, fully local AI agent with FSM-driven safety, browser automation, and 282 test files.**
+**A production-grade, fully local AI agent with FSM-driven safety, browser automation, desktop automation, and 283 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-282%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-283%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus is a **ReAct (Thought→Action→Observe) single-agent** CLI tool that runs entirely on your machine. No cloud dependency. No data leakage. Your vectors, memory, and trace logs never leave your device.
@@ -41,6 +41,8 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🧠 **Local Memory** | STM compression pyramid + LTM (SQLite+ChromaDB, score-based eviction) |
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
 | 🌐 **Browser Automation** | Playwright-based browser control with accessibility tree, CDP support |
+| 🖥️ **Desktop Automation** | OS-level accessibility API driven: snapshot, click, type, keyboard, window management |
+| 📖 **Wiki System** | Hybrid Wiki + RAG knowledge management, Karpathy's LLM Wiki pattern, mechanical verification, confidence-based routing |
 | 🔒 **Security Sandbox** | E2B cloud → native (bubblewrap/Seatbelt) → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
@@ -69,6 +71,10 @@ That's it. No API keys required for local models — just configure your LLM pro
 
 ```bash
 nexus kb add ./docs              # Add documents to knowledge base
+nexus wiki init default          # Initialize wiki for a RAG namespace
+nexus wiki ingest ./doc.md       # Ingest source document into wiki
+nexus wiki query "what is X?"    # Query wiki with confidence-based routing
+nexus serve                      # Start HTTP/WebSocket API server for desktop GUI
 nexus stats --days 7             # View token cost & task metrics
 nexus health                     # Run system health checks
 nexus alerts --days 7            # View alert history
@@ -81,23 +87,25 @@ nexus codegraph build            # Build code knowledge graph
 
 | Document | Content |
 | --- | --- |
-| 🏠 [Wiki Home](wiki/Home.en.md) | Architecture diagram, core capabilities |
-| 🤖 [ReAct Agent](wiki/ReAct-Agent.en.md) | FSM state machine, 3-tier LLM strategy, JSON fault tolerance |
-| 🔧 [Tool Governance](wiki/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
-| 🌐 [Browser Automation](wiki/Browser-Automation.en.md) | Playwright integration, CDP mode, accessibility tree |
-| ⚡ [Code Execution](wiki/Code-Execution.en.md) | Sandbox degradation chain, shell blacklist, sub-agents |
-| 🧠 [Memory System](wiki/Memory-System.en.md) | STM/LTM architecture, compression pyramid, score eviction |
-| 📚 [RAG System](wiki/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
-| ⚙️ [Configuration](wiki/Configuration.en.md) | All configuration items reference |
-| ⌨️ [Commands](wiki/Commands.en.md) | 40+ commands reference |
-| 📊 [Evaluation](wiki/Evaluation.en.md) | 8 evaluators, RAG metrics |
-| 🔒 [Security](wiki/Security.md) | PII masking, sandbox escape protection |
-| 🎯 [Skill System](wiki/Skill-System.en.md) | Skill discovery, routing, workflow execution |
-| 🔌 [MCP Integration](wiki/MCP-Integration.en.md) | External tool import, governance fusion |
-| 📈 [Observability](wiki/Observability.en.md) | 6-layer observability: trace, drift detection, fault attribution, alerting, health checks, improvement loop |
-| 📝 [Prompt System](wiki/Prompt-System.en.md) | Template categories, variable injection |
-| 🛠 [Development](wiki/Development.en.md) | Environment setup, testing, CI pipeline |
-| 🤝 [Contributing](wiki/Contributing.en.md) | Issue/PR guidelines, testing requirements |
+| 🏠 [Wiki Home](docs/Home.en.md) | Architecture diagram, core capabilities |
+| 🤖 [ReAct Agent](docs/ReAct-Agent.en.md) | FSM state machine, 3-tier LLM strategy, JSON fault tolerance |
+| 🔧 [Tool Governance](docs/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
+| 🌐 [Browser Automation](docs/Browser-Automation.en.md) | Playwright integration, CDP mode, accessibility tree |
+| ⚡ [Code Execution](docs/Code-Execution.en.md) | Sandbox degradation chain, shell blacklist, sub-agents |
+| 🧠 [Memory System](docs/Memory-System.en.md) | STM/LTM architecture, compression pyramid, score eviction |
+| 📚 [RAG System](docs/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
+| 🖥️ [Desktop Automation](docs/Computer-Use.en.md) | OS-level accessibility automation, Windows/Linux/macOS |
+| 📖 [Wiki System](docs/Wiki-System.en.md) | Hybrid Wiki + RAG, Karpathy pattern, confidence routing |
+| ⚙️ [Configuration](docs/Configuration.en.md) | All configuration items reference |
+| ⌨️ [Commands](docs/Commands.en.md) | 40+ commands reference |
+| 📊 [Evaluation](docs/Evaluation.en.md) | 8 evaluators, RAG metrics |
+| 🔒 [Security](docs/Security.en.md) | PII masking, sandbox escape protection |
+| 🎯 [Skill System](docs/Skill-System.en.md) | Skill discovery, routing, workflow execution |
+| 🔌 [MCP Integration](docs/MCP-Integration.en.md) | External tool import, governance fusion |
+| 📈 [Observability](docs/Observability.en.md) | 6-layer observability: trace, drift detection, fault attribution, alerting, health checks, improvement loop |
+| 📝 [Prompt System](docs/Prompt-System.en.md) | Template categories, variable injection |
+| 🛠 [Development](docs/Development.en.md) | Environment setup, testing, CI pipeline |
+| 🤝 [Contributing](docs/Contributing.en.md) | Issue/PR guidelines, testing requirements |
 
 ## Architecture
 
@@ -120,7 +128,7 @@ nexus codegraph build            # Build code knowledge graph
 │                     Tool Execution Layer                         │
 │  code_executor · shell · file_ops · web_search · kb_search      │
 │  memory_save · subagent · grep_search · web_fetch · browser     │
-│  codegraph_search · codegraph_relations · todo · ...            │
+│  computer_* · wiki · codegraph_* · todo · ...                   │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
 │ (vectors)│  (relational)│  (observability)                      │

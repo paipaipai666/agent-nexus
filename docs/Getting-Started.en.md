@@ -34,6 +34,34 @@ nexus tui
 
 Shortcuts: `Ctrl+Q` quit, `Ctrl+L` clear screen, `Tab` focus switch.
 
+Resume a previous session:
+
+```bash
+nexus --continue                   # Resume most recent TUI session
+nexus --continue <session_id>      # Resume a specific session
+```
+
+## Start API Server
+
+```bash
+nexus serve                        # Default port 8000
+nexus serve --port 3000            # Custom port
+nexus serve --no-auth              # Disable authentication
+```
+
+Starts the HTTP/WebSocket API server for desktop GUI clients.
+
+## Wiki Quick Start
+
+```bash
+nexus wiki init my-project         # Initialize wiki namespace
+nexus wiki ingest ./docs -n my-project  # Ingest documents
+nexus wiki query "your question" -n my-project  # Query wiki
+nexus wiki stats -n my-project     # View health statistics
+```
+
+Wiki provides confidence-based RAG queries, document ingestion, health checks, and a review workflow. See the `nexus wiki` section in the [Commands Reference](Commands.en.md) for details.
+
 ## Basic Workflow
 
 ```bash

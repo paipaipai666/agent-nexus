@@ -12,9 +12,11 @@
 - [🤖 ReAct Agent](ReAct-Agent.en.md)
 - [🔧 Tool Governance](Tool-Governance.en.md)
 - [🌐 Browser Automation](Browser-Automation.en.md)
+- [🖥 Desktop Automation](Computer-Use.en.md)
 - [⚡ Code Execution & Security](Code-Execution.en.md)
 - [🧠 Memory System](Memory-System.en.md)
 - [📚 RAG System](RAG-System.en.md)
+- [📖 Wiki System](Wiki-System.en.md)
 - [📝 Prompt System](Prompt-System.en.md)
 
 ### Operations

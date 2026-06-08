@@ -34,20 +34,24 @@ Each call records `AuditEntry{tool, caller, params(masked), duration, hitl, erro
 
 ## Tool Registration
 
-`ToolProvider` protocol, 10 providers registered in order:
+`ToolProvider` protocol, 11 providers registered in order:
 
 ```text
-MemoryToolProvider     → memory_search, memory_save
-SearchToolProvider     → grep_search, web_search, web_fetch, kb_search
-FilesystemToolProvider → file_read, file_list, file_write
-ExecutionToolProvider  → python_execute, shell_exec
-SubagentToolProvider   → subagent_run
-McpBridgeToolProvider  → MCP dynamic import
-TodoToolProvider       → todo_add, todo_update, todo_list
-CodeGraphToolProvider  → codegraph_search, codegraph_relations, codegraph_context
-BrowserToolProvider    → browser_navigate, browser_snapshot, browser_click, browser_type,
-                         browser_read, browser_screenshot, browser_evaluate, browser_wait,
-                         browser_scroll, browser_scroll_to
+MemoryToolProvider       → memory_search, memory_save
+SearchToolProvider       → grep_search, web_search, web_fetch, kb_search
+FilesystemToolProvider   → file_read, file_list, file_write
+ExecutionToolProvider    → python_execute, shell_exec
+SubagentToolProvider     → subagent_run
+McpBridgeToolProvider    → MCP dynamic import
+TodoToolProvider         → todo_add, todo_update, todo_list
+CodeGraphToolProvider    → codegraph_search, codegraph_relations, codegraph_context
+BrowserToolProvider      → browser_navigate, browser_snapshot, browser_click, browser_type,
+                           browser_read, browser_screenshot, browser_evaluate, browser_wait,
+                           browser_scroll, browser_scroll_to, browser_wait_navigation,
+                           browser_dismiss_popup, browser_list_pages, browser_switch_page
+ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_switch_window,
+                           computer_launch, computer_click, computer_type, computer_key,
+                           computer_select, computer_toggle, computer_scroll
 ```
 
 ## Built-in Tool Parameters
@@ -82,5 +86,19 @@ BrowserToolProvider    → browser_navigate, browser_snapshot, browser_click, br
 | `browser_wait` | `role?`, `name?`, `ref?`, `text?`, `timeout?`, `task_id?` | 20/min | LOW |
 | `browser_scroll` | `direction?`, `amount?`, `task_id?` | 20/min | LOW |
 | `browser_scroll_to` | `landmark?`, `ref?`, `selector?`, `task_id?` | 20/min | LOW |
+| `browser_wait_navigation` | `url_contains?`, `timeout?`, `task_id?` | 10/min | LOW |
+| `browser_dismiss_popup` | No parameters | 10/min | LOW |
+| `browser_list_pages` | No parameters | 30/min | LOW |
+| `browser_switch_page` | `index` | 30/min | LOW |
+| `computer_snapshot` | `app_name?`, `window_title?`, `mode?`, `task_id?` | 10/min | LOW |
+| `computer_list_windows` | `task_id?` | 30/min | LOW |
+| `computer_switch_window` | `window_index?`, `app_name?`, `window_title?`, `task_id?` | 30/min | LOW |
+| `computer_launch` | `app_path`, `args?`, `task_id?` | 10/min | MEDIUM |
+| `computer_click` | `element_id`, `button?`, `clicks?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_type` | `element_id`, `text`, `clear?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_key` | `keys`, `task_id?` | 30/min | MEDIUM |
+| `computer_select` | `element_id`, `value`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_toggle` | `element_id`, `checked?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
+| `computer_scroll` | `element_id?`, `direction?`, `amount?`, `task_id?` | 30/min | LOW |
 
-> See [Code Execution](Code-Execution.en.md) for sandbox details, [MCP Integration](MCP-Integration.en.md) for external tool integration, [Browser Automation](Browser-Automation.en.md) for browser automation.
+> See [Code Execution](Code-Execution.en.md) for sandbox details, [MCP Integration](MCP-Integration.en.md) for external tool integration, [Browser Automation](Browser-Automation.en.md) for browser automation, [Computer Use](Computer-Use.en.md) for desktop automation.

@@ -14,7 +14,7 @@ graph TD
     User["User (CLI/TUI/Desktop)"] --> CLI["CLI Layer (Typer+Rich)<br>40+ commands"]
     CLI --> ReAct["ReActAgent (FSM 16 states × 25 rules)<br>3-tier LLM strategy degradation"]
     ReAct --> Gate["ToolRegistry Governance Gateway<br>①RBAC②Schema③Rate-limit④Timeout⑤Risk⑥HITL⑦Audit"]
-    Gate --> Tools["Tool Execution Layer<br>10 Built-in Providers + MCP Extensions"]
+    Gate --> Tools["Tool Execution Layer<br>11 Built-in Providers + MCP Extensions"]
     Tools --> Local["Local Infrastructure<br>ChromaDB Vectors | SQLite Relational | JSONL Traces"]
 ```
 
@@ -34,6 +34,8 @@ graph TD
 | **MCP Integration** | External tools with full governance |
 | **Sub-agents** | Agent-in-Agent isolated delegation |
 | **Code Knowledge Graph** | AST parsing, semantic search, relationship queries |
+| **Wiki Knowledge System** | Hybrid Wiki + RAG, confidence routing, calibration, propagation, review queue |
+| **Desktop Automation** | OS accessibility API driven, screenshot/window management/keyboard-mouse actions |
 
 ## Quick Links
 

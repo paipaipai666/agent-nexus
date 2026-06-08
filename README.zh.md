@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 282 个测试文件。**
+**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 桌面自动化 + 283 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-282%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-283%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI 工具，完全运行在本地。无云端依赖，无数据泄露。向量、记忆、Trace 日志全部留在你的设备上。
@@ -41,6 +41,8 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🧠 **本地记忆** | 短期（STM 压缩金字塔）+ 长期（SQLite+ChromaDB，评分驱逐） |
 | 📚 **知识库 RAG** | 混合检索（稠密+稀疏+RRF+重排序），8 种文件格式导入 |
 | 🌐 **浏览器自动化** | Playwright 驱动的浏览器控制，支持无障碍树和 CDP 模式 |
+| 🖥️ **桌面自动化** | OS 级无障碍 API 驱动：快照、点击、输入、键盘、窗口管理 |
+| 📖 **Wiki 系统** | 混合 Wiki + RAG 知识管理，Karpathy 的 LLM Wiki 模式，机械验证，置信度路由 |
 | 🔒 **安全沙箱** | E2B 云端 → 原生 (bubblewrap/Seatbelt) → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
 | 📈 **可观测性** | 6 层体系：JSONL Trace + 漂移检测 + 工具故障归因 + 告警管道 + 健康检查 + 改进闭环 |
@@ -69,6 +71,10 @@ nexus tui
 
 ```bash
 nexus kb add ./docs              # 添加文档到知识库
+nexus wiki init default          # 为 RAG 命名空间初始化 Wiki
+nexus wiki ingest ./doc.md       # 将源文档导入 Wiki
+nexus wiki query "什么是 X？"     # 置信度路由查询 Wiki
+nexus serve                      # 启动 HTTP/WebSocket API 服务器（桌面端 GUI）
 nexus stats --days 7             # 查看 Token 成本和任务指标
 nexus health                     # 运行系统健康检查
 nexus alerts --days 7            # 查看告警历史
@@ -81,23 +87,25 @@ nexus codegraph build            # 构建代码知识图谱
 
 | 文档 | 内容 |
 | --- | --- |
-| 🏠 [Wiki 首页](wiki/Home.md) | 架构图、核心能力表格 |
-| 🤖 [ReAct Agent](wiki/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
-| 🔧 [工具治理](wiki/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
-| 🌐 [浏览器自动化](wiki/Browser-Automation.md) | Playwright 集成、CDP 模式、无障碍树 |
-| ⚡ [代码执行](wiki/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
-| 🧠 [记忆系统](wiki/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
-| 📚 [RAG 检索](wiki/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
-| ⚙️ [配置参考](wiki/Configuration.md) | 全部配置项速查 |
-| ⌨️ [命令参考](wiki/Commands.md) | 40+ 个命令速查 |
-| 📊 [评估体系](wiki/Evaluation.md) | 8 个评估器、RAG 指标 |
-| 🔒 [安全模型](wiki/Security.md) | PII 脱敏、沙箱逃逸防护 |
-| 🎯 [技能系统](wiki/Skill-System.md) | Skill 发现、路由、工作流执行 |
-| 🔌 [MCP 集成](wiki/MCP-Integration.md) | 外部工具导入、治理融合 |
-| 📈 [可观测性](wiki/Observability.md) | 6 层可观测性：Trace、漂移检测、故障归因、告警、健康检查、改进闭环 |
-| 📝 [提示词系统](wiki/Prompt-System.md) | 模板分类、变量注入 |
-| 🛠 [开发指南](wiki/Development.md) | 环境搭建、测试、CI 流程 |
-| 🤝 [贡献指南](wiki/Contributing.md) | Issue/PR 规范、测试要求 |
+| 🏠 [Wiki 首页](docs/Home.md) | 架构图、核心能力表格 |
+| 🤖 [ReAct Agent](docs/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
+| 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
+| 🌐 [浏览器自动化](docs/Browser-Automation.md) | Playwright 集成、CDP 模式、无障碍树 |
+| ⚡ [代码执行](docs/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
+| 🧠 [记忆系统](docs/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
+| 📚 [RAG 检索](docs/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
+| 🖥️ [桌面自动化](docs/Computer-Use.md) | OS 级无障碍自动化，Windows/Linux/macOS |
+| 📖 [Wiki 系统](docs/Wiki-System.md) | 混合 Wiki + RAG、Karpathy 模式、置信度路由 |
+| ⚙️ [配置参考](docs/Configuration.md) | 全部配置项速查 |
+| ⌨️ [命令参考](docs/Commands.md) | 40+ 个命令速查 |
+| 📊 [评估体系](docs/Evaluation.md) | 8 个评估器、RAG 指标 |
+| 🔒 [安全模型](docs/Security.md) | PII 脱敏、沙箱逃逸防护 |
+| 🎯 [技能系统](docs/Skill-System.md) | Skill 发现、路由、工作流执行 |
+| 🔌 [MCP 集成](docs/MCP-Integration.md) | 外部工具导入、治理融合 |
+| 📈 [可观测性](docs/Observability.md) | 6 层可观测性：Trace、漂移检测、故障归因、告警、健康检查、改进闭环 |
+| 📝 [提示词系统](docs/Prompt-System.md) | 模板分类、变量注入 |
+| 🛠 [开发指南](docs/Development.md) | 环境搭建、测试、CI 流程 |
+| 🤝 [贡献指南](docs/Contributing.md) | Issue/PR 规范、测试要求 |
 
 ## 架构
 
@@ -120,7 +128,7 @@ nexus codegraph build            # 构建代码知识图谱
 │                     工具执行层                                   │
 │  code_executor · shell · file_ops · web_search · kb_search      │
 │  memory_save · subagent · grep_search · web_fetch · browser     │
-│  codegraph_search · codegraph_relations · todo · ...            │
+│  computer_* · wiki · codegraph_* · todo · ...                   │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace 日志                     │
 │ (向量)   │  (关系型)    │  (可观测性)                           │

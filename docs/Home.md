@@ -14,7 +14,7 @@ graph TD
     User["用户 (CLI/TUI/Desktop)"] --> CLI["CLI 层 (Typer+Rich)<br>40+ 命令"]
     CLI --> ReAct["ReActAgent (FSM 16 状态 × 25 规则)<br>三级 LLM 策略降级"]
     ReAct --> Gate["ToolRegistry 治理网关<br>①RBAC②Schema③限流④超时⑤风险⑥HITL⑦审计"]
-    Gate --> Tools["工具执行层<br>10 内置 Provider + MCP 扩展"]
+    Gate --> Tools["工具执行层<br>11 内置 Provider + MCP 扩展"]
     Tools --> Local["本地基础设施<br>ChromaDB 向量 | SQLite 关系 | JSONL 追踪"]
 ```
 
@@ -34,6 +34,8 @@ graph TD
 | **MCP 集成** | 外部工具全治理接入 |
 | **子代理** | Agent-in-Agent 隔离委派 |
 | **代码知识图谱** | AST 解析、语义搜索、关系查询 |
+| **Wiki 知识系统** | 混合 Wiki + RAG，置信度路由、校准、传播、审查队列 |
+| **桌面自动化** | OS 无障碍 API 驱动，截图/窗口管理/键鼠操作 |
 
 ## 快速链接
 

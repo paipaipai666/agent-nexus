@@ -34,6 +34,34 @@ nexus tui
 
 快捷键：`Ctrl+Q` 退出，`Ctrl+L` 清屏，`Tab` 焦点切换。
 
+恢复上一次会话：
+
+```bash
+nexus --continue                   # 恢复最近一次 TUI 会话
+nexus --continue <session_id>      # 恢复指定会话
+```
+
+## 启动 API 服务
+
+```bash
+nexus serve                        # 默认 8000 端口
+nexus serve --port 3000            # 指定端口
+nexus serve --no-auth              # 禁用认证
+```
+
+启动 HTTP/WebSocket API 服务，供桌面 GUI 客户端连接。
+
+## Wiki 快速开始
+
+```bash
+nexus wiki init my-project         # 初始化 wiki 命名空间
+nexus wiki ingest ./docs -n my-project  # 摄入文档
+nexus wiki query "问题内容" -n my-project  # 查询 wiki
+nexus wiki stats -n my-project     # 查看健康统计
+```
+
+Wiki 提供基于置信度路由的 RAG 查询、文档摄入、健康检查和审核流程。详见 [命令参考](Commands.md) 中的 `nexus wiki` 部分。
+
 ## 基础工作流
 
 ```bash

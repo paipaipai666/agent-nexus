@@ -42,7 +42,6 @@ chroma_data/
 Thumbs.db
 **/.trae/
 **/.sisyphus/
-**/docs/
 **/.github/
 .coverage
 sample.txt
@@ -56,3 +55,4 @@ perf_test_compact_*.json
 perf_test_compact_*.jsonl
 **/.impeccable/
 **/designs/
+**/.obsidian/

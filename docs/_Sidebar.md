@@ -12,9 +12,11 @@
 - [🤖 ReAct Agent](ReAct-Agent.md)
 - [🔧 工具治理](Tool-Governance.md)
 - [🌐 浏览器自动化](Browser-Automation.md)
+- [🖥 桌面自动化](Computer-Use.md)
 - [⚡ 代码执行与安全](Code-Execution.md)
 - [🧠 记忆系统](Memory-System.md)
 - [📚 RAG 检索](RAG-System.md)
+- [📖 Wiki 知识系统](Wiki-System.md)
 - [📝 提示词系统](Prompt-System.md)
 
 ### 运维
