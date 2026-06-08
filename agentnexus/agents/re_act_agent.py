@@ -24,10 +24,16 @@ from agentnexus.agents.tool_runner import execute_tool
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
-from agentnexus.observability.tracer import trace_manager
 from agentnexus.observability.drift_detector import DriftDetector
+from agentnexus.observability.tracer import trace_manager
 from agentnexus.prompts import load_prompt
-from agentnexus.skills import CompiledSessionProfile, SessionProfile, validate_session_profile
+from agentnexus.skills import (
+    CompiledSessionProfile,
+    SessionProfile,
+    compile_persona_fragment,
+    load_core_fragments,
+    validate_session_profile,
+)
 from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -73,6 +79,10 @@ class ReActAgent:
         self._todo_list = None  # Set externally after construction
         self._degrade_count = 0
         self._thought_retries = 0
+        # Persona and behavioral fragments — loaded once, stable across sessions
+        settings = get_settings()
+        self._persona_text: str = compile_persona_fragment(settings.persona)
+        self._behavior_fragments_text: str = load_core_fragments()
 
     # ================================================================
     # Public API (unchanged)
@@ -746,12 +756,24 @@ class ReActAgent:
         """Build messages array with stable prefix for prompt caching."""
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
+        # Merge agent-level persona and behavior fragments into conversation context
+        extra_blocks: list[str] = []
+        if self._persona_text:
+            extra_blocks.append(self._persona_text)
+        if self._behavior_fragments_text:
+            extra_blocks.append(self._behavior_fragments_text)
+        merged_conversation = conversation_context
+        if extra_blocks:
+            suffix = "\n\n".join(extra_blocks)
+            merged_conversation = (
+                conversation_context + "\n\n" + suffix if conversation_context else suffix
+            )
         return build_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
             tools_desc=tools_desc,
             question=question,
             memory_context=memory_context,
-            conversation_context=conversation_context,
+            conversation_context=merged_conversation,
             available_skill_context=self._available_skill_context,
             mcp_context=self._mcp_context,
             compiled_profile=compiled,

@@ -166,13 +166,35 @@ class CapabilitiesSettings(BaseModel):
     states: dict[str, Any] = Field(default_factory=dict)
 
 
+class PersonaProject(BaseModel):
+    """A single project entry in the persona mission map."""
+
+    name: str
+    focus: str = "进行中"
+
+
+class PersonaConfig(BaseModel):
+    """User-defined persona configuration for the agent.
+
+    Loaded from the ``persona`` section of ``config.yaml``.
+    Compiled into a prompt fragment at agent initialization.
+    """
+
+    agent_name: str = ""
+    identity: str = ""
+    tone: str = ""
+    projects: list[PersonaProject] = Field(default_factory=list)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
 
     def __init__(self, **data: Any):
         capabilities = data.pop("capabilities", None)
+        persona = data.pop("persona", None)
         super().__init__(**data)
         self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
+        self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
     llm_api_key: SecretStr = Field(default=SecretStr(""))
     llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
@@ -439,6 +461,12 @@ class Settings(BaseSettings):
         """Return typed capabilities settings."""
         raw = getattr(self, "_raw_capabilities", None) or {}
         return CapabilitiesSettings(**raw)
+
+    @property
+    def persona(self) -> PersonaConfig:
+        """Return typed persona settings."""
+        raw = getattr(self, "_raw_persona", None) or {}
+        return PersonaConfig(**raw)
 
 
 class AgentNexusDumper(yaml.SafeDumper):

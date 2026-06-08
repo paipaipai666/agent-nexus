@@ -3,7 +3,9 @@
 from agentnexus.skills.profile import (
     CompiledSessionProfile,
     build_workflow_guidance,
+    compile_persona_fragment,
     format_tool_policy_summary,
+    load_core_fragments,
     validate_session_profile,
 )
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
@@ -31,7 +33,9 @@ __all__ = [
     "WorkflowRuntimeEvent",
     "WorkflowStep",
     "build_workflow_guidance",
+    "compile_persona_fragment",
     "format_tool_policy_summary",
+    "load_core_fragments",
     "load_workflow",
     "validate_session_profile",
 ]

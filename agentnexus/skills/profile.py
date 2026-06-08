@@ -5,10 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from string import Formatter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentnexus.prompts import load_prompt
 from agentnexus.skills.workflow import SessionProfile, ToolPolicy
+
+if TYPE_CHECKING:
+    from agentnexus.core.config import PersonaConfig
 
 _FRAGMENTS_DIR = Path(__file__).resolve().parents[1] / "prompts" / "fragments"
 _RISK_ORDER = {
@@ -17,6 +20,9 @@ _RISK_ORDER = {
     "high": 2,
 }
 _CORE_TEMPLATE_KEYS = {"tools", "question", "history", "memory_context", "conversation_context"}
+
+# Platform-level behavioral fragments — always loaded, cannot be disabled.
+_CORE_FRAGMENTS = ["stance", "autonomy", "accountability"]
 
 
 @dataclass(frozen=True)
@@ -56,6 +62,39 @@ def validate_session_profile(profile: SessionProfile) -> CompiledSessionProfile:
         fragments_text="\n\n".join(part for part in fragments if part),
         workflow_guidance=guidance,
     )
+
+
+def load_core_fragments() -> str:
+    """Load platform-level behavioral fragments. Always loaded, cannot be disabled."""
+    parts: list[str] = []
+    for name in _CORE_FRAGMENTS:
+        fragment_path = _FRAGMENTS_DIR / f"{name}.txt"
+        try:
+            parts.append(fragment_path.read_text(encoding="utf-8").strip())
+        except FileNotFoundError:
+            continue
+    return "\n\n".join(part for part in parts if part)
+
+
+def compile_persona_fragment(persona_config: PersonaConfig) -> str:
+    """Compile a validated PersonaConfig into a prompt fragment string."""
+    if not persona_config:
+        return ""
+
+    lines: list[str] = []
+    if persona_config.agent_name:
+        lines.append(f"你是 {persona_config.agent_name}。")
+    if persona_config.identity:
+        lines.append(f"你的角色：{persona_config.identity}。")
+    if persona_config.tone:
+        lines.append(f"沟通风格：{persona_config.tone}。")
+    if persona_config.projects:
+        lines.append("当前关注：")
+        for project in persona_config.projects:
+            lines.append(f"- {project.name}：{project.focus}")
+    if not lines:
+        return ""
+    return "== Persona ==\n" + "\n".join(lines)
 
 
 def build_workflow_guidance(profile: SessionProfile) -> str:

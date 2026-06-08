@@ -1,7 +1,10 @@
+from agentnexus.core.config import PersonaConfig, PersonaProject
 from agentnexus.skills.profile import (
     build_workflow_guidance,
+    compile_persona_fragment,
     filter_tool_meta,
     format_tool_policy_summary,
+    load_core_fragments,
     validate_session_profile,
 )
 from agentnexus.skills.workflow import Workflow
@@ -115,3 +118,65 @@ def test_build_workflow_guidance_and_policy_summary():
     assert "allow=3" in summary
     assert "deny=1" in summary
     assert "no-subagents" in summary
+
+
+# ── Core fragments ──────────────────────────────────────────────
+
+
+def test_load_core_fragments_loads_all_three():
+    result = load_core_fragments()
+    assert "行为原则" in result
+    assert "自主权边界" in result
+    assert "Accountability" in result
+
+
+def test_load_core_fragments_order_is_stance_autonomy_accountability():
+    result = load_core_fragments()
+    stance_pos = result.index("行为原则")
+    autonomy_pos = result.index("自主权边界")
+    accountability_pos = result.index("Accountability")
+    assert stance_pos < autonomy_pos < accountability_pos
+
+
+# ── Persona compilation ─────────────────────────────────────────
+
+
+def test_compile_persona_fragment_empty_config():
+    config = PersonaConfig()
+    result = compile_persona_fragment(config)
+    assert result == ""
+
+
+def test_compile_persona_fragment_full_config():
+    config = PersonaConfig(
+        agent_name="Nexus",
+        identity="开发搭档",
+        tone="直接、简洁",
+        projects=[
+            PersonaProject(name="AgentNexus", focus="v0.2.0 发布"),
+            PersonaProject(name="SideProject", focus="原型验证"),
+        ],
+    )
+    result = compile_persona_fragment(config)
+    assert "你是 Nexus。" in result
+    assert "你的角色：开发搭档。" in result
+    assert "沟通风格：直接、简洁。" in result
+    assert "AgentNexus：v0.2.0 发布" in result
+    assert "SideProject：原型验证" in result
+
+
+def test_compile_persona_fragment_partial_config():
+    config = PersonaConfig(agent_name="Hermes")
+    result = compile_persona_fragment(config)
+    assert "你是 Hermes。" in result
+    assert "角色" not in result
+    assert "沟通" not in result
+
+
+def test_compile_persona_fragment_projects_only():
+    config = PersonaConfig(
+        projects=[PersonaProject(name="ProjectX")]
+    )
+    result = compile_persona_fragment(config)
+    assert "== Persona ==" in result
+    assert "ProjectX：进行中" in result

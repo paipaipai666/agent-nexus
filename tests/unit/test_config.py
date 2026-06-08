@@ -3,7 +3,7 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from agentnexus.core.config import Settings, _default_paths, get_config_dir, get_settings
+from agentnexus.core.config import PersonaConfig, PersonaProject, Settings, _default_paths, get_config_dir, get_settings
 
 
 class TestConfigSettings:
@@ -208,3 +208,49 @@ class TestCodeExecutionBackendValidator:
     def test_shell_execution_docker_image_default(self, temp_agentnexus_home):
         s = Settings()
         assert s.shell_execution_docker_image == "python:3.11-slim"
+
+
+class TestPersonaConfig:
+    def test_default_persona_is_empty(self):
+        config = PersonaConfig()
+        assert config.agent_name == ""
+        assert config.identity == ""
+        assert config.tone == ""
+        assert config.projects == []
+
+    def test_persona_with_all_fields(self):
+        config = PersonaConfig(
+            agent_name="Nexus",
+            identity="开发搭档",
+            tone="直接、简洁",
+            projects=[PersonaProject(name="AgentNexus", focus="v0.2.0")],
+        )
+        assert config.agent_name == "Nexus"
+        assert config.identity == "开发搭档"
+        assert len(config.projects) == 1
+        assert config.projects[0].name == "AgentNexus"
+        assert config.projects[0].focus == "v0.2.0"
+
+    def test_persona_project_default_focus(self):
+        project = PersonaProject(name="TestProject")
+        assert project.focus == "进行中"
+
+    def test_settings_persona_property_from_raw(self):
+        s = Settings(
+            persona={
+                "agent_name": "Hermes",
+                "identity": "操作员",
+                "tone": "直接",
+                "projects": [{"name": "P1", "focus": "开发"}],
+            }
+        )
+        persona = s.persona
+        assert isinstance(persona, PersonaConfig)
+        assert persona.agent_name == "Hermes"
+        assert len(persona.projects) == 1
+
+    def test_settings_persona_property_empty(self):
+        s = Settings()
+        persona = s.persona
+        assert isinstance(persona, PersonaConfig)
+        assert persona.agent_name == ""
