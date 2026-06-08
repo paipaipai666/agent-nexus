@@ -108,7 +108,7 @@ def clear_short_term_memory():
 
 
 @router.get("/short/history")
-def list_session_history(limit: int = 0):
+def list_session_history(limit: int = 0, session_id: str | None = None):
     """Read full conversation history from the message journal.
 
     Unlike /short (which reads from the in-memory STM deque, max 50 messages),
@@ -117,21 +117,22 @@ def list_session_history(limit: int = 0):
 
     Args:
         limit: Max messages to return (0 = all).
+        session_id: Optional session ID to read from. If not provided,
+                    uses the first active session or finds the latest.
     """
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    # Get current session id from the version manager if available
     settings = get_settings()
     workspace = str(__import__("pathlib").Path.cwd())
 
-    # Try to find the current active session
-    session_id = None
-    chat = runtime.services.chat
-    if chat._sessions:
-        session_id = next(iter(chat._sessions.keys()))
+    # Use provided session_id, or fall back to first active session, or find latest
+    if not session_id:
+        chat = runtime.services.chat
+        if chat._sessions:
+            session_id = next(iter(chat._sessions.keys()))
 
     if not session_id:
         session_id = ConversationVersionManager.find_latest_session(

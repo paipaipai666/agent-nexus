@@ -227,7 +227,8 @@ export default function ChatPage() {
     try {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
-        const hist = await api.listSessionHistory()
+        const currentSid = sessionIdRef.current
+        const hist = await api.listSessionHistory(0, currentSid || undefined)
         stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
       } catch {
         stm = (await api.listShortMemories()).messages
