@@ -98,7 +98,8 @@ export default function SettingsPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4">
-        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Settings</h1>
+        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>General</h1>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Core configuration for LLM, agent, RAG, and execution</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">

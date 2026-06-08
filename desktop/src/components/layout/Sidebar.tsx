@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, BookOpen, Zap, Brain, Settings, Plus, Server, Puzzle, BarChart3, Heart, Bell, FileText, FlaskConical, Network } from 'lucide-react'
+import { MessageSquare, Settings, Plus } from 'lucide-react'
 import { api } from '../../services/api'
 
 interface RecentSession {
@@ -12,22 +12,6 @@ interface RecentSession {
   profile: string | null
 }
 
-const navItems = [
-  { path: '/knowledge', icon: BookOpen, label: 'Knowledge' },
-  { path: '/wiki', icon: Network, label: 'Wiki' },
-  { path: '/skills', icon: Zap, label: 'Skills' },
-  { path: '/mcp', icon: Server, label: 'MCP' },
-  { path: '/memory', icon: Brain, label: 'Memory' },
-  { path: '/plugins', icon: Puzzle, label: 'Plugins' },
-  { divider: true },
-  { path: '/settings', icon: Settings, label: 'Settings' },
-  { path: '/stats', icon: BarChart3, label: 'Stats' },
-  { path: '/health', icon: Heart, label: 'Health' },
-  { path: '/alerts', icon: Bell, label: 'Alerts' },
-  { path: '/audit', icon: FileText, label: 'Audit' },
-  { path: '/eval', icon: FlaskConical, label: 'Eval' },
-]
-
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -35,6 +19,7 @@ export default function Sidebar() {
   const [loading, setLoading] = useState(false)
 
   const isChatActive = location.pathname === '/' || location.pathname.startsWith('/chat/')
+  const isSettingsActive = location.pathname.startsWith('/settings')
 
   useEffect(() => {
     loadRecentSessions()
@@ -137,30 +122,20 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* Nav Items */}
-        <div className="mt-4 space-y-0.5">
+        {/* Settings */}
+        <div className="mt-4">
           <div className="h-px my-2 mx-3" style={{ background: 'var(--border)' }} />
-          {navItems.map((item, idx) => {
-            if ('divider' in item) {
-              return <div key={`div-${idx}`} className="h-px my-2 mx-3" style={{ background: 'var(--border)' }} />
-            }
-            const { path, icon: Icon, label } = item
-            const isActive = location.pathname === path
-            return (
-              <button
-                key={path}
-                onClick={() => navigate(path)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md transition-all duration-150 text-left"
-                style={{
-                  color: isActive ? 'var(--fg)' : 'var(--fg-muted)',
-                  background: isActive ? 'var(--surface-2)' : 'transparent',
-                }}
-              >
-                <Icon size={16} style={{ color: isActive ? 'var(--accent)' : undefined }} />
-                <span className="text-[13px] truncate">{label}</span>
-              </button>
-            )
-          })}
+          <button
+            onClick={() => navigate('/settings/general')}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md transition-all duration-150 text-left"
+            style={{
+              color: isSettingsActive ? 'var(--fg)' : 'var(--fg-muted)',
+              background: isSettingsActive ? 'var(--surface-2)' : 'transparent',
+            }}
+          >
+            <Settings size={16} style={{ color: isSettingsActive ? 'var(--accent)' : undefined }} />
+            <span className="text-[13px] truncate">Settings</span>
+          </button>
         </div>
       </div>
     </nav>
