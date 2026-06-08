@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, BookOpen, Zap, Brain, Settings, Plus, Server, Puzzle, BarChart3, Heart, Bell, FileText, FlaskConical } from 'lucide-react'
+import { MessageSquare, BookOpen, Zap, Brain, Settings, Plus, Server, Puzzle, BarChart3, Heart, Bell, FileText, FlaskConical, Network } from 'lucide-react'
 import { api } from '../../services/api'
 
 interface RecentSession {
@@ -14,6 +14,7 @@ interface RecentSession {
 
 const navItems = [
   { path: '/knowledge', icon: BookOpen, label: 'Knowledge' },
+  { path: '/wiki', icon: Network, label: 'Wiki' },
   { path: '/skills', icon: Zap, label: 'Skills' },
   { path: '/mcp', icon: Server, label: 'MCP' },
   { path: '/memory', icon: Brain, label: 'Memory' },

@@ -339,4 +339,77 @@ export const api = {
 
   getEvalStats: () =>
     request<any>('/api/eval/stats'),
+
+  // Wiki
+  getWikiStats: (namespace = 'default') =>
+    request<{ page_count: number; statement_count: number; pending_reviews: number; confidence_distribution: Record<string, number>; calibration_needed: boolean }>(
+      `/api/wiki/stats?namespace=${namespace}`
+    ),
+
+  listWikiPages: (namespace = 'default', limit = 100) =>
+    request<{ pages: Array<{ page_id: string; title: string; page_type: string; confidence: string; statement_count: number; source_namespace: string; created_at: string; updated_at: string }>; total: number }>(
+      `/api/wiki/pages?namespace=${namespace}&limit=${limit}`
+    ),
+
+  getWikiPage: (pageId: string) =>
+    request<any>(`/api/wiki/pages/${pageId}`),
+
+  deleteWikiPage: (pageId: string) =>
+    request<{ status: string; page_id: string }>(`/api/wiki/pages/${pageId}`, {
+      method: 'DELETE',
+    }),
+
+  wikiQuery: (question: string, namespace = 'default', forceRag = false) =>
+    request<{ used_wiki: boolean; decision: string; confidence: string; answer: string; source_chunks: string[]; disclaimer: string; rag_results: any[] }>('/api/wiki/query', {
+      method: 'POST',
+      body: JSON.stringify({ question, namespace, force_rag: forceRag }),
+    }),
+
+  wikiIngestText: (sourceText: string, sourceUri: string, namespace = 'default', pageType = 'concept') =>
+    request<{ status: string; page_id: string; title: string; statement_count: number; confidence: string }>('/api/wiki/ingest', {
+      method: 'POST',
+      body: JSON.stringify({ source_text: sourceText, source_uri: sourceUri, namespace, page_type: pageType }),
+    }),
+
+  wikiIngestFile: async (file: File, namespace = 'default', pageType = 'concept') => {
+    const headers: Record<string, string> = {}
+    if (apiKey) headers['X-API-Key'] = apiKey
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch(`${BASE_URL}/api/wiki/ingest/file?namespace=${namespace}&page_type=${pageType}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(error.detail || `HTTP ${res.status}`)
+    }
+    return res.json()
+  },
+
+  wikiLint: (namespace = 'default') =>
+    request<{ items: Array<{ item_id: string; priority: number; page_id: string; description: string }>; total: number }>(
+      `/api/wiki/lint?namespace=${namespace}`,
+      { method: 'POST' }
+    ),
+
+  listWikiReviews: (status = 'pending', limit = 50) =>
+    request<{ items: Array<{ item_id: string; priority: number; page_id: string; statement_id: string; description: string; status: string; deadline: string; created_at: string }>; total: number }>(
+      `/api/wiki/review?status=${status}&limit=${limit}`
+    ),
+
+  resolveWikiReview: (itemId: string) =>
+    request<{ status: string; item_id: string }>('/api/wiki/review/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ item_id: itemId }),
+    }),
+
+  processWikiReviews: () =>
+    request<{ actions: any[]; total: number }>('/api/wiki/review/process', {
+      method: 'POST',
+    }),
+
+  getWikiCalibration: () =>
+    request<{ calibration: any }>('/api/wiki/calibration'),
 }

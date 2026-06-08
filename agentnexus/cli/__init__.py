@@ -15,6 +15,9 @@ console = Console()
 kb_app = typer.Typer(help="Knowledge base management")
 app.add_typer(kb_app, name="kb")
 
+wiki_app = typer.Typer(help="Hybrid Wiki + RAG knowledge system")
+app.add_typer(wiki_app, name="wiki")
+
 memory_app = typer.Typer(help="Memory management")
 app.add_typer(memory_app, name="memory")
 
@@ -45,6 +48,7 @@ from agentnexus.cli import (
     skill_cmd,  # noqa: E402
     stats,  # noqa: E402
     tui_cmd,  # noqa: E402
+    wiki_cmd,  # noqa: E402
 )
 
 

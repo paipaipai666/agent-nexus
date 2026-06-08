@@ -14,6 +14,7 @@ import HealthPage from './pages/HealthPage'
 import AlertsPage from './pages/AlertsPage'
 import AuditPage from './pages/AuditPage'
 import EvalPage from './pages/EvalPage'
+import WikiPage from './pages/WikiPage'
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/eval" element={<EvalPage />} />
+            <Route path="/wiki" element={<WikiPage />} />
           </Routes>
           </AppShell>
         </BrowserRouter>

@@ -291,6 +291,20 @@ class Settings(BaseSettings):
         default_factory=lambda: ["taskmgr", "regedit", "cmd", "powershell", "terminal"],
         description="禁止操控的应用黑名单",
     )
+    # ── Wiki 系统 ─────────────────────────────────────────────────
+    wiki_enabled: bool = Field(default=False, description="启用混合 Wiki + RAG 知识系统")
+    wiki_namespace: str = Field(default="wiki", description="Wiki 页面的 ChromaDB 命名空间")
+    wiki_review_sla_p1_days: int = Field(default=7, ge=1, le=90, description="P1 review 期限（天）")
+    wiki_review_sla_p2_days: int = Field(default=14, ge=1, le=90, description="P2 review 期限（天）")
+    wiki_review_sla_p3_days: int = Field(default=30, ge=1, le=180, description="P3 review 期限（天）")
+    wiki_propagation_max_depth: int = Field(default=3, ge=1, le=10, description="置信度传播最大深度")
+    wiki_calibration_retrigger_pct: float = Field(default=0.5, ge=0.1, le=2.0, description="wiki 规模增长多少比例后需要重新校准")
+    # 机械验证阈值（上线前通过校准调整）
+    wiki_jaccard_direct_quote: float = Field(default=0.6, ge=0.0, le=1.0, description="Jaccard 相似度 > 此值判定为 direct_quote")
+    wiki_jaccard_paraphrase: float = Field(default=0.4, ge=0.0, le=1.0, description="Jaccard 相似度 > 此值判定为 paraphrase")
+    wiki_cosine_paraphrase: float = Field(default=0.7, ge=0.0, le=1.0, description="余弦相似度 > 此值确认 paraphrase")
+    wiki_cosine_source: float = Field(default=0.35, ge=0.0, le=1.0, description="余弦相似度 >= 此值认为 chunk 是有效来源")
+    wiki_drift_threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="canonical_definition 偏离度阈值")
 
     @field_validator("llm_base_url", "judge_base_url")
     @classmethod
