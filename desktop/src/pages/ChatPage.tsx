@@ -382,7 +382,14 @@ export default function ChatPage() {
         setMessages(prev => [...prev, { id: `tc-${++msgCounterRef.current}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolStatus: 'running', timestamp: new Date() }])
       }),
       agentWs.on('tool_result', (data) => {
-        setMessages(prev => prev.map(m => m.toolName === data.tool_name && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` } : m))
+        let updated = false
+        setMessages(prev => prev.map(m => {
+          if (!updated && m.toolName === data.tool_name && m.toolStatus === 'running') {
+            updated = true
+            return { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
+          }
+          return m
+        }))
       }),
       agentWs.on('token', (data) => {
         currentReasoningIdRef.current = null
