@@ -134,6 +134,31 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 | `browser_allow_js_execution` | `False` | 允许 JavaScript 执行 |
 | `browser_snapshot_max_nodes` | `100` | 无障碍树最大节点数 |
 
+### Persona（嵌套对象）
+
+定义 Agent 的身份、语气和当前任务地图。详见 [Persona 系统](Persona.md)。
+
+```yaml
+persona:
+  agent_name: "Nexus"
+  identity: "开发搭档"
+  tone: "直接、简洁，不啰嗦"
+  projects:
+    - name: "AgentNexus"
+      focus: "v0.2.0 发布"
+    - name: "SideProject"
+      focus: "原型验证"
+```
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `persona.agent_name` | `""` | Agent 名称 |
+| `persona.identity` | `""` | 角色定义 |
+| `persona.tone` | `""` | 沟通风格偏好 |
+| `persona.projects` | `[]` | 当前关注的项目列表，每项含 `name` 和 `focus` |
+
+也可在桌面端 GUI 的 Settings 页面直接编辑。
+
 ### 其他
 
 | 字段 | 默认值 | 说明 |

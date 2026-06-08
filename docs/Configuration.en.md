@@ -134,6 +134,31 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 | `browser_allow_js_execution` | `False` | Allow JavaScript execution |
 | `browser_snapshot_max_nodes` | `100` | Max accessibility tree nodes |
 
+### Persona (nested object)
+
+Defines the agent's identity, tone, and current mission map. See [Persona System](Persona.en.md) for details.
+
+```yaml
+persona:
+  agent_name: "Nexus"
+  identity: "Dev partner"
+  tone: "Direct, concise"
+  projects:
+    - name: "AgentNexus"
+      focus: "v0.2.0 release"
+    - name: "SideProject"
+      focus: "Prototype validation"
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `persona.agent_name` | `""` | Agent name |
+| `persona.identity` | `""` | Role definition |
+| `persona.tone` | `""` | Communication style preference |
+| `persona.projects` | `[]` | Current projects, each with `name` and `focus` |
+
+Also editable directly in the Desktop GUI Settings page.
+
 ### Other
 
 | Field | Default | Description |

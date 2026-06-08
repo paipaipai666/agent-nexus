@@ -10,6 +10,7 @@
 ### System Design
 - [🏗 Architecture](Architecture.en.md)
 - [🤖 ReAct Agent](ReAct-Agent.en.md)
+- [🎭 Persona System](Persona.en.md)
 - [🔧 Tool Governance](Tool-Governance.en.md)
 - [🌐 Browser Automation](Browser-Automation.en.md)
 - [🖥 Desktop Automation](Computer-Use.en.md)

@@ -10,6 +10,7 @@
 ### 系统设计
 - [🏗 整体架构](Architecture.md)
 - [🤖 ReAct Agent](ReAct-Agent.md)
+- [🎭 Persona 系统](Persona.md)
 - [🔧 工具治理](Tool-Governance.md)
 - [🌐 浏览器自动化](Browser-Automation.md)
 - [🖥 桌面自动化](Computer-Use.md)

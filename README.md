@@ -47,6 +47,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
 | 📊 **Evaluation** | 8 evaluators (Agent/Trajectory/Hallucination/RAG/Code, etc.) |
+| 🎭 **Persona System** | Agent identity, behavioral principles (stance/autonomy/accountability), and user-defined mission map |
 | 🎯 **Skill System** | Reusable workflow templates, TF-IDF + learned reranker routing |
 | 🔌 **MCP Integration** | Import external tools via stdio/HTTP, full governance |
 | 🤖 **Sub-agent Delegation** | Agent-in-Agent isolated subtask execution |

@@ -47,6 +47,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
 | 📈 **可观测性** | 6 层体系：JSONL Trace + 漂移检测 + 工具故障归因 + 告警管道 + 健康检查 + 改进闭环 |
 | 📊 **评估体系** | 8 个评估器（Agent/Trajectory/幻觉/RAG/代码等） |
+| 🎭 **Persona 系统** | Agent 身份、行为原则（立场/自主权/问责）、用户任务地图 |
 | 🎯 **技能系统** | 可复用工作流模板，TF-IDF + 学习型重排序路由 |
 | 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理 |
 | 🤖 **子代理委派** | Agent-in-Agent 隔离执行子任务 |
