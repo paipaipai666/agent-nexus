@@ -357,7 +357,8 @@ class TestReActAgentConversationMode:
         assert "用户" in result
         assert "助手" in result
 
-    def test_build_conversation_context_truncates_long_content(self):
+    def test_build_conversation_context_keeps_user_messages_intact(self):
+        """User/assistant messages are kept whole — no mid-message truncation."""
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
@@ -365,14 +366,13 @@ class TestReActAgentConversationMode:
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
-        stm.append("user", "x" * 1000)
+        long_content = "x" * 1000
+        stm.append("user", long_content)
 
         mock_mm = MagicMock()
         mock_mm.short_term = stm
         result = agent._build_conversation_context(mock_mm)
-        for line in result.split("\n"):
-            if line.startswith("用户:"):
-                assert len(line) <= 510
+        assert long_content in result
 
     def test_build_conversation_context_groups_by_turns(self):
         """Messages are grouped by complete turns, not by raw count."""

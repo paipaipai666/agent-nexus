@@ -6,7 +6,7 @@ from typing import Any
 
 from agentnexus.memory.compaction import parse_tool_message
 
-TOOL_CONTEXT_LIMIT = 200       # max chars for tool results in conversation context
+TOOL_CONTEXT_LIMIT = 2000      # max chars for tool results in conversation context
 N_TURNS_NO_SUMMARY = 3         # turns to show when no compressed summary exists
 N_TURNS_WITH_SUMMARY = 2       # turns to show alongside compressed summary
 
@@ -106,7 +106,7 @@ def build_react_messages(
     return messages
 
 
-def build_conversation_context(memory_manager, per_msg_limit: int = 500) -> str:
+def build_conversation_context(memory_manager) -> str:
     if not memory_manager or not memory_manager.short_term:
         return ""
     stm = memory_manager.short_term
@@ -120,13 +120,13 @@ def build_conversation_context(memory_manager, per_msg_limit: int = 500) -> str:
         parts = ["== 对话历史摘要 ==", summary]
         if turns:
             parts.append("\n== 最近对话 ==")
-            parts.append(_format_turns_for_context(turns, assistant_user_limit=per_msg_limit))
+            parts.append(_format_turns_for_context(turns))
         return "\n".join(parts) + "\n\n"
 
     turns = _collect_recent_turns(relevant_msgs, N_TURNS_NO_SUMMARY)
     if not turns:
         return ""
-    return "== 近期对话 ==\n" + _format_turns_for_context(turns, assistant_user_limit=per_msg_limit) + "\n\n"
+    return "== 近期对话 ==\n" + _format_turns_for_context(turns) + "\n\n"
 
 
 def _collect_recent_turns(messages: list[dict], n_turns: int) -> list[list[dict]]:
@@ -162,8 +162,13 @@ def _collect_recent_turns(messages: list[dict], n_turns: int) -> list[list[dict]
     return turns[-n_turns:]
 
 
-def _format_turns_for_context(turns: list[list[dict]], assistant_user_limit: int) -> str:
-    """Format collected turns into a readable context block."""
+def _format_turns_for_context(turns: list[list[dict]]) -> str:
+    """Format collected turns into a readable context block.
+
+    Truncation policy (per-message-unit, not mid-message):
+    - user / assistant: kept intact — these are semantic units
+    - tool results: truncated at source (data, not conversation)
+    """
     role_label = {"user": "用户", "assistant": "助手", "tool": "工具"}
     lines = []
     for turn in turns:
@@ -174,18 +179,23 @@ def _format_turns_for_context(turns: list[list[dict]], assistant_user_limit: int
             if message["role"] == "tool":
                 content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)
             else:
-                content = message["content"][:assistant_user_limit]
+                content = message["content"]
             lines.append(f"{label}: {content}")
     return "\n".join(lines)
 
 
 def _format_tool_for_context(content: str, limit: int) -> str:
-    """Format a tool STM message for conversation context display."""
+    """Format a tool STM message for conversation context display.
+
+    Tool results are data (not conversation), so they can be truncated
+    at the boundary with a clear marker showing original length.
+    """
     tool_name, _ = parse_tool_message(content)
     obs_idx = content.find("Observation: ")
     observation = content[obs_idx + len("Observation: "):] if obs_idx >= 0 else content
     observation = " ".join(observation.split())
-    if len(observation) > limit:
-        observation = observation[:limit] + "..."
+    original_len = len(observation)
+    if original_len > limit:
+        observation = observation[:limit] + f"\n...[已截断，原始长度 {original_len} 字符]"
     label = tool_name or "工具"
     return f"[{label}] {observation}"

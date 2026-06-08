@@ -127,7 +127,7 @@ class TurnRuntime:
             return
         self._persisted = True
         record = self._record
-        if record.status != "finished" and self._memory is not None:
+        if record.status == "finished" and self._memory is not None:
             try:
                 self._memory.append("assistant", record.answer)
             except Exception as e:

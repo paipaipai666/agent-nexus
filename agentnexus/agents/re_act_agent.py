@@ -247,7 +247,7 @@ class ReActAgent:
         tool_state.tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=tool_policy)
 
         if self.conversation_mode and memory_manager:
-            memory_state.conv_ctx = self._build_conversation_context(memory_manager, per_msg_limit=800)
+            memory_state.conv_ctx = self._build_conversation_context(memory_manager)
 
         # Build messages with stable prefix for prompt caching
         ctx.messages = self._build_messages(
@@ -265,7 +265,7 @@ class ReActAgent:
                 new_tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=policy)
                 new_conv = ""
                 if self.conversation_mode:
-                    new_conv = self._build_conversation_context(memory_manager, per_msg_limit=800)
+                    new_conv = self._build_conversation_context(memory_manager)
                     memory_state.conv_ctx = new_conv
                 # Rebuild messages with stable prefix structure
                 new_messages = self._build_messages(
@@ -781,8 +781,8 @@ class ReActAgent:
             workflow_context=workflow_context,
         )
 
-    def _build_conversation_context(self, memory_manager, per_msg_limit: int = 500) -> str:
-        return build_conversation_context(memory_manager, per_msg_limit=per_msg_limit)
+    def _build_conversation_context(self, memory_manager) -> str:
+        return build_conversation_context(memory_manager)
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None

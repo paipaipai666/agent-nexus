@@ -131,7 +131,8 @@ class TestBuildConversationContext:
         assert "previous summary" in result
         assert "最近对话" in result
 
-    def test_per_msg_limit_truncation(self):
+    def test_user_messages_kept_intact(self):
+        """User/assistant messages are kept whole — no mid-message truncation."""
         stm = MagicMock()
         stm.get_summary.return_value = None
         long_content = "x" * 1000
@@ -141,11 +142,8 @@ class TestBuildConversationContext:
         mm = MagicMock()
         mm.short_term = stm
 
-        result = build_conversation_context(mm, per_msg_limit=100)
-        lines = result.split("\n")
-        user_line = [line for line in lines if line.startswith("用户:")][0]
-        content_part = user_line.split("用户: ", 1)[1]
-        assert len(content_part) == 100
+        result = build_conversation_context(mm)
+        assert long_content in result
 
     def test_role_labels_chinese(self):
         stm = MagicMock()
