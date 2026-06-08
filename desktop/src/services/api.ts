@@ -165,6 +165,12 @@ export const api = {
       body: JSON.stringify({ key, value }),
     }),
 
+  updatePersona: (persona: { agent_name: string; identity: string; tone: string; projects: { name: string; focus: string }[] }) =>
+    request<{ status: string }>('/api/config/persona', {
+      method: 'PUT',
+      body: JSON.stringify(persona),
+    }),
+
   // Stats
   getStats: (days = 7) => request<Record<string, any>>(`/api/stats?days=${days}`),
 

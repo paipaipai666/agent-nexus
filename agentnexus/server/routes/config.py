@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -11,6 +13,18 @@ router = APIRouter(tags=["config"])
 class ConfigUpdateRequest(BaseModel):
     key: str
     value: str
+
+
+class PersonaProjectUpdate(BaseModel):
+    name: str
+    focus: str = "进行中"
+
+
+class PersonaUpdateRequest(BaseModel):
+    agent_name: str = ""
+    identity: str = ""
+    tone: str = ""
+    projects: list[PersonaProjectUpdate] = []
 
 
 SETTABLE_KEYS = {
@@ -75,12 +89,20 @@ def get_config():
     from agentnexus.core.config import get_settings
 
     settings = get_settings()
-    config = {}
+    config: dict[str, Any] = {}
     for name in type(settings).model_fields:
         value = getattr(settings, name)
         if hasattr(value, "get_secret_value"):
             value = "****"
         config[name] = value
+    # Include persona as nested object (not a model_field, loaded from raw yaml)
+    persona = settings.persona
+    config["persona"] = {
+        "agent_name": persona.agent_name,
+        "identity": persona.identity,
+        "tone": persona.tone,
+        "projects": [{"name": p.name, "focus": p.focus} for p in persona.projects],
+    }
     return config
 
 
@@ -100,6 +122,27 @@ def update_config(req: ConfigUpdateRequest):
         cfg._settings_cache = None
 
     return {"status": "updated", "key": req.key}
+
+
+@router.put("/persona")
+def update_persona(req: PersonaUpdateRequest):
+    from agentnexus.core.config import load_config_yaml, write_config_yaml
+
+    data = load_config_yaml()
+    persona_data: dict[str, Any] = {
+        "agent_name": req.agent_name,
+        "identity": req.identity,
+        "tone": req.tone,
+        "projects": [{"name": p.name, "focus": p.focus} for p in req.projects],
+    }
+    data["persona"] = persona_data
+    write_config_yaml(data)
+
+    import agentnexus.core.config as cfg
+    if hasattr(cfg, "_settings_cache"):
+        cfg._settings_cache = None
+
+    return {"status": "updated", "persona": persona_data}
 
 
 @router.get("/extensions")
