@@ -1,6 +1,12 @@
 {
   "name": "agentnexus-desktop",
-  "version": "0.2.0",
+  "version": "0.2.4",
+  "description": "AgentNexus Desktop — local AI agent framework GUI",
+  "homepage": "https://github.com/paipaipai666/agent-nexus",
+  "author": {
+    "name": "AgentNexus",
+    "email": "agentnexus@example.com"
+  },
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
