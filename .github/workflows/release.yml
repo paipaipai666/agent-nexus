@@ -7,11 +7,11 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-backend:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,21 +19,75 @@ jobs:
           python-version: '3.11'
       - name: Install deps
         run: pip install pyinstaller .
-      - name: Build
+      - name: Build backend binary
         run: pyinstaller agentnexus.spec --noconfirm
-      - name: Upload artifact
+      - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: agentnexus-${{ matrix.os }}
-          path: dist/*
+          name: backend-${{ matrix.os }}
+          path: dist/agentnexus*
+
+  build-desktop:
+    needs: build-backend
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Download backend binary
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-${{ matrix.os }}
+          path: dist/
+      - name: Make backend executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x dist/agentnexus
+      - name: Build desktop app
+        working-directory: desktop
+        run: npm run build
+      - name: Upload desktop artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            desktop/release/*.exe
+      - name: Upload desktop artifacts (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: |
+            desktop/release/*.dmg
+      - name: Upload desktop artifacts (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: |
+            desktop/release/*.AppImage
+            desktop/release/*.deb
 
   release:
-    needs: build
+    needs: [build-backend, build-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
+      - name: List release files
+        run: find . -type f -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name 'agentnexus*' | grep -v node_modules | sort
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: agentnexus-*/*
+          files: |
+            backend-*/*
+            desktop-*/*
           generate_release_notes: true

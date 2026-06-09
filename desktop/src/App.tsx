@@ -1,8 +1,10 @@
+import { useState, useCallback, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import ThemeProvider from './components/theme/ThemeProvider'
 import SessionProvider from './components/session/SessionProvider'
 import SettingsLayout from './components/settings/SettingsLayout'
+import LoadingScreen from './components/LoadingScreen'
 import ChatPage from './pages/ChatPage'
 import KnowledgePage from './pages/KnowledgePage'
 import SkillsPage from './pages/SkillsPage'
@@ -17,7 +19,31 @@ import AuditPage from './pages/AuditPage'
 import EvalPage from './pages/EvalPage'
 import WikiPage from './pages/WikiPage'
 
+const DEFAULT_BACKEND_PORT = 18765
+
 export default function App() {
+  const [backendReady, setBackendReady] = useState(false)
+  const [backendPort, setBackendPort] = useState(DEFAULT_BACKEND_PORT)
+
+  useEffect(() => {
+    // In Electron, get the actual port from the main process
+    window.electronAPI?.getBackendStatus().then((status) => {
+      if (status.port) setBackendPort(status.port)
+    })
+  }, [])
+
+  const handleReady = useCallback(() => {
+    setBackendReady(true)
+  }, [])
+
+  if (!backendReady) {
+    return (
+      <ThemeProvider>
+        <LoadingScreen onReady={handleReady} backendPort={backendPort} />
+      </ThemeProvider>
+    )
+  }
+
   return (
     <ThemeProvider>
       <SessionProvider>

@@ -1,0 +1,45 @@
+appId: com.agentnexus.desktop
+productName: AgentNexus
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+
+extraResources:
+  - from: "../dist/agentnexus"
+    to: "backend/agentnexus"
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  extraResources:
+    - from: "../dist/agentnexus.exe"
+      to: "backend/agentnexus.exe"
+      filter:
+        - "**/*"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
