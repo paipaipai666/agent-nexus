@@ -4,8 +4,8 @@
   "description": "AgentNexus Desktop — local AI agent framework GUI",
   "homepage": "https://github.com/paipaipai666/agent-nexus",
   "author": {
-    "name": "AgentNexus",
-    "email": "agentnexus@example.com"
+    "name": "pai",
+    "email": "2921839932@qq.com"
   },
   "private": true,
   "main": "dist-electron/main.js",

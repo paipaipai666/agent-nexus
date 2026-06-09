@@ -69,7 +69,7 @@ jobs:
           path: dist/
       - name: Make backend executable (Linux/macOS)
         if: runner.os != 'Windows'
-        run: chmod +x dist/agentnexus
+        run: chmod +x dist/agentnexus-*
       - name: Verify backend binary
         shell: bash
         run: |
