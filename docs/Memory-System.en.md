@@ -20,17 +20,23 @@ User interaction → MemoryManager (throughout Agent lifecycle)
     ├── refresh_ltm_context()
     │
     ├── conclude(question, answer)
-    │     ├── PII masking
-    │     ├── Pre-filter (_should_extract): signal words + length/pattern checks
-    │     ├── LLM extraction → 3 memory categories (fact/preference/note)
-    │     ├── Semantic dedup (cosine similarity ≥ 0.90 → skip)
-    │     ├── Conflict detection (fact/preference: LLM detects contradiction → supersede old)
-    │     └── Encode + save LTM (SQLite + ChromaDB)
+    │     ├── Two-level pre-filter
+    │     │     ├── Level 1: Rule filter (0ms) — fast pass for strong signals, fast reject for useless formats
+    │     │     └── Level 2: LLM gate (boundary cases only) — with circuit breaker protection
+    │     ├── PII masking (input side)
+    │     ├── LLM extraction → 3 categories (fact/preference/note), with PII source control
+    │     ├── Five-segment fine-grained pipeline
+    │     │     ├── Segment 1 (unlocked): LLM extraction
+    │     │     ├── Segment 1.5 (unlocked): Embedding generation
+    │     │     ├── Segment 2 (locked): Semantic dedup (cosine ≥ 0.90 → skip)
+    │     │     ├── Segment 3 (unlocked): LLM conflict detection (all categories)
+    │     │     └── Segment 4 (locked): Double-check + save LTM
+    │     └── PII regex fallback (output side)
     │
     └── run_reflection() — periodic reflection
           ├── Fetch recent note-category memories (≥ 5 required)
           ├── LLM distills higher-level patterns → save as fact/preference
-          └── Mark original notes as superseded_by
+          └── Mark original notes as superseded_by (idempotent)
 ```
 
 ## STM Compression Pyramid
@@ -66,14 +72,22 @@ Non-destructive read-time compression that automatically selects a strategy base
 
 **Search scoring**:
 ```
-score = cosine_similarity × 0.6 + importance × 0.2 + decay × 0.2
-decay = 1.0 / (1.0 + age_hours / 168)   // 7-day half-life
+score = cosine_similarity × 0.55 + effective_importance × 0.25 + time_decay × 0.20
+
+effective_importance = min(1.0, base_importance + 0.1 × min(2.0, log(1 + access_count)))
+time_decay = 2^(-age_hours / half_life)
+  - fact/preference: half_life = None (no decay, permanent)
+  - note: half_life = 48 hours
 ```
 
+**Write behavior**:
+- Same content+category already exists: importance boosted by 0.05 (capped at 1.0), refreshes `last_accessed_at` (does NOT modify `created_at`)
+- `mark_superseded()` is idempotent: already-superseded memories are not overwritten
+
 **Eviction strategy** (exceeds `max_memories`):
-1. `_compact_low_score()` — merge low-score entries by category
-2. Delete by `importance ASC, created_at ASC` (sync delete from ChromaDB)
-3. Clean TTL-expired entries (default 90 days)
+1. `_compact_low_score()` — merge low-score entries by category (importance 0.3-0.6, merge when >5 entries)
+2. Delete by `(importance + access_boost) × 0.6 + decay × 0.4 ASC` (sync delete from ChromaDB)
+3. Clean TTL-expired entries (note default 90 days, fact/preference never expire)
 
 **Importance categories** (3-category system):
 
@@ -119,3 +133,29 @@ Preview (first 500 chars): {preview}
 4. Semantic dedup: skips if cosine similarity >= 0.90 with existing memory
 
 Reflected memories are saved with a `[Reflection]` prefix, importance range 0.7-0.95.
+
+## Structured Monitoring (metrics.py)
+
+`MemoryMetrics` singleton provides thread-safe counters for monitoring pipeline health:
+
+| Metric | Meaning |
+|--------|---------|
+| `writes_total` | Total memories successfully written to LTM |
+| `writes_skipped_dedup` | Skipped by semantic dedup |
+| `writes_skipped_gate` | Intercepted by LLM gate |
+| `writes_skipped_gate_error` | Gate network/API exceptions |
+| `writes_skipped_gate_format_error` | Gate output format anomalies (model degradation signal) |
+| `pii_masked_count` | PII regex fallback catches (source control failure signal) |
+| `conflicts_detected` | Conflict detection hits |
+| `superseded_count` | Memories superseded |
+| `deletions_expired` | TTL-expired deletions |
+| `deletions_evicted` | Eviction deletions |
+| `searches_total` / `searches_hit` | Total LTM searches / hits |
+| `extraction_attempts` / `extraction_successes` | Extraction attempts / successes |
+
+**Key alerts**:
+- `writes_skipped_gate_format_error` growing → model degradation or prompt change causing format anomalies
+- `pii_masked_count > 0` → LLM source control failing, check prompt or model version
+- `conflict_rate > 0.3` → memory writes too aggressive, consider tightening gate
+
+Access via `get_metrics().report()` for dict snapshot, compatible with Prometheus or FastAPI `/metrics` endpoint.

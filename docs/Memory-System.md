@@ -20,17 +20,23 @@
     ├── refresh_ltm_context()
     │
     ├── conclude(question, answer)
-    │     ├── PII 脱敏
-    │     ├── 预过滤 (_should_extract): 信号词检测 + 长度/模式判断
-    │     ├── LLM 提取 → 3 类记忆 (fact/preference/note)
-    │     ├── 语义去重 (cosine similarity ≥ 0.90 → 跳过)
-    │     ├── 冲突检测 (fact/preference 类: LLM 判断矛盾 → 覆盖旧记忆)
-    │     └── 编码 + 保存 LTM (SQLite + ChromaDB)
+    │     ├── 两级预过滤
+    │     │     ├── 第一级：规则过滤（0ms）— 强信号快速通过、格式无用快速拒绝
+    │     │     └── 第二级：LLM 门控（仅边界情况）— 含熔断器保护
+    │     ├── PII 脱敏（输入侧）
+    │     ├── LLM 提取 → 3 类记忆 (fact/preference/note)，含 PII 源头控制
+    │     ├── 五段细粒度管道
+    │     │     ├── 段1（无锁）：LLM 提取
+    │     │     ├── 段1.5（无锁）：Embedding 生成
+    │     │     ├── 段2（锁内）：语义去重 (cosine ≥ 0.90 → 跳过)
+    │     │     ├── 段3（无锁）：LLM 冲突检测（全类别）
+    │     │     └── 段4（锁内）：double check + 保存 LTM
+    │     └── PII 正则兜底（输出侧）
     │
     └── run_reflection() — 周期性反思
           ├── 拉取近期 note 类记忆 (≥ 5 条)
           ├── LLM 归纳高阶模式 → 保存为 fact/preference
-          └── 标记原始 note 为 superseded_by
+          └── 标记原始 note 为 superseded_by（幂等）
 ```
 
 ## STM 压缩金字塔
@@ -66,14 +72,22 @@
 
 **搜索评分**：
 ```
-score = cosine_similarity × 0.6 + importance × 0.2 + decay × 0.2
-decay = 1.0 / (1.0 + age_hours / 168)   // 7 天半衰期
+score = cosine_similarity × 0.55 + effective_importance × 0.25 + time_decay × 0.20
+
+effective_importance = min(1.0, base_importance + 0.1 × min(2.0, log(1 + access_count)))
+time_decay = 2^(-age_hours / half_life)
+  - fact/preference: half_life = None (无衰减，永久)
+  - note: half_life = 48 小时
 ```
 
+**写入行为**：
+- 相同内容+类别已存在：importance 提升 0.05（上限 1.0），刷新 `last_accessed_at`（不修改 `created_at`）
+- `mark_superseded()` 幂等：已被替代的记忆不会被覆盖
+
 **驱逐策略**（超出 `max_memories`）：
-1. `_compact_low_score()` — 合并同 category 低分条目
-2. 按 `importance ASC, created_at ASC` 删除超出部分（同步删 ChromaDB）
-3. 清理 TTL 过期条目（默认 90 天）
+1. `_compact_low_score()` — 合并同 category 低分条目（importance 0.3-0.6，>5 条时合并）
+2. 按 `(importance + access_boost) × 0.6 + decay × 0.4 ASC` 删除超出部分（同步删 ChromaDB）
+3. 清理 TTL 过期条目（note 默认 90 天，fact/preference 永不过期）
 
 **重要性类别**（3 类体系）：
 
@@ -117,3 +131,29 @@ LLM 提取时可返回每条记忆的自定义 importance（0.0-1.0），优先�
 4. 语义去重：与已有记忆 cosine similarity ≥ 0.90 则跳过
 
 反射后的记忆以 `[Reflection]` 前缀保存，importance 范围 0.7-0.95。
+
+## 结构化监控（metrics.py）
+
+`MemoryMetrics` 单例提供线程安全的计数器，监控记忆管道健康状态：
+
+| 指标 | 含义 |
+|------|------|
+| `writes_total` | 成功写入 LTM 的记忆总数 |
+| `writes_skipped_dedup` | 语义去重跳过的次数 |
+| `writes_skipped_gate` | LLM 门控拦截的次数 |
+| `writes_skipped_gate_error` | 门控网络/API 异常次数 |
+| `writes_skipped_gate_format_error` | 门控输出格式异常次数（模型退化信号） |
+| `pii_masked_count` | PII 正则兜底拦截次数（源头控制失效信号） |
+| `conflicts_detected` | 冲突检测命中次数 |
+| `superseded_count` | 被替代的记忆数 |
+| `deletions_expired` | TTL 过期删除数 |
+| `deletions_evicted` | 淘汰删除数 |
+| `searches_total` / `searches_hit` | LTM 搜索总数 / 命中数 |
+| `extraction_attempts` / `extraction_successes` | 提取尝试 / 成功次数 |
+
+**关键告警**：
+- `writes_skipped_gate_format_error` 持续增长 → 模型退化或 prompt 改动导致输出格式异常
+- `pii_masked_count > 0` → LLM 源头控制失效，需检查 prompt 或模型版本
+- `conflict_rate > 0.3` → 记忆写入过于激进，可能需要收紧门控
+
+通过 `get_metrics().report()` 获取 dict 快照，可对接 Prometheus 或 FastAPI `/metrics` 端点。
