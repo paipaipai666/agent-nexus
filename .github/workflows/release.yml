@@ -64,6 +64,16 @@ jobs:
           file dist/agentnexus* || true
           echo "=== size ==="
           du -sh dist/agentnexus* || true
+      - name: Stage backend binary for electron-builder
+        shell: bash
+        run: |
+          mkdir -p desktop/backend
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/agentnexus.exe desktop/backend/agentnexus.exe
+          else
+            cp dist/agentnexus desktop/backend/agentnexus
+          fi
+          ls -lh desktop/backend/
       - name: Build desktop app
         working-directory: desktop
         run: npx tsc && npx vite build && npx electron-builder --publish never
