@@ -33,6 +33,8 @@ app.add_typer(skill_app, name="skill")
 codegraph_app = typer.Typer(help="Code knowledge graph management")
 app.add_typer(codegraph_app, name="codegraph")
 
+# Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
+import agentnexus.cli.eval  # noqa: E402,F401
 from agentnexus.cli import (
     alerts_cmd,  # noqa: E402
     audit,  # noqa: E402
@@ -50,8 +52,6 @@ from agentnexus.cli import (
     tui_cmd,  # noqa: E402
     wiki_cmd,  # noqa: E402
 )
-# Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
-import agentnexus.cli.eval  # noqa: E402,F401
 
 
 def _continue_session(session_id: str | None) -> None:

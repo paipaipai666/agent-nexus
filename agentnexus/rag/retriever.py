@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.prompts import load_prompt
-from agentnexus.storage.chroma import insert_documents, resolve_collection_name, upsert_documents
+from agentnexus.storage.chroma import resolve_collection_name, upsert_documents
 from agentnexus.storage.chroma import search as chroma_search
 
 from . import ranking as _ranking

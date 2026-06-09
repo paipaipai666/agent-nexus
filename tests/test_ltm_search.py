@@ -4,7 +4,6 @@ Run: python -m tests.test_ltm_search
 """
 
 import math
-import tempfile
 import os
 import sys
 

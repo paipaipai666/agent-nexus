@@ -15,11 +15,8 @@ from agentnexus.core.config import get_settings
 
 from .models import (
     CanonicalDefinition,
-    ConfidenceLevel,
     DefinitionEntry,
     ReviewItem,
-    ReviewPriority,
-    ReviewStatus,
     WikiPage,
     WikiStatement,
 )

@@ -5,7 +5,7 @@ and that token consumption stays within reasonable limits.
 """
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentnexus.observability.stats import _cost, compute_stats
 

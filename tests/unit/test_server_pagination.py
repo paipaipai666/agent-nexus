@@ -1,6 +1,5 @@
 """Tests for agentnexus.server.pagination."""
 
-import pytest
 
 from agentnexus.server.pagination import PageParams, paginate
 

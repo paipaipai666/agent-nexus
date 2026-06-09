@@ -1,17 +1,17 @@
 """Tests for web_search structured tool."""
-from unittest.mock import MagicMock, patch
 from time import monotonic
+from unittest.mock import MagicMock, patch
 
 from agentnexus.tools.web_search import (
-    _pick_depth,
-    _make_cache_key,
+    _cache,
     _cache_get,
     _cache_set,
+    _make_cache_key,
+    _pick_depth,
     clear_search_cache,
     clear_seen_urls,
     web_search,
     web_search_structured,
-    _cache,
 )
 
 

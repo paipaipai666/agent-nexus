@@ -1,9 +1,12 @@
 """Verify all Phase 1 components are working."""
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 1. Categories merged
 from agentnexus.memory.extraction import MEMORY_CATEGORIES, migrate_category
+
 print("[1] Categories:", list(MEMORY_CATEGORIES.keys()))
 assert list(MEMORY_CATEGORIES.keys()) == ["fact", "preference", "note"]
 
@@ -14,7 +17,8 @@ assert migrate_category("task_progress") == "note"
 print("[2] Category migration OK")
 
 # 3. memory_save accepts new categories
-from agentnexus.tools.memory_save import _VALID_CATEGORIES, _CATEGORY_MIGRATION
+from agentnexus.tools.memory_save import _CATEGORY_MIGRATION, _VALID_CATEGORIES
+
 assert "fact" in _VALID_CATEGORIES
 assert "preference" in _VALID_CATEGORIES
 assert "note" in _VALID_CATEGORIES
@@ -23,6 +27,7 @@ print("[3] memory_save categories OK")
 
 # 4. TTL config
 from agentnexus.memory.long_term import LongTermMemory
+
 assert LongTermMemory._CATEGORY_TTL["fact"] is None
 assert LongTermMemory._CATEGORY_TTL["preference"] is None
 assert LongTermMemory._CATEGORY_TTL["note"] == 90
@@ -36,6 +41,7 @@ print(f"[5] Dynamic importance OK: base=0.7, access=10 -> effective={eff:.3f}")
 
 # 6. Prompt updated
 from agentnexus.prompts import load_prompt
+
 prompt = load_prompt("memory_extract")
 assert "fact" in prompt
 assert "preference" in prompt
@@ -44,6 +50,7 @@ print("[6] Extraction prompt OK")
 
 # 7. memory_search uses new categories
 from agentnexus.tools.memory_search import _is_entity_query
+
 assert _is_entity_query("你知道我叫什么吗")
 print("[7] memory_search OK")
 

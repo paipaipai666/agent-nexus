@@ -141,8 +141,8 @@ class SearchToolProvider:
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.grep_search import grep_search
         from agentnexus.tools.kb_search import kb_search
-        from agentnexus.tools.web_search import web_search
         from agentnexus.tools.web_fetch import web_fetch
+        from agentnexus.tools.web_search import web_search
 
         before = set(executor.list_tools())
         if context.want("grep_search"):
@@ -734,6 +734,7 @@ class BrowserToolProvider:
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         from agentnexus.tools.browser import (
             browser_click,
+            browser_dismiss_popup,
             browser_evaluate,
             browser_list_pages,
             browser_navigate,
@@ -746,7 +747,6 @@ class BrowserToolProvider:
             browser_type,
             browser_wait,
             browser_wait_navigation,
-            browser_dismiss_popup,
         )
 
         before = set(executor.list_tools())

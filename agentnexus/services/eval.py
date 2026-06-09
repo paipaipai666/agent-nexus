@@ -10,15 +10,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any, Callable
 
 from agentnexus.evaluation.baseline import BaselineManager
 from agentnexus.evaluation.dataset import EvalDataset
-from agentnexus.evaluation.harness import EvalHarness, HarnessConfig, SuiteReport
-from agentnexus.evaluation.task import EvalSuite, EvalTask
+from agentnexus.evaluation.harness import EvalHarness, HarnessConfig
+from agentnexus.evaluation.task import EvalTask
 
 logger = logging.getLogger(__name__)
 

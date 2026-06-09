@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from agentnexus.evaluation.utils import load_all_traces
 

@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,10 +15,7 @@ from agentnexus.tools.mcp_capabilities import (
     import_server_capabilities,
 )
 from agentnexus.tools.mcp_schema import (
-    MCPPromptDescriptor,
-    MCPResourceDescriptor,
     MCPToolDescriptor,
-    ServerRuntime,
 )
 
 

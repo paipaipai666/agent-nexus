@@ -3,9 +3,13 @@ from unittest.mock import MagicMock
 
 from agentnexus.rag.retriever import (
     _dedupe_preserve_order as dedupe_preserve_order,
+)
+from agentnexus.rag.retriever import (
+    _looks_like_question as looks_like_question,
+)
+from agentnexus.rag.retriever import (
     expand_queries,
     generate_hypothetical_document,
-    _looks_like_question as looks_like_question,
     rewrite_query,
 )
 

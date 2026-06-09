@@ -1,6 +1,5 @@
 """Tests for agentnexus.core.text_utils.collapse_and_truncate."""
 
-import pytest
 
 from agentnexus.core.text_utils import collapse_and_truncate
 

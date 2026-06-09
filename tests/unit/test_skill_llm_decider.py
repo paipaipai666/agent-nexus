@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentnexus.skills.registry import SkillEntry
-from agentnexus.skills.router.llm_decider import LLMDecision, _parse_decision, decide_with_llm
+from agentnexus.skills.router.llm_decider import _parse_decision, decide_with_llm
 from agentnexus.skills.router.types import SkillRoute
 from agentnexus.skills.workflow import Workflow
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 

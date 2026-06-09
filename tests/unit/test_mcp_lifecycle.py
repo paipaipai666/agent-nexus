@@ -4,11 +4,9 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_lifecycle import close_all, connect_all, disconnect_server
-from agentnexus.tools.mcp_schema import MCPServerState, ServerRuntime
+from agentnexus.tools.mcp_schema import MCPServerState
 
 
 def _make_config(name="test_server"):

@@ -169,7 +169,6 @@ class ShortTermMemory:
         return total
 
     def _estimate_tokens_fallback(self) -> int:
-        import re
         total = 0
         for m in self._messages:
             total += self._estimate_msg_tokens(m)

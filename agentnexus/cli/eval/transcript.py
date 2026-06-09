@@ -17,12 +17,10 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
-from agentnexus.cli import eval_app, console
+from agentnexus.cli import console, eval_app
 
 app = typer.Typer(name="transcript", help="Transcript 查看和分析")
 eval_app.add_typer(app, name="transcript")
@@ -164,8 +162,10 @@ def transcript_show(
 def _show_grader_scores(spans: list[dict]) -> None:
     """对 transcript 运行所有 grader 并显示结果。"""
     from agentnexus.evaluation.graders import (
-        TrajectoryGraderAdapter, HallucinationGraderAdapter,
-        TranscriptGrader, GraderConfig,
+        GraderConfig,
+        HallucinationGraderAdapter,
+        TrajectoryGraderAdapter,
+        TranscriptGrader,
     )
 
     console.print("\n[bold]Grader Scores:[/bold]\n")

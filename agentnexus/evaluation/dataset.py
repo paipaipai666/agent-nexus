@@ -16,15 +16,12 @@ from typing import Any
 import yaml
 
 from agentnexus.evaluation.task import (
-    EvalTask,
     EvalSuite,
+    EvalTask,
     TaskCategory,
-    TaskDifficulty,
-    EvalType,
     _parse_task,
-    _parse_suite,
-    load_task_from_yaml,
     load_suite_from_yaml,
+    load_task_from_yaml,
 )
 
 logger = logging.getLogger(__name__)

@@ -15,7 +15,6 @@ from .models import (
     QueryDecision,
     SynthesisLevel,
     WikiPage,
-    WikiStatement,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,13 +62,13 @@ class ConfidenceRouter:
             return ConfidenceLevel.HIGH.value
 
         # Rule 1: Any untrusted → page is untrusted
-        if any(l == ConfidenceLevel.UNTRUSTED.value for l in levels):
+        if any(lv == ConfidenceLevel.UNTRUSTED.value for lv in levels):
             return ConfidenceLevel.UNTRUSTED.value
 
         # Count high-trust statements
         high_count = sum(
-            1 for l in levels
-            if l in (SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value)
+            1 for lv in levels
+            if lv in (SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value)
         )
         total = len(levels)
         ratio = high_count / total
@@ -83,7 +82,7 @@ class ConfidenceRouter:
             return ConfidenceLevel.MEDIUM.value
 
         # Rule 4: Has synthesis statements → low
-        if any(l == SynthesisLevel.SYNTHESIS.value for l in levels):
+        if any(lv == SynthesisLevel.SYNTHESIS.value for lv in levels):
             return ConfidenceLevel.LOW.value
 
         # Rule 5: Default

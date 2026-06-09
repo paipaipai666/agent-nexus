@@ -1,10 +1,13 @@
 """Verify all Phase 2 components are working."""
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 2D: Conflict detection
-from agentnexus.memory.extraction import _check_conflict, MEMORY_CATEGORIES
-from agentnexus.memory.long_term import LongTermMemory, SCHEMA
+from agentnexus.memory.extraction import _check_conflict
+from agentnexus.memory.long_term import SCHEMA, LongTermMemory
+
 print("[2D] Conflict detection:")
 print("  - _check_conflict function exists:", callable(_check_conflict))
 print("  - superseded_by in SCHEMA:", "superseded_by" in SCHEMA)
@@ -12,12 +15,14 @@ print("  - mark_superseded method exists:", hasattr(LongTermMemory, "mark_supers
 
 # Verify superseded filtering in search
 import inspect
+
 search_src = inspect.getsource(LongTermMemory.search)
 assert "superseded_by IS NULL" in search_src or "superseded_by" in search_src
 print("  - Search filters superseded: OK")
 
 # 2E: Recall strategy
-from agentnexus.tools.memory_search import _diversify_results, _truncate_content, _MAX_CONTENT_TOKENS
+from agentnexus.tools.memory_search import _MAX_CONTENT_TOKENS, _diversify_results, _truncate_content
+
 print("\n[2E] Recall strategy:")
 print("  - Max content tokens:", _MAX_CONTENT_TOKENS)
 
@@ -42,6 +47,7 @@ print(f"  - Diversification OK: {cats}")
 
 # 2F: Pre-filter
 from agentnexus.memory.manager import MemoryManager
+
 print("\n[2F] Pre-filter:")
 print("  - _should_extract exists:", hasattr(MemoryManager, "_should_extract"))
 print("  - _MEMORY_SIGNALS count:", len(MemoryManager._MEMORY_SIGNALS))

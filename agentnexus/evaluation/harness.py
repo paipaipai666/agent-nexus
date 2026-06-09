@@ -13,21 +13,19 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from agentnexus.evaluation.task import EvalSuite, EvalTask
-from agentnexus.evaluation.trial import AggregateMetrics, TaskReport, TrialResult
 from agentnexus.evaluation.graders import (
-    BaseGrader,
-    CompositeGrader,
     create_composite_grader,
 )
 from agentnexus.evaluation.statistics import (
     compute_pass_metrics,
-    compute_trial_consistency,
     compute_saturation_score,
+    compute_trial_consistency,
 )
+from agentnexus.evaluation.task import EvalSuite, EvalTask
+from agentnexus.evaluation.trial import AggregateMetrics, TaskReport, TrialResult
 
 logger = logging.getLogger(__name__)
 

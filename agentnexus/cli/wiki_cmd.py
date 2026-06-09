@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from . import console, wiki_app
@@ -136,7 +135,7 @@ def wiki_lint(
         console.print(f"  [{color}]{priority_label}[/{color}] {item['description'][:120]}")
 
     if enqueue:
-        console.print(f"\n[dim]Items added to review queue.[/dim]")
+        console.print("\n[dim]Items added to review queue.[/dim]")
 
 
 # ── wiki review ─────────────────────────────────────────────────────

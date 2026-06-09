@@ -163,10 +163,10 @@ def run_reflection(days: int = 7, max_memories: int = 50):
     Reviews note-category memories from the last N days, identifies recurring patterns,
     and saves distilled insights as fact/preference memories.
     """
-    from agentnexus.memory.reflection import run_reflection as _run_reflection
-    from agentnexus.memory.long_term import get_long_term_memory
-    from agentnexus.rag.embeddings import get_embedding_model
     from agentnexus.core.llm import AgentLLM
+    from agentnexus.memory.long_term import get_long_term_memory
+    from agentnexus.memory.reflection import run_reflection as _run_reflection
+    from agentnexus.rag.embeddings import get_embedding_model
 
     ltm = get_long_term_memory()
     if not ltm:

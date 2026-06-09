@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import sys
 from time import monotonic
 from typing import Any
 
@@ -150,7 +149,7 @@ class ComputerUseManager:
         settings = get_settings()
         preferred = settings.computer_use_backend
 
-        from agentnexus.tools.computer_use.backends import get_backend, _detect_platform
+        from agentnexus.tools.computer_use.backends import _detect_platform, get_backend
 
         platform = preferred if preferred != "auto" else _detect_platform()
         self._backend = get_backend(preferred)

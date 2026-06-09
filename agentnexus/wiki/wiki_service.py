@@ -10,23 +10,15 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag import embeddings as embedding_service
-from agentnexus.rag.store import get_knowledge_base_catalog
 
 from .calibration import CalibrationSample, run_calibration
-from .confidence import ConfidenceRouter, QueryRouteResult
+from .confidence import ConfidenceRouter
 from .lint import WikiLinter
 from .models import (
-    CanonicalDefinition,
-    ConfidenceLevel,
-    DefinitionEntry,
     QueryDecision,
-    SynthesisLevel,
     WikiPage,
-    WikiStatement,
 )
 from .propagation import PropagationEngine
 from .store import WikiStore, get_wiki_store

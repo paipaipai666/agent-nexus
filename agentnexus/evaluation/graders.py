@@ -12,12 +12,10 @@ from __future__ import annotations
 import re
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any
 
-from agentnexus.evaluation.task import GraderConfig, ScoringMode
+from agentnexus.evaluation.task import EvalTask, GraderConfig, ScoringMode
 from agentnexus.evaluation.trial import GraderScore, TrialResult
-
 
 # ---------------------------------------------------------------------------
 # Base Grader

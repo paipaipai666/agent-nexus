@@ -102,6 +102,7 @@ def check_disk_space() -> dict[str, Any]:
     """检查磁盘空间"""
     try:
         import shutil
+
         from agentnexus.core.config import _config_dir
         usage = shutil.disk_usage(str(_config_dir()))
         free_gb = usage.free / (1024 ** 3)

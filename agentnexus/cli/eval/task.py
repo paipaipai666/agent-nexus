@@ -13,15 +13,13 @@
 from __future__ import annotations
 
 import json
-import sys
 from typing import Optional
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from agentnexus.cli import eval_app, console
+from agentnexus.cli import console, eval_app
 
 # 注册 task 和 suite 子命令到 eval_app
 task_app = typer.Typer(name="task", help="评估任务管理")

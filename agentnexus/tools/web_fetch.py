@@ -189,7 +189,7 @@ def web_fetch(
             parts.append(f"URL: {url}\n\n{content}")
 
     if failed_urls:
-        parts.append(f"\n[抓取失败] 以下URL未能成功获取:\n" +
+        parts.append("\n[抓取失败] 以下URL未能成功获取:\n" +
                       "\n".join(f"  - {u}" for u in failed_urls))
 
     result = "\n\n---\n\n".join(parts)

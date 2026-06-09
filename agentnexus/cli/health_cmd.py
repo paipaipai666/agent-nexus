@@ -2,8 +2,6 @@
 
 import logging
 
-import typer
-
 logger = logging.getLogger(__name__)
 
 from . import app, console
@@ -14,7 +12,6 @@ def health():
     """Run system health checks."""
     from rich.panel import Panel
 
-    from agentnexus.app.runtime import AppRuntime
     from agentnexus.core.config import get_settings
     from agentnexus.server.health_checks import run_health_checks
 
@@ -22,7 +19,6 @@ def health():
         settings = get_settings()
         # 构建轻量 runtime 用于健康检查
         from agentnexus.core.llm import AgentLLM
-        from agentnexus.tools.registry import ToolRegistry
 
         # 构造一个最小 runtime 对象给 health_checks 使用
         class _MiniRuntime:

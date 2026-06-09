@@ -19,9 +19,9 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="Statistics for the l
 
     try:
         s = compute_stats(get_settings().traces_dir, days)
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to compute statistics")
-        console.print(f"[red]Failed to compute statistics. Check that trace files are valid.[/red]")
+        console.print("[red]Failed to compute statistics. Check that trace files are valid.[/red]")
         raise SystemExit(1)
 
     if s.total_tasks == 0:

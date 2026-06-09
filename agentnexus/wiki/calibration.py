@@ -8,13 +8,12 @@ engineering calibration against a human-labeled sample.
 from __future__ import annotations
 
 import logging
-import random
 from dataclasses import dataclass, field
 from typing import Any
 
 from .models import SynthesisLevel, WikiStatement
 from .store import WikiStore
-from .verifier import MechanicalVerifier, jaccard_similarity, cosine_similarity
+from .verifier import MechanicalVerifier
 
 logger = logging.getLogger(__name__)
 

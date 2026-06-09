@@ -39,7 +39,7 @@ def serve(
         else:
             console.print(f"[red]Server failed to start: {e}[/red]")
         raise SystemExit(1)
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected server startup error")
-        console.print(f"[red]Server failed to start. Check logs for details.[/red]")
+        console.print("[red]Server failed to start. Check logs for details.[/red]")
         raise SystemExit(1)

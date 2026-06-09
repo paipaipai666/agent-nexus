@@ -1,6 +1,5 @@
 """Tests for agentnexus.cli.eval.common: formatting and detection helpers."""
 
-import pytest
 
 from agentnexus.cli.eval.common import (
     _detect_embedding_device,

@@ -7,9 +7,8 @@ manager, and provider registration. Uses mocks — no real desktop required.
 from __future__ import annotations
 
 import asyncio
-import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -19,12 +18,9 @@ from agentnexus.tools.computer_use.element import (
     normalize_role,
 )
 from agentnexus.tools.computer_use.snapshot import (
-    INTERACTIVE_ROLES,
-    READING_ROLES,
     format_desktop_numbered,
     format_desktop_yaml,
 )
-
 
 # ---------------------------------------------------------------------------
 # Async test helper
@@ -608,7 +604,6 @@ class TestToolFunctions:
         assert "ERROR" in result
 
     def test_scroll_invalid_direction(self, mock_settings):
-        from agentnexus.tools.computer_use.tools import computer_scroll
         with patch("agentnexus.tools.computer_use.tools._run_async", side_effect=lambda coro: coro):
             # Direct async test
             from agentnexus.tools.computer_use.tools import _async_scroll

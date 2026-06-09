@@ -16,7 +16,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag import embeddings as embedding_service
 
 from .models import ReviewItem, ReviewPriority, ReviewStatus
 from .store import WikiStore

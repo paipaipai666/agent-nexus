@@ -116,8 +116,8 @@ def test_rules_recall_on_yes_with_signals():
     """Rule filter should catch all 'yes' samples that contain strong signals."""
     predictions = _run_gate_dry_run()
     signal_samples = [
-        (q, a, l) for q, a, l in SAMPLES
-        if l == "yes" and any(
+        (q, a, label) for q, a, label in SAMPLES
+        if label == "yes" and any(
             sig in q + a
             for sig in ["记住", "我叫", "我的名字", "我喜欢", "我不喜欢", "以后都", "偏好"]
         )

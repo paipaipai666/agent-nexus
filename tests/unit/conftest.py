@@ -1,7 +1,8 @@
 """Unit test conftest — mock embedding model to avoid HuggingFace downloads."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture(autouse=True)

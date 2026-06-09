@@ -269,7 +269,6 @@ class WindowsBackend(ComputerUseBackend):
         except ImportError:
             # Fallback to Windows API
             import ctypes
-            from ctypes import wintypes
             CF_UNICODETEXT = 13
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
@@ -295,7 +294,6 @@ class WindowsBackend(ComputerUseBackend):
             pyperclip.copy(text)
         except ImportError:
             import ctypes
-            from ctypes import wintypes
             CF_UNICODETEXT = 13
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32

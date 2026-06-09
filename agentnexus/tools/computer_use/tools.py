@@ -7,7 +7,6 @@ Each follows the sync wrapper + _run_async() pattern from browser.py.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from agentnexus.core.config import get_settings
 from agentnexus.tools.computer_use.manager import (

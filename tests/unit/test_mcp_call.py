@@ -2,12 +2,12 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentnexus.tools.mcp_call import call_descriptor, run_with_limiter
-from agentnexus.tools.mcp_schema import MCPToolDescriptor, ServerRuntime
+from agentnexus.tools.mcp_schema import MCPToolDescriptor
 
 
 def _make_descriptor(**overrides):

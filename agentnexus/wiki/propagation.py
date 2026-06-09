@@ -13,12 +13,11 @@ Propagation is depth-limited (default 3) to prevent chain reactions.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from agentnexus.core.config import get_settings
 
 from .confidence import ConfidenceRouter
-from .models import ReviewItem, ReviewPriority, ReviewStatus, WikiStatement
+from .models import WikiStatement
 from .store import WikiStore
 from .verifier import MechanicalVerifier
 

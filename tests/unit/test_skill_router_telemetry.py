@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import asdict
-from pathlib import Path
-
-import pytest
 
 from agentnexus.skills.router.telemetry import RouteEvent, RouteTelemetry
-
 
 # ── Tests for RouteEvent ───────────────────────────────────────────
 

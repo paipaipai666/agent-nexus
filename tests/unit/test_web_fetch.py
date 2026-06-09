@@ -1,15 +1,15 @@
 """Tests for web_fetch tool."""
-from unittest.mock import MagicMock, patch
 from time import monotonic
+from unittest.mock import MagicMock, patch
 
 from agentnexus.tools.web_fetch import (
-    _make_cache_key,
+    _cache,
     _cache_get,
     _cache_set,
+    _make_cache_key,
     clear_fetch_cache,
     web_fetch,
     web_fetch_structured,
-    _cache,
 )
 
 
