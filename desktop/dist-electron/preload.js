@@ -1,9 +1,1 @@
-"use strict";
-const electron = require("electron");
-electron.contextBridge.exposeInMainWorld("electronAPI", {
-  minimize: () => electron.ipcRenderer.send("window-minimize"),
-  maximize: () => electron.ipcRenderer.send("window-maximize"),
-  close: () => electron.ipcRenderer.send("window-close"),
-  isMaximized: () => electron.ipcRenderer.invoke("window-is-maximized"),
-  openExternal: (url) => electron.ipcRenderer.send("open-external", url)
-});
+"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("electronAPI",{minimize:()=>e.ipcRenderer.send("window-minimize"),maximize:()=>e.ipcRenderer.send("window-maximize"),close:()=>e.ipcRenderer.send("window-close"),isMaximized:()=>e.ipcRenderer.invoke("window-is-maximized"),openExternal:n=>e.ipcRenderer.send("open-external",n),getBackendStatus:()=>e.ipcRenderer.invoke("get-backend-status"),onBackendReady:n=>{const r=()=>n();return e.ipcRenderer.on("backend-ready",r),()=>{e.ipcRenderer.removeListener("backend-ready",r)}},onBackendError:n=>{const r=(d,i)=>n(i);return e.ipcRenderer.on("backend-error",r),()=>{e.ipcRenderer.removeListener("backend-error",r)}}});
