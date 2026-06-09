@@ -193,13 +193,14 @@ class LongTermMemory:
         """Update last_accessed_at and increment access_count for the given memory ids."""
         if not ids:
             return
-        placeholders = ",".join("?" for _ in ids)
-        self._conn.execute(
-            f"UPDATE long_term_memories SET last_accessed_at = datetime('now'), "
-            f"access_count = COALESCE(access_count, 0) + 1 WHERE id IN ({placeholders})",
-            ids,
-        )
-        self._conn.commit()
+        with self._lock:
+            placeholders = ",".join("?" for _ in ids)
+            self._conn.execute(
+                f"UPDATE long_term_memories SET last_accessed_at = datetime('now'), "
+                f"access_count = COALESCE(access_count, 0) + 1 WHERE id IN ({placeholders})",
+                ids,
+            )
+            self._conn.commit()
 
     @staticmethod
     def _effective_importance(row: dict) -> float:
@@ -236,13 +237,18 @@ class LongTermMemory:
                 )
                 existing = cur.fetchone()
                 if existing:
+                    # Boost importance on repeated mention, cap at 1.0.
+                    # Update last_accessed_at (TTL refresh) — not created_at (immutable).
+                    boosted = min(existing["importance"] + 0.05, 1.0)
+                    new_importance = max(boosted, importance)
                     self._conn.execute(
                         "UPDATE long_term_memories "
-                        "SET importance = MAX(importance, ?), created_at = datetime('now') "
+                        "SET importance = ?, last_accessed_at = datetime('now') "
                         "WHERE id = ?",
-                        (importance, existing["id"]),
+                        (new_importance, existing["id"]),
                     )
                     chroma_id = existing["chroma_id"]
+                    row_id = existing["id"]
                 else:
                     import uuid
                     chroma_id = uuid.uuid4().hex
@@ -260,6 +266,7 @@ class LongTermMemory:
                         ),
                     )
                     self._write_counter += 1
+                    row_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
                 self._conn.commit()
                 # Ordering note: SQLite commit precedes the ChromaDB upsert below.
@@ -267,6 +274,11 @@ class LongTermMemory:
                 # still persisted and the failure is logged as non-fatal.
                 # The inverse ordering in _evict_if_needed (ChromaDB-first) ensures
                 # we never leave orphan vectors if the ChromaDB delete fails.
+
+                # Post-save eviction (inside lock to keep count check atomic)
+                count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+                if count_row["cnt"] > self._max_memories:
+                    self._evict_if_needed()
 
             if embedding:
                 self._ensure_chroma()
@@ -285,8 +297,6 @@ class LongTermMemory:
                     )
                     self._conn.commit()
 
-            count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
-
             # ── after ltm save hook ────────────────────────────────
             hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
                 "session_id": session_id, "content": content,
@@ -294,8 +304,7 @@ class LongTermMemory:
                 "chroma_id": chroma_id, "total_count": count_row["cnt"],
             })
 
-            if count_row["cnt"] > self._max_memories:
-                self._evict_if_needed()
+            return row_id
 
     def _evict_if_needed(self):
         """Evict oldest/lowest-importance memories when over max_memories."""
@@ -612,12 +621,14 @@ class LongTermMemory:
         ]
 
     def mark_superseded(self, old_id: int, new_id: int) -> None:
-        """Mark an old memory as superseded by a new one."""
-        self._conn.execute(
-            "UPDATE long_term_memories SET superseded_by = ? WHERE id = ?",
-            (new_id, old_id),
-        )
-        self._conn.commit()
+        """Mark an old memory as superseded by a new one. Idempotent: skips if already superseded."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE long_term_memories SET superseded_by = ? "
+                "WHERE id = ? AND superseded_by IS NULL",
+                (new_id, old_id),
+            )
+            self._conn.commit()
 
     def delete(self, memory_id: int):
         with self._lock:

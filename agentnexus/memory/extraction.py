@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import threading
 from typing import Any
 
+from agentnexus.core.pii import contains_pii, mask_pii
+from agentnexus.memory.metrics import get_metrics
 from agentnexus.prompts import load_prompt
 from agentnexus.rag.embeddings import embedding_to_list
+
+logger = logging.getLogger(__name__)
 
 EXTRACT_PROMPT = load_prompt("memory_extract")
 
@@ -52,10 +58,12 @@ def extract_xml_tag(text: str, tag: str) -> str | None:
 
 def parse_memory_payload(response: str) -> dict:
     try:
-        return json.loads(response.strip().lstrip("```json").rstrip("```").strip())
+        text = response.strip()
+        text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+        text = re.sub(r'\n?```\s*$', '', text)
+        return json.loads(text.strip())
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("Failed to parse memory extraction response: %s", e)
+        logger.warning("Failed to parse memory extraction response: %s", e)
         return {}
 
 
@@ -86,6 +94,10 @@ def _check_conflict(llm: Any, old_content: str, new_content: str) -> bool:
         return False
 
 
+# ── module-level lock for the extraction pipeline ───────────────────
+_extraction_lock = threading.Lock()
+
+
 def extract_and_save_memories(
     *,
     llm: Any,
@@ -95,76 +107,82 @@ def extract_and_save_memories(
     question: str,
     answer: str,
 ) -> None:
-    import logging
-    logger = logging.getLogger(__name__)
+    metrics = get_metrics()
+    metrics.incr("extraction_attempts")
 
+    # ── Segment 1: LLM extraction (unlocked — slow network call) ────
     prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
     response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
     data = parse_memory_payload(response)
     saved_count = 0
-    for category, importance, item in iter_memory_items(data):
-        # Use LLM-provided importance if available, else fall back to category default
-        item_importance = importance
-        if isinstance(data.get(category), list):
-            for entry in data[category]:
-                if isinstance(entry, dict):
-                    content = entry.get("content") or entry.get("text") or ""
-                    if content.strip() == item and "importance" in entry:
-                        try:
-                            item_importance = max(0.0, min(1.0, float(entry["importance"])))
-                        except (ValueError, TypeError):
-                            pass
-                        break
 
+    for category, importance, item in iter_memory_items(data):
+        if not item:
+            continue
+
+        # ── PII fallback: regex scan after LLM extraction ───────────
+        # Prompt tells LLM not to extract PII, but LLM is non-deterministic.
+        # This catches phone numbers, emails, IDs that slipped through.
+        if contains_pii(item):
+            item = mask_pii(item)
+            metrics.incr("pii_masked_count")
+            logger.warning("PII detected in extracted memory (source control bypassed), masked: %s", item[:60])
+
+        # ── Segment 1.5: Embedding generation (unlocked — slow compute/API) ──
         vec = embedding_to_list(embed_model.encode(item, normalize_embeddings=True))
 
-        # Semantic dedup: skip if a very similar memory already exists
-        if long_term and vec:
-            existing = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
-            if existing and existing[0].get("_score", 0) >= 0.90:
-                logger.debug("Skipping duplicate memory (similarity=%.2f): %s",
-                             existing[0]["_score"], item[:80])
-                continue
+        # ── Segment 2: Dedup query (locked — fast DB read) ──────────
+        with _extraction_lock:
+            if vec:
+                existing = long_term.search(query_embedding=vec, limit=3, min_similarity=0.90)
+                if existing:
+                    metrics.incr("writes_skipped_dedup")
+                    logger.debug("Skipping duplicate memory: %s", item[:80])
+                    continue
 
-        # Conflict detection for fact/preference categories
-        if long_term and vec and category in ("fact", "preference"):
+        # ── Segment 3: Conflict detection (unlocked — LLM call) ─────
+        conflict_ids: list[int] = []
+        # All categories get conflict detection (note threshold is slightly higher)
+        threshold = 0.75 if category == "note" else 0.70
+        with _extraction_lock:
             candidates = long_term.search(
                 query_embedding=vec, category=category,
-                limit=3, min_similarity=0.70,
-            )
-            for c in candidates:
-                if c.get("_score", 0) >= 0.90:
-                    continue  # already handled by dedup above
-                if _check_conflict(llm, c["content"], item):
-                    logger.info("Conflict detected: '%s' vs '%s', superseding old", item[:40], c["content"][:40])
-                    new_id = long_term.save(
-                        session_id=session_id,
-                        content=item,
-                        category=category,
-                        importance=item_importance,
-                        embedding=vec,
-                    )
-                    long_term.mark_superseded(c["id"], new_id)
-                    saved_count += 1
-                    break
-            else:
-                # No conflict — save normally
-                long_term.save(
-                    session_id=session_id,
-                    content=item,
-                    category=category,
-                    importance=item_importance,
-                    embedding=vec,
-                )
-                saved_count += 1
-        else:
-            long_term.save(
+                limit=3, min_similarity=threshold,
+            ) if vec else []
+        # LLM conflict check outside lock
+        for c in candidates:
+            if c.get("_score", 0) >= 0.90:
+                continue  # already handled by dedup
+            if _check_conflict(llm, c["content"], item):
+                conflict_ids.append(c["id"])
+
+        # ── Segment 4: Double-check + save (locked — fast DB write) ─
+        with _extraction_lock:
+            # Double-check: another thread may have written a duplicate
+            if vec:
+                recheck = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
+                if recheck:
+                    metrics.incr("writes_skipped_dedup")
+                    continue
+
+            new_id = long_term.save(
                 session_id=session_id,
                 content=item,
                 category=category,
-                importance=item_importance,
+                importance=importance,
                 embedding=vec,
             )
+            # Supersede all conflicting old memories (idempotent)
+            for cid in conflict_ids:
+                long_term.mark_superseded(cid, new_id)
+
+            metrics.incr("writes_total")
+            if conflict_ids:
+                metrics.incr("conflicts_detected", len(conflict_ids))
+                metrics.incr("superseded_count", len(conflict_ids))
+                logger.info("Conflict detected: '%s' superseded %d old memories", item[:40], len(conflict_ids))
             saved_count += 1
+
     if saved_count:
+        metrics.incr("extraction_successes")
         logger.debug("Extracted and saved %d memories from conversation", saved_count)

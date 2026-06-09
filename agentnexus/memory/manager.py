@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
@@ -12,8 +13,9 @@ from agentnexus.core.pii import contains_pii as _contains_pii
 from agentnexus.core.pii import mask_pii as _mask_pii
 from agentnexus.memory.compaction import is_recoverable_tool
 from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
-from agentnexus.memory.extraction import extract_and_save_memories
+from agentnexus.memory.extraction import CATEGORY_LABELS, extract_and_save_memories
 from agentnexus.memory.long_term import get_long_term_memory
+from agentnexus.memory.metrics import get_metrics
 from agentnexus.memory.offload import offload_large_result
 from agentnexus.memory.projection import build_projection as build_projected_messages
 from agentnexus.memory.projection import microcompact_messages
@@ -31,16 +33,15 @@ def _extract_xml_tag(text: str, tag: str) -> str | None:
     return match.group(1) if match else None
 
 SUMMARIZE_PROMPT = load_prompt("memory_summarize")
+GATE_PROMPT = load_prompt("memory_gate")
 
-CATEGORY_LABELS = {
-    "user_preference": "偏好",
-    "entity_fact": "事实",
-    "conclusion": "结论",
-    "conversation": "历史",
-    "task_progress": "进展",
-    "error_pattern": "错误模式",
-    "tool_preference": "工具偏好",
-}
+
+class _GateCircuitState(Enum):
+    """Three-state circuit breaker for the LLM memory gate."""
+    CLOSED = "closed"       # normal operation
+    OPEN = "open"           # tripped — reject all LLM gate calls
+    HALF_OPEN = "half_open" # probe — allow one request to test recovery
+
 
 
 
@@ -59,6 +60,10 @@ class MemoryManager:
         self._circuit_open: bool = False
         self._circuit_opened_at: float = 0.0
         self._circuit_half_open: bool = False  # half-open probe state
+        # LLM gate circuit breaker
+        self._gate_state = _GateCircuitState.CLOSED
+        self._gate_failures: int = 0
+        self._gate_opened_at: float = 0.0
         self._microcompacts_since_open: int = 0
         self._compacting: bool = False
         self._last_api_call_ts: float = 0.0
@@ -557,32 +562,86 @@ class MemoryManager:
         except Exception as e:
             logger.warning("LTM extraction failed (non-fatal): %s", e)
 
-    # Signal words that strongly indicate memory-worthy content
-    _MEMORY_SIGNALS = frozenset([
-        "记住", "我是", "我叫", "我喜欢", "我不喜欢", "以后", "偏好",
-        "我的名字", "我住", "我在", "我用", "我喜欢用", "我习惯",
-    ])
+    # ── Two-level filtering: class constants ────────────────────────
+    _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])
+    _STRONG_SIGNALS = frozenset(["记住", "我叫", "我的名字", "我喜欢", "我不喜欢", "以后都", "偏好"])
 
-    # Patterns that indicate low-value tool/transactional queries
-    _SKIP_PATTERNS = frozenset([
-        "怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行",
-    ])
+    _GATE_RECOVERY_SECONDS = 20.0
+
+    def _should_extract_rules(self, question: str, answer: str) -> str:
+        """First-level rule filter. Returns 'yes' / 'no' / 'uncertain'.
+
+        Only filters formatally useless content — does NOT judge importance.
+        Strong signals are checked FIRST to avoid killing short but valuable answers
+        (e.g. "我叫张三" → answer "张三" is <5 chars but contains strong signal "我叫").
+        """
+        combined = question + answer
+        # Strong signals: always pass, regardless of answer length
+        if any(sig in combined for sig in self._STRONG_SIGNALS):
+            return "yes"
+        # Format-level exclusion: empty / whitespace-only
+        if len(answer.strip()) < 5:
+            return "no"
+        # Transactional + very short: tool echo
+        if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 50:
+            return "no"
+        return "uncertain"
+
+    def _gate_on_success(self) -> None:
+        """Reset circuit breaker to CLOSED on successful gate call."""
+        self._gate_state = _GateCircuitState.CLOSED
+        self._gate_failures = 0
+
+    def _gate_on_failure(self) -> None:
+        """Record a gate failure; trip to OPEN if threshold exceeded."""
+        if self._gate_state is _GateCircuitState.HALF_OPEN:
+            # Half-open probe failed → back to OPEN, reset timer
+            self._gate_state = _GateCircuitState.OPEN
+            self._gate_opened_at = time.time()
+            return
+        self._gate_failures += 1
+        if self._gate_failures >= 3:
+            self._gate_state = _GateCircuitState.OPEN
+            self._gate_opened_at = time.time()
 
     def _should_extract(self, question: str, answer: str) -> bool:
-        """Pre-filter: decide if this conversation is worth extracting memories from."""
-        combined = question + answer
-        # Always extract if signal words present
-        if any(sig in combined for sig in self._MEMORY_SIGNALS):
-            return True
-        # Skip very short answers (tool outputs, errors, trivial replies)
-        if len(answer.strip()) < 80:
+        """Two-level filtering: rules first (free), LLM gate second (boundary cases only)."""
+        metrics = get_metrics()
+
+        # Level 1: rule filter (0ms, deterministic)
+        rule_result = self._should_extract_rules(question, answer)
+        if rule_result != "uncertain":
+            return rule_result == "yes"
+
+        # Level 2: LLM gate (only for boundary cases)
+        # Circuit breaker check
+        if self._gate_state is _GateCircuitState.OPEN:
+            if time.time() - self._gate_opened_at > self._GATE_RECOVERY_SECONDS:
+                self._gate_state = _GateCircuitState.HALF_OPEN
+            else:
+                metrics.incr("writes_skipped_gate")
+                return False
+
+        try:
+            prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
+            result = self._llm.think([{"role": "user", "content": prompt}], silent=True)
+            normalized = result.strip().lower().strip('"').strip("'").strip(".")
+            if normalized == "yes" or normalized.startswith("yes"):
+                self._gate_on_success()
+                return True
+            if normalized == "no" or normalized.startswith("no"):
+                self._gate_on_success()
+                metrics.incr("writes_skipped_gate")
+                return False
+            # Format anomaly — not a failure, but counted separately
+            logger.warning("Gate returned unexpected format: %s", result[:100])
+            self._gate_on_success()
+            metrics.incr("writes_skipped_gate_format_error")
             return False
-        # Skip pure transactional queries with short answers
-        if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 200:
+        except Exception:
+            self._gate_on_failure()
+            metrics.incr("writes_skipped_gate_error")
             return False
-        # Probabilistic sampling for borderline cases (30%)
-        import random
-        return random.random() < 0.3
 
     def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
         if not answer or not self.long_term:
@@ -591,6 +650,7 @@ class MemoryManager:
             return
         if not self._should_extract(question, answer):
             return
+        # PII masking on input side (defense in depth — extraction prompt also controls this)
         if _contains_pii(question) or _contains_pii(answer):
             question = _mask_pii(question)
             answer = _mask_pii(answer)

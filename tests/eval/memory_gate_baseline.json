@@ -1,0 +1,12 @@
+{
+  "accuracy": 0.75,
+  "precision": 1.0,
+  "recall": 0.5,
+  "tp": 10,
+  "tn": 20,
+  "fp": 0,
+  "fn": 10,
+  "sample_size": 40,
+  "evaluated_at": "2026-06-09",
+  "note": "Rule-level filter only. LLM gate improves recall on uncertain cases."
+}
