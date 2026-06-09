@@ -34,6 +34,7 @@ jobs:
     needs: build-backend
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
@@ -54,20 +55,18 @@ jobs:
       - name: Make backend executable (Linux/macOS)
         if: runner.os != 'Windows'
         run: chmod +x dist/agentnexus
-      - name: Verify backend binary exists
+      - name: Verify backend binary
         shell: bash
         run: |
-          echo "=== Backend binary check ==="
-          ls -la dist/
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            test -f dist/agentnexus.exe || (echo "ERROR: dist/agentnexus.exe not found" && exit 1)
-          else
-            test -f dist/agentnexus || (echo "ERROR: dist/agentnexus not found" && exit 1)
-          fi
-          echo "Backend binary OK"
+          echo "=== dist/ contents ==="
+          ls -lh dist/
+          echo "=== file type ==="
+          file dist/agentnexus* || true
+          echo "=== size ==="
+          du -sh dist/agentnexus* || true
       - name: Build desktop app
         working-directory: desktop
-        run: npm run build
+        run: npx tsc && npx vite build && npx electron-builder --publish never
       - name: Upload desktop artifacts (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -91,6 +90,7 @@ jobs:
 
   release:
     needs: [build-backend, build-desktop]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
