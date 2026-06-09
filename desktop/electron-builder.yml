@@ -7,15 +7,14 @@ files:
   - dist/**/*
   - dist-electron/**/*
 
-extraResources:
-  - from: "backend/"
-    to: "backend"
-
 win:
   target:
     - target: nsis
       arch:
         - x64
+  extraResources:
+    - from: "backend/agentnexus.exe"
+      to: "backend/agentnexus.exe"
 
 mac:
   target:
@@ -23,12 +22,18 @@ mac:
       arch:
         - x64
         - arm64
+  extraResources:
+    - from: "backend/agentnexus"
+      to: "backend/agentnexus"
 
 linux:
   target:
     - AppImage
     - deb
   category: Utility
+  extraResources:
+    - from: "backend/agentnexus"
+      to: "backend/agentnexus"
 
 nsis:
   oneClick: false

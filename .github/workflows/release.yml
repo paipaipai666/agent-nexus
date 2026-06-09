@@ -72,11 +72,29 @@ jobs:
             cp dist/agentnexus.exe desktop/backend/agentnexus.exe
           else
             cp dist/agentnexus desktop/backend/agentnexus
+            chmod +x desktop/backend/agentnexus
           fi
+          echo "=== staged backend ==="
           ls -lh desktop/backend/
-      - name: Build desktop app
+          file desktop/backend/*
+      - name: TypeScript compile
         working-directory: desktop
-        run: npx tsc && npx vite build && npx electron-builder --publish never
+        run: npx tsc --noEmit
+      - name: Vite build
+        working-directory: desktop
+        run: npx vite build
+      - name: Electron-builder package (Linux)
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: npx electron-builder --linux --publish never
+      - name: Electron-builder package (Windows)
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        run: npx electron-builder --win --publish never
+      - name: Electron-builder package (macOS)
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: npx electron-builder --mac --publish never
       - name: Upload desktop artifacts (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
