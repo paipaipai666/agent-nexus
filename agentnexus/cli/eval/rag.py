@@ -142,12 +142,17 @@ def eval_run(
     table.add_column("Precision", justify="right")
     table.add_column("Recall", justify="right")
     table.add_column("CtxRel", justify="right")
+    table.add_column("CitePrec", justify="right")
     table.add_column("HitRate", justify="right")
     table.add_column("MRR", justify="right")
+    table.add_column("RetRecall", justify="right")
+    table.add_column("RerankMRR", justify="right")
+    table.add_column("Success%", justify="right")
     table.add_column("Reject", justify="right")
+    table.add_column("Halluc%", justify="right")
     table.add_column("p95(ms)", justify="right")
 
-    for r in sorted(results, key=lambda x: x.faithfulness, reverse=True):
+    for r in sorted(results, key=lambda x: x.task_success_rate, reverse=True):
         table.add_row(
             r.label,
             _fmt_ci(r.faithfulness, getattr(r, "faithfulness_ci", None)),
@@ -156,17 +161,22 @@ def eval_run(
             _fmt_ci(r.context_precision, getattr(r, "context_precision_ci", None)),
             _fmt_ci(r.context_recall, getattr(r, "context_recall_ci", None)),
             _fmt_ci(r.context_relevancy, getattr(r, "context_relevancy_ci", None)),
+            _fmt_ci(r.citation_precision, getattr(r, "citation_precision_ci", None)),
             _fmt_ci(r.hit_rate, getattr(r, "hit_rate_ci", None)),
             _fmt_ci(r.mrr, getattr(r, "mrr_ci", None)),
+            f"{getattr(r, 'retriever_recall', 0.0):.1%}",
+            f"{getattr(r, 'reranker_mrr', 0.0):.3f}",
+            f"{getattr(r, 'task_success_rate', 0.0):.1%}",
             f"{getattr(r, 'rejection_rate', 0.0):.1%}",
+            f"{getattr(r, 'hallucination_rate', 0.0):.1%}",
             f"{r.p95_latency_ms:.0f}",
         )
 
     output_console.print(table)
 
     # Highlight best
-    best = max(results, key=lambda r: r.faithfulness)
-    output_console.print(f"\n[bold green]Best configuration:[/bold green] {best.label} (faithfulness={best.faithfulness:.3f})")
+    best = max(results, key=lambda r: r.task_success_rate)
+    output_console.print(f"\n[bold green]Best configuration:[/bold green] {best.label} (task_success_rate={best.task_success_rate:.1%}, faithfulness={best.faithfulness:.3f})")
 
     # Save report
     report_dir = Path(get_settings().traces_dir) / "evals"
@@ -188,11 +198,16 @@ def eval_run(
                 "context_precision": r.context_precision,
                 "context_recall": r.context_recall,
                 "context_relevancy": r.context_relevancy,
+                "citation_precision": r.citation_precision,
                 "hit_rate": r.hit_rate,
                 "mrr": r.mrr,
+                "retriever_recall": r.retriever_recall,
+                "reranker_mrr": r.reranker_mrr,
+                "task_success_rate": r.task_success_rate,
+                "hallucination_rate": r.hallucination_rate,
                 "avg_latency_ms": r.avg_latency_ms,
                 "p95_latency_ms": r.p95_latency_ms,
-                "rejection_rate": getattr(r, "rejection_rate", 0.0),
+                "rejection_rate": r.rejection_rate,
             }
             for r in results
         ],
@@ -362,7 +377,12 @@ def eval_compare(
     b_map = {r["label"]: r for r in b_configs}
     c_map = {r["label"]: r for r in c_configs}
 
-    metrics = ["faithfulness", "answer_relevancy", "hit_rate", "mrr", "context_precision", "context_recall"]
+    metrics = [
+        "faithfulness", "answer_relevancy", "hit_rate", "mrr",
+        "context_precision", "context_recall", "citation_precision",
+        "retriever_recall", "reranker_mrr", "task_success_rate",
+        "rejection_rate", "hallucination_rate",
+    ]
 
     table = Table(title=f"Comparison: {baseline} vs {candidate}", box=box.ROUNDED)
     table.add_column("Config", style="cyan")

@@ -274,6 +274,8 @@ class TestScoreAnswerRelevancy:
 
 
 class TestScoreRetrievalRanked:
+    """Tests for _score_retrieval_ranked which uses text matching (not Judge LLM)."""
+
     def test_empty_full_ranked_returns_zeros(self):
         evaluator = RAGEvaluator([], [])
         sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
@@ -284,11 +286,13 @@ class TestScoreRetrievalRanked:
 
     def test_all_relevant_returns_one(self):
         evaluator = RAGEvaluator([], [])
-        evaluator._judge_llm = MagicMock()
-        evaluator._judge_llm.think.return_value = "1.0"
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["the answer is 42"],
+        )
+        # Both chunks contain the reference substring
         precision, hit, mrr = evaluator._score_retrieval_ranked(
-            sample, ["chunk1", "chunk2"], top_k=2,
+            sample, ["the answer is 42 and more", "the answer is 42 too"], top_k=2,
         )
         assert precision == 1.0
         assert hit == 1.0
@@ -296,9 +300,11 @@ class TestScoreRetrievalRanked:
 
     def test_none_relevant_returns_zeros(self):
         evaluator = RAGEvaluator([], [])
-        evaluator._judge_llm = MagicMock()
-        evaluator._judge_llm.think.return_value = "0.0"
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["completely unrelated reference"],
+        )
+        # Neither chunk contains the reference
         precision, hit, mrr = evaluator._score_retrieval_ranked(
             sample, ["chunk1", "chunk2"], top_k=2,
         )
@@ -308,12 +314,13 @@ class TestScoreRetrievalRanked:
 
     def test_first_relevant_at_rank_2(self):
         evaluator = RAGEvaluator([], [])
-        evaluator._judge_llm = MagicMock()
-        # chunk1 not relevant, chunk2 relevant
-        evaluator._judge_llm.think.side_effect = ["0.0", "1.0"]
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["the answer is 42"],
+        )
+        # chunk1 doesn't contain ref, chunk2 does
         precision, hit, mrr = evaluator._score_retrieval_ranked(
-            sample, ["chunk1", "chunk2"], top_k=2,
+            sample, ["unrelated chunk", "the answer is 42 here"], top_k=2,
         )
         assert precision == 0.5
         assert hit == 1.0
@@ -321,13 +328,45 @@ class TestScoreRetrievalRanked:
 
     def test_respects_top_k_limit(self):
         evaluator = RAGEvaluator([], [])
-        evaluator._judge_llm = MagicMock()
-        evaluator._judge_llm.think.return_value = "1.0"
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
-        chunks = [f"chunk{i}" for i in range(10)]
-        evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
-        # Should only call Judge for 5 chunks
-        assert evaluator._judge_llm.think.call_count == 5
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["the answer is 42"],
+        )
+        # Only last chunk is relevant, but top_k=5 means only first 5 are checked
+        chunks = [f"unrelated{i}" for i in range(5)] + ["the answer is 42"]
+        precision, hit, mrr = evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
+        # top_k=5 means only first 5 chunks checked, none contain ref
+        assert precision == 0.0
+        assert hit == 0.0
+        assert mrr == 0.0
+
+    def test_top_k_includes_relevant(self):
+        evaluator = RAGEvaluator([], [])
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["the answer is 42"],
+        )
+        # Relevant chunk is at position 2 (0-indexed), within top_k=5
+        chunks = ["unrelated0", "the answer is 42 here", "unrelated2", "unrelated3", "unrelated4"]
+        precision, hit, mrr = evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
+        assert precision == 0.2  # 1 out of 5
+        assert hit == 1.0
+        assert mrr == 0.5  # 1/2
+
+    def test_token_overlap_matching(self):
+        """Test that token overlap works when reference is a substring of chunk."""
+        evaluator = RAGEvaluator([], [])
+        sample = EvalSample(
+            question="q", ground_truth="gt",
+            reference_contexts=["BM25 算法"],
+        )
+        # Chunk contains the reference as a substring
+        precision, hit, mrr = evaluator._score_retrieval_ranked(
+            sample, ["BM25 算法是一种文本排名函数"], top_k=1,
+        )
+        assert hit == 1.0
+        assert precision == 1.0
+        assert mrr == 1.0
 
 
 class TestScoreCorrectness:

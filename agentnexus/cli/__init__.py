@@ -50,6 +50,8 @@ from agentnexus.cli import (
     tui_cmd,  # noqa: E402
     wiki_cmd,  # noqa: E402
 )
+# Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
+import agentnexus.cli.eval  # noqa: E402,F401
 
 
 def _continue_session(session_id: str | None) -> None:

@@ -23,7 +23,7 @@ class EvalSample:
 @dataclass
 class EvalRun:
     def check_passed(self, thresholds: dict[str, float] | None = None) -> bool:
-        t = thresholds or DEFAULT_RAG_THRESHOLDS
+        t = thresholds or THRESHOLD_PROFILES["balanced"]
         return (
             self.faithfulness >= t.get("faithfulness", 0.0)
             and self.answer_relevancy >= t.get("answer_relevancy", 0.0)
@@ -32,18 +32,24 @@ class EvalRun:
             and self.mrr >= t.get("mrr", 0.0)
             and self.rejection_rate >= t.get("rejection_rate", 0.0)
         )
+
     label: str
     strategy: ChunkStrategy
     chunk_size: int
     use_hybrid: bool
     faithfulness: float = 0.0
-    answer_relevancy: float = 0.0       # 新: 回答是否切题（Judge LLM，不依赖 ground_truth）
-    answer_correctness: float = 0.0     # 原 answer_relevancy (与 ground_truth 比较)
+    answer_relevancy: float = 0.0       # 回答是否切题（Judge LLM，不依赖 ground_truth）
+    answer_correctness: float = 0.0     # 与 ground_truth 比较
     context_precision: float = 0.0
     context_recall: float = 0.0
-    context_relevancy: float = 0.0
+    context_relevancy: float = 0.0      # Embedding 相似度（非关键词重叠）
+    citation_precision: float = 0.0     # 回答中事实可映射到检索结果的比例
     hit_rate: float = 0.0              # 检索命中率@k
     mrr: float = 0.0                   # 平均倒数排名@k
+    retriever_recall: float = 0.0      # 召回器 Recall@50（粗排质量）
+    reranker_mrr: float = 0.0          # 重排器 MRR@10（精排质量）
+    task_success_rate: float = 0.0     # 端到端成功率
+    hallucination_rate: float = 0.0    # 负样本幻觉率
     avg_latency_ms: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
@@ -54,6 +60,7 @@ class EvalRun:
     context_precision_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     context_recall_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     context_relevancy_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    citation_precision_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     hit_rate_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     mrr_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
     rejection_rate: float = 0.0
@@ -66,8 +73,10 @@ EVAL_ANSWER_RELEVANCY_PROMPT = load_prompt("eval_answer_relevancy")
 EVAL_PRECISION_PROMPT = load_prompt("eval_precision")
 EVAL_RECALL_PROMPT = load_prompt("eval_recall")
 EVAL_QUALITY_BATCH_PROMPT = load_prompt("eval_quality_batch")
+EVAL_CITATION_PROMPT = load_prompt("eval_citation")
+EVAL_REFUSAL_PROMPT = load_prompt("eval_refusal")
 
-# Keywords for detecting refusal in negative samples (Change 4)
+# Keywords for detecting refusal in negative samples (legacy fallback)
 _REFUSAL_KEYWORDS = [
     "无法", "没有找到", "不能", "不确定", "不包含",
     "i don't know", "not found", "cannot", "unable",
@@ -112,18 +121,51 @@ def _simple_tokenize(text: str) -> list[str]:
     return re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
 
 
-# ── Default thresholds for CI gating ──
-DEFAULT_RAG_THRESHOLDS: dict[str, float] = {
-    "faithfulness": 0.80,
-    "answer_relevancy": 0.75,
-    "answer_correctness": 0.70,
-    "context_precision": 0.70,
-    "context_recall": 0.70,
-    "context_relevancy": 0.60,
-    "hit_rate": 0.85,
-    "mrr": 0.70,
-    "rejection_rate": 0.75,
+# ── Threshold profiles for CI gating ──
+THRESHOLD_PROFILES: dict[str, dict[str, float]] = {
+    "strict": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.85,
+        "answer_correctness": 0.80,
+        "context_precision": 0.80,
+        "context_recall": 0.80,
+        "context_relevancy": 0.75,
+        "citation_precision": 0.75,
+        "hit_rate": 0.90,
+        "mrr": 0.80,
+        "rejection_rate": 0.85,
+        "task_success_rate": 0.80,
+    },
+    "balanced": {
+        "faithfulness": 0.80,
+        "answer_relevancy": 0.75,
+        "answer_correctness": 0.70,
+        "context_precision": 0.70,
+        "context_recall": 0.70,
+        "context_relevancy": 0.60,
+        "citation_precision": 0.60,
+        "hit_rate": 0.85,
+        "mrr": 0.70,
+        "rejection_rate": 0.75,
+        "task_success_rate": 0.65,
+    },
+    "relaxed": {
+        "faithfulness": 0.70,
+        "answer_relevancy": 0.65,
+        "answer_correctness": 0.60,
+        "context_precision": 0.60,
+        "context_recall": 0.60,
+        "context_relevancy": 0.50,
+        "citation_precision": 0.50,
+        "hit_rate": 0.75,
+        "mrr": 0.60,
+        "rejection_rate": 0.65,
+        "task_success_rate": 0.50,
+    },
 }
+
+# Backward-compatible alias
+DEFAULT_RAG_THRESHOLDS = THRESHOLD_PROFILES["balanced"]
 
 
 class RAGEvaluator:
@@ -218,6 +260,9 @@ class RAGEvaluator:
             ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
                 sample, full_ranked, top_k=top_k,
             )
+            # Retriever vs Reranker separation
+            retriever_recall = self._score_retriever_recall(sample, full_ranked, top_k=50)
+            reranker_mrr = self._score_reranker_mrr(sample, full_ranked, top_k=10)
             recall = 0.0
             context_relevancy = 0.0
             if truncated:
@@ -227,6 +272,9 @@ class RAGEvaluator:
             faithfulness, answer_relevancy, correctness = self._score_quality_batch(
                 sample.question, answer, truncated, sample.ground_truth, _timeout=call_timeout,
             )
+            citation_precision = self._score_citation_precision(
+                sample.question, answer, truncated, _timeout=call_timeout,
+            )
             return {
                 "faithfulness": faithfulness,
                 "correctness": correctness,
@@ -234,8 +282,11 @@ class RAGEvaluator:
                 "precision": ret_precision,
                 "recall": recall,
                 "context_relevancy": context_relevancy,
+                "citation_precision": citation_precision,
                 "hit_rate": ret_hit,
                 "mrr": ret_mrr,
+                "retriever_recall": retriever_recall,
+                "reranker_mrr": reranker_mrr,
                 "latency_ms": latency_ms,
             }
 
@@ -246,9 +297,11 @@ class RAGEvaluator:
                 max_tokens=max_tokens, top_k=top_k,
             )
             if not retrieved:
-                return True
+                return "reject", False  # no retrieval = correct refusal, no hallucination
             answer = self._generate_answer(sample.question, retrieved, _timeout=call_timeout)
-            return _is_refusal(answer)
+            verdict = self._judge_refusal(sample.question, answer, retrieved, _timeout=call_timeout)
+            is_hallucination = verdict == "hallucinate"
+            return verdict, is_hallucination
 
         faithfulness_scores = []
         correctness_scores = []
@@ -256,8 +309,11 @@ class RAGEvaluator:
         precision_scores = []
         recall_scores = []
         context_relevancy_scores = []
+        citation_precision_scores = []
         hit_rates = []
         mrrs = []
+        retriever_recalls = []
+        reranker_mrrs = []
         latencies = []
 
         _log(f"    [3/4] 评估正样本 ({len(positive_samples)} 个, workers={effective_workers})...")
@@ -280,6 +336,9 @@ class RAGEvaluator:
                 mrrs.append(result["mrr"])
                 recall_scores.append(result["recall"])
                 context_relevancy_scores.append(result["context_relevancy"])
+                citation_precision_scores.append(result["citation_precision"])
+                retriever_recalls.append(result["retriever_recall"])
+                reranker_mrrs.append(result["reranker_mrr"])
                 latencies.append(result["latency_ms"])
         else:
             done_count = 0
@@ -302,28 +361,40 @@ class RAGEvaluator:
                     mrrs.append(result["mrr"])
                     recall_scores.append(result["recall"])
                     context_relevancy_scores.append(result["context_relevancy"])
+                    citation_precision_scores.append(result["citation_precision"])
+                    retriever_recalls.append(result["retriever_recall"])
+                    reranker_mrrs.append(result["reranker_mrr"])
                     latencies.append(result["latency_ms"])
 
         _log(f"    [3/4] 正样本完成 ({time.perf_counter() - t_eval:.1f}s)")
 
-        _log(f"    [4/4] 评估负样本 ({len(negative_samples)} 个)...")
+        _log(f"    [4/4] 评估负样本 ({len(negative_samples)} 个, Judge LLM)...")
         t_neg = time.perf_counter()
         correct_refusals = 0
+        hallucination_count = 0
         if effective_workers <= 1:
             for idx, sample in enumerate(negative_samples, 1):
                 _log(f"      负样本 {idx}/{len(negative_samples)}: {sample.question[:40]}...")
-                if _eval_negative(sample):
+                verdict, is_hallucination = _eval_negative(sample)
+                if verdict == "reject":
                     correct_refusals += 1
                     _log(f"      负样本 {idx}: 正确拒绝")
+                elif is_hallucination:
+                    hallucination_count += 1
+                    _log(f"      负样本 {idx}: 幻觉！")
                 else:
-                    _log(f"      负样本 {idx}: 未拒绝")
+                    _log(f"      负样本 {idx}: 未拒绝 (answered)")
         else:
             with ThreadPoolExecutor(max_workers=effective_workers) as pool:
                 futures_list = [pool.submit(_eval_negative, s) for s in negative_samples]
                 for idx, future in enumerate(as_completed(futures_list), 1):
-                    if future.result():
+                    verdict, is_hallucination = future.result()
+                    if verdict == "reject":
                         correct_refusals += 1
                         _log(f"      负样本 {idx}/{len(negative_samples)}: 正确拒绝")
+                    elif is_hallucination:
+                        hallucination_count += 1
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 幻觉！")
                     else:
                         _log(f"      负样本 {idx}/{len(negative_samples)}: 未拒绝")
 
@@ -336,8 +407,11 @@ class RAGEvaluator:
         run.context_precision = _safe_mean(precision_scores)
         run.context_recall = _safe_mean(recall_scores)
         run.context_relevancy = _safe_mean(context_relevancy_scores)
+        run.citation_precision = _safe_mean(citation_precision_scores)
         run.hit_rate = _safe_mean(hit_rates)
         run.mrr = _safe_mean(mrrs)
+        run.retriever_recall = _safe_mean(retriever_recalls)
+        run.reranker_mrr = _safe_mean(reranker_mrrs)
         run.avg_latency_ms = _safe_mean(latencies)
         sorted_lat = sorted(latencies)
         if sorted_lat:
@@ -351,11 +425,21 @@ class RAGEvaluator:
         run.context_precision_ci = _bootstrap_ci(precision_scores)
         run.context_recall_ci = _bootstrap_ci(recall_scores)
         run.context_relevancy_ci = _bootstrap_ci(context_relevancy_scores)
+        run.citation_precision_ci = _bootstrap_ci(citation_precision_scores)
         run.hit_rate_ci = _bootstrap_ci(hit_rates)
         run.mrr_ci = _bootstrap_ci(mrrs)
 
         if negative_samples:
             run.rejection_rate = correct_refusals / len(negative_samples)
+            run.hallucination_rate = hallucination_count / len(negative_samples)
+
+        # Task success rate: faithfulness >= 0.8 AND correctness >= 0.7 AND relevancy >= 0.75
+        success_count = sum(
+            1 for f, c, r in zip(faithfulness_scores, correctness_scores, answer_relevancy_scores)
+            if f >= 0.8 and c >= 0.7 and r >= 0.75
+        )
+        total_positive = len(faithfulness_scores)
+        run.task_success_rate = success_count / total_positive if total_positive else 0.0
 
         total_elapsed = time.perf_counter() - t_total
         _log(f"    总耗时: {total_elapsed:.1f}s (faithfulness={run.faithfulness:.3f})")
@@ -385,6 +469,10 @@ class RAGEvaluator:
         candidate = Path(value)
         return candidate.suffix.lower() in {".pdf", ".md", ".txt"} and candidate.exists()
 
+    # Relevance score threshold: chunks below this are dropped from generation context.
+    # Keeps full_ranked intact for hit_rate/MRR computation.
+    RELEVANCE_FILTER_THRESHOLD = 0.35
+
     def _retrieve(
         self, query, retriever, use_hybrid, max_tokens: int,
         min_score: float = 0.3, top_k: int = 10,
@@ -394,19 +482,31 @@ class RAGEvaluator:
         Returns (full_ranked, truncated):
           - full_ranked: top_k candidate chunks before token budget fitting
             (used for hit_rate / MRR computation)
-          - truncated: chunks after token budget fitting
+          - truncated: chunks after relevance filtering + token budget fitting
             (used for generation + precision / recall)
         """
         if not use_hybrid:
-            candidates = [r["text"] for r in search(query, limit=top_k, namespace="eval")]
-            return candidates, _fit_token_budget(candidates, max_tokens)
+            raw = search(query, limit=top_k, namespace="eval")
+            full_ranked = [r["text"] for r in raw]
+            # Filter: keep only chunks with score above threshold for generation
+            filtered = [r["text"] for r in raw if r.get("score", 0) >= self.RELEVANCE_FILTER_THRESHOLD]
+            if not filtered:
+                filtered = full_ranked[:1] if full_ranked else []
+            return full_ranked, _fit_token_budget(filtered, max_tokens)
         dense_results = search(query, limit=top_k * 2, namespace="eval")
         dense = [(r["id"], r["score"]) for r in dense_results]
         results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
         full_ranked = [r.text for r in results]
         expanded = retriever.expand_contexts(results) if hasattr(retriever, "expand_contexts") else results
         expanded_contexts = [result_display_text(r) for r in expanded]
-        return full_ranked, _fit_token_budget(expanded_contexts, max_tokens)
+        # Filter by relevance score for generation context
+        filtered = [
+            result_display_text(r) for r in expanded
+            if getattr(r, "score", 0) >= self.RELEVANCE_FILTER_THRESHOLD
+        ]
+        if not filtered:
+            filtered = expanded_contexts[:1] if expanded_contexts else []
+        return full_ranked, _fit_token_budget(filtered, max_tokens)
 
     def _generate_answer(self, question: str, contexts: list[str], _timeout: int = 0) -> str:
         ctx = "\n---\n".join(contexts)
@@ -535,19 +635,106 @@ class RAGEvaluator:
     def _score_context_relevancy(self, query: str, retrieved: list[str]) -> float:
         """Score what fraction of retrieved chunks are relevant to the query.
 
-        Uses keyword overlap between query and each chunk. Threshold: >0.85 target.
+        Uses embedding similarity (not keyword overlap) for semantic relevance.
         """
         if not retrieved:
             return 0.0
-        query_terms = set(query.lower().split())
-        if not query_terms:
+        try:
+            from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
+            model = get_embedding_model()
+            query_vec = embedding_to_list(model.encode(query, normalize_embeddings=True))
+            if not query_vec:
+                return 0.0
+            scores = []
+            for chunk in retrieved:
+                chunk_vec = embedding_to_list(model.encode(chunk, normalize_embeddings=True))
+                if not chunk_vec:
+                    scores.append(0.0)
+                    continue
+                sim = sum(a * b for a, b in zip(query_vec, chunk_vec))
+                scores.append(max(0.0, min(1.0, sim)))
+            return sum(scores) / len(scores) if scores else 0.0
+        except Exception:
+            # Fallback to keyword overlap if embedding fails
+            query_terms = set(_simple_tokenize(query))
+            if not query_terms:
+                return 0.0
+            scores = []
+            for chunk in retrieved:
+                chunk_tokens = set(_simple_tokenize(chunk))
+                if not chunk_tokens:
+                    scores.append(0.0)
+                    continue
+                overlap = len(query_terms & chunk_tokens) / len(query_terms)
+                scores.append(overlap)
+            return sum(scores) / len(scores) if scores else 0.0
+
+    def _judge_refusal(self, question: str, answer: str, contexts: list[str], _timeout: int = 0) -> str:
+        """Judge whether a negative-sample answer is a refusal, answer, or hallucination.
+
+        Returns: 'reject', 'answer', or 'hallucinate'.
+        Uses Judge LLM with structured prompt for nuanced detection.
+        """
+        # Pass ALL contexts to judge (not just 3) to avoid false hallucination detection
+        ctx = "\n---\n".join(contexts)
+        prompt = EVAL_REFUSAL_PROMPT.format(
+            question=question, context=ctx, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        if not result:
+            # Fallback to keyword matching if Judge fails
+            return "reject" if _is_refusal(answer) else "answer"
+        normalized = result.strip().lower()
+        # Check for explicit rejection first (model said it can't answer)
+        # This handles case where model refuses but also adds extra explanation
+        if "reject" in normalized or "拒绝" in normalized or "无法回答" in normalized:
+            return "reject"
+        if "hallucinate" in normalized or "幻觉" in normalized:
+            return "hallucinate"
+        return "answer"
+
+    def _score_citation_precision(
+        self, question: str, answer: str, contexts: list[str], _timeout: int = 0,
+    ) -> float:
+        """Citation precision: what fraction of facts in the answer are grounded in retrieved contexts.
+
+        Uses Judge LLM to check each factual claim against the contexts.
+        """
+        if not answer or not contexts:
             return 0.0
-        scores = []
-        for chunk in retrieved:
-            chunk_lower = chunk.lower()
-            matched = sum(1 for t in query_terms if t in chunk_lower)
-            scores.append(matched / len(query_terms))
-        return sum(scores) / len(scores) if scores else 0.0
+        ctx = "\n---\n".join(contexts[:5])
+        prompt = EVAL_CITATION_PROMPT.format(
+            question=question, context=ctx, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        return _parse_score(result)
+
+    def _score_retriever_recall(self, sample: EvalSample, full_ranked: list[str], top_k: int = 50) -> float:
+        """Retriever recall@50: what fraction of reference contexts appear in the broad candidate set.
+
+        This measures the raw retriever quality before reranking.
+        """
+        if not sample.reference_contexts or not full_ranked:
+            return 0.0
+        candidates = full_ranked[:top_k]
+        hits = sum(
+            1 for ref in sample.reference_contexts
+            if _text_contains_reference(candidates, ref)
+        )
+        return hits / len(sample.reference_contexts)
+
+    def _score_reranker_mrr(self, sample: EvalSample, full_ranked: list[str], top_k: int = 10) -> float:
+        """Reranker MRR@10: how well the top-10 ranking places relevant chunks.
+
+        This measures the reranker's ability to push relevant chunks to the top.
+        """
+        if not full_ranked:
+            return 0.0
+        candidates = full_ranked[:top_k]
+        for i, chunk in enumerate(candidates):
+            if any(_text_contains_reference([chunk], ref) for ref in sample.reference_contexts):
+                return 1.0 / (i + 1)
+        return 0.0
 
 
 # ── Module-level helpers ──
