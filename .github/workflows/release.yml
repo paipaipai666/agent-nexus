@@ -24,6 +24,21 @@ jobs:
       - name: List dist contents
         shell: bash
         run: ls -la dist/
+      - name: Rename backend binary with platform suffix
+        shell: bash
+        run: |
+          cd dist
+          if [ -f agentnexus.exe ]; then
+            mv agentnexus.exe agentnexus-windows-x64.exe
+          fi
+          if [ -f agentnexus ]; then
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              mv agentnexus agentnexus-macos-x64
+            else
+              mv agentnexus agentnexus-linux-x64
+            fi
+          fi
+          ls -la
       - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,9 +84,12 @@ jobs:
         run: |
           mkdir -p desktop/backend
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp dist/agentnexus.exe desktop/backend/agentnexus.exe
+            cp dist/agentnexus-windows-x64.exe desktop/backend/agentnexus.exe
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            cp dist/agentnexus-macos-x64 desktop/backend/agentnexus
+            chmod +x desktop/backend/agentnexus
           else
-            cp dist/agentnexus desktop/backend/agentnexus
+            cp dist/agentnexus-linux-x64 desktop/backend/agentnexus
             chmod +x desktop/backend/agentnexus
           fi
           echo "=== staged backend ==="
