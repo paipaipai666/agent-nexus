@@ -42,7 +42,6 @@ chroma_data/
 Thumbs.db
 **/.trae/
 **/.sisyphus/
-**/.github/
 .coverage
 sample.txt
 perf_report.md
