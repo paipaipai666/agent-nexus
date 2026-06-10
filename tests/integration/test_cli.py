@@ -29,7 +29,7 @@ class TestCliStats:
             try:
                 result = runner.invoke(app, ["stats", "--days", "30"])
                 assert result.exit_code == 0
-                assert "暂无" in result.stdout or "0" in result.stdout
+                assert "No" in result.stdout or "0" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -96,7 +96,7 @@ class TestCliConfig:
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             try:
                 result = runner.invoke(app, ["config", "--set", "invalid_key", "--value", "x"])
-                assert "无效" in result.stdout
+                assert "Invalid" in result.stdout or "invalid" in result.stdout
             finally:
                 del os.environ["AGENTNEXUS_HOME"]
 
@@ -122,7 +122,7 @@ class TestCliLogs:
             try:
                 result = runner.invoke(app, ["logs", "list", "--days", "30"])
                 assert result.exit_code == 0
-                assert "暂无" in result.stdout
+                assert "No" in result.stdout
             finally:
                 del os.environ["AGENTNEXUS_HOME"]
 
@@ -146,15 +146,23 @@ class TestCliEvaluation:
                 self.context_relevancy = 1.0
                 self.hit_rate = 1.0
                 self.mrr = 1.0
+                self.citation_precision = 1.0
+                self.retriever_recall = 1.0
+                self.reranker_mrr = 1.0
+                self.hallucination_rate = 0.0
                 self.avg_latency_ms = 1.0
+                self.p50_latency_ms = 1.0
                 self.p95_latency_ms = 1.0
+                self.p99_latency_ms = 1.0
                 self.rejection_rate = 1.0
+                self.task_success_rate = 1.0
                 self.faithfulness_ci = (1.0, 1.0)
                 self.answer_relevancy_ci = (1.0, 1.0)
                 self.answer_correctness_ci = (1.0, 1.0)
                 self.context_precision_ci = (1.0, 1.0)
                 self.context_recall_ci = (1.0, 1.0)
                 self.context_relevancy_ci = (1.0, 1.0)
+                self.citation_precision_ci = (1.0, 1.0)
                 self.hit_rate_ci = (1.0, 1.0)
                 self.mrr_ci = (1.0, 1.0)
 
@@ -270,15 +278,23 @@ class TestCliEvalRun:
                 self.context_relevancy = 1.0
                 self.hit_rate = 1.0
                 self.mrr = 1.0
+                self.citation_precision = 1.0
+                self.retriever_recall = 1.0
+                self.reranker_mrr = 1.0
+                self.hallucination_rate = 0.0
                 self.avg_latency_ms = 1.0
+                self.p50_latency_ms = 1.0
                 self.p95_latency_ms = 1.0
+                self.p99_latency_ms = 1.0
                 self.rejection_rate = 0.0
+                self.task_success_rate = 1.0
                 self.faithfulness_ci = (1.0, 1.0)
                 self.answer_relevancy_ci = (1.0, 1.0)
                 self.answer_correctness_ci = (1.0, 1.0)
                 self.context_precision_ci = (1.0, 1.0)
                 self.context_recall_ci = (1.0, 1.0)
                 self.context_relevancy_ci = (1.0, 1.0)
+                self.citation_precision_ci = (1.0, 1.0)
                 self.hit_rate_ci = (1.0, 1.0)
                 self.mrr_ci = (1.0, 1.0)
 
@@ -327,9 +343,16 @@ class TestCliEvalRun:
                 self.context_relevancy = 0.5
                 self.hit_rate = 0.5
                 self.mrr = 0.5
+                self.citation_precision = 0.5
+                self.retriever_recall = 0.5
+                self.reranker_mrr = 0.5
+                self.hallucination_rate = 0.1
                 self.avg_latency_ms = 100.0
+                self.p50_latency_ms = 80.0
                 self.p95_latency_ms = 200.0
+                self.p99_latency_ms = 300.0
                 self.rejection_rate = 0.0
+                self.task_success_rate = 0.5
                 self.faithfulness_ci = (0.4, 0.6)
                 self.answer_relevancy_ci = (0.4, 0.6)
                 self.answer_correctness_ci = (0.4, 0.6)
@@ -374,7 +397,7 @@ class TestCliEvalHistory:
             try:
                 result = runner.invoke(app, ["eval", "history"])
                 assert result.exit_code == 0
-                assert "暂无" in result.stdout
+                assert "No" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -428,7 +451,7 @@ class TestCliEvalCompare:
                     "--candidate", "nonexistent.json",
                 ])
                 assert result.exit_code == 0
-                assert "基准文件不存在" in result.stdout
+                assert "Baseline file not found" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -451,7 +474,7 @@ class TestCliEvalCompare:
                     "--candidate", "nonexistent.json",
                 ])
                 assert result.exit_code == 0
-                assert "候选文件不存在" in result.stdout
+                assert "Candidate file not found" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -570,7 +593,7 @@ class TestCliLogsView:
             try:
                 result = runner.invoke(app, ["logs", "view", "--trace-id", "nonexistent"])
                 assert result.exit_code == 0
-                assert "未找到" in result.stdout or "暂无" in result.stdout
+                assert "not found" in result.stdout.lower() or "No" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -584,7 +607,7 @@ class TestCliLogsView:
             try:
                 result = runner.invoke(app, ["logs", "view", "--trace-id", "any"])
                 assert result.exit_code == 0
-                assert "暂无" in result.stdout
+                assert "No" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]

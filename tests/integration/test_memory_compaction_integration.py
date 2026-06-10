@@ -27,6 +27,8 @@ class TestMemoryCompactionIntegration:
             mgr._compact_threshold = ctx_max - 8000
             mgr._compact_failures = 0
             mgr._circuit_open = False
+            mgr._circuit_opened_at = 0.0
+            mgr._circuit_half_open = False
             mgr._microcompacts_since_open = 0
             mgr._compacting = False
             mgr._snip_freed_tokens = 0

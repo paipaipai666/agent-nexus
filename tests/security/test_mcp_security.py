@@ -385,6 +385,7 @@ class TestToolResultSafety:
         manager._server_runtimes["api"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=None,
         )
         descriptor = _make_descriptor(server_name="api", remote_name="admin_op")
         with pytest.raises(RuntimeError, match="access denied"):
@@ -405,6 +406,7 @@ class TestToolResultSafety:
         manager._server_runtimes["api"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=None,
         )
         descriptor = _make_descriptor(server_name="api", remote_name="admin_op")
         with pytest.raises(RuntimeError, match="未返回文本内容"):
