@@ -8,6 +8,14 @@ from agentnexus.server.routes.chat import ws_agent
 from agentnexus.services.chat import ChatService
 
 
+@pytest.fixture(autouse=True)
+def _mock_trace_manager():
+    """Prevent trace_manager from trying to serialize MagicMock objects."""
+    mock_tm = MagicMock()
+    with patch("agentnexus.observability.tracer.trace_manager", mock_tm):
+        yield
+
+
 class TestWebSocketAgentStream:
     """Test ws_agent WebSocket endpoint streams events correctly."""
 

@@ -7,9 +7,19 @@ Tests cover:
 4. Event ordering: thinking → tool_call → tool_result → token → answer → done
 """
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agentnexus.server.routes.chat import _map_to_gui_event
+
+
+@pytest.fixture(autouse=True)
+def _mock_trace_manager():
+    """Prevent trace_manager from trying to serialize MagicMock objects."""
+    mock_tm = MagicMock()
+    with patch("agentnexus.observability.tracer.trace_manager", mock_tm):
+        yield
 
 
 class TestRealTimeEventStreaming:
