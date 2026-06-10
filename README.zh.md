@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 桌面自动化 + 283 个测试文件。**
+**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 桌面自动化 + 269 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-283%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-269%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI 工具，完全运行在本地。无云端依赖，无数据泄露。向量、记忆、Trace 日志全部留在你的设备上。
@@ -88,7 +88,9 @@ nexus codegraph build            # 构建代码知识图谱
 
 | 文档 | 内容 |
 | --- | --- |
+| 🚀 [快速开始](docs/Getting-Started.md) | 安装、首次运行、快速导览 |
 | 🏠 [Wiki 首页](docs/Home.md) | 架构图、核心能力表格 |
+| 🏗️ [系统架构](docs/Architecture.md) | 系统架构、模块边界、数据流 |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
 | 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
 | 🌐 [浏览器自动化](docs/Browser-Automation.md) | Playwright 集成、CDP 模式、无障碍树 |
@@ -97,6 +99,10 @@ nexus codegraph build            # 构建代码知识图谱
 | 📚 [RAG 检索](docs/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
 | 🖥️ [桌面自动化](docs/Computer-Use.md) | OS 级无障碍自动化，Windows/Linux/macOS |
 | 📖 [Wiki 系统](docs/Wiki-System.md) | 混合 Wiki + RAG、Karpathy 模式、置信度路由 |
+| 📖 [Wiki 系统（详细）](docs/Wiki-System-Detailed.md) | Wiki 内部机制、验证管线、路由逻辑 |
+| 🎭 [Persona 系统](docs/Persona.md) | Agent 身份、行为原则、任务地图 |
+| ⌨️ [CLI & TUI](docs/CLI-TUI-Detailed.md) | CLI 命令、TUI 界面、快捷键 |
+| 🖥️ [应用运行时](docs/App-Runtime.md) | 桌面应用运行时、Electron 集成 |
 | ⚙️ [配置参考](docs/Configuration.md) | 全部配置项速查 |
 | ⌨️ [命令参考](docs/Commands.md) | 40+ 个命令速查 |
 | 📊 [评估体系](docs/Evaluation.md) | 8 个评估器、RAG 指标 |
@@ -142,7 +148,7 @@ nexus codegraph build            # 构建代码知识图谱
 
 **桌面端**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**测试**: pytest · 194 单元测试 · 17 安全测试 · 12 性能基准测试 · E2E 集成测试
+**测试**: pytest · 193 单元测试 · 16 安全测试 · 40 性能基准测试 · 10 集成测试 · 9 回归测试
 
 ## 贡献
 

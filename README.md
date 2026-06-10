@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**A production-grade, fully local AI agent with FSM-driven safety, browser automation, desktop automation, and 283 test files.**
+**A production-grade, fully local AI agent with FSM-driven safety, browser automation, desktop automation, and 269 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-283%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-269%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus is a **ReAct (Thought→Action→Observe) single-agent** CLI tool that runs entirely on your machine. No cloud dependency. No data leakage. Your vectors, memory, and trace logs never leave your device.
@@ -88,7 +88,9 @@ nexus codegraph build            # Build code knowledge graph
 
 | Document | Content |
 | --- | --- |
+| 🚀 [Getting Started](docs/Getting-Started.en.md) | Installation, first run, quick tour |
 | 🏠 [Wiki Home](docs/Home.en.md) | Architecture diagram, core capabilities |
+| 🏗️ [Architecture](docs/Architecture.en.md) | System architecture, module boundaries, data flow |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.en.md) | FSM state machine, 3-tier LLM strategy, JSON fault tolerance |
 | 🔧 [Tool Governance](docs/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
 | 🌐 [Browser Automation](docs/Browser-Automation.en.md) | Playwright integration, CDP mode, accessibility tree |
@@ -97,6 +99,10 @@ nexus codegraph build            # Build code knowledge graph
 | 📚 [RAG System](docs/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
 | 🖥️ [Desktop Automation](docs/Computer-Use.en.md) | OS-level accessibility automation, Windows/Linux/macOS |
 | 📖 [Wiki System](docs/Wiki-System.en.md) | Hybrid Wiki + RAG, Karpathy pattern, confidence routing |
+| 📖 [Wiki System (Detailed)](docs/Wiki-System-Detailed.en.md) | Wiki internals, verification pipeline, routing logic |
+| 🎭 [Persona System](docs/Persona.en.md) | Agent identity, behavioral principles, mission map |
+| ⌨️ [CLI & TUI](docs/CLI-TUI-Detailed.en.md) | CLI commands, TUI interface, keybindings |
+| 🖥️ [App Runtime](docs/App-Runtime.en.md) | Desktop app runtime, Electron integration |
 | ⚙️ [Configuration](docs/Configuration.en.md) | All configuration items reference |
 | ⌨️ [Commands](docs/Commands.en.md) | 40+ commands reference |
 | 📊 [Evaluation](docs/Evaluation.en.md) | 8 evaluators, RAG metrics |
@@ -142,7 +148,7 @@ nexus codegraph build            # Build code knowledge graph
 
 **Desktop**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**Testing**: pytest · 194 unit tests · 17 security tests · 12 performance benchmarks · E2E integration tests
+**Testing**: pytest · 193 unit tests · 16 security tests · 40 performance benchmarks · 10 integration tests · 9 regression tests
 
 ## Contributing
 
