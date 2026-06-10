@@ -22,6 +22,7 @@ def _make_memory_manager():
 
         mm = MemoryManager(session_id="test", enable_long_term=False)
         mm.short_term = MagicMock()
+        mm.short_term.token_count = 0
         mm.short_term.estimate_tokens.return_value = 0
         return mm
 

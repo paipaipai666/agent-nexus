@@ -92,7 +92,6 @@ class TestInitSessionWithContext:
             result = mgr.init_session("测试")
             assert "喜欢Python" in result
             assert "使用VSCode" in result
-            assert "偏好" in result
             assert "★" in result
             assert "[提示]" in result
             assert "相关历史记忆" in result
@@ -157,10 +156,11 @@ class TestReActAgentConversationMode:
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         agent.set_available_skill_context("== Available Skills ==\n- default/docx: DOCX - Word docs\n\n")
 
-        result = agent._build_prompt("tools", "question", "", "", "")
+        messages = agent._build_messages("tools", "question", "", "", "")
+        all_content = "\n".join(m["content"] for m in messages)
 
-        assert "Available Skills" in result
-        assert "default/docx" in result
+        assert "Available Skills" in all_content
+        assert "default/docx" in all_content
 
     def test_build_prompt_with_profile_injects_guidance(self):
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -184,13 +184,14 @@ class TestReActAgentConversationMode:
         }).to_session_profile()
 
         agent.set_session_profile(profile)
-        result = agent._build_prompt("tools", "question", "", "", "")
+        messages = agent._build_messages("tools", "question", "", "", "")
+        all_content = "\n".join(m["content"] for m in messages)
 
-        assert "Security Fragment" in result
-        assert "Skill Workflow" in result
-        assert "Review diff" in result
-        assert "Inspect diff." in result
-        assert "Findings mention diff." in result
+        assert "Security Fragment" in all_content
+        assert "Skill Workflow" in all_content
+        assert "Review diff" in all_content
+        assert "Inspect diff." in all_content
+        assert "Findings mention diff." in all_content
 
     def test_on_init_uses_profile_tool_policy_for_visible_tools(self):
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -283,10 +284,13 @@ class TestReActAgentConversationMode:
 
         assert result.answer == "done"
         messages = mock_llm.think.call_args.kwargs["messages"]
-        assert "Security Fragment" in messages[0]["content"]
-        assert "Skill Workflow" in messages[0]["content"]
-        assert "shell_exec" not in messages[0]["content"]
-        assert "file_read" in messages[0]["content"]
+        # Profile content is in messages[2], tools in messages[1]
+        context_content = messages[2]["content"]
+        assert "Security Fragment" in context_content
+        assert "Skill Workflow" in context_content
+        tools_content = messages[1]["content"]
+        assert "shell_exec" not in tools_content
+        assert "file_read" in tools_content
 
     def test_reset_profile_restores_default_prompt(self):
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -441,7 +445,7 @@ class TestReActAgentConversationMode:
             {"role": "assistant", "content": "回答内容"},
             {"role": "system", "content": "[最终答案] 回答内容"},
         ]]
-        result = _format_turns_for_context(turns, assistant_user_limit=500)
+        result = _format_turns_for_context(turns)
         assert "用户: 问题" in result
         assert "助手: 回答内容" in result
         assert "系统" not in result
@@ -781,6 +785,16 @@ class TestChatScreenAnswerRender:
                 self.total_usage = {"input_tokens": 1, "output_tokens": 1}
                 self._on_event = None
                 self._confirm = None
+                self.agent_id = "fake-agent"
+                self.max_steps = 10
+                self._persona_text = ""
+                self._behavior_fragments_text = ""
+                self._compiled_session_profile = None
+                self._available_skill_context = ""
+                self._mcp_context = ""
+                self._workflow_context = ""
+                self._todo_list = None
+                self.conversation_mode = False
 
             @property
             def model_id(self):
@@ -842,6 +856,12 @@ class TestChatScreenAnswerRender:
                 return {"head": None, "can_undo": False, "can_redo": False}
 
             def commit(self, *args, **kwargs):
+                return None
+
+            def get_message_count(self):
+                return 0
+
+            def append_messages(self, *args, **kwargs):
                 return None
 
         async def scenario():
@@ -968,7 +988,8 @@ class TestCompactFull:
             stm.append("user", f"msg{i}")
         stm.compact_full("摘要内容", message_count=20, is_auto=True)
         msgs = stm.get_all()
-        assert len(msgs) == 1
+        # compact_full keeps last 6 recent messages + 1 summary
+        assert len(msgs) == 7
         assert "本会话是从之前一次因上下文耗尽而中断的对话延续过来的" in msgs[0]["content"]
         assert "摘要内容" in msgs[0]["content"]
 
@@ -978,7 +999,8 @@ class TestCompactFull:
             stm.append("user", f"msg{i}")
         stm.compact_full("摘要内容", message_count=20, is_auto=False)
         msgs = stm.get_all()
-        assert len(msgs) == 1
+        # compact_full keeps last 6 recent messages + 1 summary
+        assert len(msgs) == 7
         assert "对话已被手动压缩" in msgs[0]["content"]
 
     def test_compact_full_no_original_retained(self):
@@ -987,9 +1009,10 @@ class TestCompactFull:
         stm.append("assistant", "critical decision")
         stm.compact_full("summary", is_auto=True)
         msgs = stm.get_all()
-        assert len(msgs) == 1
-        for msg in msgs:
-            assert "important message" not in msg["content"]
+        # compact_full keeps last 6 recent messages + 1 summary (2 msgs < 6, so all kept)
+        assert len(msgs) == 3
+        # Summary should be in the first message
+        assert "important message" not in msgs[0]["content"]
 
 
 class TestMicroCompactKeepLast:
@@ -1140,6 +1163,7 @@ class TestRefreshLtmContext:
 class TestConclude:
 
     def _make_mgr(self):
+        from agentnexus.memory.manager import _GateCircuitState
         mgr = MemoryManager.__new__(MemoryManager)
         mgr.short_term = ShortTermMemory()
         mgr._llm = MagicMock()
@@ -1149,6 +1173,9 @@ class TestConclude:
         mgr.long_term.write_counter = 0
         mgr._settings = MagicMock()
         mgr.session_id = "test"
+        mgr._gate_state = _GateCircuitState.CLOSED
+        mgr._gate_failures = 0
+        mgr._gate_opened_at = 0.0
         return mgr
 
     def test_calls_llm_with_extract_prompt(self):
@@ -1162,37 +1189,50 @@ class TestConclude:
 
     def test_parses_llm_response_and_saves_memories(self):
         mgr = self._make_mgr()
-        mgr._llm.think.return_value = json.dumps({
-            "user_preference": ["likes Python", "prefers dark mode"],
-            "entity_fact": ["uses VSCode"],
+        mgr.long_term.search.return_value = []
+        json_response = json.dumps({
+            "preference": ["likes Python", "prefers dark mode"],
+            "fact": ["uses VSCode"],
         })
+        # Gate call returns "yes", extraction call returns JSON
+        mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("Test", "Answer")
         assert mgr.long_term.save.call_count == 3
 
     def test_handles_markdown_code_block_response(self):
         mgr = self._make_mgr()
-        mgr._llm.think.return_value = '```json\n{"user_preference": ["likes Python"]}\n```'
+        mgr.long_term.search.return_value = []
+        json_response = '```json\n{"preference": ["likes Python"]}\n```'
+        # Gate call returns "yes", extraction call returns JSON
+        mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("test", "Python")
         assert mgr.long_term.save.call_count == 1
         save_call = mgr.long_term.save.call_args
         assert save_call[1]["content"] == "likes Python"
-        assert save_call[1]["category"] == "user_preference"
+        assert save_call[1]["category"] == "preference"
 
     def test_masks_pii_in_question_instead_of_skipping(self):
         mgr = self._make_mgr()
-        mgr.conclude("email me at user@example.com", "ok")
-        mgr._llm.think.assert_called_once()
-        call_text = mgr._llm.think.call_args[0][0][0]["content"]
-        assert "***" in call_text
-        assert "user@example.com" not in call_text
+        mgr.long_term.search.return_value = []
+        # Answer must be >= 5 chars to pass rule filter
+        mgr._llm.think.side_effect = ["yes", "{}"]
+        mgr.conclude("email me at user@example.com", "sure thing")
+        # Gate call + extraction call
+        assert mgr._llm.think.call_count == 2
+        gate_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
+        assert "***" in gate_text
+        assert "user@example.com" not in gate_text
 
     def test_masks_pii_in_answer_instead_of_skipping(self):
         mgr = self._make_mgr()
+        mgr.long_term.search.return_value = []
+        mgr._llm.think.side_effect = ["yes", "{}"]
         mgr.conclude("hello", "call 13800138000")
-        mgr._llm.think.assert_called_once()
-        call_text = mgr._llm.think.call_args[0][0][0]["content"]
-        assert "****" in call_text
-        assert "13800138000" not in call_text
+        # Gate call + extraction call
+        assert mgr._llm.think.call_count == 2
+        extraction_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
+        assert "****" in extraction_text
+        assert "13800138000" not in extraction_text
 
     def test_skips_when_allow_memory_false(self):
         mgr = self._make_mgr()

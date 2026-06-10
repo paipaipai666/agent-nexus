@@ -28,7 +28,7 @@ class TestBuildCommand:
         )
         result = runner.invoke(app, ["codegraph", "build"])
         assert result.exit_code == 0
-        assert "图谱构建完成" in result.output
+        assert "Graph built successfully" in result.output
 
     @patch("agentnexus.codegraph.updater.build_graph")
     def test_build_with_force(self, mock_build, runner):
@@ -45,7 +45,7 @@ class TestBuildCommand:
         mock_build.side_effect = Exception("Build failed")
         result = runner.invoke(app, ["codegraph", "build"])
         assert result.exit_code == 1
-        assert "构建失败" in result.output
+        assert "Build failed" in result.output
 
 
 class TestSearchCommand:
@@ -70,7 +70,7 @@ class TestSearchCommand:
         mock_search.return_value = []
         result = runner.invoke(app, ["codegraph", "search", "nonexistent"])
         assert result.exit_code == 0
-        assert "未找到" in result.output
+        assert "No matching code entities found" in result.output
 
 
 class TestCallersCommand:
@@ -93,7 +93,7 @@ class TestCallersCommand:
         mock_callers.return_value = []
         result = runner.invoke(app, ["codegraph", "callers", "func"])
         assert result.exit_code == 0
-        assert "未找到" in result.output
+        assert "No callers found" in result.output
 
 
 class TestCalleesCommand:
@@ -116,7 +116,7 @@ class TestCalleesCommand:
         mock_callees.return_value = []
         result = runner.invoke(app, ["codegraph", "callees", "func"])
         assert result.exit_code == 0
-        assert "未调用" in result.output
+        assert "does not call any entities" in result.output
 
 
 class TestInheritsCommand:
@@ -139,7 +139,7 @@ class TestInheritsCommand:
         mock_inherits.return_value = []
         result = runner.invoke(app, ["codegraph", "inherits", "MyClass"])
         assert result.exit_code == 0
-        assert "未找到" in result.output
+        assert "No inheritance found" in result.output
 
 
 class TestImportsCommand:
@@ -162,7 +162,7 @@ class TestImportsCommand:
         mock_imports.return_value = []
         result = runner.invoke(app, ["codegraph", "imports", "module"])
         assert result.exit_code == 0
-        assert "未找到" in result.output
+        assert "No imports found" in result.output
 
 
 class TestContextCommand:
@@ -192,7 +192,7 @@ class TestContextCommand:
         mock_context.return_value = None
         result = runner.invoke(app, ["codegraph", "context", "nonexistent"])
         assert result.exit_code == 1
-        assert "未找到" in result.output
+        assert "Entity not found" in result.output
 
 
 class TestStatsCommand:
@@ -201,7 +201,7 @@ class TestStatsCommand:
         mock_db_path.return_value = tmp_path / "nonexistent.db"
         result = runner.invoke(app, ["codegraph", "stats"])
         assert result.exit_code == 0
-        assert "未构建" in result.output
+        assert "Graph not built" in result.output
 
     @patch("agentnexus.codegraph.store.CodeGraphStore")
     @patch("agentnexus.codegraph.store.detect_project_root")
@@ -235,7 +235,7 @@ class TestVerifyCommand:
         mock_verify.return_value = []
         result = runner.invoke(app, ["codegraph", "verify"])
         assert result.exit_code == 0
-        assert "通过" in result.output
+        assert "Consistency check passed" in result.output
 
     @patch("agentnexus.codegraph.updater.verify_consistency")
     def test_verify_with_issues(self, mock_verify, runner):

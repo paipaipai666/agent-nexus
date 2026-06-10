@@ -12,9 +12,9 @@ class TestMemorySave:
         mock_model = MagicMock()
         mock_model.encode.return_value.tolist.return_value = [0.1, 0.2]
         mock_get_emb.return_value = mock_model
-        result = memory_save("用户喜欢Python编程", category="user_preference", importance=0.8)
+        result = memory_save("用户喜欢Python编程", category="preference", importance=0.8)
         assert "已保存" in result
-        assert "user_preference" in result
+        assert "preference" in result
         mock_get_ltm.return_value.save.assert_called_once()
 
     def test_content_too_short(self):
@@ -29,8 +29,9 @@ class TestMemorySave:
         result = memory_save("this is a long enough fact", category="invalid")
         assert "无效分类" in result
         assert "invalid" in result
-        for cat in sorted(_VALID_CATEGORIES):
-            assert cat in result
+        assert "fact" in result
+        assert "preference" in result
+        assert "note" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
     @patch("agentnexus.tools.memory_save.get_embedding_model")
@@ -43,7 +44,7 @@ class TestMemorySave:
         mock_get_ltm.return_value.save.assert_called_with(
             session_id="agent_written",
             content="Very important fact",
-            category="entity_fact",
+            category="fact",
             importance=1.0,
             embedding=[0.1],
         )
@@ -52,7 +53,7 @@ class TestMemorySave:
         mock_get_ltm.return_value.save.assert_called_with(
             session_id="agent_written",
             content="Not important fact",
-            category="entity_fact",
+            category="fact",
             importance=0.0,
             embedding=[0.1],
         )

@@ -40,8 +40,8 @@ class TestAgentIdentityAndToolFiltering:
         te = ToolRegistry()
         te.register_tool("restricted", "desc", lambda: 1, allowed_agents=["parent_agent"])
 
-        parent_tools = te.registry.to_openai_tools("parent_agent")
-        child_tools = te.registry.to_openai_tools("child_agent")
+        parent_tools = te.to_openai_tools("parent_agent")
+        child_tools = te.to_openai_tools("child_agent")
 
         assert [tool["function"]["name"] for tool in parent_tools] == ["restricted"]
         assert child_tools == []
@@ -55,7 +55,7 @@ class TestAgentIdentityAndToolFiltering:
             captured["caller"] = caller
             return "ok"
 
-        monkeypatch.setattr(executor.registry, "invoke", fake_invoke)
+        monkeypatch.setattr(executor, "invoke", fake_invoke)
         agent = ReActAgent(mock_llm, executor, conversation_mode=False, agent_id="research_parent")
 
         result = agent._execute_tool("dummy", {})

@@ -40,7 +40,8 @@ def test_prompt_checkpoint_finalize_steps_build_context():
     assert "Checkpoint diff." in result.workflow_context
     assert "Finish diff." in result.workflow_context
     assert "Mention diff." in result.workflow_context
-    assert result.enhanced_question.endswith("== User Question ==\nquestion")
+    # Context is injected as a separate system message, not merged into question
+    assert result.enhanced_question == "question"
     assert [event.status for event in result.events] == ["ok", "ok", "ok"]
     assert result.state is not None
     assert result.state.status == "completed"

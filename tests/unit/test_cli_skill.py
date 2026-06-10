@@ -60,12 +60,12 @@ class TestSkillCli:
         assert first.exit_code == 0
         second = runner.invoke(app, ["skill", "init", "draft"])
         assert second.exit_code == 1
-        assert "skill 已存在" in second.stdout
+        assert "Skill already exists" in second.stdout
 
     def test_skill_use_persists_default(self, temp_agentnexus_home):
         result = runner.invoke(app, ["skill", "use", "review/code_review"])
         assert result.exit_code == 0
-        assert "默认 skill 已设置" in result.stdout
+        assert "Default skill set" in result.stdout
         data = yaml.safe_load((temp_agentnexus_home / "config.yaml").read_text(encoding="utf-8"))
         assert data["default_skill"] == "review/code_review"
 
@@ -127,7 +127,7 @@ success_criteria:
         result = runner.invoke(app, ["skill", "use", "review/code_review"])
 
         assert result.exit_code == 0
-        assert "默认 skill 已设置" in result.stdout
+        assert "Default skill set" in result.stdout
 
     def test_skill_reset_clears_default(self, temp_agentnexus_home):
         (temp_agentnexus_home / "config.yaml").write_text("default_skill: review/code_review\n", encoding="utf-8")

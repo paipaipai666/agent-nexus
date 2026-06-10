@@ -151,9 +151,11 @@ class TestRestartSafeRetrieval:
                 {"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": {"source_uri": "docs/support.md"}}
             ],
         )
+        monkeypatch.setattr("agentnexus.rag.retriever.generate_hypothetical_document", lambda q: "")
 
         import agentnexus.rag.retriever as retriever_mod
         retriever_mod._retriever = None
+        monkeypatch.setitem(retriever_mod._retriever_reranker_requested, "support", False)
 
         result = search_knowledge_base("检索用什么", namespace="support")
 
@@ -240,7 +242,7 @@ class TestRestartSafeRetrieval:
     def test_build_knowledge_base_replaces_old_chunks_in_namespace(self, temp_agentnexus_home):
         from unittest.mock import patch
 
-        with patch("agentnexus.rag.retriever.insert_documents", lambda *args, **kwargs: None):
+        with patch("agentnexus.rag.retriever.upsert_documents", lambda *args, **kwargs: None):
             build_knowledge_base(["doc A", "stale B"], load_reranker=False, namespace="support")
             build_knowledge_base(["doc A"], load_reranker=False, namespace="support")
 

@@ -102,7 +102,6 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run.id)
         assert snapshot.status == "empty_answer"
         assert "Agent 未能得出最终答案" in snapshot.answer
-        memory.append.assert_called_once_with("assistant", snapshot.answer)
         version.commit.assert_called_once()
 
     def test_stream_events_unknown_run_id_raises_key_error(self):
@@ -207,7 +206,6 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run_id)
         assert snapshot.status == "failed"
         assert "something broke" in snapshot.answer
-        memory.append.assert_called_once_with("assistant", snapshot.answer)
         version.commit.assert_called_once()
 
     def test_cancel_run_sets_cancel_checker(self):

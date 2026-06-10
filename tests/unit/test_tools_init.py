@@ -11,7 +11,7 @@ class TestRegisterCount:
         executor = ToolRegistry()
         register_all_tools(executor)
         names = executor.list_tools()
-        assert len(names) == 26
+        assert len(names) == 39
 
     def test_registers_correct_tool_names(self):
         executor = ToolRegistry()
@@ -26,6 +26,11 @@ class TestRegisterCount:
             "browser_type", "browser_read", "browser_screenshot",
             "browser_evaluate", "browser_wait", "browser_scroll",
             "browser_scroll_to", "browser_wait_navigation",
+            "browser_list_pages", "browser_dismiss_popup", "browser_switch_page",
+            "computer_click", "computer_key", "computer_launch",
+            "computer_list_windows", "computer_scroll", "computer_select",
+            "computer_snapshot", "computer_switch_window", "computer_toggle",
+            "computer_type",
         }
         assert set(names) == expected
 

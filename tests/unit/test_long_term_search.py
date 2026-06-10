@@ -255,14 +255,13 @@ class TestCleanupExpired:
     """Tests for LongTermMemory._cleanup_expired()."""
 
     def test_cleanup_expired_removes_old_entries(self, ltm):
-        ltm.save("sess-1", "旧记忆", category="test", importance=0.5)
+        ltm.save("sess-1", "旧记忆", category="note", importance=0.5)
         ltm._conn.execute(
             "UPDATE long_term_memories SET created_at = datetime('now', '-100 days') WHERE content = ?",
             ("旧记忆",)
         )
         ltm._conn.commit()
-        ltm.save("sess-1", "新记忆", category="test", importance=0.5)
-        ltm._ttl_days = 30
+        ltm.save("sess-1", "新记忆", category="note", importance=0.5)
         ltm._cleanup_expired()
         count = ltm._conn.execute("SELECT COUNT(*) FROM long_term_memories").fetchone()[0]
         assert count == 1
@@ -300,6 +299,7 @@ class TestMigrate:
 
     def test_migrate_adds_missing_columns(self, ltm):
         ltm._conn.execute("DROP TABLE IF EXISTS long_term_memories")
+        ltm._conn.execute("DROP TABLE IF EXISTS schema_versions")
         ltm._conn.execute("""
             CREATE TABLE long_term_memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,6 +308,11 @@ class TestMigrate:
                 content TEXT NOT NULL,
                 importance REAL DEFAULT 0.5,
                 created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        ltm._conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_versions (
+                version INTEGER PRIMARY KEY
             )
         """)
         ltm._conn.commit()

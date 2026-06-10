@@ -13,7 +13,7 @@ class TestMemoryList:
         mock_ltm.list_recent.return_value = []
         with patch("agentnexus.cli.memory_cmd.get_long_term_memory", return_value=mock_ltm):
             result = runner.invoke(app, ["memory", "list"])
-            assert "暂无记忆" in result.stdout
+            assert "No memories" in result.stdout
             assert result.exit_code == 0
 
     def test_memory_list_with_data(self):
@@ -44,5 +44,5 @@ class TestMemoryClear:
         with patch("agentnexus.cli.memory_cmd.get_long_term_memory", return_value=mock_ltm):
             result = runner.invoke(app, ["memory", "clear"])
             mock_ltm.clear_all.assert_called_once()
-            assert "记忆已清空" in result.stdout
+            assert "All memories cleared" in result.stdout
             assert result.exit_code == 0

@@ -26,6 +26,7 @@ _EST10 = {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20}
 class TestTokenUsageTracking:
     """last_usage and total_usage are tracked correctly via _call()."""
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -43,6 +44,7 @@ class TestTokenUsageTracking:
             assert llm.last_usage["input_tokens"] == 5
             assert llm.last_usage["output_tokens"] == 5
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -60,6 +62,7 @@ class TestTokenUsageTracking:
             assert llm.total_usage["input_tokens"] >= 5
             assert llm.total_usage["output_tokens"] >= 5
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST10)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -79,6 +82,7 @@ class TestTokenUsageTracking:
             assert llm.total_usage["input_tokens"] >= 30
             assert llm.total_usage["output_tokens"] >= 30
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -95,6 +99,7 @@ class TestTokenUsageTracking:
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert llm.last_usage.get("total_tokens", 0) >= 0
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST10)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -118,6 +123,7 @@ class TestTokenUsageTracking:
 class TestUsageNoOverflow:
     """Token counts should not grow beyond expected bounds."""
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -135,6 +141,7 @@ class TestUsageNoOverflow:
             assert llm.last_usage["input_tokens"] >= 0
             assert llm.last_usage["output_tokens"] >= 0
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -153,6 +160,7 @@ class TestUsageNoOverflow:
                 assert key in llm.last_usage, f"missing key: {key}"
                 assert isinstance(llm.last_usage[key], int)
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.AgentLLM._estimate_usage", return_value=_EST)
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")

@@ -20,7 +20,7 @@ class TestStatsCmd:
             try:
                 result = runner.invoke(app, ["stats"])
                 assert result.exit_code == 0
-                assert "暂无任务数据" in result.stdout
+                assert "No task data" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]
@@ -58,7 +58,7 @@ class TestStatsCmd:
                 result = runner.invoke(app, ["stats"])
                 assert result.exit_code == 0
                 assert "deepseek-v4-flash" in result.stdout
-                assert "总任务数" in result.stdout
+                assert "Total tasks" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]

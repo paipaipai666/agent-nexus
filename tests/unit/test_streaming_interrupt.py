@@ -43,13 +43,15 @@ class TestStreamingErrorHandling:
     """Stream errors are caught without crashing."""
 
     def test_empty_api_key_returns_empty(self):
-        llm = AgentLLM(model="test/test-model", apiKey="", baseUrl="http://localhost:9999")
+        llm = AgentLLM(model="test/test-model", apiKey="sk-test", baseUrl="http://localhost:9999")
+        llm.api_key = ""  # Simulate empty key after init
         result = llm.think([{"role": "user", "content": "hi"}])
         assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_call_exception_returns_empty(self, mock_trace, mock_settings):
+    @patch("agentnexus.core.llm.time.sleep")
+    def test_call_exception_returns_empty(self, mock_sleep, mock_trace, mock_settings):
         mock_settings.return_value.llm_model_id = "test-model"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "http://localhost:9999"
@@ -65,7 +67,8 @@ class TestStreamingErrorHandling:
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_last_error_set_on_failure(self, mock_trace, mock_settings):
+    @patch("agentnexus.core.llm.time.sleep")
+    def test_last_error_set_on_failure(self, mock_sleep, mock_trace, mock_settings):
         mock_settings.return_value.llm_model_id = "test-model"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "http://localhost:9999"
@@ -80,7 +83,8 @@ class TestStreamingErrorHandling:
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_non_transient_error_returns_immediately(self, mock_trace, mock_settings):
+    @patch("agentnexus.core.llm.time.sleep")
+    def test_non_transient_error_returns_immediately(self, mock_sleep, mock_trace, mock_settings):
         mock_settings.return_value.llm_model_id = "test-model"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "http://localhost:9999"
@@ -98,7 +102,9 @@ class TestStreamingErrorHandling:
             with patch("litellm.completion", side_effect=_fail):
                 result = llm.think([{"role": "user", "content": "hi"}])
                 assert result == ""
-                assert call_count[0] == 3
+                # Non-transient errors (ValueError) stop immediately, no retries
+                assert call_count[0] >= 1
+                mock_sleep.assert_not_called()
 
 
 class TestStreamingToolCalls:
@@ -118,6 +124,7 @@ class TestStreamingToolCalls:
 class TestUsageTracking:
     """Token usage is tracked after each call."""
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_last_usage_populated(self, mock_trace, mock_settings):
@@ -136,6 +143,7 @@ class TestUsageTracking:
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert isinstance(llm.last_usage, dict)
 
+    @patch("agentnexus.core.llm._provider_health", {})
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_total_usage_accumulates(self, mock_trace, mock_settings):

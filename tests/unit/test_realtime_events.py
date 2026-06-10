@@ -42,10 +42,12 @@ class TestRealTimeEventStreaming:
 
         # Sync stream_events delivers all events after completion
         gui_events = []
+        seq = 0
         for event in service.stream_events(run.id):
-            gui_event = _map_to_gui_event(event, service)
+            gui_event = _map_to_gui_event(event, service, seq)
             if gui_event:
                 gui_events.append(gui_event["type"])
+                seq += 1
 
         assert "thinking" in gui_events
         assert "tool_call" in gui_events
@@ -77,13 +79,15 @@ class TestRealTimeEventStreaming:
 
         async def collect_events():
             events = []
+            seq = 0
             async for event in service.astream_events(run.id):
-                gui_event = _map_to_gui_event(event, service)
+                gui_event = _map_to_gui_event(event, service, seq)
                 if gui_event:
                     events.append(gui_event["type"])
+                    seq += 1
             return events
 
-        event_types = asyncio.get_event_loop().run_until_complete(collect_events())
+        event_types = asyncio.run(collect_events())
 
         assert "thinking" in event_types
         assert "tool_call" in event_types
@@ -133,7 +137,7 @@ class TestRealTimeEventStreaming:
                 events.append(event.type)
             return events
 
-        result = asyncio.get_event_loop().run_until_complete(collect())
+        result = asyncio.run(collect())
         assert result == ["event1", "event2"]
 
 
@@ -165,10 +169,12 @@ class TestEventOrdering:
         run = service.send_message(session.id, "test")
 
         gui_events = []
+        seq = 0
         for event in service.stream_events(run.id):
-            gui_event = _map_to_gui_event(event, service)
+            gui_event = _map_to_gui_event(event, service, seq)
             if gui_event:
                 gui_events.append(gui_event["type"])
+                seq += 1
 
         thinking_idx = gui_events.index("thinking")
         tool_call_idx = gui_events.index("tool_call")
@@ -199,31 +205,49 @@ class TestEventOrdering:
         run = service.send_message(session.id, "test")
 
         gui_events = []
+        seq = 0
         for event in service.stream_events(run.id):
-            gui_event = _map_to_gui_event(event, service)
+            gui_event = _map_to_gui_event(event, service, seq)
             if gui_event:
                 gui_events.append(gui_event["type"])
+                seq += 1
 
         tool_result_idx = gui_events.index("tool_result")
         answer_idx = gui_events.index("answer")
         assert tool_result_idx < answer_idx
 
     def test_token_before_answer(self):
-        """token (message_delta) should arrive before answer (run_finished)."""
+        """token should arrive before answer (run_finished)."""
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
         from agentnexus.services.chat import ChatService
 
         agent = MagicMock()
-        agent.run.return_value = "final answer"
+
+        def run(_text, memory_manager=None):
+            if agent._on_event:
+                agent._on_event(
+                    ReActEvent(ReActEventType.STREAM_TOKEN, {"token": "tok1"}),
+                    None, None,
+                )
+                agent._on_event(
+                    ReActEvent(ReActEventType.STREAM_TOKEN, {"token": "tok2"}),
+                    None, None,
+                )
+            return "final answer"
+
+        agent.run.side_effect = run
 
         service = ChatService(agent=agent)
         session = service.start_session()
         run = service.send_message(session.id, "test")
 
         gui_events = []
+        seq = 0
         for event in service.stream_events(run.id):
-            gui_event = _map_to_gui_event(event, service)
+            gui_event = _map_to_gui_event(event, service, seq)
             if gui_event:
                 gui_events.append(gui_event["type"])
+                seq += 1
 
         token_idx = gui_events.index("token")
         answer_idx = gui_events.index("answer")
@@ -241,10 +265,12 @@ class TestEventOrdering:
         run = service.send_message(session.id, "test")
 
         gui_events = []
+        seq = 0
         for event in service.stream_events(run.id):
-            gui_event = _map_to_gui_event(event, service)
+            gui_event = _map_to_gui_event(event, service, seq)
             if gui_event:
                 gui_events.append(gui_event["type"])
+                seq += 1
 
         answer_idx = gui_events.index("answer")
         done_idx = gui_events.index("done")
@@ -260,7 +286,7 @@ class TestHITLConfirmBridge:
 
         bridge = ConfirmBridge()
         ws = AsyncMock()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
 
         confirm_result = None
 
@@ -284,6 +310,7 @@ class TestHITLConfirmBridge:
             "type": "confirm_request",
             "summary": "test tool call summary"
         })
+        loop.close()
 
     def test_confirm_bridge_returns_false_when_no_target(self):
         """ConfirmBridge should return False when no target is set."""

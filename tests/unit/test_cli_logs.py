@@ -128,7 +128,7 @@ class TestLogsList:
 
     def test_no_data_prints_empty_message(self, temp_agentnexus_home):
         result = runner.invoke(app, ["logs", "list"])
-        assert "暂无 trace" in result.stdout
+        assert "No trace records" in result.stdout
         assert result.exit_code == 0
 
     def test_with_single_trace(self, temp_agentnexus_home):
@@ -199,7 +199,7 @@ class TestLogsView:
         traces_dir = temp_agentnexus_home / "traces"
         os.makedirs(traces_dir, exist_ok=True)
         result = runner.invoke(app, ["logs", "view", "--trace-id", "nonexistent"])
-        assert "未找到 Trace" in result.stdout
+        assert "Trace not found" in result.stdout
         assert result.exit_code == 0
 
     def test_single_span_trace(self, temp_agentnexus_home):
@@ -219,7 +219,7 @@ class TestLogsView:
         result = runner.invoke(app, ["logs", "view", "--trace-id", "tr-001"])
         assert "tr-001" in result.stdout
         assert "root_span" in result.stdout
-        assert "Span 总数: 1" in result.stdout
+        assert "Total spans: 1" in result.stdout
         assert result.exit_code == 0
 
     def test_parent_child_spans(self, temp_agentnexus_home):
@@ -250,7 +250,7 @@ class TestLogsView:
         result = runner.invoke(app, ["logs", "view", "--trace-id", "tr-001"])
         assert "root_span" in result.stdout
         assert "child_span" in result.stdout
-        assert "Span 总数: 2" in result.stdout
+        assert "Total spans: 2" in result.stdout
         assert result.exit_code == 0
 
     def test_error_span_summary(self, temp_agentnexus_home):
@@ -269,5 +269,5 @@ class TestLogsView:
         self._write_span(traces_dir, span)
         result = runner.invoke(app, ["logs", "view", "--trace-id", "err-tr"])
         assert "err-tr" in result.stdout
-        assert "错误: 1 个 span" in result.stdout
+        assert "Errors: 1 spans" in result.stdout
         assert result.exit_code == 0

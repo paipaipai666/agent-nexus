@@ -22,7 +22,7 @@ class TestAudit:
 
     def test_audit_empty(self):
         result = runner.invoke(app, ["audit"])
-        assert "暂无审计记录" in result.stdout
+        assert "No audit records" in result.stdout
         assert result.exit_code == 0
 
     def test_audit_with_entries(self):
@@ -181,7 +181,7 @@ class TestLogs:
 
     def test_logs_list_no_data(self, temp_agentnexus_home):
         result = runner.invoke(app, ["logs", "list"])
-        assert "暂无 trace" in result.stdout
+        assert "No trace records" in result.stdout
         assert result.exit_code == 0
 
     def test_logs_list_with_data(self, temp_agentnexus_home):
@@ -207,7 +207,7 @@ class TestLogs:
         traces_dir = temp_agentnexus_home / "traces"
         os.makedirs(traces_dir, exist_ok=True)
         result = runner.invoke(app, ["logs", "view", "--trace-id", "nonexistent"])
-        assert "未找到 Trace" in result.stdout
+        assert "Trace not found" in result.stdout
         assert result.exit_code == 0
 
     def test_logs_view_with_data(self, temp_agentnexus_home):
@@ -240,7 +240,7 @@ class TestLogs:
         assert "trace_001" in stdout
         assert "root_span" in stdout
         assert "child_span" in stdout
-        assert "Span 总数: 2" in stdout
+        assert "Total spans: 2" in stdout
         assert result.exit_code == 0
 
     def test_logs_view_with_error_span(self, temp_agentnexus_home):
@@ -260,5 +260,5 @@ class TestLogs:
         result = runner.invoke(app, ["logs", "view", "--trace-id", "error_trace"])
         stdout = result.stdout
         assert "error_trace" in stdout
-        assert "错误: 1 个 span" in stdout
+        assert "Errors: 1 spans" in stdout
         assert result.exit_code == 0

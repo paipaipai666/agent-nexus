@@ -16,7 +16,11 @@ from contextlib import contextmanager
 from typing import Any
 
 from agentnexus.core.config import get_settings
-from agentnexus.rag import embeddings as embedding_service
+
+
+def _get_embedding_service():
+    from agentnexus.rag import embeddings as embedding_service
+    return embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +185,7 @@ def _build_ids(texts: list[str], ids: list[str] | None = None) -> list[str]:
 
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
-    return embedding_service.embed_texts(texts)
+    return _get_embedding_service().embed_texts(texts)
 
 
 def insert_documents(
@@ -252,11 +256,13 @@ def search(
     where: dict[str, Any] | None = None,
     *,
     collection_provider=get_collection,
-    embedding_model_provider=embedding_service.get_embedding_model,
+    embedding_model_provider=None,
 ) -> list[dict]:
     collection = collection_provider(name=name, namespace=namespace)
+    if embedding_model_provider is None:
+        embedding_model_provider = _get_embedding_service().get_embedding_model
     model = embedding_model_provider()
-    query_vec = embedding_service.embedding_to_list(model.encode(query, normalize_embeddings=True))
+    query_vec = _get_embedding_service().embedding_to_list(model.encode(query, normalize_embeddings=True))
     results = collection.query(
         query_embeddings=[query_vec],
         n_results=limit,

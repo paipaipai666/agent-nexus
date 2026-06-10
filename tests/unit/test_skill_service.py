@@ -112,7 +112,7 @@ def test_skill_service_prepare_message_records_last_run():
     result = service.prepare_message("hello")
     snapshot = service.snapshot()
 
-    assert "Workflow Runtime Context" in result.enhanced_question
+    assert "Workflow Runtime Context" in result.workflow_context
     assert snapshot.last_run_status == "completed"
     assert snapshot.step_count == 1
     assert snapshot.ok_steps == 1

@@ -24,7 +24,7 @@ class TestWebSocketAgentStream:
 
     @pytest.mark.asyncio
     async def test_ws_streams_answer_event(self, mock_runtime):
-        """Verify answer event is sent through WebSocket."""
+        """Verify answer and done events are sent through WebSocket."""
         runtime, chat, session = mock_runtime
 
         with patch("agentnexus.server.app._get_runtime", return_value=runtime):
@@ -39,33 +39,32 @@ class TestWebSocketAgentStream:
             with pytest.raises((asyncio.CancelledError, Exception)):
                 await ws_agent(ws, session.id)
 
+            # Give stream_events task time to finish
+            await asyncio.sleep(0.15)
+
             sent_events = [call.args[0] for call in ws.send_json.call_args_list]
             event_types = [e.get("type") for e in sent_events]
 
-            assert "token" in event_types, f"Expected 'token' in {event_types}"
             assert "answer" in event_types, f"Expected 'answer' in {event_types}"
+            assert "done" in event_types, f"Expected 'done' in {event_types}"
 
-            token_event = next(e for e in sent_events if e.get("type") == "token")
             answer_event = next(e for e in sent_events if e.get("type") == "answer")
-
-            assert token_event["content"] == "test answer"
             assert answer_event["content"] == "test answer"
 
     @pytest.mark.asyncio
     async def test_ws_streams_thinking_then_answer(self, mock_runtime):
         """Verify thinking events appear before answer."""
-        from agentnexus.agents.react_types import ReActEvent, ReActEventType, ReActResult
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
 
         runtime, chat, session = mock_runtime
 
         def simulate_run(text, memory_manager=None):
-            # Simulate agent events via _on_event bridge
             if hasattr(chat._agent, '_on_event') and chat._agent._on_event:
                 chat._agent._on_event(
                     ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "analyzing..."}),
                     None, None,
                 )
-            return ReActResult(answer="final", steps=[])
+            return "final"
 
         chat._agent.run.side_effect = simulate_run
 
@@ -80,6 +79,8 @@ class TestWebSocketAgentStream:
 
             with pytest.raises((asyncio.CancelledError, Exception)):
                 await ws_agent(ws, session.id)
+
+            await asyncio.sleep(0.15)
 
             sent_events = [call.args[0] for call in ws.send_json.call_args_list]
             event_types = [e.get("type") for e in sent_events]
@@ -105,9 +106,13 @@ class TestWebSocketAgentStream:
             with pytest.raises((asyncio.CancelledError, Exception)):
                 await ws_agent(ws, session.id)
 
+            await asyncio.sleep(0.15)
+
             sent_events = [call.args[0] for call in ws.send_json.call_args_list]
             event_types = [e.get("type") for e in sent_events]
 
+            assert "answer" in event_types, f"Expected 'answer' in {event_types}"
+            assert "done" in event_types, f"Expected 'done' in {event_types}"
             answer_idx = event_types.index("answer")
             done_idx = event_types.index("done")
             assert done_idx > answer_idx, "done should come after answer"
@@ -129,6 +134,8 @@ class TestWebSocketAgentStream:
             with pytest.raises((asyncio.CancelledError, Exception)):
                 await ws_agent(ws, session.id)
 
+            await asyncio.sleep(0.15)
+
             sent_events = [call.args[0] for call in ws.send_json.call_args_list]
             answer_events = [e for e in sent_events if e.get("type") == "answer"]
 
@@ -137,7 +144,7 @@ class TestWebSocketAgentStream:
     @pytest.mark.asyncio
     async def test_ws_event_order_complete(self, mock_runtime):
         """Verify complete event ordering: thinking* tool* token answer done."""
-        from agentnexus.agents.react_types import ReActEvent, ReActEventType, ReActResult
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
 
         runtime, chat, session = mock_runtime
 
@@ -155,7 +162,11 @@ class TestWebSocketAgentStream:
                     ReActEvent(ReActEventType.TOOL_DONE, {"name": "search", "result": "ok"}),
                     None, None,
                 )
-            return ReActResult(answer="done", steps=[])
+                chat._agent._on_event(
+                    ReActEvent(ReActEventType.STREAM_TOKEN, {"token": "hello"}),
+                    None, None,
+                )
+            return "done"
 
         chat._agent.run.side_effect = simulate_run
 
@@ -171,6 +182,8 @@ class TestWebSocketAgentStream:
             with pytest.raises((asyncio.CancelledError, Exception)):
                 await ws_agent(ws, session.id)
 
+            await asyncio.sleep(0.15)
+
             sent_events = [call.args[0] for call in ws.send_json.call_args_list]
             event_types = [e.get("type") for e in sent_events]
 
@@ -183,5 +196,6 @@ class TestWebSocketAgentStream:
             assert relevant[0] == "thinking"
             assert "tool_call" in relevant
             assert "tool_result" in relevant
+            assert "token" in relevant
             assert relevant[-2] == "answer"
             assert relevant[-1] == "done"

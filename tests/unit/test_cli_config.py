@@ -18,7 +18,7 @@ class TestConfigCommand:
     def test_view_default(self, temp_agentnexus_home):
         result = runner.invoke(app, ["config"])
         assert result.exit_code == 0
-        assert "AgentNexus 配置" in result.stdout
+        assert "AgentNexus Configuration" in result.stdout
         assert "llm_model_id" in result.stdout
         assert "deepseek/deepseek-v4-flash" in result.stdout
         assert "default" in result.stdout
@@ -48,7 +48,7 @@ class TestConfigCommand:
         config_dir = temp_agentnexus_home
         result = runner.invoke(app, ["config", "--set", "llm_model_id", "--value", "some-model"])
         assert result.exit_code == 0
-        assert "已保存" in result.stdout
+        assert "Saved" in result.stdout
         assert "llm_model_id" in result.stdout
         assert "some-model" in result.stdout
         yaml_path = config_dir / "config.yaml"
@@ -59,12 +59,12 @@ class TestConfigCommand:
     def test_set_invalid_key(self, temp_agentnexus_home):
         result = runner.invoke(app, ["config", "--set", "invalid_key", "--value", "x"])
         assert result.exit_code == 0
-        assert "无效" in result.stdout
+        assert "Invalid" in result.stdout
 
     def test_set_without_value(self, temp_agentnexus_home):
         result = runner.invoke(app, ["config", "--set", "llm_model_id"])
         assert result.exit_code == 0
-        assert "请用 --value" in result.stdout or "请用 -v" in result.stdout
+        assert "--value" in result.stdout
 
 
 class TestInitCommand:
@@ -79,7 +79,7 @@ class TestInitCommand:
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        assert "配置完成" in result.stdout
+        assert "Configuration complete" in result.stdout
         config_dir = temp_agentnexus_home
         yaml_path = config_dir / "config.yaml"
         assert yaml_path.exists()
@@ -93,5 +93,5 @@ class TestInitCommand:
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        assert "API Key 不能为空" in result.stdout
-        assert "配置完成" in result.stdout
+        assert "API Key cannot be empty" in result.stdout
+        assert "Configuration complete" in result.stdout

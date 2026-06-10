@@ -140,7 +140,11 @@ class TestTuiCommand:
              patch("agentnexus.observability.tracer.trace_manager"):
 
             runner.invoke(app, ["tui"])
-            mock_ra.assert_called_once_with(mock_llm, mock_executor, conversation_mode=True)
+            mock_ra.assert_called_once()
+            call_kwargs = mock_ra.call_args.kwargs
+            assert call_kwargs["conversation_mode"] is True
+            assert call_kwargs["output"] is None
+            assert call_kwargs["confirm_fn"] is mock_confirm
 
     def test_tui_closes_mcp_manager(self):
         mock_llm = MagicMock()

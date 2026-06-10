@@ -18,7 +18,7 @@ class TestConfigSettings:
         s = Settings()
         assert s.llm_model_id == "deepseek/deepseek-v4-flash"
         assert s.llm_timeout == 60
-        assert s.max_agent_steps == 5
+        assert s.max_agent_steps == 50
         assert s.enable_query_rewrite is True
         assert s.enable_multi_query is True
         assert s.enable_hyde is False

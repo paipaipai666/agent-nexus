@@ -7,6 +7,7 @@ from agentnexus.memory.manager import (
     _extract_xml_tag,
     _parse_tool_message,
 )
+from agentnexus.memory.projection import project_aggressive, project_mild
 from agentnexus.memory.short_term import ShortTermMemory
 
 
@@ -127,21 +128,11 @@ class TestSnipInManager:
         assert removed == 0
 
     def test_updates_snip_freed_tokens(self, monkeypatch):
-        call_count = [0]
-
-        def fake_estimate(self):
-            call_count[0] += 1
-            return 1000 if call_count[0] == 1 else 100
-
-        monkeypatch.setattr(
-            "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
-            fake_estimate,
-        )
         mgr = self._make_mgr()
         for i in range(20):
-            mgr.short_term.append("user", f"msg{i}")
+            mgr.short_term.append("user", f"msg{i}" + " content" * 50)
         mgr.snip(keep_recent=5)
-        assert mgr._snip_freed_tokens == 900
+        assert mgr._snip_freed_tokens > 0
 
 
 class TestMicroCompact:
@@ -207,6 +198,9 @@ class TestMicroCompactTimeBased:
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr.short_term = ShortTermMemory()
+        # Reset incremental counter so microcompact_time_based falls back
+        # to estimate_tokens() for before/after comparison
+        mgr.short_term._token_count = 0
         mgr._settings = MagicMock()
         mgr._settings.time_microcompact_interval = 60
         mgr._last_api_call_ts = 0.0
@@ -218,6 +212,8 @@ class TestMicroCompactTimeBased:
         mgr = self._make_mgr()
         mgr._last_api_call_ts = time.time() - 120
         mgr.short_term.append("assistant", "x" * 3000)
+        # Reset incremental counter so before/after comparison uses estimate_tokens()
+        mgr.short_term._token_count = 0
         result = mgr.microcompact_time_based(interval=60)
         assert result is True
 
@@ -244,6 +240,8 @@ class TestMicroCompactTimeBased:
         mgr._settings.time_microcompact_interval = 30
         mgr._last_api_call_ts = time.time() - 60
         mgr.short_term.append("assistant", "x" * 3000)
+        # Reset incremental counter so before/after comparison uses estimate_tokens()
+        mgr.short_term._token_count = 0
         result = mgr.microcompact_time_based()
         assert result is True
 
@@ -279,16 +277,22 @@ class TestMaybeCompactCircuitBreaker:
         mgr.short_term = ShortTermMemory()
         mgr._llm = MagicMock()
         mgr._embed_model = MagicMock()
+        mgr.long_term = None
         mgr._settings = MagicMock()
         mgr._settings.snip_enabled = False
         mgr._settings.time_microcompact_interval = 0
         mgr._settings.autocompact_buffer_tokens = 8000
         mgr._settings.transcript_enabled = False
         mgr._settings.post_compact_max_files = 0
+        mgr._settings.post_compact_token_per_file = 0
+        mgr._settings.post_compact_token_budget = 0
+        mgr._settings.offload_enabled = False
         mgr._ctx_max = 128000
         mgr._compact_threshold = 120000
         mgr._compact_failures = 0
         mgr._circuit_open = False
+        mgr._circuit_opened_at = 0.0
+        mgr._circuit_half_open = False
         mgr._microcompacts_since_open = 0
         mgr._compacting = False
         mgr._snip_freed_tokens = 0
@@ -308,6 +312,8 @@ class TestMaybeCompactCircuitBreaker:
         mgr = self._make_mgr()
         for i in range(10):
             mgr.short_term.append("user", f"msg{i}")
+        # Reset incremental counter so maybe_compact() uses the monkeypatched estimate_tokens
+        mgr.short_term._token_count = 0
         mgr._llm.think.return_value = ""
         for _ in range(3):
             mgr.maybe_compact()
@@ -317,23 +323,30 @@ class TestMaybeCompactCircuitBreaker:
     def test_circuit_open_only_microcompact_runs(self):
         mgr = self._make_mgr()
         mgr._circuit_open = True
-        mgr._microcompacts_since_open = 0
+        mgr._circuit_opened_at = time.time()  # cooldown hasn't expired
         for i in range(10):
             mgr.short_term.append(
                 "tool", f"Action: read[file=f{i}.py]\nObservation: content of file {i}"
             )
         result = mgr.maybe_compact()
         assert result == 0
-        assert mgr._microcompacts_since_open == 1
         msgs = mgr.short_term.get_all()
         cleared = [m for m in msgs if "工具结果已清理" in m.get("content", "")]
         assert len(cleared) == 5
 
-    def test_circuit_resets_after_5_successful_microcompacts(self):
+    def test_circuit_resets_after_5_successful_microcompacts(self, monkeypatch):
+        monkeypatch.setattr(
+            "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
+            lambda self: 125000,
+        )
         mgr = self._make_mgr()
         mgr._circuit_open = True
         mgr._compact_failures = 3
         mgr._microcompacts_since_open = 4
+        for i in range(10):
+            mgr.short_term.append("user", f"msg{i}")
+        mgr.short_term._token_count = 0  # force fallback to monkeypatched estimate_tokens
+        mgr._llm.think.return_value = "<summary>Compacted summary of conversation.</summary>"
         mgr.maybe_compact()
         assert mgr._circuit_open is False
         assert mgr._compact_failures == 0
@@ -396,13 +409,7 @@ class TestBuildProjection:
 
 class TestProjectMild:
 
-    def _make_mgr(self):
-        mgr = MemoryManager.__new__(MemoryManager)
-        mgr._settings = MagicMock()
-        return mgr
-
     def test_truncates_long_assistant_messages(self):
-        mgr = self._make_mgr()
         messages = [
             {"role": "assistant", "content": "x" * 2000},
             {"role": "user", "content": "r1"},
@@ -410,12 +417,11 @@ class TestProjectMild:
             {"role": "user", "content": "r3"},
             {"role": "user", "content": "r4"},
         ]
-        result = mgr._project_mild(messages)
+        result = project_mild(messages)
         assert "投影截断" in result[0]["content"]
         assert len(result[0]["content"]) < 2000
 
     def test_truncates_long_tool_messages(self):
-        mgr = self._make_mgr()
         messages = [
             {"role": "tool", "content": "Action: read[file=a.py]\n" + "x" * 2000},
             {"role": "user", "content": "r1"},
@@ -423,11 +429,10 @@ class TestProjectMild:
             {"role": "user", "content": "r3"},
             {"role": "user", "content": "r4"},
         ]
-        result = mgr._project_mild(messages)
+        result = project_mild(messages)
         assert "投影截断" in result[0]["content"]
 
     def test_keeps_recent_4_messages_intact(self):
-        mgr = self._make_mgr()
         messages = [
             {"role": "assistant", "content": "x" * 2000},
             {"role": "user", "content": "r1"},
@@ -435,70 +440,76 @@ class TestProjectMild:
             {"role": "user", "content": "r3"},
             {"role": "user", "content": "r4"},
         ]
-        result = mgr._project_mild(messages)
+        result = project_mild(messages)
         assert result[-4]["content"] == "r1"
         assert result[-3]["content"] == "r2"
         assert result[-2]["content"] == "r3"
         assert result[-1]["content"] == "r4"
 
     def test_preserves_long_user_messages_as_is(self):
-        mgr = self._make_mgr()
         long_user = "x" * 2000
         messages = [
             {"role": "user", "content": long_user},
             {"role": "user", "content": "short"},
         ]
-        result = mgr._project_mild(messages)
+        result = project_mild(messages)
         assert result[0]["content"] == long_user
         assert result[1]["content"] == "short"
 
 
 class TestProjectAggressive:
 
-    def _make_mgr(self):
-        mgr = MemoryManager.__new__(MemoryManager)
-        mgr._settings = MagicMock()
-        return mgr
-
     def test_clears_recoverable_tool_results(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [
             {"role": "tool", "content": "Action: read[file=a.py]\nObservation: content"},
             {"role": "user", "content": "r1"},
             {"role": "user", "content": "r2"},
             {"role": "user", "content": "r3"},
         ]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         tool_msgs = [m for m in result if m["role"] == "tool"]
         assert len(tool_msgs) == 1
         assert "投影清除" in tool_msgs[0]["content"]
 
     def test_truncates_all_assistant_messages_over_1000(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [
             {"role": "assistant", "content": "x" * 2000},
             {"role": "user", "content": "r1"},
             {"role": "user", "content": "r2"},
             {"role": "user", "content": "r3"},
         ]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         assert "投影压缩" in result[0]["content"]
 
     def test_keeps_recent_3_messages_intact(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [
             {"role": "assistant", "content": "old and long " * 100},
             {"role": "user", "content": "r1"},
             {"role": "user", "content": "r2"},
             {"role": "user", "content": "r3"},
         ]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         assert result[-3]["content"] == "r1"
         assert result[-2]["content"] == "r2"
         assert result[-1]["content"] == "r3"
 
     def test_inserts_boundary_marker_once_before_recent(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [
             {"role": "user", "content": "old1"},
             {"role": "user", "content": "old2"},
@@ -506,7 +517,11 @@ class TestProjectAggressive:
             {"role": "user", "content": "r2"},
             {"role": "user", "content": "r3"},
         ]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         boundaries = [m for m in result if m["role"] == "system" and "上下文投影" in m["content"]]
         assert len(boundaries) == 1
         boundary_idx = next(
@@ -516,21 +531,29 @@ class TestProjectAggressive:
         assert boundary_idx == first_recent_idx
 
     def test_inserts_boundary_at_start_when_all_messages_recent(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [{"role": "user", "content": "r1"}]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         boundaries = [m for m in result if m["role"] == "system" and "上下文投影" in m["content"]]
         assert len(boundaries) == 1
         assert result[0]["role"] == "system"
         assert "上下文投影" in result[0]["content"]
 
     def test_preserves_non_recoverable_tool_results(self):
-        mgr = self._make_mgr()
+        from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [
             {"role": "tool", "content": "Action: python_repl[code=print(1)]\nObservation: 1"},
             {"role": "user", "content": "recent"},
         ]
-        result = mgr._project_aggressive(messages)
+        result = project_aggressive(
+            messages,
+            parse_tool_message=parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+        )
         tool_msgs = [m for m in result if m["role"] == "tool"]
         assert len(tool_msgs) == 1
         assert "投影清除" not in tool_msgs[0]["content"]

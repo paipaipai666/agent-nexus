@@ -20,6 +20,7 @@ def test_default_providers_expose_specs():
         "todo",
         "codegraph",
         "browser",
+        "computer-use",
     ]
 
 

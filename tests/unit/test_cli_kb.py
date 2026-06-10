@@ -11,7 +11,7 @@ runner = CliRunner()
 class TestKbAdd:
     def test_path_not_exists(self):
         result = runner.invoke(app, ["kb", "add", "/nonexistent/path"])
-        assert "路径不存在" in result.stdout
+        assert "Path not found" in result.stdout
 
     def test_file_ingestion(self, temp_agentnexus_home):
         filepath = temp_agentnexus_home / "test.md"
@@ -39,7 +39,7 @@ class TestKbAdd:
             result = runner.invoke(app, ["kb", "add", str(filepath)])
             assert result.exit_code == 0
             assert "test.md" in result.stdout
-            assert "1 个文档块" in result.stdout
+            assert "(1 chunks)" in result.stdout
 
     def test_directory_ingestion(self, temp_agentnexus_home):
         docs_dir = temp_agentnexus_home / "docs"
@@ -72,7 +72,7 @@ class TestKbAdd:
             assert result.exit_code == 0
             assert "a.md" in result.stdout
             assert "b.md" in result.stdout
-            assert "2 个文档块" in result.stdout
+            assert "(2 chunks)" in result.stdout
 
     def test_directory_ingestion_supports_extended_formats(self, temp_agentnexus_home):
         docs_dir = temp_agentnexus_home / "docs"
@@ -134,7 +134,7 @@ class TestKbSearch:
             retriever_cls.return_value = retriever
             result = runner.invoke(app, ["kb", "search", "test"])
             assert result.exit_code == 0
-            assert "知识库为空" in result.stdout
+            assert "Knowledge base is empty" in result.stdout
 
     def test_search_outputs_ranked_results(self):
         with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \

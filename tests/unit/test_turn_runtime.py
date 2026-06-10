@@ -25,7 +25,8 @@ def test_finish_persists_checkpoint_without_extra_memory_append():
 
     assert record.status == "finished"
     assert record.answer == "done"
-    memory.append.assert_not_called()
+    # finish() with a real answer appends to memory
+    memory.append.assert_called_once_with("assistant", "done")
     version.commit.assert_called_once()
 
 
@@ -41,7 +42,8 @@ def test_cancel_generates_summary_with_reason_question_and_journal():
     assert "user interrupted" in record.answer
     assert "do work" in record.answer
     assert "tool start: web_search" in record.answer
-    memory.append.assert_called_once_with("assistant", record.answer)
+    # cancel() does not append to memory (only finish does)
+    memory.append.assert_not_called()
 
 
 def test_fail_generates_summary_with_detail():
@@ -65,7 +67,8 @@ def test_cancel_is_idempotent_for_persistence():
     turn.cancel("first")
     turn.cancel("second")
 
-    memory.append.assert_called_once()
+    # cancel() does not append to memory (only finish does)
+    memory.append.assert_not_called()
     version.commit.assert_called_once()
 
 

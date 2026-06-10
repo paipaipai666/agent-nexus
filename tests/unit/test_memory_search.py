@@ -102,7 +102,7 @@ class TestMemorySearch:
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
         memory_search("query", category="user_preference")
         _, kwargs = mock_ltm.return_value.search.call_args
-        assert kwargs["category"] == "user_preference"
+        assert kwargs["category"] == "preference"
 
         memory_search("query")
         _, kwargs = mock_ltm.return_value.search.call_args

@@ -177,7 +177,8 @@ class TestSkillRuntime:
     def test_workflow_run_enhanced_question(self):
         from agentnexus.skills.runtime import WorkflowRunResult
         result = WorkflowRunResult(question="hello", workflow_context="context")
-        assert result.enhanced_question == "context\n\n== User Question ==\nhello"
+        # Context is injected as a separate system message, not merged into question
+        assert result.enhanced_question == "hello"
 
     def test_supported_kb_filters_filters_correctly(self):
         from agentnexus.skills.runtime import _supported_kb_filters

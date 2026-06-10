@@ -48,31 +48,31 @@ class TestIterMemoryItems:
 
     def test_valid_data_with_multiple_categories(self):
         data = {
-            "user_preference": ["likes Python"],
-            "entity_fact": ["uses VSCode"],
-            "conclusion": ["prefers dark mode"],
+            "preference": ["likes Python"],
+            "fact": ["uses VSCode"],
+            "note": ["prefers dark mode"],
         }
         items = list(iter_memory_items(data))
         assert len(items) == 3
         categories = [cat for cat, _, _ in items]
-        assert "user_preference" in categories
-        assert "entity_fact" in categories
-        assert "conclusion" in categories
+        assert "preference" in categories
+        assert "fact" in categories
+        assert "note" in categories
 
     def test_dict_items_with_content(self):
-        data = {"entity_fact": [{"content": "some fact"}]}
+        data = {"fact": [{"content": "some fact"}]}
         items = list(iter_memory_items(data))
         assert len(items) == 1
         assert items[0][2] == "some fact"
 
     def test_dict_items_with_text(self):
-        data = {"entity_fact": [{"text": "some fact"}]}
+        data = {"fact": [{"text": "some fact"}]}
         items = list(iter_memory_items(data))
         assert len(items) == 1
         assert items[0][2] == "some fact"
 
     def test_short_items_skipped(self):
-        data = {"user_preference": ["hi", "long enough item"]}
+        data = {"preference": ["hi", "long enough item"]}
         items = list(iter_memory_items(data))
         assert len(items) == 1
         assert items[0][2] == "long enough item"
@@ -86,10 +86,11 @@ class TestExtractAndSaveMemories:
 
     def test_mock_llm_returns_json_and_save_called(self):
         llm = MagicMock()
-        llm.think.return_value = '{"user_preference": ["likes Python"]}'
+        llm.think.return_value = '{"preference": ["likes Python"]}'
         embed_model = MagicMock()
         embed_model.encode.return_value.tolist.return_value = [0.1, 0.2]
         long_term = MagicMock()
+        long_term.search.return_value = []
 
         extract_and_save_memories(
             llm=llm,
@@ -104,4 +105,4 @@ class TestExtractAndSaveMemories:
         call_kwargs = long_term.save.call_args[1]
         assert call_kwargs["session_id"] == "test-session"
         assert call_kwargs["content"] == "likes Python"
-        assert call_kwargs["category"] == "user_preference"
+        assert call_kwargs["category"] == "preference"

@@ -132,7 +132,7 @@ class TestMCPHealthLoop:
         manager._health_check_once = AsyncMock()
 
         async def stop_sleep(delay):
-            manager._closing = True
+            manager._closing.set()
 
         with patch.object(asyncio, "sleep", stop_sleep):
             asyncio.run(manager._health_loop())
@@ -142,7 +142,7 @@ class TestMCPHealthLoop:
     def test_health_loop_stops_on_closing(self):
         config = MCPServerConfig(name="test", transport="stdio", command="python")
         manager = MCPToolManager([config])
-        manager._closing = True
+        manager._closing.set()
         manager._health_check_once = AsyncMock()
 
         asyncio.run(manager._health_loop())
@@ -161,7 +161,7 @@ class TestMCPHealthLoop:
 
         async def capture_sleep(delay):
             sleeps.append(delay)
-            manager._closing = True
+            manager._closing.set()
 
         with patch.object(asyncio, "sleep", capture_sleep):
             asyncio.run(manager._health_loop())
@@ -232,7 +232,7 @@ class TestMCPShouldAttemptReconnect:
     def test_closing_returns_false(self):
         config = MCPServerConfig(name="test", transport="stdio", command="python")
         manager = MCPToolManager([config])
-        manager._closing = True
+        manager._closing.set()
         assert manager._should_attempt_reconnect(config, None, 0) is False
 
     def test_no_runtime_and_in_failures(self):

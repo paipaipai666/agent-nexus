@@ -777,9 +777,8 @@ class TestSkillCommandHelpers:
 
         question = screen._prepare_agent_question("user question")
 
-        assert "Workflow Runtime Context" in question
-        assert "Inspect workflow." in question
-        assert question.endswith("== User Question ==\nuser question")
+        # Context is now injected as a separate system message, not merged into question
+        assert question == "user question"
         assert screen._side_panel.add_timeline_event.called
 
     def test_prepare_agent_question_uses_skill_service_runtime(self):
@@ -797,7 +796,8 @@ class TestSkillCommandHelpers:
 
         question = screen._prepare_agent_question("user question")
 
-        assert "Workflow Runtime Context" in question
+        # Context is now injected as a separate system message
+        assert question == "user question"
         assert service.snapshot().last_run_status == "completed"
         screen._side_panel.update_skill.assert_called_with(
             "review",
@@ -842,7 +842,8 @@ class TestSkillCommandHelpers:
         question = screen._prepare_agent_question("Please write concise release notes.")
 
         assert service.current == entry
-        assert "Draft concise release notes." in question
+        # Context is injected as a separate system message, not merged into question
+        assert question == "Please write concise release notes."
         assert screen._side_panel.add_timeline_event.called
 
     def test_handle_dynamic_skill_command_runs_instruction(self):

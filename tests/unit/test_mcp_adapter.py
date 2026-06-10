@@ -438,6 +438,7 @@ class TestMcpToolManager:
         manager._server_runtimes["docs"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=asyncio.Semaphore(4),
         )
         descriptor = _make_descriptor(server_name="docs", remote_name="search", timeout_sec=30)
         result = asyncio.run(manager._call_tool_async(descriptor, {"q": "test"}))
@@ -466,6 +467,7 @@ class TestMcpToolManager:
         manager._server_runtimes["docs"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=asyncio.Semaphore(4),
         )
         descriptor = _make_descriptor(server_name="docs", remote_name="fail")
         try:
@@ -488,6 +490,7 @@ class TestMcpToolManager:
         manager._server_runtimes["docs"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=asyncio.Semaphore(4),
         )
         descriptor = _make_descriptor(server_name="docs", remote_name="fail")
         try:
@@ -996,6 +999,7 @@ class TestTimeoutBehavior:
         manager._server_runtimes["slow"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=asyncio.Semaphore(4),
         )
         descriptor = _make_descriptor(server_name="slow", remote_name="slow_tool", timeout_sec=0.01)
 
@@ -1827,6 +1831,7 @@ class TestCallLockConcurrency:
         manager._server_runtimes["docs"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=None,
         )
         descriptor = _make_descriptor(server_name="docs", remote_name="search", timeout_sec=30)
 
@@ -1854,6 +1859,7 @@ class TestCallLockConcurrency:
         manager._server_runtimes["docs"] = SimpleNamespace(
             session=mock_session,
             call_lock=asyncio.Lock(),
+            semaphore=None,
         )
         descriptor = _make_descriptor(server_name="docs", remote_name="fail", timeout_sec=30)
 
