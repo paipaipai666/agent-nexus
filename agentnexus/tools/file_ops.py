@@ -31,7 +31,7 @@ def _get_allowed_roots() -> list[Path]:
     roots = [workspace]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
-    agentnexus_home = Path.home().resolve(strict=False) / ".agentnexus"
+    agentnexus_home = Path(Path.home().resolve(strict=False)) / ".agentnexus"
     if agentnexus_home not in roots:
         roots.append(agentnexus_home)
 

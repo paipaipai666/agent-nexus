@@ -2,6 +2,8 @@
 injection, path traversal, PII filtering, SQL injection,
 and edge-case input validation."""
 
+import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -228,13 +230,24 @@ class TestPathTraversal:
         assert result is not None
 
     def test_symlink_outside_workspace(self):
-        """Symlink inside workspace pointing outside is not yet blocked."""
-        with patch("agentnexus.tools.file_ops.os.getcwd", return_value="D:\\code\\AgentNexus"):
-            with patch("agentnexus.tools.file_ops.Path.resolve") as mock_resolve:
-                outside = "D:\\outside\\target"
-                mock_resolve.return_value = outside
+        """Symlink inside workspace pointing outside is blocked by resolve layer."""
+        import tempfile
+        ws = Path(tempfile.mkdtemp())
+        link = ws / "link_to_outside"
+        target = Path(tempfile.mkdtemp()) / "target"
+        target.mkdir()
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("symlink not available (Windows without admin/DevMode)")
+        try:
+            with patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(ws)):
                 with pytest.raises(ValueError, match="路径越界|out of bounds"):
                     _resolve_safe("link_to_outside")
+        finally:
+            link.unlink(missing_ok=True)
+            shutil.rmtree(ws, ignore_errors=True)
+            shutil.rmtree(target.parent, ignore_errors=True)
 
 
 class TestMemorySave:
