@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock, patch
+
 from agentnexus.rag.ids import make_chunk_id, make_document_version, make_source_id
 from agentnexus.rag.models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
 from agentnexus.rag.store import get_knowledge_base_catalog
@@ -46,7 +48,8 @@ class TestKbSearchTool:
             ],
         )
 
-        result = kb_search("检索用什么", namespace="support")
+        with patch("sentence_transformers.CrossEncoder", return_value=MagicMock()):
+            result = kb_search("检索用什么", namespace="support")
 
         assert "docs/support.md" in result
         assert "检索" in result
