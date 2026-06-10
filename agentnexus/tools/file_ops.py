@@ -52,6 +52,10 @@ def _resolve_safe(path: str) -> Path:
 
     Allowed roots: workspace (cwd), ~/.agentnexus, and the agentnexus package dir.
     Raises ValueError if the resolved path escapes all allowed roots.
+
+    Two-layer defense:
+    1. normpath — catches ".." traversal on non-existent paths
+    2. resolve  — catches symlink escapes (link -> ../../outside)
     """
     try:
         workspace = Path(os.getcwd()).absolute()
@@ -65,20 +69,28 @@ def _resolve_safe(path: str) -> Path:
     if not candidate.is_absolute():
         candidate = workspace / path
 
-    # Use normpath to resolve .. components without requiring the path to exist.
-    # This catches traversal attacks like "foo/../../bar" reliably.
-    normalized = Path(os.path.normpath(str(candidate)))
-
     def is_allowed(p: Path) -> bool:
         return any(_is_within(p, root) for root in roots)
 
+    # Layer 1: normpath resolves ".." without requiring the path to exist.
+    normalized = Path(os.path.normpath(str(candidate)))
     if not is_allowed(normalized):
         root_names = ", ".join(str(r) for r in roots)
         raise ValueError(
             f"路径越界: '{path}' 解析为 '{normalized}'，不在允许的目录范围内。"
             f" 允许的根目录: {root_names}"
         )
-    return normalized
+
+    # Layer 2: resolve follows symlinks to catch link -> ../../outside.
+    resolved = normalized.resolve(strict=False)
+    if not is_allowed(resolved):
+        root_names = ", ".join(str(r) for r in roots)
+        raise ValueError(
+            f"路径越界: '{path}' (符号链接) 解析为 '{resolved}'，不在允许的目录范围内。"
+            f" 允许的根目录: {root_names}"
+        )
+
+    return resolved
 
 
 def _is_within(path: Path, root: Path) -> bool:
