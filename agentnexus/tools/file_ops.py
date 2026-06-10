@@ -25,13 +25,13 @@ LARGE_FILE_PREVIEW_LINES = 20
 def _get_allowed_roots() -> list[Path]:
     """Build the set of allowed root directories (recomputed each call)."""
     try:
-        workspace = Path(os.getcwd()).absolute()
+        workspace = Path(os.getcwd()).resolve(strict=False)
     except (FileNotFoundError, OSError):
-        workspace = Path(tempfile.gettempdir()).absolute()
+        workspace = Path(tempfile.gettempdir()).resolve(strict=False)
     roots = [workspace]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
-    agentnexus_home = Path.home().absolute() / ".agentnexus"
+    agentnexus_home = Path.home().resolve(strict=False) / ".agentnexus"
     if agentnexus_home not in roots:
         roots.append(agentnexus_home)
 
@@ -58,9 +58,9 @@ def _resolve_safe(path: str) -> Path:
     2. resolve  — catches symlink escapes (link -> ../../outside)
     """
     try:
-        workspace = Path(os.getcwd()).absolute()
+        workspace = Path(os.getcwd()).resolve(strict=False)
     except (FileNotFoundError, OSError):
-        workspace = Path(tempfile.gettempdir()).absolute()
+        workspace = Path(tempfile.gettempdir()).resolve(strict=False)
     roots = _get_allowed_roots()
 
     # If the path is absolute and already under an allowed root, use it directly.
@@ -94,12 +94,13 @@ def _resolve_safe(path: str) -> Path:
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    """Check if path is within root (handles Windows short names)."""
+    """Check if path is within root (handles Windows 8.3 short names)."""
     try:
-        # Use normcase for case-insensitive comparison on Windows
-        p = os.path.normcase(os.path.normpath(str(path)))
-        r = os.path.normcase(os.path.normpath(str(root)))
-        return p == r or p.startswith(r + os.sep)
+        # resolve(strict=False) canonicalizes both long and short names,
+        # ensuring C:\Users\RUNNER~1 and C:\Users\runneradmin compare equal.
+        p = path.resolve(strict=False)
+        r = root.resolve(strict=False)
+        return p == r or str(p).startswith(str(r) + os.sep)
     except (ValueError, OSError):
         return False
 
