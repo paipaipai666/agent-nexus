@@ -58,8 +58,13 @@ def _continue_session(session_id: str | None) -> None:
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
 
+    import tempfile as _tf
+
     settings = get_settings()
-    workspace = str(Path.cwd())
+    try:
+        workspace = str(Path.cwd())
+    except (FileNotFoundError, OSError):
+        workspace = _tf.gettempdir()
 
     if session_id:
         if not ConversationVersionManager.session_belongs_to_workspace(

@@ -20,8 +20,8 @@ class TestResolveSafe:
         assert p.is_dir()
 
     def test_escaping_path_raises(self):
-        with pytest.raises(ValueError, match="路径越界"):
-            _resolve_safe("..\\..\\etc")
+        with pytest.raises(ValueError, match="路径越界|out of bounds"):
+            _resolve_safe("../../etc")
 
 
 class TestFingerprintFile:

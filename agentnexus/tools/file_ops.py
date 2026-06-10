@@ -6,6 +6,7 @@ import difflib
 import fnmatch
 import hashlib
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,10 @@ LARGE_FILE_PREVIEW_LINES = 20
 
 def _get_allowed_roots() -> list[Path]:
     """Build the set of allowed root directories (recomputed each call)."""
-    workspace = Path(os.getcwd()).absolute()
+    try:
+        workspace = Path(os.getcwd()).absolute()
+    except (FileNotFoundError, OSError):
+        workspace = Path(tempfile.gettempdir()).absolute()
     roots = [workspace]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
@@ -49,7 +53,10 @@ def _resolve_safe(path: str) -> Path:
     Allowed roots: workspace (cwd), ~/.agentnexus, and the agentnexus package dir.
     Raises ValueError if the resolved path escapes all allowed roots.
     """
-    workspace = Path(os.getcwd()).absolute()
+    try:
+        workspace = Path(os.getcwd()).absolute()
+    except (FileNotFoundError, OSError):
+        workspace = Path(tempfile.gettempdir()).absolute()
     roots = _get_allowed_roots()
 
     # If the path is absolute and already under an allowed root, use it directly.

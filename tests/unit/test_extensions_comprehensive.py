@@ -10,13 +10,14 @@ Covers:
 """
 
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 
 def _workspace_tmp() -> Path:
-    root = Path.cwd() / "build" / "test-workspace" / uuid.uuid4().hex
+    root = Path(tempfile.gettempdir()) / "test-workspace" / uuid.uuid4().hex
     root.mkdir(parents=True, exist_ok=True)
     return root
 

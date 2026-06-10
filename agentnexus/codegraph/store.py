@@ -141,7 +141,12 @@ END;
 
 def detect_project_root() -> Path:
     """Detect project root: walk up looking for .git, fallback to cwd."""
-    cwd = Path.cwd()
+    import tempfile as _tf
+
+    try:
+        cwd = Path.cwd()
+    except (FileNotFoundError, OSError):
+        cwd = Path(_tf.gettempdir())
     for parent in [cwd, *cwd.parents]:
         if (parent / ".git").exists():
             return parent

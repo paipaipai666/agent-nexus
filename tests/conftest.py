@@ -7,24 +7,21 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture(scope="session", autouse=True)
-def safe_working_directory():
-    """Ensure a valid working directory for the entire test session.
+_SAFE_DIR = tempfile.gettempdir()
 
-    CI runners may clean up the initial cwd before tests finish.
-    Uses /tmp directly (not a subdirectory) so it can't be accidentally
-    deleted by other test fixtures that call shutil.rmtree on temp dirs.
+
+@pytest.fixture(autouse=True)
+def _ensure_valid_cwd():
+    """Ensure a valid working directory before every test.
+
+    On Linux, a test can delete the current directory (os.chdir + shutil.rmtree),
+    causing all subsequent os.getcwd() calls to fail with FileNotFoundError.
+    This fixture checks and recovers before each test runs.
     """
     try:
         os.getcwd()
     except (FileNotFoundError, OSError):
-        pass
-
-    # Use /tmp itself — it exists on all Unix CI runners and won't be
-    # deleted by test fixtures that clean up their own temp subdirectories.
-    safe_dir = tempfile.gettempdir()
-    os.chdir(safe_dir)
-
+        os.chdir(_SAFE_DIR)
     yield
 
 

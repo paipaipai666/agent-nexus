@@ -1,11 +1,12 @@
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 
 def _workspace_tmp() -> Path:
-    root = Path.cwd() / "build" / "test-workspace" / uuid.uuid4().hex
+    root = Path(tempfile.gettempdir()) / "test-workspace" / uuid.uuid4().hex
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -148,7 +149,7 @@ def test_default_builtin_extensions_dir_exists():
     from agentnexus.extensions import ExtensionManager
 
     settings = SimpleNamespace(
-        memory_db_path=str(Path.cwd() / "build" / "test-workspace" / "memory.db"),
+        memory_db_path=str(Path(tempfile.gettempdir()) / "test-workspace" / "memory.db"),
         extensions_dirs=[],
         extensions_enabled=True,
     )
