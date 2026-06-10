@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 _SAFE_DIR = tempfile.gettempdir()
 
 

@@ -55,10 +55,10 @@ from agentnexus.cli import (
 
 
 def _continue_session(session_id: str | None) -> None:
+    import tempfile as _tf
+
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
-
-    import tempfile as _tf
 
     settings = get_settings()
     try:
