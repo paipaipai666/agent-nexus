@@ -20,8 +20,17 @@ class _FakeServices:
     chat = _FakeChatService()
 
 
+class _FakeLLM:
+    api_key = "test-key"
+    base_url = "http://localhost"
+    model = "test-model"
+
+
 class _FakeRuntime:
     services = _FakeServices()
+    llm = _FakeLLM()
+    mcp_manager = None
+    memory_manager = None
 
     def close(self):
         pass

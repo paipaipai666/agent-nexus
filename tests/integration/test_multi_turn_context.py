@@ -6,7 +6,7 @@ in later turns.
 """
 from unittest.mock import MagicMock, patch
 
-from agentnexus.memory.manager import MemoryManager
+from agentnexus.memory.manager import MemoryManager, _GateCircuitState
 from agentnexus.memory.short_term import ShortTermMemory
 
 
@@ -32,6 +32,9 @@ class TestMultiTurnContext:
             mgr._embed_model = mock_embed
             mgr._enable_long_term = True
             mgr._ctx_max = 8000
+            mgr._gate_state = _GateCircuitState.CLOSED
+            mgr._gate_failures = 0
+            mgr._gate_opened_at = 0.0
             return mgr
 
     def test_earlier_context_available_in_later_turn(self, temp_agentnexus_home):
@@ -92,14 +95,21 @@ class TestMultiTurnContext:
 
         mgr.short_term.append("user", "定义User模型")
         mgr.short_term.append("assistant", "class User(Base): ...")
-        mgr._llm.think.return_value = '```json\n{"entity_fact": [{"content": "定义了User模型"}]}\n```'
+        # Gate check expects "yes"/"no"; extraction expects JSON.
+        mgr._llm.think.side_effect = [
+            "yes",
+            '```json\n{"fact": [{"content": "定义了User模型"}]}\n```',
+        ]
         mgr.conclude("定义User模型", "class User(Base): ...")
         turn1_save_count = mock_ltm.save.call_count
 
         # Turn 2
         mgr.short_term.append("user", "添加email字段")
         mgr.short_term.append("assistant", "email = Column(String)")
-        mgr._llm.think.return_value = '```json\n{"entity_fact": [{"content": "添加了email字段"}]}\n```'
+        mgr._llm.think.side_effect = [
+            "yes",
+            '```json\n{"fact": [{"content": "添加了email字段"}]}\n```',
+        ]
         mgr.conclude("添加email字段", "email = Column(String)")
         turn2_save_count = mock_ltm.save.call_count
 

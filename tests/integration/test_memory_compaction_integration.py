@@ -145,6 +145,10 @@ class TestMemoryCompactionIntegration:
             mgr.short_term.append("user", f"msg {i}")
             mgr.short_term.append("assistant", f"reply {i}")
 
+        # Reset incremental counter so maybe_compact falls through to the
+        # monkeypatched estimate_tokens() (which returns 125 000 > threshold).
+        mgr.short_term._token_count = 0
+
         mgr._llm.think.return_value = "<summary>会话摘要：用户讨论了多个话题。</summary>"
 
         saved = mgr.maybe_compact()

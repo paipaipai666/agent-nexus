@@ -1,7 +1,7 @@
 """Integration tests for multi-turn conversation with long-term memory (LTM)."""
 from unittest.mock import MagicMock, patch
 
-from agentnexus.memory.manager import MemoryManager
+from agentnexus.memory.manager import MemoryManager, _GateCircuitState
 from agentnexus.memory.short_term import ShortTermMemory
 
 
@@ -47,6 +47,9 @@ class TestMultiTurnLTM:
             mgr._settings.post_compact_max_files = 0
             mgr._settings.offload_enabled = False
             mgr._settings.large_result_threshold = 10000
+            mgr._gate_state = _GateCircuitState.CLOSED
+            mgr._gate_failures = 0
+            mgr._gate_opened_at = 0.0
             return mgr
 
     def test_init_session_returns_empty_without_ltm(self, temp_agentnexus_home):
@@ -92,8 +95,12 @@ class TestMultiTurnLTM:
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)
         mgr._embed_model = mock_embed
+        # Short answers like "你好！" (< 5 chars) are rejected by the rule filter
+        # before the gate runs, so bypass it to test the extraction path.
+        mgr._should_extract = MagicMock(return_value=True)
+        # Extraction expects JSON (gate is bypassed by the mock above).
         mgr._llm.think.return_value = (
-            '```json\n{"user_preference": [{"content": "用户喜欢简洁回答"}]}\n```'
+            '```json\n{"preference": [{"content": "用户喜欢简洁回答"}]}\n```'
         )
 
         mgr.conclude("你好", "你好！")
@@ -101,7 +108,7 @@ class TestMultiTurnLTM:
         mock_ltm.save.assert_called()
         call_kwargs = mock_ltm.save.call_args
         assert call_kwargs[1]["content"] == "用户喜欢简洁回答"
-        assert call_kwargs[1]["category"] == "user_preference"
+        assert call_kwargs[1]["category"] == "preference"
 
     def test_new_session_retrieves_ltm_from_previous(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
