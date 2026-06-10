@@ -78,11 +78,14 @@ def _resolve_safe(path: str) -> Path:
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    """Check if path is within root (symlink-safe)."""
+    """Check if path is within root (symlink-safe, Windows short-name safe)."""
     try:
-        path.relative_to(root)
-        return True
-    except ValueError:
+        # Use os.path.realpath to resolve Windows short names (RUNNER~1 -> runneradmin)
+        # and os.path.normcase for case-insensitive comparison on Windows
+        p = os.path.normcase(os.path.realpath(str(path)))
+        r = os.path.normcase(os.path.realpath(str(root)))
+        return p == r or p.startswith(r + os.sep)
+    except (ValueError, OSError):
         return False
 
 

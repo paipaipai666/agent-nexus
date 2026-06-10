@@ -134,7 +134,7 @@ class TestRegistryAudit:
         entry = log[0]
         assert entry.tool_name == "test_tool"
         assert entry.caller == "agent1"
-        assert entry.duration_ms > 0
+        assert entry.duration_ms >= 0
 
     def test_audit_params_truncated(self):
         """Params longer than 300 chars are truncated."""

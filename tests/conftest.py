@@ -7,6 +7,30 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def safe_working_directory():
+    """Ensure a valid working directory for the entire test session.
+
+    CI runners may clean up the initial cwd before tests finish.
+    """
+    try:
+        original_cwd = os.getcwd()
+    except (FileNotFoundError, OSError):
+        original_cwd = None
+
+    tmpdir = tempfile.mkdtemp()
+    os.chdir(tmpdir)
+
+    yield
+
+    if original_cwd and os.path.exists(original_cwd):
+        os.chdir(original_cwd)
+    try:
+        os.rmdir(tmpdir)
+    except OSError:
+        pass
+
+
 @pytest.fixture
 def temp_agentnexus_home():
     """临时 .agentnexus 目录，测试后自动清理"""

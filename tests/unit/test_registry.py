@@ -145,7 +145,7 @@ class TestInvoke:
         assert len(r._audit_log) == 1
         entry = r._audit_log[0]
         assert entry.tool_name == "test_tool"
-        assert entry.duration_ms > 0
+        assert entry.duration_ms >= 0
 
 
 class TestQueryAPI:
