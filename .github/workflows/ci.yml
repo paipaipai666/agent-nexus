@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,rag,server,tui]"
       - name: Run unit and integration tests
         run: python -m pytest tests/unit/ tests/integration/ tests/security/ -q --tb=short --timeout=60
       - name: Run coverage (ubuntu + 3.11 only)
@@ -55,7 +55,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,rag,server,tui]"
       - name: Validate eval dataset
         run: |
           python -c "
