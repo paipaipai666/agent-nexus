@@ -231,7 +231,6 @@ class TestPathTraversal:
 
     def test_symlink_outside_workspace(self):
         """Symlink inside workspace pointing outside is blocked by resolve layer."""
-        import tempfile
         ws = Path(tempfile.mkdtemp())
         link = ws / "link_to_outside"
         target = Path(tempfile.mkdtemp()) / "target"
