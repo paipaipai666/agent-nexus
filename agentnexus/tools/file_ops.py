@@ -65,38 +65,28 @@ def _resolve_safe(path: str) -> Path:
     if not candidate.is_absolute():
         candidate = workspace / path
 
-    def is_allowed(resolved: Path) -> bool:
-        return any(_is_within(resolved, root) for root in roots)
+    # Use normpath to resolve .. components without requiring the path to exist.
+    # This catches traversal attacks like "foo/../../bar" reliably.
+    normalized = Path(os.path.normpath(str(candidate)))
 
-    existing_ancestor = candidate
-    while not existing_ancestor.exists() and existing_ancestor != existing_ancestor.parent:
-        existing_ancestor = existing_ancestor.parent
+    def is_allowed(p: Path) -> bool:
+        return any(_is_within(p, root) for root in roots)
 
-    resolved_ancestor = Path(existing_ancestor.resolve())
-    resolved_candidate = Path(candidate.resolve())
-
-    if not is_allowed(resolved_ancestor) and not is_allowed(resolved_candidate):
+    if not is_allowed(normalized):
         root_names = ", ".join(str(r) for r in roots)
         raise ValueError(
-            f"路径越界: '{path}' 解析为 '{resolved_candidate}'，不在允许的目录范围内。"
+            f"路径越界: '{path}' 解析为 '{normalized}'，不在允许的目录范围内。"
             f" 允许的根目录: {root_names}"
         )
-    return resolved_candidate
+    return normalized
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    """Check if path is within root (symlink-safe, Windows short-name safe)."""
+    """Check if path is within root (handles Windows short names)."""
     try:
-        root_str = str(root)
-        path_str = str(path)
-        # On Linux, realpath of a non-existent Windows-style path resolves to cwd,
-        # which can falsely match. Only use realpath when the root actually exists.
-        if os.path.exists(root_str):
-            r = os.path.normcase(os.path.realpath(root_str))
-            p = os.path.normcase(os.path.realpath(path_str))
-        else:
-            r = os.path.normcase(root_str)
-            p = os.path.normcase(path_str)
+        # Use normcase for case-insensitive comparison on Windows
+        p = os.path.normcase(os.path.normpath(str(path)))
+        r = os.path.normcase(os.path.normpath(str(root)))
         return p == r or p.startswith(r + os.sep)
     except (ValueError, OSError):
         return False
