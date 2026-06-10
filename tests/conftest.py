@@ -12,23 +12,20 @@ def safe_working_directory():
     """Ensure a valid working directory for the entire test session.
 
     CI runners may clean up the initial cwd before tests finish.
+    Uses /tmp directly (not a subdirectory) so it can't be accidentally
+    deleted by other test fixtures that call shutil.rmtree on temp dirs.
     """
     try:
-        original_cwd = os.getcwd()
+        os.getcwd()
     except (FileNotFoundError, OSError):
-        original_cwd = None
+        pass
 
-    tmpdir = tempfile.mkdtemp()
-    os.chdir(tmpdir)
+    # Use /tmp itself — it exists on all Unix CI runners and won't be
+    # deleted by test fixtures that clean up their own temp subdirectories.
+    safe_dir = tempfile.gettempdir()
+    os.chdir(safe_dir)
 
     yield
-
-    if original_cwd and os.path.exists(original_cwd):
-        os.chdir(original_cwd)
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
 
 
 @pytest.fixture

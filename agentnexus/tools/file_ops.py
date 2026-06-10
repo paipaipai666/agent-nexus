@@ -80,10 +80,16 @@ def _resolve_safe(path: str) -> Path:
 def _is_within(path: Path, root: Path) -> bool:
     """Check if path is within root (symlink-safe, Windows short-name safe)."""
     try:
-        # Use os.path.realpath to resolve Windows short names (RUNNER~1 -> runneradmin)
-        # and os.path.normcase for case-insensitive comparison on Windows
-        p = os.path.normcase(os.path.realpath(str(path)))
-        r = os.path.normcase(os.path.realpath(str(root)))
+        root_str = str(root)
+        path_str = str(path)
+        # On Linux, realpath of a non-existent Windows-style path resolves to cwd,
+        # which can falsely match. Only use realpath when the root actually exists.
+        if os.path.exists(root_str):
+            r = os.path.normcase(os.path.realpath(root_str))
+            p = os.path.normcase(os.path.realpath(path_str))
+        else:
+            r = os.path.normcase(root_str)
+            p = os.path.normcase(path_str)
         return p == r or p.startswith(r + os.sep)
     except (ValueError, OSError):
         return False

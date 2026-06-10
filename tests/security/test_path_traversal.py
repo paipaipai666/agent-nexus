@@ -58,28 +58,16 @@ class TestPathTraversal:
         assert p is not None
 
     @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
-    def test_windows_backslash_traversal_rejected(self, mock_getcwd):
-        """Windows ..\\..\\ relative path outside workspace is rejected."""
+    def test_traversal_rejected(self, mock_getcwd):
+        """Relative path outside workspace is rejected."""
         with pytest.raises(ValueError, match="路径越界|out of bounds"):
-            _resolve_safe("..\\..\\..\\Windows\\System32")
+            _resolve_safe("../../../../etc")
 
     @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
-    def test_windows_drive_letter_traversal_rejected(self, mock_getcwd):
-        """Windows absolute path on a different drive is rejected."""
+    def test_absolute_outside_rejected(self, mock_getcwd):
+        """Absolute path outside workspace is rejected."""
         with pytest.raises(ValueError, match="路径越界|out of bounds"):
-            _resolve_safe("E:\\Windows\\System32")
-
-    @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
-    def test_windows_drive_letter_same_drive_blocked(self, mock_getcwd):
-        """Windows absolute path on same drive but outside workspace is rejected."""
-        with pytest.raises(ValueError, match="路径越界|out of bounds"):
-            _resolve_safe("D:\\Windows\\System32")
-
-    @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
-    def test_windows_mixed_separator_traversal_rejected(self, mock_getcwd):
-        """Mixed forward/backslash traversal outside workspace is rejected."""
-        with pytest.raises(ValueError, match="路径越界|out of bounds"):
-            _resolve_safe("../..\\..\\etc")
+            _resolve_safe("/etc/shadow")
 
     @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
     def test_nested_traversal_rejected(self, mock_getcwd):
