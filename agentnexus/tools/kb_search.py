@@ -1,6 +1,12 @@
 """kb_search tool — search the structured knowledge base with citations."""
 
-from agentnexus.rag.retriever import HybridRetriever, expand_queries, result_citation, result_display_text
+from agentnexus.rag.retriever import (
+    _get_retriever,
+    _retriever_reranker_requested,
+    expand_queries,
+    result_citation,
+    result_display_text,
+)
 from agentnexus.storage.chroma import search as chroma_search
 
 
@@ -48,12 +54,12 @@ def kb_search(
     has_list: bool | None = None,
     heading_depth: int | None = None,
 ) -> str:
-    retriever = HybridRetriever(namespace=namespace)
-    retriever.rebuild_from_catalog()
+    retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "[kb_search] 知识库为空"
 
-    if retriever._reranker is None:
+    should_load_reranker = _retriever_reranker_requested.get(namespace, True)
+    if should_load_reranker and retriever._reranker is None:
         retriever.load_reranker()
 
     where = _build_search_where(

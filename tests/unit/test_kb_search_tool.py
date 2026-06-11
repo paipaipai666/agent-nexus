@@ -57,13 +57,9 @@ class TestKbSearchTool:
 
     def test_kb_search_outputs_expanded_context(self, monkeypatch):
         class FakeRetriever:
-            def __init__(self, namespace="default"):
-                self.namespace = namespace
+            def __init__(self):
                 self._chunks = {"chunk_1": object()}
                 self._reranker = object()
-
-            def rebuild_from_catalog(self):
-                return None
 
             def search(self, query, dense, top_k=5, min_score=0.0, metadata_filters=None):
                 from agentnexus.rag.retriever import SearchResult
@@ -81,7 +77,8 @@ class TestKbSearchTool:
                 results[0].context_text = "前置说明\n\n>> 核心答案\n\n后续补充"
                 return results
 
-        monkeypatch.setattr("agentnexus.tools.kb_search.HybridRetriever", FakeRetriever)
+        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {})
         monkeypatch.setattr(
             "agentnexus.tools.kb_search.chroma_search",
             lambda query, limit=10, name=None, namespace=None, where=None: [
@@ -101,13 +98,9 @@ class TestKbSearchTool:
         captured = {}
 
         class FakeRetriever:
-            def __init__(self, namespace="default"):
-                self.namespace = namespace
+            def __init__(self):
                 self._chunks = {"chunk_1": object()}
                 self._reranker = None
-
-            def rebuild_from_catalog(self):
-                return None
 
             def load_reranker(self):
                 captured["reranker_loaded"] = True
@@ -116,7 +109,8 @@ class TestKbSearchTool:
             def search(self, query, dense, top_k=5, min_score=0.0, metadata_filters=None):
                 return []
 
-        monkeypatch.setattr("agentnexus.tools.kb_search.HybridRetriever", FakeRetriever)
+        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {"support": True})
 
         def fake_chroma_search(query, limit=10, name=None, namespace=None, where=None):
             captured.setdefault("queries", []).append(query)
@@ -161,13 +155,9 @@ class TestKbSearchTool:
         captured = {}
 
         class FakeRetriever:
-            def __init__(self, namespace="default"):
-                self.namespace = namespace
+            def __init__(self):
                 self._chunks = {"chunk_1": object()}
                 self._reranker = object()
-
-            def rebuild_from_catalog(self):
-                return None
 
             def search(self, query, dense, top_k=5, min_score=0.0, metadata_filters=None):
                 from agentnexus.rag.retriever import SearchResult
@@ -178,7 +168,8 @@ class TestKbSearchTool:
                 captured["view"] = view
                 return results
 
-        monkeypatch.setattr("agentnexus.tools.kb_search.HybridRetriever", FakeRetriever)
+        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {})
         monkeypatch.setattr(
             "agentnexus.tools.kb_search.chroma_search",
             lambda query, limit=10, name=None, namespace=None, where=None: [
