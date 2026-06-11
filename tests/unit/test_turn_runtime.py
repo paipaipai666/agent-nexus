@@ -25,8 +25,9 @@ def test_finish_persists_checkpoint_without_extra_memory_append():
 
     assert record.status == "finished"
     assert record.answer == "done"
-    # finish() with a real answer appends to memory
-    memory.append.assert_called_once_with("assistant", "done")
+    # finish() no longer appends to memory — the agent already stores
+    # the answer as "[最终答案]" in re_act_agent.py:_on_emit_answer.
+    memory.append.assert_not_called()
     version.commit.assert_called_once()
 
 

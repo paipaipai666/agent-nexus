@@ -11,8 +11,6 @@ Fix: remove the duplicate storage in turn.py. The agent already
 stores the answer with [最终答案] prefix.
 """
 
-import pytest
-
 
 # Simulate the frontend transformation logic from ChatPage.tsx loadAndDisplayMessages
 def transform_messages(stm: list[dict]) -> list[dict]:

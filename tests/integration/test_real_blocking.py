@@ -5,21 +5,16 @@ large file uploads. Previous tests mocked ingest_one_document which
 completely bypassed the real blocking path.
 """
 
-import asyncio
 import concurrent.futures
 import gc
-import os
-import tempfile
 import threading
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

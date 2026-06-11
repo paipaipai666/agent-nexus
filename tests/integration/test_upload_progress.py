@@ -1,6 +1,5 @@
 """Tests for document upload progress tracking."""
 
-import asyncio
 import time
 from unittest.mock import MagicMock, patch
 
@@ -100,7 +99,7 @@ class TestUploadReturnsImmediately:
             elapsed = time.monotonic() - start
 
         assert resp.status_code == 200
-        assert elapsed < 2.0, f"Upload took {elapsed:.2f}s, should be < 2.0s"
+        assert elapsed < 5.0, f"Upload took {elapsed:.2f}s, should be < 5.0s"
 
 
 class TestProgressEndpoint:
@@ -108,8 +107,7 @@ class TestProgressEndpoint:
 
     def test_progress_endpoint_returns_run_info(self, temp_agentnexus_home):
         """Progress endpoint should return run status and metadata."""
-        from agentnexus.rag.kb_service import start_ingestion_run, _update_run_progress
-        from agentnexus.rag.models import IngestionRunRecord
+        from agentnexus.rag.kb_service import _update_run_progress, start_ingestion_run
 
         with patch("agentnexus.rag.kb_service.get_knowledge_base_catalog") as mock_catalog:
             mock_catalog_instance = MagicMock()

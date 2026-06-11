@@ -2,16 +2,13 @@
 
 import gc
 import os
-import tempfile
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -76,7 +73,7 @@ def _make_large_markdown(size_mb: float) -> bytes:
     for i in range(500):
         sections.append(f"\n## Section {i}\n")
         sections.append(f"Content for section {i}. " * 100 + "\n")
-        sections.append(f"- Item 1\n- Item 2\n- Item 3\n")
+        sections.append("- Item 1\n- Item 2\n- Item 3\n")
     content = "".join(sections)
     target_bytes = int(size_mb * 1024 * 1024)
     return (content * (target_bytes // len(content) + 1)).encode("utf-8")[:target_bytes]
@@ -139,7 +136,6 @@ class TestLargeFileIngestion:
 
     def test_ingestion_receives_correct_filepath(self, temp_agentnexus_home):
         """Verify the ingestion function receives a valid temp file path."""
-        from agentnexus.rag.kb_service import ingest_one_document as real_ingest
         import tempfile
 
         content = b"test content for filepath verification"

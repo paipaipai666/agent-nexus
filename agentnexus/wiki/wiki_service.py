@@ -318,10 +318,11 @@ class WikiService:
         Uses LLM to extract statements and link them to RAG chunks.
         Falls back to a simple extraction if LLM is unavailable.
         """
-        from agentnexus.rag.store import get_knowledge_base_catalog
-        from .models import WikiStatement, SynthesisLevel
-
         from pathlib import Path
+
+        from agentnexus.rag.store import get_knowledge_base_catalog
+
+        from .models import SynthesisLevel, WikiStatement
         page_id = _make_id("page")
         title = Path(source_uri).name if source_uri else "Untitled"
 
@@ -392,7 +393,7 @@ class WikiService:
         llm_client,
     ) -> list:
         """Use LLM to extract wiki statements from source text."""
-        from .models import WikiStatement, SynthesisLevel
+        from .models import SynthesisLevel, WikiStatement
 
         chunk_listing = "\n".join(
             f"[{cid}] {text[:200]}..." for cid, text in list(chunk_map.items())[:20]
