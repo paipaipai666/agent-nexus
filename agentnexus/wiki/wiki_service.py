@@ -88,10 +88,24 @@ class WikiService:
         Returns:
             The generated WikiPage.
         """
+        # Deduplicate: if a page with the same title already exists, update it
+        from pathlib import Path
+        expected_title = Path(source_uri).name if source_uri else ""
+        existing_pages = self.store.list_pages(source_namespace=source_namespace)
+        existing_page = None
+        for p in existing_pages:
+            if p.title == expected_title:
+                existing_page = p
+                break
+
         # Generate wiki page from source using LLM
         page = self._generate_wiki_page(
             source_text, source_uri, source_namespace, page_type, llm_client
         )
+
+        # Reuse existing page_id to avoid duplicates
+        if existing_page:
+            page.page_id = existing_page.page_id
 
         # Verify all statements mechanically
         self._verify_page_statements(page)
@@ -301,25 +315,143 @@ class WikiService:
     ) -> WikiPage:
         """Generate a wiki page from source text using LLM.
 
-        This is a placeholder — the actual LLM call depends on the
-        configured LLM client. The prompt should instruct the LLM to:
-        1. Extract key concepts and entities
-        2. Create statements with synthesis_level annotations
-        3. Define canonical definitions for key terms
-        4. Link to existing concepts where relevant
+        Uses LLM to extract statements and link them to RAG chunks.
+        Falls back to a simple extraction if LLM is unavailable.
         """
-        # For now, create a minimal page structure
-        # In production, this would call the LLM with a structured prompt
+        from agentnexus.rag.store import get_knowledge_base_catalog
+        from .models import WikiStatement, SynthesisLevel
+
+        from pathlib import Path
+        page_id = _make_id("page")
+        title = Path(source_uri).name if source_uri else "Untitled"
+
+        # Get RAG chunks for this source to link statements
+        catalog = get_knowledge_base_catalog()
+        kb = catalog.get_knowledge_base(source_namespace)
+        chunk_map: dict[str, str] = {}  # chunk_id -> chunk_text
+        if kb:
+            all_docs = catalog.list_documents(kb.kb_id)
+            for doc in all_docs:
+                if doc.source_uri == source_uri:
+                    chunks = catalog.list_chunks(doc.document_id)
+                    for c in chunks:
+                        chunk_map[c.chunk_id] = c.text
+
+        # Try LLM-based extraction
+        statements = []
+        if llm_client:
+            try:
+                statements = self._llm_extract_statements(
+                    source_text, page_id, chunk_map, llm_client
+                )
+            except Exception as e:
+                logger.warning("LLM statement extraction failed: %s", e)
+
+        # Fallback: create one statement per chunk
+        if not statements and chunk_map:
+            for chunk_id, chunk_text in chunk_map.items():
+                statements.append(WikiStatement(
+                    statement_id=_make_id("stmt"),
+                    page_id=page_id,
+                    text=chunk_text[:500],
+                    synthesis_level=SynthesisLevel.DIRECT_QUOTE.value,
+                    source_chunk_ids=[chunk_id],
+                    created_at=_utc_now(),
+                    updated_at=_utc_now(),
+                ))
+
+        # Fallback: no chunks available, create a single statement from source
+        if not statements:
+            statements.append(WikiStatement(
+                statement_id=_make_id("stmt"),
+                page_id=page_id,
+                text=source_text[:500],
+                synthesis_level=SynthesisLevel.SYNTHESIS.value,
+                source_chunk_ids=[],
+                created_at=_utc_now(),
+                updated_at=_utc_now(),
+            ))
+
         page = WikiPage(
-            page_id=_make_id("page"),
-            title=source_uri.split("/")[-1] if "/" in source_uri else source_uri,
+            page_id=page_id,
+            title=title,
             page_type=page_type,
-            content=source_text[:2000],  # Placeholder: truncated source
+            content=source_text[:2000],
+            statements=statements,
             source_namespace=source_namespace,
             created_at=_utc_now(),
             updated_at=_utc_now(),
         )
         return page
+
+    def _llm_extract_statements(
+        self,
+        source_text: str,
+        page_id: str,
+        chunk_map: dict[str, str],
+        llm_client,
+    ) -> list:
+        """Use LLM to extract wiki statements from source text."""
+        from .models import WikiStatement, SynthesisLevel
+
+        chunk_listing = "\n".join(
+            f"[{cid}] {text[:200]}..." for cid, text in list(chunk_map.items())[:20]
+        )
+
+        prompt = (
+            "You are a knowledge extraction system. Given a document, extract "
+            "key factual statements. For each statement, identify which source chunks "
+            "support it.\n\n"
+            f"DOCUMENT:\n{source_text[:3000]}\n\n"
+            f"AVAILABLE CHUNKS (use their IDs in source_chunk_ids):\n{chunk_listing}\n\n"
+            "Return a JSON array of statements. Each statement has:\n"
+            '- "text": the factual claim (1-2 sentences)\n'
+            '- "source_chunk_ids": array of chunk IDs that support this claim\n'
+            '- "synthesis_level": "direct" (nearly verbatim from chunk) or "synthesis" (synthesized from multiple chunks)\n'
+            "- \"canonical_term\": optional key term this statement defines\n\n"
+            "Return ONLY the JSON array, no other text."
+        )
+
+        try:
+            response = llm_client.think(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                silent=True,
+            )
+            import json
+            # Extract JSON from response
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            items = json.loads(response)
+
+            statements = []
+            for item in items:
+                stmt_text = item.get("text", "").strip()
+                if not stmt_text:
+                    continue
+                source_ids = item.get("source_chunk_ids", [])
+                # Validate chunk IDs exist
+                valid_ids = [cid for cid in source_ids if cid in chunk_map]
+                level = item.get("synthesis_level", "synthesis")
+                valid_levels = {v.value for v in SynthesisLevel}
+                if level not in valid_levels:
+                    level = SynthesisLevel.SYNTHESIS.value
+
+                statements.append(WikiStatement(
+                    statement_id=_make_id("stmt"),
+                    page_id=page_id,
+                    text=stmt_text,
+                    synthesis_level=level,
+                    source_chunk_ids=valid_ids,
+                    canonical_term=item.get("canonical_term"),
+                    created_at=_utc_now(),
+                    updated_at=_utc_now(),
+                ))
+            return statements
+        except Exception as e:
+            logger.warning("LLM statement extraction failed: %s", e)
+            return []
 
     def _generate_wiki_page_with_context(
         self,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, FileText, Upload, Trash2, Loader2, BookOpen, AlertTriangle, CheckCircle, BarChart3, Shield } from 'lucide-react'
+import { Search, FileText, Upload, Trash2, Loader2, BookOpen, AlertTriangle, CheckCircle, BarChart3, Shield, RefreshCw } from 'lucide-react'
 import { api } from '../services/api'
 
 interface WikiPageItem {
@@ -69,6 +69,7 @@ export default function WikiPage() {
   const [ingestText, setIngestText] = useState('')
   const [ingestUri, setIngestUri] = useState('')
   const [isIngesting, setIsIngesting] = useState(false)
+  const [isBackfilling, setIsBackfilling] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -187,6 +188,21 @@ export default function WikiPage() {
     }
   }
 
+  const handleBackfill = async () => {
+    if (!confirm('This will delete all existing wiki pages and rebuild from RAG. Continue?')) return
+    setIsBackfilling(true)
+    try {
+      const result = await api.wikiBackfill()
+      alert(`Done! Deleted ${result.deleted} old pages, created ${result.created} new pages.`)
+      loadData()
+    } catch (e) {
+      console.error(e)
+      alert('Backfill failed: ' + e)
+    } finally {
+      setIsBackfilling(false)
+    }
+  }
+
   const tabs: { key: Tab; label: string; icon: any }[] = [
     { key: 'pages', label: 'Pages', icon: BookOpen },
     { key: 'query', label: 'Query', icon: Search },
@@ -205,6 +221,10 @@ export default function WikiPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={handleBackfill} disabled={isBackfilling} className="btn-secondary flex items-center gap-1.5 text-sm" title="Generate wiki pages for RAG documents missing wiki coverage">
+            {isBackfilling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {isBackfilling ? 'Backfilling...' : 'Backfill RAG'}
+          </button>
           <input ref={fileInputRef} type="file" onChange={handleIngestFile} className="hidden" accept=".txt,.md,.pdf,.html,.json" />
           <button onClick={() => fileInputRef.current?.click()} disabled={isIngesting} className="btn-primary flex items-center gap-1.5 text-sm">
             {isIngesting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}

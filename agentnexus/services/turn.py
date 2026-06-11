@@ -127,15 +127,10 @@ class TurnRuntime:
             return
         self._persisted = True
         record = self._record
-        if record.status == "finished" and self._memory is not None:
-            try:
-                self._memory.append("assistant", record.answer)
-            except Exception as e:
-                logger.warning("Memory append failed, trying short_term fallback: %s", e)
-                try:
-                    self._memory.short_term.append("assistant", record.answer)
-                except Exception as e2:
-                    logger.warning("Short-term memory append also failed: %s", e2)
+        # NOTE: Do NOT append the answer to memory here.
+        # The agent already stores it as "system" with "[最终答案]" prefix
+        # in re_act_agent.py:_on_emit_answer. Storing it again as "assistant"
+        # causes a duplicate that displays as thinking in history.
         if self._version is not None and self._memory is not None:
             try:
                 # Write new messages to the journal

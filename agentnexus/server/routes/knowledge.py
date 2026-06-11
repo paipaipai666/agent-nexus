@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 router = APIRouter(tags=["knowledge"])
+
+# Keep references to background tasks to prevent garbage collection
+_background_tasks: set = set()
+
+# Dedicated thread pool for ingestion to avoid blocking the default pool
+_ingestion_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingestion")
 
 
 class SearchRequest(BaseModel):
@@ -20,6 +27,8 @@ class SearchRequest(BaseModel):
 
 @router.get("/documents")
 def list_documents():
+    from dataclasses import asdict
+
     from agentnexus.core.config import get_settings
     from agentnexus.rag.store import get_knowledge_base_catalog
 
@@ -29,10 +38,13 @@ def list_documents():
     if kb is None:
         return {"documents": [], "total_chunks": 0}
     docs = catalog.list_documents()
-    return {
-        "documents": [d.__dict__ if hasattr(d, "__dict__") else d for d in docs],
-        "total_chunks": kb.total_chunks if hasattr(kb, "total_chunks") else 0,
-    }
+    doc_dicts = []
+    for d in docs:
+        doc_dict = asdict(d)
+        doc_dict["chunk_count"] = catalog.count_chunks(d.document_id)
+        doc_dicts.append(doc_dict)
+    total = catalog.count_chunks_by_kb(kb.kb_id)
+    return {"documents": doc_dicts, "total_chunks": total}
 
 
 @router.post("/search")
@@ -64,22 +76,86 @@ def search_kb(req: SearchRequest):
 
 @router.post("/documents")
 async def ingest_document(file: UploadFile = File(...)):
+    import asyncio
+    import os
     import tempfile
+    import uuid
     from pathlib import Path
 
+    from agentnexus.core.config import get_settings
     from agentnexus.rag.kb_service import ingest_one_document
 
-    suffix = Path(file.filename or "upload.txt").suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    settings = get_settings()
+    filename = file.filename or "upload.txt"
+    suffix = Path(filename).suffix
+    run_id = f"ingest_{uuid.uuid4().hex[:12]}"
 
-    try:
-        result = ingest_one_document(tmp_path)
-        return {"status": "ok", "filename": file.filename, "result": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    loop = asyncio.get_running_loop()
+
+    def _save_file():
+        """Read file and save to temp — runs in dedicated thread."""
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp_path = tmp.name
+        try:
+            # Read from underlying file object directly in this thread
+            file.file.seek(0)
+            while True:
+                chunk = file.file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        finally:
+            tmp.close()
+        return tmp_path
+
+    # Save file in dedicated thread — never blocks event loop or default pool
+    tmp_path = await loop.run_in_executor(_ingestion_executor, _save_file)
+
+    def _run_ingestion():
+        """Run ingestion in dedicated thread pool."""
+        try:
+            ingest_one_document(
+                tmp_path,
+                namespace=settings.rag_default_namespace,
+                enable_contextual=settings.enable_contextual_retrieval,
+                run_id=run_id,
+                source_uri=filename,
+            )
+        except Exception:
+            pass  # Error recorded in IngestionRunRecord
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # Run ingestion in dedicated thread pool — never blocks default pool
+    task = loop.run_in_executor(_ingestion_executor, _run_ingestion)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {"status": "processing", "run_id": run_id, "filename": filename}
+
+
+@router.get("/documents/runs/{run_id}")
+def get_ingestion_run(run_id: str):
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    catalog = get_knowledge_base_catalog()
+    run = catalog.get_ingestion_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Ingestion run not found: {run_id}")
+    return {
+        "run_id": run.run_id,
+        "status": run.status,
+        "source_uri": run.source_uri,
+        "documents_seen": run.documents_seen,
+        "chunks_written": run.chunks_written,
+        "error_message": run.error_message,
+        "metadata": run.metadata,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    }
 
 
 @router.delete("/documents/{doc_id}")

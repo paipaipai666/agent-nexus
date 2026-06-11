@@ -1,7 +1,43 @@
-import { useState, useEffect, useRef } from 'react'
-import { Search, FileText, Upload, Trash2, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Search, FileText, Upload, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { api } from '../services/api'
 import { animateEntrance } from '../utils/animations'
+
+interface IngestionProgress {
+  runId: string
+  filename: string
+  stage: string
+  pct: number
+  message: string
+  status: 'processing' | 'completed' | 'failed'
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  loading: 'Loading document',
+  chunking: 'Chunking text',
+  enriching: 'Enriching chunks',
+  embedding: 'Generating embeddings',
+  persisting: 'Saving to database',
+  completed: 'Done',
+  failed: 'Failed',
+}
+
+const ACTIVE_UPLOAD_KEY = 'agentnexus_active_upload'
+
+function saveActiveUpload(runId: string, filename: string) {
+  try { localStorage.setItem(ACTIVE_UPLOAD_KEY, JSON.stringify({ runId, filename })) } catch {}
+}
+
+function loadActiveUpload(): { runId: string; filename: string } | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_UPLOAD_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function clearActiveUpload() {
+  try { localStorage.removeItem(ACTIVE_UPLOAD_KEY) } catch {}
+}
 
 export default function KnowledgePage() {
   const [documents, setDocuments] = useState<any[]>([])
@@ -10,17 +46,99 @@ export default function KnowledgePage() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [progress, setProgress] = useState<IngestionProgress | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const loadDocuments = () => {
-    api.listDocuments().then(({ documents, total_chunks }) => {
+  const loadDocuments = useCallback((signal?: AbortSignal) => {
+    api.listDocuments(signal).then(({ documents, total_chunks }) => {
       setDocuments(documents)
       setTotalChunks(total_chunks)
-    }).catch(console.error)
-  }
+    }).catch((err) => {
+      if (err.name !== 'AbortError') console.error(err)
+    })
+  }, [])
 
-  useEffect(() => { loadDocuments() }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    loadDocuments(controller.signal)
+    return () => controller.abort()
+  }, [loadDocuments])
+
+  // Cleanup polling and timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
+  // Resume polling for active upload on mount
+  useEffect(() => {
+    const saved = loadActiveUpload()
+    if (saved && saved.runId) {
+      setIsUploading(true)
+      pollProgress(saved.runId, saved.filename)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pollProgress = useCallback((runId: string, filename: string) => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+
+    let lastPct = -1
+    let staleTicks = 0
+    const MAX_STALE_TICKS = 30 // Stop after 30s of no progress change
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const run = await api.getIngestionProgress(runId)
+        const stage = run.metadata?.progress_stage || run.status
+        const pct = run.metadata?.progress_pct ?? 0
+        const message = run.metadata?.progress_message || STAGE_LABELS[stage] || stage
+
+        // Track stale progress (no change in pct)
+        if (pct === lastPct && run.status === 'running') {
+          staleTicks++
+          if (staleTicks >= MAX_STALE_TICKS) {
+            setProgress({ runId, filename, stage: 'failed', pct, message: 'Timed out — no progress', status: 'failed' })
+            if (pollRef.current) clearInterval(pollRef.current)
+            pollRef.current = null
+            setIsUploading(false)
+            clearActiveUpload()
+            timeoutRef.current = setTimeout(() => setProgress(null), 5000)
+            return
+          }
+        } else {
+          staleTicks = 0
+          lastPct = pct
+        }
+
+        if (run.status === 'completed') {
+          setProgress({ runId, filename, stage: 'completed', pct: 100, message: 'Done', status: 'completed' })
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = null
+          setIsUploading(false)
+          clearActiveUpload()
+          loadDocuments()
+          timeoutRef.current = setTimeout(() => setProgress(null), 2000)
+        } else if (run.status === 'failed') {
+          setProgress({ runId, filename, stage: 'failed', pct: 0, message: run.error_message || 'Ingestion failed', status: 'failed' })
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = null
+          setIsUploading(false)
+          clearActiveUpload()
+          timeoutRef.current = setTimeout(() => setProgress(null), 5000)
+        } else {
+          setProgress({ runId, filename, stage, pct, message, status: 'processing' })
+        }
+      } catch (err) {
+        console.error('Poll error:', err)
+      }
+    }, 1000)
+  }, [loadDocuments])
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -34,9 +152,22 @@ export default function KnowledgePage() {
     const file = e.target.files?.[0]
     if (!file) return
     setIsUploading(true)
-    try { await api.uploadDocument(file); loadDocuments() }
-    catch (err) { console.error('Upload failed:', err) }
-    finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = '' }
+    setProgress({ runId: '', filename: file.name, stage: 'loading', pct: 5, message: 'Uploading file...', status: 'processing' })
+
+    try {
+      const { run_id, filename } = await api.uploadDocumentWithProgress(file)
+      saveActiveUpload(run_id, filename)
+      setProgress(prev => prev ? { ...prev, runId: run_id } : null)
+      pollProgress(run_id, filename)
+    } catch (err) {
+      console.error('Upload failed:', err)
+      setProgress({ runId: '', filename: file.name, stage: 'failed', pct: 0, message: String(err), status: 'failed' })
+      setIsUploading(false)
+      clearActiveUpload()
+      setTimeout(() => setProgress(null), 5000)
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   const handleDelete = async (docId: string) => {
@@ -58,9 +189,51 @@ export default function KnowledgePage() {
         <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".txt,.md,.pdf,.html,.doc,.docx,.json,.csv" />
         <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="btn-primary flex items-center gap-1.5 text-sm">
           {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-          {isUploading ? 'Uploading...' : 'Upload'}
+          {isUploading ? 'Processing...' : 'Upload'}
         </button>
       </div>
+
+      {/* Progress Bar */}
+      {progress && (
+        <div className="px-6 pb-3">
+          <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                {progress.status === 'completed' ? (
+                  <CheckCircle2 size={14} style={{ color: 'var(--green)' }} />
+                ) : progress.status === 'failed' ? (
+                  <XCircle size={14} style={{ color: 'var(--red)' }} />
+                ) : (
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                )}
+                <span className="text-xs font-medium truncate max-w-[200px]" style={{ color: 'var(--fg)' }}>
+                  {progress.filename}
+                </span>
+              </div>
+              <span className="text-xs font-mono" style={{ color: 'var(--fg-muted)' }}>
+                {progress.status === 'completed' ? '100%' : `${progress.pct}%`}
+              </span>
+            </div>
+            {/* Progress bar track */}
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-1)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300 ease-out"
+                style={{
+                  width: `${progress.status === 'completed' ? 100 : progress.pct}%`,
+                  background: progress.status === 'failed'
+                    ? 'var(--red)'
+                    : progress.status === 'completed'
+                      ? 'var(--green)'
+                      : 'var(--accent)',
+                }}
+              />
+            </div>
+            <p className="text-xs mt-1.5" style={{ color: 'var(--fg-faint)' }}>
+              {progress.message || STAGE_LABELS[progress.stage] || progress.stage}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {/* Search */}

@@ -22,6 +22,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
+async function requestWithSignal<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
+
+  const res = await fetch(`${BASE_URL}${path}`, { headers, signal })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 async function uploadRequest<T>(path: string, file: File): Promise<T> {
   const headers: Record<string, string> = {}
   if (apiKey) {
@@ -91,8 +107,8 @@ export const api = {
     ),
 
   // Knowledge
-  listDocuments: () =>
-    request<{ documents: any[]; total_chunks: number }>('/api/kb/documents'),
+  listDocuments: (signal?: AbortSignal) =>
+    requestWithSignal<{ documents: any[]; total_chunks: number }>('/api/kb/documents', signal),
 
   searchKnowledge: (query: string, topK = 5) =>
     request<{ results: any[] }>('/api/kb/search', {
@@ -102,6 +118,28 @@ export const api = {
 
   uploadDocument: (file: File) =>
     uploadRequest<{ status: string; filename: string; result: any }>('/api/kb/documents', file),
+
+  uploadDocumentWithProgress: (file: File) =>
+    uploadRequest<{ status: string; run_id: string; filename: string }>('/api/kb/documents', file),
+
+  getIngestionProgress: (runId: string) =>
+    request<{
+      run_id: string
+      status: string
+      source_uri: string
+      documents_seen: number
+      chunks_written: number
+      error_message: string
+      metadata: {
+        progress_stage?: string
+        progress_pct?: number
+        progress_message?: string
+        replaced_chunks?: number
+        duration_ms?: number
+      }
+      started_at: string | null
+      finished_at: string | null
+    }>(`/api/kb/documents/runs/${runId}`),
 
   deleteDocument: (docId: string) =>
     request<{ status: string; doc_id: string }>(`/api/kb/documents/${docId}`, {
@@ -413,6 +451,11 @@ export const api = {
 
   processWikiReviews: () =>
     request<{ actions: any[]; total: number }>('/api/wiki/review/process', {
+      method: 'POST',
+    }),
+
+  wikiBackfill: (namespace = 'default') =>
+    request<{ created: number; deleted: number; errors: any[] }>(`/api/wiki/backfill?namespace=${namespace}`, {
       method: 'POST',
     }),
 

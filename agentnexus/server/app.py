@@ -22,6 +22,41 @@ def _get_runtime() -> Any:
     return _current_runtime
 
 
+def _mark_stale_ingestion_runs() -> None:
+    """Mark interrupted ingestion runs as failed on server startup."""
+    import logging
+    import time
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        from agentnexus.rag.store import get_knowledge_base_catalog
+
+        catalog = get_knowledge_base_catalog()
+        runs = catalog.list_ingestion_runs()
+
+        stale_count = 0
+        for run in runs:
+            if run.status == "running":
+                # This run was interrupted by a server restart
+                run.status = "failed"
+                run.error_message = "Interrupted by server restart"
+                run.metadata = {
+                    **run.metadata,
+                    "progress_stage": "failed",
+                    "progress_pct": 0,
+                    "progress_message": "Interrupted by server restart",
+                }
+                run.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                catalog.upsert_ingestion_run(run)
+                stale_count += 1
+
+        if stale_count > 0:
+            logger.info(f"Marked {stale_count} interrupted ingestion run(s) as failed")
+    except Exception as e:
+        logger.warning(f"Failed to mark stale ingestion runs: {e}")
+
+
 def create_app(runtime: Any | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -33,6 +68,10 @@ def create_app(runtime: Any | None = None) -> FastAPI:
             set_runtime(runtime)
         else:
             set_runtime(AppRuntime.build(profile="server"))
+
+        # Mark any interrupted ingestion runs as failed on startup
+        _mark_stale_ingestion_runs()
+
         yield
         _current_runtime.close()
 

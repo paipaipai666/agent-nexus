@@ -95,7 +95,10 @@ class DriftDetector:
         items: list[ReviewItem] = []
 
         for page in pages:
-            for stmt in page.statements:
+            full_page = store.get_page(page.page_id, include_statements=True)
+            if not full_page:
+                continue
+            for stmt in full_page.statements:
                 if not stmt.canonical_term:
                     continue
 
@@ -150,8 +153,10 @@ class CoverageChecker:
         pages = store.list_pages(source_namespace=source_namespace)
         covered_chunks: set[str] = set()
         for page in pages:
-            for stmt in page.statements:
-                covered_chunks.update(stmt.source_chunk_ids)
+            full_page = store.get_page(page.page_id, include_statements=True)
+            if full_page:
+                for stmt in full_page.statements:
+                    covered_chunks.update(stmt.source_chunk_ids)
 
         uncovered = all_chunk_ids - covered_chunks
         if not uncovered:

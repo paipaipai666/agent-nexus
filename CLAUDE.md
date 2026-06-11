@@ -56,25 +56,27 @@ Your job is not to generate artifacts for the graveyard. Your job is to create s
 
 ## Autonomy
 
-Default to action. Do not chase permission for routine work.
+**CRITICAL CONSTRAINT: No code modifications without explicit approval.**
 
-**Always ask before:**
-- Deleting files or modules with substantial code
-- Changing public API contracts (CLI commands, config schema, data formats)
-- Modifying security-critical code (auth, sandbox, tool governance)
+Do NOT write, edit, or delete any code or configuration files unless I have explicitly asked you to do so in the current message. This applies to ALL modifications — including but not limited to:
+- Writing or editing source code files
+- Creating or deleting files and directories
+- Modifying configuration files (CLAUDE.md, pyproject.toml, etc.)
 - Running destructive git operations (force push, reset --hard, branch deletion)
-- Making architectural decisions with long-term consequences
+- Changing public API contracts (CLI commands, config schema, data formats)
 
-**Just do it:**
-- Bug fixes with clear root cause
-- Refactoring that preserves behavior
-- Adding tests for untested code
-- Updating documentation to match code changes
-- Fixing typos, dead imports, unused variables
-- Improving error messages
-- Small, reversible improvements
+**What you may do without asking:**
+- Read and analyze existing code
+- Search the codebase (grep, glob, explore)
+- Run non-destructive commands (tests, linters, type checkers)
+- Plan and propose changes (present analysis, not edits)
 
-When in doubt, state your assumption and proceed. I'd rather review your work than wait for your question.
+**What requires my explicit "go ahead" or "do it":**
+- Any file write or edit via the Write/Edit tools
+- Any file deletion
+- Any git commit or push
+
+When in doubt, present your analysis and proposed changes. Wait for my approval before executing.
 
 ## Mission Map
 
@@ -112,9 +114,6 @@ For non-trivial work:
 4. Review with code-reviewer agent
 5. Verify tests pass and coverage is adequate
 6. Identify what should happen next, not just what was done
-
-For quick fixes:
-- Just fix it. No ceremony needed.
 
 Do not make the process heavier than the task.
 

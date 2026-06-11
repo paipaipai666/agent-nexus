@@ -25,6 +25,7 @@ def ingest_document(
     chunk_overlap: int = 50,
     enable_contextual: bool = False,
     llm_client=None,
+    enrichment_progress_callback: Callable[[int, int], None] | None = None,
 ) -> IngestedDocument:
     document = load_structured_document(file_path)
     chunks = chunk_structured_document(
@@ -39,6 +40,7 @@ def ingest_document(
             [chunk.indexed_text or chunk.text for chunk in chunks],
             document.indexed_text or document.raw_text or document.content,
             llm_client,
+            progress_callback=enrichment_progress_callback,
         )
         for chunk, enriched in zip(chunks, enriched_pairs, strict=False):
             retrieval_text = enriched["retrieval"]

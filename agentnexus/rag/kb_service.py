@@ -71,12 +71,12 @@ def persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> di
     return {"replaced_chunks": replaced_chunks, "written_chunks": len(artifacts.chunks)}
 
 
-def start_ingestion_run(namespace: str, source_uri: str) -> IngestionRunRecord:
+def start_ingestion_run(namespace: str, source_uri: str, run_id: str | None = None) -> IngestionRunRecord:
     kb_record = default_kb_record(namespace)
     catalog = get_knowledge_base_catalog()
     catalog.upsert_knowledge_base(kb_record)
     run = IngestionRunRecord(
-        run_id=f"ingest_{uuid.uuid4().hex[:12]}",
+        run_id=run_id or f"ingest_{uuid.uuid4().hex[:12]}",
         kb_id=kb_record.kb_id,
         status="running",
         source_uri=source_uri,
@@ -98,8 +98,27 @@ def finish_ingestion_run(
     run.documents_seen = documents_seen
     run.chunks_written = chunks_written
     run.error_message = error_message
-    run.metadata = dict(metadata or {})
+    # Merge metadata instead of replacing to preserve progress keys
+    run.metadata = {**run.metadata, **(metadata or {})}
     run.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    catalog = get_knowledge_base_catalog()
+    catalog.upsert_ingestion_run(run)
+
+
+def _update_run_progress(
+    run: IngestionRunRecord,
+    *,
+    stage: str,
+    stage_pct: int,
+    message: str = "",
+) -> None:
+    """Update the ingestion run record with current progress."""
+    run.metadata = {
+        **run.metadata,
+        "progress_stage": stage,
+        "progress_pct": stage_pct,
+        "progress_message": message,
+    }
     catalog = get_knowledge_base_catalog()
     catalog.upsert_ingestion_run(run)
 
@@ -110,25 +129,46 @@ def ingest_one_document(
     namespace: str,
     enable_contextual: bool,
     llm_client=None,
-) -> IngestedDocument:
+    run_id: str | None = None,
+    source_uri: str | None = None,
+) -> tuple[IngestedDocument, IngestionRunRecord]:
     from agentnexus.core.hooks import HookType, get_hook_manager
 
+    effective_uri = source_uri or filepath
     hook_mgr = get_hook_manager()
     hook_mgr.fire(HookType.BEFORE_KB_INGEST, {
         "filepath": filepath, "namespace": namespace,
         "enable_contextual": enable_contextual,
     })
 
-    run = start_ingestion_run(namespace, filepath)
+    run = start_ingestion_run(namespace, effective_uri, run_id=run_id)
     started_at = time.perf_counter()
+
+    # Stage: loading
+    _update_run_progress(run, stage="loading", stage_pct=10, message="Loading document")
+
     try:
+        def _enrichment_progress(current: int, total: int) -> None:
+            pct = 30 + int(40 * current / total) if total > 0 else 50
+            _update_run_progress(
+                run,
+                stage="enriching",
+                stage_pct=pct,
+                message=f"Enriching chunks ({current}/{total})",
+            )
+
         artifacts = ingest_document(
             filepath,
             chunk_size=512,
             enable_contextual=enable_contextual,
             llm_client=llm_client,
+            enrichment_progress_callback=_enrichment_progress if enable_contextual else None,
         )
+
+        # Stage: embedding + persisting
+        _update_run_progress(run, stage="embedding", stage_pct=80, message="Generating embeddings")
         stats = persist_ingested_document(artifacts, namespace)
+        _update_run_progress(run, stage="persisting", stage_pct=90, message="Saving to database")
     except Exception as exc:
         finish_ingestion_run(
             run,
@@ -147,6 +187,9 @@ def ingest_one_document(
         metadata={
             "replaced_chunks": stats["replaced_chunks"],
             "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            "progress_stage": "completed",
+            "progress_pct": 100,
+            "progress_message": "Done",
         },
     )
 
@@ -155,7 +198,24 @@ def ingest_one_document(
         "written_chunks": stats["written_chunks"],
         "replaced_chunks": stats["replaced_chunks"],
     })
-    return artifacts
+
+    # Auto-generate wiki pages from the ingested document
+    _update_run_progress(run, stage="wiki", stage_pct=95, message="Generating wiki pages")
+    try:
+        from agentnexus.wiki.wiki_service import WikiService
+
+        wiki = WikiService()
+        source_text = artifacts.document.raw_text or artifacts.document.indexed_text or artifacts.document.content
+        wiki.ingest_source(
+            source_text=source_text,
+            source_uri=effective_uri,
+            source_namespace=namespace,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Wiki auto-generation failed (non-fatal): %s", exc)
+
+    return artifacts, run
 
 
 def search_kb(

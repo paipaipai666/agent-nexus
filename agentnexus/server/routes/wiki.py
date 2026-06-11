@@ -52,22 +52,21 @@ def list_wiki_pages(namespace: str = "default", limit: int = 100):
     try:
         store = get_wiki_store()
         pages = store.list_pages(source_namespace=namespace, limit=limit)
-        return {
-            "pages": [
-                {
-                    "page_id": p.page_id,
-                    "title": p.title,
-                    "page_type": p.page_type,
-                    "confidence": p.confidence,
-                    "statement_count": 0,  # Don't load full statements for list
-                    "source_namespace": p.source_namespace,
-                    "created_at": p.created_at,
-                    "updated_at": p.updated_at,
-                }
-                for p in pages
-            ],
-            "total": len(pages),
-        }
+        result_pages = []
+        for p in pages:
+            full_page = store.get_page(p.page_id, include_statements=True)
+            stmt_count = len(full_page.statements) if full_page else 0
+            result_pages.append({
+                "page_id": p.page_id,
+                "title": p.title,
+                "page_type": p.page_type,
+                "confidence": p.confidence,
+                "statement_count": stmt_count,
+                "source_namespace": p.source_namespace,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            })
+        return {"pages": result_pages, "total": len(pages)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -190,24 +189,29 @@ async def wiki_ingest_file(
     page_type: str = "concept",
 ):
     """Ingest a file into the wiki."""
+    import asyncio
     import tempfile
     from pathlib import Path
 
     suffix = Path(file.filename or "upload.txt").suffix
+    content = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 
-    try:
+    def _sync_ingest():
         text = Path(tmp_path).read_text(encoding="utf-8")
         service = _get_wiki_service()
-        page = service.ingest_source(
+        return service.ingest_source(
             source_text=text,
             source_uri=file.filename or "upload",
             source_namespace=namespace,
             page_type=page_type,
         )
+
+    try:
+        # Run sync ingestion in thread pool to avoid blocking the event loop
+        page = await asyncio.to_thread(_sync_ingest)
         return {
             "status": "ok",
             "page_id": page.page_id,
@@ -286,6 +290,51 @@ def process_overdue_reviews():
         return {"actions": actions, "total": len(actions)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/backfill")
+def wiki_backfill(namespace: str = "default"):
+    """Rebuild wiki from scratch: delete all existing pages, then regenerate from RAG."""
+    from agentnexus.rag.store import get_knowledge_base_catalog
+    from agentnexus.wiki.store import get_wiki_store
+
+    catalog = get_knowledge_base_catalog()
+    wiki_store = get_wiki_store()
+
+    kb = catalog.get_knowledge_base(namespace)
+    if not kb:
+        raise HTTPException(status_code=404, detail=f"No RAG knowledge base for namespace '{namespace}'")
+
+    docs = catalog.list_documents(kb.kb_id)
+    if not docs:
+        return {"created": 0, "deleted": 0, "message": "No documents in RAG"}
+
+    # Delete all existing wiki pages for this namespace
+    existing_pages = wiki_store.list_pages(source_namespace=namespace)
+    for p in existing_pages:
+        wiki_store.delete_page(p.page_id)
+    deleted = len(existing_pages)
+
+    service = _get_wiki_service()
+    created = 0
+    errors = []
+
+    for doc in docs:
+        source_text = doc.raw_text or doc.indexed_text or doc.content
+        if not source_text.strip():
+            continue
+
+        try:
+            service.ingest_source(
+                source_text=source_text,
+                source_uri=doc.source_uri,
+                source_namespace=namespace,
+            )
+            created += 1
+        except Exception as e:
+            errors.append({"source": doc.source_uri, "error": str(e)})
+
+    return {"created": created, "deleted": deleted, "errors": errors}
 
 
 # ── Calibration ─────────────────────────────────────────────────────

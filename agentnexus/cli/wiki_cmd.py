@@ -276,6 +276,59 @@ def wiki_calibrate(
     console.print(f"  Rounds: {result['rounds']}")
 
 
+# ── wiki backfill ───────────────────────────────────────────────────
+
+@wiki_app.command("backfill")
+def wiki_backfill(
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
+):
+    """Rebuild wiki from scratch: delete all existing pages, then regenerate from RAG."""
+    from agentnexus.rag.store import get_knowledge_base_catalog
+    from agentnexus.wiki.store import get_wiki_store
+
+    catalog = get_knowledge_base_catalog()
+    wiki_store = get_wiki_store()
+
+    kb = catalog.get_knowledge_base(namespace)
+    if not kb:
+        console.print(f"[red]No RAG knowledge base found for namespace '{namespace}'[/red]")
+        raise typer.Exit(1)
+
+    docs = catalog.list_documents(kb.kb_id)
+    if not docs:
+        console.print("[yellow]No documents in RAG to backfill.[/yellow]")
+        return
+
+    # Delete all existing wiki pages for this namespace
+    existing_pages = wiki_store.list_pages(source_namespace=namespace)
+    for p in existing_pages:
+        wiki_store.delete_page(p.page_id)
+    if existing_pages:
+        console.print(f"Deleted {len(existing_pages)} existing wiki pages.")
+
+    service = _get_wiki_service()
+    created = 0
+
+    for doc in docs:
+        source_text = doc.raw_text or doc.indexed_text or doc.content
+        if not source_text.strip():
+            continue
+
+        console.print(f"  Generating wiki for [cyan]{doc.source_uri}[/cyan]...")
+        try:
+            page = service.ingest_source(
+                source_text=source_text,
+                source_uri=doc.source_uri,
+                source_namespace=namespace,
+            )
+            console.print(f"    [green]✓[/green] {page.title} ({len(page.statements)} statements)")
+            created += 1
+        except Exception as e:
+            console.print(f"    [red]✗[/red] Failed: {e}")
+
+    console.print(f"\n[green]Done![/green] Created {created} wiki pages.")
+
+
 # ── wiki full-check ─────────────────────────────────────────────────
 
 @wiki_app.command("full-check")

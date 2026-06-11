@@ -284,11 +284,33 @@ class KnowledgeBaseCatalog:
             self._conn.commit()
 
     def list_knowledge_bases(self) -> list[KnowledgeBaseRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM knowledge_bases ORDER BY namespace ASC"
-        ).fetchall()
-        return [
-            KnowledgeBaseRecord(
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM knowledge_bases ORDER BY namespace ASC"
+            ).fetchall()
+            return [
+                KnowledgeBaseRecord(
+                    kb_id=row["kb_id"],
+                    namespace=row["namespace"],
+                    display_name=row["display_name"],
+                    collection_name=row["collection_name"],
+                    description=row["description"],
+                    metadata=_decode_metadata(row["metadata_json"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
+
+    def get_knowledge_base(self, namespace: str) -> KnowledgeBaseRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_bases WHERE namespace = ?",
+                (namespace,),
+            ).fetchone()
+            if row is None:
+                return None
+            return KnowledgeBaseRecord(
                 kb_id=row["kb_id"],
                 namespace=row["namespace"],
                 display_name=row["display_name"],
@@ -298,26 +320,6 @@ class KnowledgeBaseCatalog:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
-            for row in rows
-        ]
-
-    def get_knowledge_base(self, namespace: str) -> KnowledgeBaseRecord | None:
-        row = self._conn.execute(
-            "SELECT * FROM knowledge_bases WHERE namespace = ?",
-            (namespace,),
-        ).fetchone()
-        if row is None:
-            return None
-        return KnowledgeBaseRecord(
-            kb_id=row["kb_id"],
-            namespace=row["namespace"],
-            display_name=row["display_name"],
-            collection_name=row["collection_name"],
-            description=row["description"],
-            metadata=_decode_metadata(row["metadata_json"]),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
 
     def delete_knowledge_base(self, kb_id: str):
         with self._lock:
@@ -325,27 +327,28 @@ class KnowledgeBaseCatalog:
             self._conn.commit()
 
     def get_document(self, document_id: str) -> SourceDocument | None:
-        row = self._conn.execute(
-            "SELECT * FROM source_documents WHERE document_id = ?",
-            (document_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return SourceDocument(
-            document_id=row["document_id"],
-            kb_id=row["kb_id"],
-            source_id=row["source_id"],
-            source_uri=row["source_uri"],
-            document_version=row["document_version"],
-            content=row["content"],
-            metadata=_decode_metadata(row["metadata_json"]),
-            raw_text=row["raw_text"] or row["content"],
-            indexed_text=row["indexed_text"] or row["content"],
-            sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
-            sections=_decode_sections(row["sections_json"]),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM source_documents WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return SourceDocument(
+                document_id=row["document_id"],
+                kb_id=row["kb_id"],
+                source_id=row["source_id"],
+                source_uri=row["source_uri"],
+                document_version=row["document_version"],
+                content=row["content"],
+                metadata=_decode_metadata(row["metadata_json"]),
+                raw_text=row["raw_text"] or row["content"],
+                indexed_text=row["indexed_text"] or row["content"],
+                sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
+                sections=_decode_sections(row["sections_json"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
 
     def upsert_document(self, record: SourceDocument):
         self.upsert_documents([record])
@@ -400,59 +403,61 @@ class KnowledgeBaseCatalog:
             self._conn.commit()
 
     def list_documents(self, kb_id: str | None = None) -> list[SourceDocument]:
-        sql = "SELECT * FROM source_documents"
-        params: list[str] = []
-        if kb_id:
-            sql += " WHERE kb_id = ?"
-            params.append(kb_id)
-        sql += " ORDER BY source_uri ASC, created_at ASC"
-        rows = self._conn.execute(sql, params).fetchall()
-        return [
-            SourceDocument(
-                document_id=row["document_id"],
-                kb_id=row["kb_id"],
-                source_id=row["source_id"],
-                source_uri=row["source_uri"],
-                document_version=row["document_version"],
-                content=row["content"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["content"],
-                indexed_text=row["indexed_text"] or row["content"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
-                sections=_decode_sections(row["sections_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        with self._lock:
+            sql = "SELECT * FROM source_documents"
+            params: list[str] = []
+            if kb_id:
+                sql += " WHERE kb_id = ?"
+                params.append(kb_id)
+            sql += " ORDER BY source_uri ASC, created_at ASC"
+            rows = self._conn.execute(sql, params).fetchall()
+            return [
+                SourceDocument(
+                    document_id=row["document_id"],
+                    kb_id=row["kb_id"],
+                    source_id=row["source_id"],
+                    source_uri=row["source_uri"],
+                    document_version=row["document_version"],
+                    content=row["content"],
+                    metadata=_decode_metadata(row["metadata_json"]),
+                    raw_text=row["raw_text"] or row["content"],
+                    indexed_text=row["indexed_text"] or row["content"],
+                    sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
+                    sections=_decode_sections(row["sections_json"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
 
     def list_documents_by_source(self, kb_id: str, source_id: str) -> list[SourceDocument]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM source_documents
-            WHERE kb_id = ? AND source_id = ?
-            ORDER BY created_at ASC
-            """,
-            (kb_id, source_id),
-        ).fetchall()
-        return [
-            SourceDocument(
-                document_id=row["document_id"],
-                kb_id=row["kb_id"],
-                source_id=row["source_id"],
-                source_uri=row["source_uri"],
-                document_version=row["document_version"],
-                content=row["content"],
-                metadata=_decode_metadata(row["metadata_json"]),
-                raw_text=row["raw_text"] or row["content"],
-                indexed_text=row["indexed_text"] or row["content"],
-                sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
-                sections=_decode_sections(row["sections_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM source_documents
+                WHERE kb_id = ? AND source_id = ?
+                ORDER BY created_at ASC
+                """,
+                (kb_id, source_id),
+            ).fetchall()
+            return [
+                SourceDocument(
+                    document_id=row["document_id"],
+                    kb_id=row["kb_id"],
+                    source_id=row["source_id"],
+                    source_uri=row["source_uri"],
+                    document_version=row["document_version"],
+                    content=row["content"],
+                    metadata=_decode_metadata(row["metadata_json"]),
+                    raw_text=row["raw_text"] or row["content"],
+                    indexed_text=row["indexed_text"] or row["content"],
+                    sparse_text=row["sparse_text"] or row["indexed_text"] or row["content"],
+                    sections=_decode_sections(row["sections_json"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
 
     def upsert_chunks(self, records: list[ChunkRecord]):
         if not records:
@@ -504,18 +509,36 @@ class KnowledgeBaseCatalog:
             self._conn.commit()
 
     def list_chunks(self, document_id: str) -> list[ChunkRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC",
-            (document_id,),
-        ).fetchall()
-        return [_chunk_record_from_row(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC",
+                (document_id,),
+            ).fetchall()
+            return [_chunk_record_from_row(row) for row in rows]
+
+    def count_chunks(self, document_id: str) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM document_chunks WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+            return row["cnt"] if row else 0
+
+    def count_chunks_by_kb(self, kb_id: str) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM document_chunks WHERE kb_id = ?",
+                (kb_id,),
+            ).fetchone()
+            return row["cnt"] if row else 0
 
     def list_chunks_by_kb(self, kb_id: str) -> list[ChunkRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM document_chunks WHERE kb_id = ? ORDER BY document_id ASC, chunk_index ASC",
-            (kb_id,),
-        ).fetchall()
-        return [_chunk_record_from_row(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM document_chunks WHERE kb_id = ? ORDER BY document_id ASC, chunk_index ASC",
+                (kb_id,),
+            ).fetchall()
+            return [_chunk_record_from_row(row) for row in rows]
 
     def list_neighbor_chunks(
         self,
@@ -525,32 +548,34 @@ class KnowledgeBaseCatalog:
     ) -> list[ChunkRecord]:
         if window <= 0:
             return self.list_chunks(document_id)
-        rows = self._conn.execute(
-            """
-            SELECT * FROM document_chunks
-            WHERE document_id = ?
-              AND chunk_index BETWEEN ? AND ?
-            ORDER BY chunk_index ASC
-            """,
-            (document_id, chunk_index - window, chunk_index + window),
-        ).fetchall()
-        return [_chunk_record_from_row(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM document_chunks
+                WHERE document_id = ?
+                  AND chunk_index BETWEEN ? AND ?
+                ORDER BY chunk_index ASC
+                """,
+                (document_id, chunk_index - window, chunk_index + window),
+            ).fetchall()
+            return [_chunk_record_from_row(row) for row in rows]
 
     def list_section_chunks(
         self,
         document_id: str,
         section_index: int,
     ) -> list[ChunkRecord]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM document_chunks
-            WHERE document_id = ?
-              AND section_index = ?
-            ORDER BY chunk_index ASC
-            """,
-            (document_id, section_index),
-        ).fetchall()
-        return [_chunk_record_from_row(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM document_chunks
+                WHERE document_id = ?
+                  AND section_index = ?
+                ORDER BY chunk_index ASC
+                """,
+                (document_id, section_index),
+            ).fetchall()
+            return [_chunk_record_from_row(row) for row in rows]
 
     def delete_document(self, document_id: str):
         with self._lock:
@@ -596,15 +621,40 @@ class KnowledgeBaseCatalog:
             self._conn.commit()
 
     def list_ingestion_runs(self, kb_id: str | None = None) -> list[IngestionRunRecord]:
-        sql = "SELECT * FROM ingestion_runs"
-        params: list[str] = []
-        if kb_id:
-            sql += " WHERE kb_id = ?"
-            params.append(kb_id)
-        sql += " ORDER BY updated_at DESC"
-        rows = self._conn.execute(sql, params).fetchall()
-        return [
-            IngestionRunRecord(
+        with self._lock:
+            sql = "SELECT * FROM ingestion_runs"
+            params: list[str] = []
+            if kb_id:
+                sql += " WHERE kb_id = ?"
+                params.append(kb_id)
+            sql += " ORDER BY updated_at DESC"
+            rows = self._conn.execute(sql, params).fetchall()
+            return [
+                IngestionRunRecord(
+                    run_id=row["run_id"],
+                    kb_id=row["kb_id"],
+                    status=row["status"],
+                    source_uri=row["source_uri"],
+                    error_message=row["error_message"],
+                    documents_seen=row["documents_seen"],
+                    chunks_written=row["chunks_written"],
+                    metadata=_decode_metadata(row["metadata_json"]),
+                    started_at=row["started_at"],
+                    finished_at=row["finished_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
+
+    def get_ingestion_run(self, run_id: str) -> IngestionRunRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM ingestion_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return IngestionRunRecord(
                 run_id=row["run_id"],
                 kb_id=row["kb_id"],
                 status=row["status"],
@@ -617,8 +667,6 @@ class KnowledgeBaseCatalog:
                 finished_at=row["finished_at"],
                 updated_at=row["updated_at"],
             )
-            for row in rows
-        ]
 
 
 def get_knowledge_base_catalog() -> KnowledgeBaseCatalog:
