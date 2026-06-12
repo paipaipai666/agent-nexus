@@ -133,19 +133,16 @@ class TurnRuntime:
         # causes a duplicate that displays as thinking in history.
         if self._version is not None and self._memory is not None:
             try:
-                # Write new messages to the journal
+                # Re-read STM at persist time — _stm_start_count may be stale
+                # if STM was cleared/compacted during the turn.
                 all_msgs = self._memory.short_term.get_all()
-                new_msgs = all_msgs[self._stm_start_count:]
-                if new_msgs:
-                    self._version.append_messages(new_msgs)
-                total_count = self._version.get_message_count()
-                # Commit checkpoint with message_count (stm_snapshot left empty for new format)
-                self._version.commit(
-                    stm_snapshot="",
+                journal_count = self._version.get_message_count()
+                new_msgs = all_msgs[journal_count:]
+                # Atomically write messages + checkpoint in one transaction
+                self._version.commit_with_messages(
+                    messages=new_msgs,
                     question=record.question,
                     answer=record.answer,
-                    new_ltm_ids=[],
-                    message_count=total_count,
                 )
             except Exception as e:
                 logger.warning("Version commit failed: %s", e)
