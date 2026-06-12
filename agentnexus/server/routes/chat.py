@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_journal_entry(entry: str) -> dict[str, str]:
@@ -355,7 +358,6 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
     # Set up HITL confirm bridge for this WebSocket connection
     confirm_bridge = runtime.subagent_confirm
-    original_target = confirm_bridge._target
 
     # Capture the main event loop for use in ws_confirm (which runs in a thread)
     main_loop = asyncio.get_running_loop()
@@ -366,17 +368,44 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
     def ws_confirm(summary: str) -> bool:
         """Send confirm request via WebSocket and wait for response."""
+        if closed.is_set():
+            return False
         confirm_event.clear()
         confirm_approved[0] = False
-        asyncio.run_coroutine_threadsafe(
+        future = asyncio.run_coroutine_threadsafe(
             ws.send_json({"type": "confirm_request", "summary": summary}),
             main_loop,
         )
-        # Block until response
-        confirm_event.wait()
+        try:
+            future.result(timeout=5)
+        except Exception as e:
+            logger.debug("Failed to send websocket confirm request: %s", e)
+            return False
+        # Fail closed if the client disconnects or never answers.
+        if not confirm_event.wait(timeout=300):
+            return False
         return confirm_approved[0]
 
-    confirm_bridge.set_target(ws_confirm)
+    stream_tasks: set[asyncio.Task] = set()
+    agent_tasks: set[asyncio.Task] = set()
+    active_thread_ids: set[int] = set()
+    closed = threading.Event()
+
+    def is_websocket_closed_error(exc: RuntimeError) -> bool:
+        message = str(exc)
+        return "websocket.send" in message and (
+            "websocket.close" in message or "response already completed" in message
+        )
+
+    async def send_stream_error(run_id: str, seq: int, exc: Exception) -> None:
+        try:
+            await ws.send_json({"type": "error", "message": str(exc), "run_id": run_id, "seq": seq})
+        except WebSocketDisconnect:
+            return
+        except RuntimeError as send_error:
+            if is_websocket_closed_error(send_error):
+                return
+            logger.warning("Failed to send websocket stream error", exc_info=send_error)
 
     async def stream_events(run_id: str):
         """Stream events from chat service to WebSocket.
@@ -392,8 +421,13 @@ async def ws_agent(ws: WebSocket, session_id: str):
                 if gui_event is not None:
                     await ws.send_json(gui_event)
                     seq += 1
+        except WebSocketDisconnect:
+            return
+        except RuntimeError as e:
+            if not is_websocket_closed_error(e):
+                await send_stream_error(run_id, seq, e)
         except Exception as e:
-            await ws.send_json({"type": "error", "message": str(e), "run_id": run_id, "seq": seq})
+            await send_stream_error(run_id, seq, e)
 
     try:
         while True:
@@ -406,31 +440,50 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     await ws.send_json({"type": "error", "message": "Empty content"})
                     continue
 
-                # Find the run_id that will be created by send_message.
-                # begin_turn() adds to _run_events before the agent runs,
-                # so we can detect the new key after starting the thread.
-                pre_run_ids = set(chat._run_events.keys())
+                run_started_event = asyncio.Event()
+                run_holder: list[str] = []
+
+                def record_run_started(run_id: str) -> None:
+                    run_holder.append(run_id)
+                    run_started_event.set()
 
                 def run_agent():
+                    thread_id = threading.get_ident()
+                    active_thread_ids.add(thread_id)
+                    confirm_bridge.set_target(ws_confirm, thread_id=thread_id)
                     try:
-                        chat.send_message(session_id, content)
-                    except Exception:
-                        pass
+                        chat.send_message(
+                            session_id,
+                            content,
+                            on_run_started=lambda run: main_loop.call_soon_threadsafe(
+                                record_run_started,
+                                run.id,
+                            ),
+                        )
+                    except Exception as e:
+                        logger.debug("WebSocket agent run failed: %s", e)
+                    finally:
+                        confirm_bridge.set_target(None, thread_id=thread_id)
+                        active_thread_ids.discard(thread_id)
+                        main_loop.call_soon_threadsafe(run_started_event.set)
 
                 # Run agent in background thread
-                asyncio.create_task(asyncio.to_thread(run_agent))
+                agent_task = asyncio.create_task(asyncio.to_thread(run_agent))
+                agent_tasks.add(agent_task)
+                agent_task.add_done_callback(agent_tasks.discard)
 
-                # Wait for begin_turn to create the run (adds to _run_events)
-                new_run_id = None
-                for _ in range(500):
-                    post_ids = set(chat._run_events.keys()) - pre_run_ids
-                    if post_ids:
-                        new_run_id = post_ids.pop()
-                        break
-                    await asyncio.sleep(0.01)
+                # Wait for begin_turn to create this session's run.
+                try:
+                    await asyncio.wait_for(run_started_event.wait(), timeout=5)
+                except TimeoutError:
+                    logger.warning("Timed out waiting for websocket run to start for session_id=%s", session_id)
 
+                new_run_id = run_holder[0] if run_holder else None
                 if new_run_id:
-                    asyncio.create_task(stream_events(new_run_id))
+                    current_run_id = new_run_id
+                    stream_task = asyncio.create_task(stream_events(new_run_id))
+                    stream_tasks.add(stream_task)
+                    stream_task.add_done_callback(stream_tasks.discard)
                     # 发送 run_id 给 GUI，用于取消操作
                     await ws.send_json({"type": "run_started", "run_id": new_run_id, "seq": 0})
                 # Don't await task — let agent run in background so
@@ -458,5 +511,18 @@ async def ws_agent(ws: WebSocket, session_id: str):
         except Exception:
             pass
     finally:
-        # Restore original confirm target
-        confirm_bridge.set_target(original_target)
+        closed.set()
+        confirm_approved[0] = False
+        confirm_event.set()
+        if current_run_id:
+            snapshot = chat.get_run_snapshot(current_run_id)
+            if snapshot is None or snapshot.status == "running":
+                chat.cancel_run(current_run_id, reason="websocket disconnected")
+        if stream_tasks:
+            for task in stream_tasks:
+                task.cancel()
+            await asyncio.gather(*stream_tasks, return_exceptions=True)
+        for task in agent_tasks:
+            task.cancel()
+        for thread_id in list(active_thread_ids):
+            confirm_bridge.set_target(None, thread_id=thread_id)

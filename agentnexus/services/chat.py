@@ -12,7 +12,7 @@ import logging
 import queue
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.services.turn import TurnRecord, TurnRuntime
@@ -112,10 +112,17 @@ class ChatService:
             except Exception as e:
                 logger.debug("Async event queue put_nowait failed: %s", e)
 
-    def send_message(self, session_id: str, text: str) -> RunHandle:
+    def send_message(
+        self,
+        session_id: str,
+        text: str,
+        on_run_started: Callable[[RunHandle], None] | None = None,
+    ) -> RunHandle:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
         run, events, turn = self.begin_turn(session_id, text)
+        if on_run_started is not None:
+            on_run_started(run)
         old_on_event = getattr(self._agent, "_on_event", None)
         old_output = getattr(self._agent, "_output", None)
         try:
@@ -200,8 +207,8 @@ class ChatService:
     def _get_version_manager(self, session_id: str):
         """Return a per-session ConversationVersionManager, creating one if needed."""
         if session_id not in self._version_managers:
-            from agentnexus.memory.versioned import ConversationVersionManager
             from agentnexus.core.config import get_settings
+            from agentnexus.memory.versioned import ConversationVersionManager
             settings = get_settings()
             workspace = ""
             if self._version is not None:

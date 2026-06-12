@@ -1,5 +1,6 @@
 """Tests for agentnexus.tools.confirm_bridge."""
 
+import threading
 from unittest.mock import MagicMock
 
 from agentnexus.tools.confirm_bridge import ConfirmBridge
@@ -47,4 +48,33 @@ class TestConfirmBridge:
         assert bridge("x") is False
 
         bridge.set_target(lambda s: "")
+        assert bridge("x") is False
+
+    def test_thread_target_overrides_global_target_for_that_thread(self):
+        bridge = ConfirmBridge()
+        bridge.set_target(lambda _s: False)
+        bridge.set_target(lambda _s: True, thread_id=threading.get_ident())
+
+        assert bridge("x") is True
+
+        bridge.set_target(None, thread_id=threading.get_ident())
+        assert bridge("x") is False
+
+    def test_thread_targets_are_isolated(self):
+        bridge = ConfirmBridge()
+        bridge.set_target(lambda _s: False)
+        result_holder = []
+
+        def call_with_thread_target():
+            bridge.set_target(lambda _s: True, thread_id=threading.get_ident())
+            try:
+                result_holder.append(bridge("x"))
+            finally:
+                bridge.set_target(None, thread_id=threading.get_ident())
+
+        thread = threading.Thread(target=call_with_thread_target)
+        thread.start()
+        thread.join(timeout=1)
+
+        assert result_holder == [True]
         assert bridge("x") is False

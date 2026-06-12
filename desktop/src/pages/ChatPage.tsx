@@ -173,6 +173,7 @@ export default function ChatPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const currentSessionIdRef = useRef<string | null>(null)
+  const skipNextDisconnectRef = useRef(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -366,16 +367,24 @@ export default function ChatPage() {
     }
 
     if (routeSessionId) {
-      // Guard: if navigating to the session we're already in, skip restore
-      if (routeSessionId === currentSessionIdRef.current) return;
+      // Guard: if navigating to the session we're already in, keep the live socket.
+      if (routeSessionId === currentSessionIdRef.current) {
+        return () => agentWs.disconnect()
+      }
       api.restoreSession(routeSessionId)
         .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
         .catch(() => api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
       api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
     }
-    return () => agentWs.disconnect()
-  }, [routeSessionId, location.key])
+    return () => {
+      if (skipNextDisconnectRef.current) {
+        skipNextDisconnectRef.current = false
+        return
+      }
+      agentWs.disconnect()
+    }
+  }, [routeSessionId])
 
   useEffect(() => {
     const unsubs = [
@@ -460,8 +469,8 @@ export default function ChatPage() {
     currentAssistantIdRef.current = null; currentReasoningIdRef.current = null
     setMessages(prev => [...prev, { id: `u-${++msgCounterRef.current}`, role: 'user', content: text, timestamp: new Date() }])
     setIsRunning(true); agentWs.sendMessage(text)
-    // Navigate to /chat/{sid} on first message so sidebar refreshes and URL is shareable
     if (location.pathname === '/' && currentSessionIdRef.current) {
+      skipNextDisconnectRef.current = true
       navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
     }
   }

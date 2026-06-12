@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 
 class ConfirmBridge:
     def __init__(self):
         self._target: Callable[[str], bool] | None = None
+        self._thread_targets: dict[int, Callable[[str], bool]] = {}
 
-    def set_target(self, target: Callable[[str], bool] | None):
-        self._target = target
+    def set_target(self, target: Callable[[str], bool] | None, thread_id: int | None = None):
+        if thread_id is None:
+            self._target = target
+            return
+        if target is None:
+            self._thread_targets.pop(thread_id, None)
+            return
+        self._thread_targets[thread_id] = target
 
     def __call__(self, summary: str) -> bool:
-        if self._target is None:
+        target = self._thread_targets.get(threading.get_ident(), self._target)
+        if target is None:
             return False
-        return bool(self._target(summary))
+        return bool(target(summary))
