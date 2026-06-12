@@ -199,6 +199,8 @@ class TestRestartSafeRetrieval:
         chunk = self._seed_catalog()
         captured_queries = []
 
+        from agentnexus.rag.retriever import HybridRetriever
+        monkeypatch.setattr(HybridRetriever, "load_reranker", lambda self, model_name=None: setattr(self, "_reranker", object()))
         monkeypatch.setattr("agentnexus.rag.retriever.expand_queries", lambda query: [query, "BM25 查询"])
 
         def fake_search(query, limit=10, name=None, namespace=None):
@@ -219,6 +221,8 @@ class TestRestartSafeRetrieval:
         chunk = self._seed_catalog()
         captured_queries = []
 
+        from agentnexus.rag.retriever import HybridRetriever
+        monkeypatch.setattr(HybridRetriever, "load_reranker", lambda self, model_name=None: setattr(self, "_reranker", object()))
         monkeypatch.setattr("agentnexus.rag.retriever.expand_queries", lambda query: [query])
         monkeypatch.setattr(
             "agentnexus.rag.retriever.generate_hypothetical_document",

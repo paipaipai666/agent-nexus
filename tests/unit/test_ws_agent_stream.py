@@ -324,9 +324,15 @@ class TestWebSocketAgentStream:
             finally:
                 confirm_finished.set()
 
+        message_sent = False
+
         async def receive_json():
-            if not confirm_started.is_set():
+            nonlocal message_sent
+            if not message_sent:
+                message_sent = True
                 return {"type": "send_message", "content": "hello"}
+            # Wait for agent thread to reach the confirm call before disconnecting
+            confirm_started.wait(timeout=2)
             raise WebSocketDisconnect()
 
         async def send_json(payload: dict):
