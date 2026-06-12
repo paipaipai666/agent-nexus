@@ -177,6 +177,99 @@ class TestConversationVersionManager:
         assert result == stm_json
         mgr._conn.close()
 
+    def test_update_session_preview(self, mgr, temp_agentnexus_home):
+        """update_session_preview stores preview text on the session."""
+        from agentnexus.core.config import get_settings
+        settings = get_settings()
+        workspace = "/tmp"
+
+        # Register the session
+        mgr.register_session(workspace)
+
+        # Update preview
+        ConversationVersionManager.update_session_preview(
+            settings.memory_db_path, "test-session", "Hello, this is a test"
+        )
+
+        # Read it back
+        row = mgr._conn.execute(
+            "SELECT preview FROM conversation_sessions WHERE session_id = ?",
+            ("test-session",),
+        ).fetchone()
+        assert row["preview"] == "Hello, this is a test"
+
+    def test_update_session_preview_truncates(self, mgr, temp_agentnexus_home):
+        """Preview longer than 100 chars is truncated."""
+        from agentnexus.core.config import get_settings
+        settings = get_settings()
+
+        mgr.register_session("/tmp")
+        long_text = "x" * 200
+        ConversationVersionManager.update_session_preview(
+            settings.memory_db_path, "test-session", long_text
+        )
+
+        row = mgr._conn.execute(
+            "SELECT preview FROM conversation_sessions WHERE session_id = ?",
+            ("test-session",),
+        ).fetchone()
+        assert len(row["preview"]) == 103  # 100 + "..."
+        assert row["preview"].endswith("...")
+
+    def test_find_recent_sessions_no_checkpoint_required(self, temp_agentnexus_home):
+        """Sessions without checkpoints should appear in find_recent_sessions."""
+        from agentnexus.core.config import get_settings
+        settings = get_settings()
+        workspace = "/tmp"
+
+        # Create a session with a preview but NO checkpoint
+        mgr = ConversationVersionManager("preview-session", settings.memory_db_path, workspace_path=workspace)
+        ConversationVersionManager.update_session_preview(
+            settings.memory_db_path, "preview-session", "First message preview"
+        )
+
+        sessions = ConversationVersionManager.find_recent_sessions(
+            settings.memory_db_path, workspace, limit=5
+        )
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == "preview-session"
+        assert sessions[0]["preview"] == "First message preview"
+        mgr._conn.close()
+
+    def test_find_recent_sessions_fallback_to_checkpoint(self, temp_agentnexus_home):
+        """When preview is empty, find_recent_sessions falls back to checkpoint question."""
+        from agentnexus.core.config import get_settings
+        settings = get_settings()
+        workspace = "/tmp"
+
+        mgr = ConversationVersionManager("cp-session", settings.memory_db_path, workspace_path=workspace)
+        mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="What is testing?", answer="A practice")
+
+        sessions = ConversationVersionManager.find_recent_sessions(
+            settings.memory_db_path, workspace, limit=5
+        )
+        assert len(sessions) == 1
+        assert sessions[0]["preview"] == "What is testing?"
+        mgr._conn.close()
+
+    def test_find_recent_sessions_fallback_to_message(self, temp_agentnexus_home):
+        """When both preview and checkpoint are empty, falls back to last user message."""
+        from agentnexus.core.config import get_settings
+        settings = get_settings()
+        workspace = "/tmp"
+
+        mgr = ConversationVersionManager("msg-session", settings.memory_db_path, workspace_path=workspace)
+        # Insert session and message directly (no checkpoint)
+        mgr.register_session(workspace)
+        mgr.append_message("user", "Show up in sidebar please")
+
+        sessions = ConversationVersionManager.find_recent_sessions(
+            settings.memory_db_path, workspace, limit=5
+        )
+        assert len(sessions) == 1
+        assert sessions[0]["preview"] == "Show up in sidebar please"
+        mgr._conn.close()
+
     def test_session_metadata_latest_for_workspace(self, temp_agentnexus_home):
         from agentnexus.core.config import get_settings
 

@@ -440,6 +440,18 @@ async def ws_agent(ws: WebSocket, session_id: str):
                     await ws.send_json({"type": "error", "message": "Empty content"})
                     continue
 
+                # Store user message as session preview for sidebar display
+                try:
+                    from agentnexus.core.config import get_settings
+                    from agentnexus.memory.versioned import ConversationVersionManager
+
+                    settings = get_settings()
+                    ConversationVersionManager.update_session_preview(
+                        settings.memory_db_path, session_id, content
+                    )
+                except Exception as e:
+                    logger.debug("Failed to update session preview: %s", e)
+
                 run_started_event = asyncio.Event()
                 run_holder: list[str] = []
 

@@ -4,19 +4,9 @@ import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight } from '
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
-import { agentWs } from '../services/ws'
 import { animateMessage } from '../utils/animations'
-import { useSession } from '../components/session/SessionProvider'
+import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
-  content: string
-  toolName?: string
-  toolStatus?: 'running' | 'done' | 'error'
-  timestamp: Date
-}
 
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
 
@@ -34,8 +24,6 @@ const COMMAND_DEFS = [
   { cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp' },
   { cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin' },
 ]
-
-const animatedIds = new Set<string>()
 
 /* ─── Collapsible Section ─── */
 function Collapsible({ header, children, defaultExpanded = false, className = '' }: {
@@ -116,7 +104,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
 })
 
 /* ─── Message Bubble ─── */
-const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message }) {
+const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { msg: Message; animatedIds: Set<string> }) {
   return (
     <div
       ref={(el) => {
@@ -173,22 +161,9 @@ export default function ChatPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const currentSessionIdRef = useRef<string | null>(null)
-  const skipNextDisconnectRef = useRef(false)
-  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [isRunning, setIsRunning] = useState(false)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null)
-  const [confirmRequest, setConfirmRequest] = useState<{ summary: string } | null>(null)
-  const currentAssistantIdRef = useRef<string | null>(null)
-  const currentReasoningIdRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const msgCounterRef = useRef(0)
-  const messageQueueRef = useRef<string[]>([])
-
-  const tokenBufferRef = useRef<string>('')
-  const tokenFlushRef = useRef<number>(0)
 
   // HUD state
   const [versionStatus, setVersionStatus] = useState<any>(null)
@@ -205,7 +180,11 @@ export default function ChatPage() {
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
 
-  const { setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount } = useSession()
+  const {
+    sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
+    messages, setMessages, isRunning, confirmRequest,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter,
+  } = useSession()
 
   const scrollRafRef = useRef<number>(0)
   const lastEscapeAtRef = useRef<number>(0)
@@ -231,7 +210,7 @@ export default function ChatPage() {
     try {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
-        const currentSid = sessionIdRef.current
+        const currentSid = currentSessionIdRef.current
         const hist = await api.listSessionHistory(0, currentSid || undefined)
         stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
       } catch {
@@ -286,15 +265,11 @@ export default function ChatPage() {
       }
 
       flushPendingTools()
+      // Mark all restored messages as already animated
+      for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
     } catch (err) { console.error('Failed to load messages:', err) }
   }, [])
-
-  const sessionIdRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    setGlobalSessionId(sessionId)
-  }, [sessionId, setGlobalSessionId])
 
   useEffect(() => {
     if (runtimeStatus?.model_id) {
@@ -322,14 +297,10 @@ export default function ChatPage() {
     }
 
     const initNew = (sid: string) => {
-      sessionIdRef.current = sid
-      setSessionId(sid)
+      currentSessionIdRef.current = sid
+      setGlobalSessionId(sid)
       setMessages([])
       animatedIds.clear()
-      currentAssistantIdRef.current = null
-      currentReasoningIdRef.current = null
-      messageQueueRef.current = []
-      agentWs.connect(sid)
       api.clearShortMemory().catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => {
@@ -346,9 +317,8 @@ export default function ChatPage() {
     }
 
     const initRestore = (sid: string) => {
-      sessionIdRef.current = sid
-      setSessionId(sid)
-      agentWs.connect(sid)
+      currentSessionIdRef.current = sid
+      setGlobalSessionId(sid)
       loadAndDisplayMessages().catch(() => {})
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
@@ -367,9 +337,9 @@ export default function ChatPage() {
     }
 
     if (routeSessionId) {
-      // Guard: if navigating to the session we're already in, keep the live socket.
+      // Guard: if navigating to the session we're already in, skip re-init.
       if (routeSessionId === currentSessionIdRef.current) {
-        return () => agentWs.disconnect()
+        return
       }
       api.restoreSession(routeSessionId)
         .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
@@ -377,126 +347,34 @@ export default function ChatPage() {
     } else {
       api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
     }
-    return () => {
-      if (skipNextDisconnectRef.current) {
-        skipNextDisconnectRef.current = false
-        return
-      }
-      agentWs.disconnect()
-    }
+    // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
   }, [routeSessionId])
 
-  useEffect(() => {
-    const unsubs = [
-      agentWs.on('thinking', (data) => {
-        currentAssistantIdRef.current = null; currentReasoningIdRef.current = null
-        setMessages(prev => [...prev, { id: `t-${++msgCounterRef.current}`, role: 'system', content: data.content || 'Thinking...', timestamp: new Date() }])
-      }),
-      agentWs.on('tool_call', (data) => {
-        currentAssistantIdRef.current = null
-        setMessages(prev => [...prev, { id: `tc-${++msgCounterRef.current}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolStatus: 'running', timestamp: new Date() }])
-      }),
-      agentWs.on('tool_result', (data) => {
-        let updated = false
-        setMessages(prev => prev.map(m => {
-          if (!updated && m.toolName === data.tool_name && m.toolStatus === 'running') {
-            updated = true
-            return { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
-          }
-          return m
-        }))
-      }),
-      agentWs.on('token', (data) => {
-        currentReasoningIdRef.current = null
-        const tid = currentAssistantIdRef.current
-        if (tid) {
-          tokenBufferRef.current += data.content
-          if (!tokenFlushRef.current) {
-            tokenFlushRef.current = requestAnimationFrame(() => {
-              tokenFlushRef.current = 0
-              const batch = tokenBufferRef.current
-              tokenBufferRef.current = ''
-              if (!batch) return
-              const id = currentAssistantIdRef.current
-              if (id) setMessages(prev => prev.map(m => m.id === id ? { ...m, content: m.content + batch } : m))
-            })
-          }
-        } else {
-          const nid = `a-${++msgCounterRef.current}`
-          currentAssistantIdRef.current = nid
-          setMessages(prev => [...prev, { id: nid, role: 'assistant', content: data.content, timestamp: new Date() }])
-        }
-      }),
-      agentWs.on('reasoning', (data) => {
-        const tid = currentReasoningIdRef.current
-        if (tid) { setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: m.content + data.content } : m)) }
-        else { const nid = `r-${++msgCounterRef.current}`; currentReasoningIdRef.current = nid; setMessages(prev => [...prev, { id: nid, role: 'system', content: data.content, timestamp: new Date() }]) }
-      }),
-      agentWs.on('answer', (data) => {
-        if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
-        tokenBufferRef.current = ''
-        const tid = currentAssistantIdRef.current
-        if (tid) { setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: data.content } : m)) }
-        else { setMessages(prev => { const li = [...prev].reverse().findIndex(m => m.role === 'assistant'); if (li !== -1) { const idx = prev.length - 1 - li; return prev.map((m, i) => i === idx ? { ...m, content: data.content } : m) } return [...prev, { id: `a-${++msgCounterRef.current}`, role: 'assistant' as const, content: data.content, timestamp: new Date() }] }) }
-        // Force-close any tool cards still in 'running' state — the agent is done
-        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m))
-        currentAssistantIdRef.current = null; setIsRunning(false); setCurrentRunId(null)
-        api.getVersionStatus().then(setVersionStatus).catch(() => {})
-        api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
-        api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
-        processQueue()
-      }),
-      agentWs.on('error', (data) => {
-        const isCancelled = data.message === 'cancelled' || data.run_id
-        const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
-        setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: label, timestamp: new Date() }])
-        // Force-close any tool cards still in 'running' state
-        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'error' as const } : m))
-        setIsRunning(false); setCurrentRunId(null); processQueue()
-      }),
-      agentWs.on('done', () => {
-        // Force-close any tool cards still in 'running' state
-        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m))
-        setIsRunning(false); setCurrentRunId(null); processQueue()
-      }),
-      agentWs.on('run_started', (data) => { if (data.run_id) setCurrentRunId(data.run_id) }),
-      agentWs.on('confirm_request', (data) => { setConfirmRequest({ summary: data.summary }) }),
-    ]
-    return () => {
-      unsubs.forEach(u => u())
-      if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
-      if (scrollRafRef.current) { cancelAnimationFrame(scrollRafRef.current); scrollRafRef.current = 0 }
-    }
-  }, [sessionId])
-
+  // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])
 
-  const processQueue = () => { if (messageQueueRef.current.length > 0) { const next = messageQueueRef.current.shift()!; setTimeout(() => sendMessage(next), 100) } }
-
-  const sendMessage = (text: string) => {
-    currentAssistantIdRef.current = null; currentReasoningIdRef.current = null
-    setMessages(prev => [...prev, { id: `u-${++msgCounterRef.current}`, role: 'user', content: text, timestamp: new Date() }])
-    setIsRunning(true); agentWs.sendMessage(text)
+  // Handle URL redirect on first message (from / to /chat/{id})
+  const handleSendMessage = useCallback((text: string) => {
+    sendMessage(text)
     if (location.pathname === '/' && currentSessionIdRef.current) {
-      skipNextDisconnectRef.current = true
       navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
     }
-  }
+  }, [sendMessage, location.pathname, navigate])
 
   const handleSend = () => {
     const text = input.trim(); if (!text || !sessionId) return
     setInput(''); setShowPalette(false)
     if (text.startsWith('/')) { handleSlashCommand(text); return }
-    if (isRunning) { messageQueueRef.current.push(text); setMessages(prev => [...prev, { id: `q-${++msgCounterRef.current}`, role: 'system', content: `[Queued] ${text}`, timestamp: new Date() }]) }
-    else sendMessage(text)
+    if (isRunning) { queueMessage(text) }
+    else handleSendMessage(text)
   }
 
   const handleSlashCommand = async (text: string) => {
     const parts = text.trim().split(/\s+/); const cmd = parts[0].toLowerCase(); const args = parts.slice(1).join(' ')
-    const addSys = (c: string) => setMessages(prev => [...prev, { id: `cmd-${++msgCounterRef.current}`, role: 'system', content: c, timestamp: new Date() }])
+    const addSys = (c: string) => setMessages(prev => [...prev, { id: `cmd-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
     switch (cmd) {
       case '/help': addSys(COMMAND_DEFS.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n')); break
-      case '/clear': setMessages([]); messageQueueRef.current = []; animatedIds.clear(); break
+      case '/clear': setMessages([]); animatedIds.clear(); break
       case '/undo':
         try {
           const r = await api.versionUndo()
@@ -572,7 +450,7 @@ export default function ChatPage() {
           return `/${shortId}` === cmd
         })
         if (skillMatch) {
-          sendMessage(text)
+          handleSendMessage(text)
         } else {
           addSys(`Unknown command: ${cmd}. Type /help for commands.`)
         }
@@ -610,8 +488,8 @@ export default function ChatPage() {
     setPaletteIndex(0)
   }
   const handlePaletteSelect = (cmd: string) => { setInput(cmd + ' '); setShowPalette(false); setPaletteIndex(0); paletteAnimDoneRef.current = false; inputRef.current?.focus() }
-  const handleCancel = () => { if (currentRunId) agentWs.cancel(currentRunId) }
-  const handleConfirm = (approved: boolean) => { agentWs.confirm('', approved); setConfirmRequest(null) }
+  const handleCancel = () => { cancelRun() }
+  const handleConfirm = (approved: boolean) => { confirmToolCall(approved) }
   const handleUndo = async () => {
     try {
       await api.versionUndo()
@@ -708,7 +586,7 @@ export default function ChatPage() {
           </div>
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+          <MessageBubble key={msg.id} msg={msg} animatedIds={animatedIds} />
         ))}
         <div ref={messagesEndRef} />
       </div>
