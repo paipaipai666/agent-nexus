@@ -73,4 +73,4 @@ class TestMemoryHooks:
     def test_no_hooks_works_normally(self):
         mm = _make_memory_manager()
         mm.append("user", "msg")
-        mm.short_term.append.assert_called_once_with("user", "msg")
+        mm.short_term.append.assert_called_once_with("user", "msg", metadata=None)

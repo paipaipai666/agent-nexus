@@ -102,8 +102,9 @@ class ConversationVersionManager:
         This prevents the race where messages are written but the checkpoint's
         message_count is stale (or vice versa).
         """
-        from agentnexus.core.hooks import HookType, get_hook_manager
         import time as _time
+
+        from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()
         hook_mgr.fire(HookType.BEFORE_CHECKPOINT, {

@@ -28,7 +28,7 @@ def test_finish_persists_checkpoint_without_extra_memory_append():
     # finish() no longer appends to memory — the agent already stores
     # the answer as "[最终答案]" in re_act_agent.py:_on_emit_answer.
     memory.append.assert_not_called()
-    version.commit.assert_called_once()
+    version.commit_with_messages.assert_called_once()
 
 
 def test_cancel_generates_summary_with_reason_question_and_journal():
@@ -70,7 +70,7 @@ def test_cancel_is_idempotent_for_persistence():
 
     # cancel() does not append to memory (only finish does)
     memory.append.assert_not_called()
-    version.commit.assert_called_once()
+    version.commit_with_messages.assert_called_once()
 
 
 def test_memory_append_failure_does_not_block_checkpoint():
@@ -82,4 +82,4 @@ def test_memory_append_failure_does_not_block_checkpoint():
 
     turn.cancel("cancelled")
 
-    version.commit.assert_called_once()
+    version.commit_with_messages.assert_called_once()

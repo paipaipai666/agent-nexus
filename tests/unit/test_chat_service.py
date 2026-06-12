@@ -94,6 +94,7 @@ class TestChatService:
         memory.short_term.to_json.return_value = '{"messages":[]}'
         version = MagicMock()
         service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
+        service._get_version_manager = lambda _sid: version
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         events = list(service.stream_events(run.id))
@@ -193,6 +194,7 @@ class TestChatService:
         memory.short_term.to_json.return_value = '{"messages":[]}'
         version = MagicMock()
         service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
+        service._get_version_manager = lambda _sid: version
         session = service.start_session()
         with pytest.raises(RuntimeError, match="something broke"):
             service.send_message(session.id, "hello")
