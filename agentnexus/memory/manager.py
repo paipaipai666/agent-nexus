@@ -198,7 +198,7 @@ class MemoryManager:
         """Reload LTM context after new memories are detected."""
         return self.init_session(question)
 
-    def append(self, role: str, content: str):
+    def append(self, role: str, content: str, metadata: dict | None = None):
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()
@@ -213,7 +213,7 @@ class MemoryManager:
             threshold = self._settings.large_result_threshold
             if len(content.encode("utf-8", errors="replace")) > threshold:
                 content = self._offload_large_result(content)
-        self.short_term.append(role, content)
+        self.short_term.append(role, content, metadata=metadata)
         # Recursive guard: don't trigger compaction from within compaction
         if not self._compacting:
             self.maybe_compact()

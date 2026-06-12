@@ -169,12 +169,22 @@ def _format_turns_for_context(turns: list[list[dict]]) -> str:
     - user / assistant: kept intact — these are semantic units
     - tool results: truncated at source (data, not conversation)
     """
+    FINAL_ANSWER_PREFIX = "[最终答案]"
     role_label = {"user": "用户", "assistant": "助手", "tool": "工具"}
     lines = []
     for turn in turns:
         for message in turn:
+            # Skip display-only messages (e.g. final-answer thought)
+            if message.get("metadata", {}).get("display_only"):
+                continue
+            # Convert [最终答案] system marker into assistant message for context
+            if message["role"] == "system" and message["content"].startswith(FINAL_ANSWER_PREFIX):
+                actual_answer = message["content"][len(FINAL_ANSWER_PREFIX):].strip()
+                if actual_answer:
+                    lines.append(f"助手: {actual_answer}")
+                continue
             if message["role"] == "system":
-                continue  # [最终答案] is a boundary marker, not display content
+                continue
             label = role_label.get(message["role"], message["role"])
             if message["role"] == "tool":
                 content = _format_tool_for_context(message["content"], TOOL_CONTEXT_LIMIT)

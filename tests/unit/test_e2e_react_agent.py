@@ -3,7 +3,7 @@
 Runs the full ReAct agent through multi-step tasks with mocked LLM,
 validating intermediate state assertions (tool calls, observations, reasoning steps).
 """
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -79,6 +79,38 @@ class TestE2EReActAgent:
         result = agent.run("What is Python?")
         assert call_count[0] >= 1
         assert result.answer is not None
+
+    def test_persists_final_answer_thought_before_answer(self):
+        agent, llm = self._make_agent()
+        llm.capabilities.supports_tool_calling = False
+        memory = MagicMock()
+        memory.init_session.return_value = ""
+        memory.short_term.get_all.return_value = []
+        call_count = [0]
+
+        def mock_think(**kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return '{"thought":"Need to search first.","tool":"web_search","params":{"query":"Python"}}'
+            return '{"thought":"Now I can answer from the search result.","answer":"Python is a language."}'
+
+        llm.think.side_effect = mock_think
+
+        agent.run("What is Python?", memory_manager=memory)
+
+        assert call("assistant", "Now I can answer from the search result.", metadata={"display_only": True}) in memory.append.call_args_list
+        assert call("system", "[最终答案] Python is a language.") in memory.append.call_args_list
+        final_thought_index = memory.append.call_args_list.index(
+            call("assistant", "Now I can answer from the search result.", metadata={"display_only": True})
+        )
+        final_answer_index = memory.append.call_args_list.index(call("system", "[最终答案] Python is a language."))
+        assert final_thought_index < final_answer_index
+        assert memory.append.call_args_list.count(
+            call("assistant", "Now I can answer from the search result.", metadata={"display_only": True})
+        ) == 1
+        assert memory.append.call_args_list.count(
+            call("system", "[最终答案] Python is a language.")
+        ) == 1
 
     def test_e2e_multiple_tools(self):
         agent, llm = self._make_agent()

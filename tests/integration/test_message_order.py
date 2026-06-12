@@ -112,7 +112,7 @@ class TestCorrectStorageOrder:
         assert answers[1]["content"] == "答案2"
 
     def test_thinking_with_tool_calls(self):
-        """Thinking → tool → thinking → answer should work correctly."""
+        """Thinking → tool → final-answer thinking → answer should work correctly."""
         messages = [
             {"role": "user", "content": "搜索 Python"},
             {"role": "assistant", "content": "我需要搜索..."},
@@ -126,6 +126,22 @@ class TestCorrectStorageOrder:
         assert result[-1]["content"] == "Python 是一种编程语言。"
         assert result[-2]["role"] == "system"
         assert result[-2]["content"] == "根据搜索结果..."
+
+    def test_final_answer_thought_is_preserved_before_answer(self):
+        """The final thought emitted before [最终答案] should display in history."""
+        messages = [
+            {"role": "user", "content": "搜索 Python"},
+            {"role": "assistant", "content": "我需要搜索..."},
+            {"role": "tool", "content": "搜索结果: Python 是..."},
+            {"role": "assistant", "content": "根据搜索结果，我可以回答了..."},
+            {"role": "system", "content": "[最终答案] Python 是一种编程语言。"},
+        ]
+        result = transform_messages(messages)
+
+        assert result[-2]["role"] == "system"
+        assert result[-2]["content"] == "根据搜索结果，我可以回答了..."
+        assert result[-1]["role"] == "assistant"
+        assert result[-1]["content"] == "Python 是一种编程语言。"
 
 
 class TestDuplicateAnswerBug:

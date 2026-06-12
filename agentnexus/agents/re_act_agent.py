@@ -698,6 +698,9 @@ class ReActAgent:
         if not thought or thought == raw_text:
             return
 
+        memory_manager = ctx.memory_state.memory_manager
+        if memory_manager:
+            memory_manager.append("assistant", thought, metadata={"display_only": True})
         ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=thought)
 
     @staticmethod

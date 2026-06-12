@@ -257,3 +257,87 @@ class TestBuildReactMessages:
         assert user_msg["role"] == "user"
         assert "== 当前任务 ==" in user_msg["content"]
         assert "What is the capital of France?" in user_msg["content"]
+
+
+class TestDisplayOnlyAndFinalAnswerContext:
+    """display_only thought should be excluded from prompt context;
+    [最终答案] should be converted to assistant message."""
+
+    def test_display_only_excluded_from_prompt_context(self):
+        """display_only messages must not appear in conversation context."""
+        stm = MagicMock()
+        stm.get_summary.return_value = None
+        stm.get_all.return_value = [
+            {"role": "user", "content": "What is Python?"},
+            {"role": "assistant", "content": "I need to search first.", "metadata": {"display_only": True}},
+            {"role": "tool", "content": "Action: web_search[{}]\nObservation: Python is a language."},
+            {"role": "assistant", "content": "Now I can answer.", "metadata": {"display_only": True}},
+            {"role": "system", "content": "[最终答案] Python is a programming language."},
+        ]
+        mm = MagicMock()
+        mm.short_term = stm
+
+        result = build_conversation_context(mm)
+        assert "I need to search first." not in result
+        assert "Now I can answer." not in result
+        assert "Python is a programming language." in result
+
+    def test_final_answer_converted_to_assistant_in_context(self):
+        """[最终答案] system marker should appear as 助手: in context."""
+        stm = MagicMock()
+        stm.get_summary.return_value = None
+        stm.get_all.return_value = [
+            {"role": "user", "content": "What is Python?"},
+            {"role": "assistant", "content": "I searched."},
+            {"role": "system", "content": "[最终答案] Python is a language."},
+        ]
+        mm = MagicMock()
+        mm.short_term = stm
+
+        result = build_conversation_context(mm)
+        assert "助手: Python is a language." in result
+
+    def test_final_answer_not_duplicated_with_thought(self):
+        """Both thought and answer should appear, but thought only when not display_only."""
+        stm = MagicMock()
+        stm.get_summary.return_value = None
+        stm.get_all.return_value = [
+            {"role": "user", "content": "What is Python?"},
+            {"role": "assistant", "content": "I can answer now.", "metadata": {"display_only": True}},
+            {"role": "system", "content": "[最终答案] Python is a language."},
+        ]
+        mm = MagicMock()
+        mm.short_term = stm
+
+        result = build_conversation_context(mm)
+        assert result.count("Python is a language.") == 1
+        assert "I can answer now." not in result
+
+    def test_no_display_messages_context_unchanged(self):
+        """Normal messages without metadata should work as before."""
+        stm = MagicMock()
+        stm.get_summary.return_value = None
+        stm.get_all.return_value = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        mm = MagicMock()
+        mm.short_term = stm
+
+        result = build_conversation_context(mm)
+        assert "用户: hello" in result
+        assert "助手: hi" in result
+
+    def test_history_api_still_returns_display_only(self):
+        """get_all() should still return display_only messages for history display."""
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        stm = ShortTermMemory()
+        stm.append("user", "What is Python?")
+        stm.append("assistant", "I can answer now.", metadata={"display_only": True})
+        stm.append("system", "[最终答案] Python is a language.")
+
+        messages = stm.get_all()
+        assert len(messages) == 3
+        assert messages[1]["metadata"] == {"display_only": True}
+        assert messages[1]["content"] == "I can answer now."

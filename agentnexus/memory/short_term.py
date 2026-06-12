@@ -68,8 +68,10 @@ class ShortTermMemory:
         if self._wal_path:
             self._recover_wal()
 
-    def append(self, role: str, content: str):
+    def append(self, role: str, content: str, metadata: dict | None = None):
         msg = {"role": role, "content": content, "ts": time.time()}
+        if metadata:
+            msg["metadata"] = metadata
         # Incremental token tracking
         self._token_count += self._estimate_msg_tokens(msg)
         # If deque is full, the evicted message's tokens should be subtracted
