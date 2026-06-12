@@ -66,6 +66,8 @@ class ChatService:
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
         self._is_processing = False
+        # Per-session version managers — each session gets its own journal + checkpoints
+        self._version_managers: dict[str, Any] = {}
 
     def start_session(self, skill: str | None = None, profile: str | None = None) -> SessionHandle:
         handle = SessionHandle(id=f"session_{uuid.uuid4().hex[:12]}", skill=skill, profile=profile)
@@ -195,6 +197,22 @@ class ChatService:
             self._put_event(run.id, None)
         return run
 
+    def _get_version_manager(self, session_id: str):
+        """Return a per-session ConversationVersionManager, creating one if needed."""
+        if session_id not in self._version_managers:
+            from agentnexus.memory.versioned import ConversationVersionManager
+            from agentnexus.core.config import get_settings
+            settings = get_settings()
+            workspace = ""
+            if self._version is not None:
+                workspace = getattr(self._version, "_workspace_path", "")
+            self._version_managers[session_id] = ConversationVersionManager(
+                session_id,
+                settings.memory_db_path,
+                workspace_path=workspace,
+            )
+        return self._version_managers[session_id]
+
     def begin_turn(self, session_id: str, text: str) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
@@ -203,12 +221,13 @@ class ChatService:
         async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         self._run_events[run.id] = events
         self._async_run_events[run.id] = async_events
+        version_mgr = self._get_version_manager(session_id)
         turn = TurnRuntime(
             run_id=run.id,
             session_id=session_id,
             question=text,
             memory_manager=self._memory,
-            version_manager=self._version,
+            version_manager=version_mgr,
         )
         self._turns[run.id] = turn
         events.put(AgentEvent("message_started", {"text": text}, run_id=run.id, session_id=session_id))

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -170,6 +170,9 @@ const MessageBubble = React.memo(function MessageBubble({ msg }: { msg: Message 
 /* ─── Main Chat Page ─── */
 export default function ChatPage() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentSessionIdRef = useRef<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -363,14 +366,16 @@ export default function ChatPage() {
     }
 
     if (routeSessionId) {
+      // Guard: if navigating to the session we're already in, skip restore
+      if (routeSessionId === currentSessionIdRef.current) return;
       api.restoreSession(routeSessionId)
-        .then(({ session_id }) => initRestore(session_id))
-        .catch(() => api.createSession().then(({ session_id }) => initNew(session_id)))
+        .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
+        .catch(() => api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
-      api.createSession().then(({ session_id }) => initNew(session_id))
+      api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
     }
     return () => agentWs.disconnect()
-  }, [routeSessionId])
+  }, [routeSessionId, location.key])
 
   useEffect(() => {
     const unsubs = [
@@ -455,6 +460,10 @@ export default function ChatPage() {
     currentAssistantIdRef.current = null; currentReasoningIdRef.current = null
     setMessages(prev => [...prev, { id: `u-${++msgCounterRef.current}`, role: 'user', content: text, timestamp: new Date() }])
     setIsRunning(true); agentWs.sendMessage(text)
+    // Navigate to /chat/{sid} on first message so sidebar refreshes and URL is shareable
+    if (location.pathname === '/' && currentSessionIdRef.current) {
+      navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
+    }
   }
 
   const handleSend = () => {

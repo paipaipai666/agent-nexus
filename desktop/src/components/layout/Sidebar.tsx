@@ -45,7 +45,7 @@ export default function Sidebar() {
   const handleSessionClick = (sessionId: string) => navigate(`/chat/${sessionId}`)
 
   const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr)
+    const date = new Date(dateStr + 'Z')
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)
@@ -97,7 +97,7 @@ export default function Sidebar() {
           </div>
         ) : recentSessions.length > 0 && (
           <div className="space-y-0.5">
-            {recentSessions.map((session) => {
+            {[...recentSessions].sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()).map((session) => {
               const active = isActiveSession(session.session_id)
               return (
                 <button
