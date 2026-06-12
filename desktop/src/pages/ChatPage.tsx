@@ -438,6 +438,8 @@ export default function ChatPage() {
         const tid = currentAssistantIdRef.current
         if (tid) { setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: data.content } : m)) }
         else { setMessages(prev => { const li = [...prev].reverse().findIndex(m => m.role === 'assistant'); if (li !== -1) { const idx = prev.length - 1 - li; return prev.map((m, i) => i === idx ? { ...m, content: data.content } : m) } return [...prev, { id: `a-${++msgCounterRef.current}`, role: 'assistant' as const, content: data.content, timestamp: new Date() }] }) }
+        // Force-close any tool cards still in 'running' state — the agent is done
+        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m))
         currentAssistantIdRef.current = null; setIsRunning(false); setCurrentRunId(null)
         api.getVersionStatus().then(setVersionStatus).catch(() => {})
         api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
@@ -448,9 +450,15 @@ export default function ChatPage() {
         const isCancelled = data.message === 'cancelled' || data.run_id
         const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
         setMessages(prev => [...prev, { id: `e-${++msgCounterRef.current}`, role: 'system', content: label, timestamp: new Date() }])
+        // Force-close any tool cards still in 'running' state
+        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'error' as const } : m))
         setIsRunning(false); setCurrentRunId(null); processQueue()
       }),
-      agentWs.on('done', () => { setIsRunning(false); setCurrentRunId(null); processQueue() }),
+      agentWs.on('done', () => {
+        // Force-close any tool cards still in 'running' state
+        setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m))
+        setIsRunning(false); setCurrentRunId(null); processQueue()
+      }),
       agentWs.on('run_started', (data) => { if (data.run_id) setCurrentRunId(data.run_id) }),
       agentWs.on('confirm_request', (data) => { setConfirmRequest({ summary: data.summary }) }),
     ]

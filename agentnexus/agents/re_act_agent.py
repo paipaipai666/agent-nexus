@@ -430,10 +430,10 @@ class ReActAgent:
         """EXECUTE_TOOL + TOOL_DONE -> execute next tool or finish."""
         # 记录工具调用到漂移检测器
         payload = event.payload
-        tool_name = payload.get("tool_name", "")
+        tool_name = payload.get("name", "")
         if tool_name and hasattr(self, "_drift_detector"):
             import hashlib
-            params_str = str(payload.get("params", ""))
+            params_str = str(payload.get("arguments", ""))
             params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
             self._drift_detector.record_step(
                 step_index=ctx.run_state.current_step,
