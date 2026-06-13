@@ -97,13 +97,15 @@ def list_short_term_memories():
 
 
 @router.post("/short/clear")
-def clear_short_term_memory():
-    """Clear the global short-term memory — called when creating a new session."""
+def clear_short_term_memory(session_id: str | None = None):
+    """Clear short-term memory. If session_id is provided, clears only that session's STM."""
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    stm = runtime.memory_manager.short_term
-    stm.clear()
+    if session_id:
+        runtime.services.chat._stms.pop(session_id, None)
+    else:
+        runtime.memory_manager.short_term.clear()
     return {"status": "cleared"}
 
 

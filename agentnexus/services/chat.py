@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
@@ -63,11 +64,14 @@ class ChatService:
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
         self._turns: dict[str, TurnRuntime] = {}
+        self._stm_lock = threading.Lock()
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
         self._is_processing = False
         # Per-session version managers — each session gets its own journal + checkpoints
         self._version_managers: dict[str, Any] = {}
+        # Per-session short-term memories — each session gets its own STM deque
+        self._stms: dict[str, Any] = {}
 
     def start_session(self, skill: str | None = None, profile: str | None = None) -> SessionHandle:
         handle = SessionHandle(id=f"session_{uuid.uuid4().hex[:12]}", skill=skill, profile=profile)
@@ -120,9 +124,31 @@ class ChatService:
     ) -> RunHandle:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
+        # Swap per-session STM into memory_manager so the agent and TurnRuntime
+        # read/write the correct session's context (not the global scratch STM).
+        # Lock protects the shared self._memory.short_term from concurrent
+        # swap/restore by two sessions running in parallel threads.
+        stm_lock = self._stm_lock if self._memory is not None else None
+        saved_stm = None
+        if stm_lock is not None:
+            stm_lock.acquire()
+            saved_stm = self._memory.short_term
+            self._memory.short_term = self._get_or_create_stm(session_id)
         run, events, turn = self.begin_turn(session_id, text)
         if on_run_started is not None:
             on_run_started(run)
+        # Persist user question immediately so it survives even if the run
+        # is interrupted (e.g. WebSocket disconnect, page navigation).
+        try:
+            version_mgr = self._get_version_manager(session_id)
+            existing = version_mgr.get_messages(limit=0)
+            if not existing or existing[-1].get("content") != text:
+                version_mgr.commit_with_messages(
+                    messages=[{"role": "user", "content": text}],
+                    question=text, answer="",
+                )
+        except Exception as e:
+            logger.debug("Failed to persist user question immediately: %s", e)
         old_on_event = getattr(self._agent, "_on_event", None)
         old_output = getattr(self._agent, "_output", None)
         try:
@@ -191,6 +217,11 @@ class ChatService:
             ))
             raise
         finally:
+            # Restore global STM — per-session STM stays in self._stms
+            if saved_stm is not None:
+                self._memory.short_term = saved_stm
+            if stm_lock is not None:
+                stm_lock.release()
             if hasattr(self._agent, "set_cancel_checker"):
                 self._agent.set_cancel_checker(None)
             try:
@@ -219,6 +250,22 @@ class ChatService:
                 workspace_path=workspace,
             )
         return self._version_managers[session_id]
+
+    def _get_or_create_stm(self, session_id: str, snapshot: str | None = None) -> Any:
+        """Return the per-session STM, creating one from snapshot if needed."""
+        if session_id not in self._stms:
+            if snapshot:
+                from agentnexus.memory.short_term import ShortTermMemory
+                self._stms[session_id] = ShortTermMemory.from_json(snapshot)
+            else:
+                from agentnexus.memory.short_term import ShortTermMemory
+                self._stms[session_id] = ShortTermMemory()
+        return self._stms[session_id]
+
+    def set_session_stm_snapshot(self, session_id: str, snapshot: str) -> None:
+        """Store a per-session STM from a checkpoint snapshot (used by restore_session)."""
+        from agentnexus.memory.short_term import ShortTermMemory
+        self._stms[session_id] = ShortTermMemory.from_json(snapshot)
 
     def begin_turn(self, session_id: str, text: str) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:

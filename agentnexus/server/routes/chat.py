@@ -278,10 +278,8 @@ def restore_session(req: CreateSessionRequest):
     )
     snapshot = version.get_head_stm()
     if snapshot:
-        from agentnexus.memory.short_term import ShortTermMemory
-        restored = ShortTermMemory.from_json(snapshot)
-        runtime.memory_manager.short_term._messages = restored._messages
-        runtime.memory_manager.short_term._summary = restored._summary
+        # Store in per-session STM dict — don't mutate global STM
+        runtime.services.chat.set_session_stm_snapshot(session_id, snapshot)
 
     return {"session_id": session_id, "restored": True}
 
@@ -377,7 +375,12 @@ async def ws_agent(ws: WebSocket, session_id: str):
             main_loop,
         )
         try:
-            future.result(timeout=5)
+            # Use a short timeout — the event loop may be blocked by a sync
+            # call in receive_json (e.g. threading.Event.wait). If the timeout
+            # fires, fall through to confirm_event.wait which fails closed.
+            future.result(timeout=2)
+        except TimeoutError:
+            logger.debug("Timed out sending websocket confirm request")
         except Exception as e:
             logger.debug("Failed to send websocket confirm request: %s", e)
             return False
@@ -526,15 +529,12 @@ async def ws_agent(ws: WebSocket, session_id: str):
         closed.set()
         confirm_approved[0] = False
         confirm_event.set()
-        if current_run_id:
-            snapshot = chat.get_run_snapshot(current_run_id)
-            if snapshot is None or snapshot.status == "running":
-                chat.cancel_run(current_run_id, reason="websocket disconnected")
+        # Don't cancel the running agent on WebSocket disconnect — let it
+        # finish in the background and persist results. The user will see
+        # completed results when they reconnect to this session.
         if stream_tasks:
             for task in stream_tasks:
                 task.cancel()
             await asyncio.gather(*stream_tasks, return_exceptions=True)
-        for task in agent_tasks:
-            task.cancel()
         for thread_id in list(active_thread_ids):
             confirm_bridge.set_target(None, thread_id=thread_id)

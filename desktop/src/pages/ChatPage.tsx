@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -301,7 +301,6 @@ export default function ChatPage() {
       setGlobalSessionId(sid)
       setMessages([])
       animatedIds.clear()
-      api.clearShortMemory().catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => {
         if (config.cwd) setCwd(config.cwd)
@@ -341,14 +340,17 @@ export default function ChatPage() {
       if (routeSessionId === currentSessionIdRef.current) {
         return
       }
+      // Reset running state and queue before switching sessions
+      resetForSessionSwitch()
       api.restoreSession(routeSessionId)
         .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
-        .catch(() => api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
+        .catch(() => api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
-      api.clearShortMemory().then(() => api.createSession()).then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
+      resetForSessionSwitch()
+      api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
     }
     // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
-  }, [routeSessionId])
+  }, [routeSessionId, resetForSessionSwitch])
 
   // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])

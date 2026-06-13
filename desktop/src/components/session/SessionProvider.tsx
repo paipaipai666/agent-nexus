@@ -46,6 +46,7 @@ interface SessionContextType {
   confirmToolCall: (approved: boolean) => void
   processQueue: () => void
   queueMessage: (text: string) => void
+  resetForSessionSwitch: () => void
 
   // Animation tracking
   animatedIds: Set<string>
@@ -84,6 +85,7 @@ const SessionContext = createContext<SessionContextType>({
   confirmToolCall: () => {},
   processQueue: () => {},
   queueMessage: () => {},
+  resetForSessionSwitch: () => {},
   animatedIds: new Set(),
 })
 
@@ -155,6 +157,20 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       setTimeout(() => sendMessageInternal(next), 100)
     }
   }, [sendMessageInternal])
+
+  const resetForSessionSwitch = useCallback(() => {
+    setIsRunning(false)
+    setCurrentRunId(null)
+    setConfirmRequest(null)
+    messageQueueRef.current = []
+    currentAssistantIdRef.current = null
+    currentReasoningIdRef.current = null
+    tokenBufferRef.current = ''
+    if (tokenFlushRef.current) {
+      cancelAnimationFrame(tokenFlushRef.current)
+      tokenFlushRef.current = 0
+    }
+  }, [])
 
   // ── WebSocket lifecycle ──
   useEffect(() => {
@@ -294,7 +310,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       messages, setMessages, isRunning, currentRunId, confirmRequest,
       msgCounter: msgCounterRef.current, incrementMsgCounter,
       // Actions
-      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage,
+      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage, resetForSessionSwitch,
       animatedIds: animatedIdsRef.current,
     }}>
       {children}
