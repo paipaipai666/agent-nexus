@@ -47,6 +47,8 @@ interface SessionContextType {
   processQueue: () => void
   queueMessage: (text: string) => void
   resetForSessionSwitch: () => void
+  getCachedMessages: (sessionId: string) => Message[] | null
+  clearCachedMessages: (sessionId: string) => void
 
   // Animation tracking
   animatedIds: Set<string>
@@ -86,6 +88,8 @@ const SessionContext = createContext<SessionContextType>({
   processQueue: () => {},
   queueMessage: () => {},
   resetForSessionSwitch: () => {},
+  getCachedMessages: () => null,
+  clearCachedMessages: () => {},
   animatedIds: new Set(),
 })
 
@@ -120,6 +124,10 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   const tokenFlushRef = useRef<number>(0)
   const messageQueueRef = useRef<string[]>([])
   const animatedIdsRef = useRef(new Set<string>())
+  // Per-session message cache — preserves streaming content across page navigation.
+  // Without this, navigating away during a run loses all streaming tokens
+  // because they exist only in React state, and the backend doesn't have them yet.
+  const messagesCacheRef = useRef<Map<string, Message[]>>(new Map())
 
   const incrementMsgCounter = useCallback(() => ++msgCounterRef.current, [])
 
@@ -159,6 +167,15 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   }, [sendMessageInternal])
 
   const resetForSessionSwitch = useCallback(() => {
+    // Save current messages to per-session cache before clearing.
+    // This preserves streaming content (thinking, tokens) that hasn't been
+    // persisted to the backend yet.
+    setMessages(prev => {
+      if (prev.length > 0 && sessionId) {
+        messagesCacheRef.current.set(sessionId, [...prev])
+      }
+      return prev
+    })
     setIsRunning(false)
     setCurrentRunId(null)
     setConfirmRequest(null)
@@ -170,6 +187,14 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       cancelAnimationFrame(tokenFlushRef.current)
       tokenFlushRef.current = 0
     }
+  }, [sessionId])
+
+  const getCachedMessages = useCallback((sid: string): Message[] | null => {
+    return messagesCacheRef.current.get(sid) || null
+  }, [])
+
+  const clearCachedMessages = useCallback((sid: string) => {
+    messagesCacheRef.current.delete(sid)
   }, [])
 
   // ── WebSocket lifecycle ──
@@ -250,6 +275,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
         currentAssistantIdRef.current = null
         setIsRunning(false)
         setCurrentRunId(null)
+        if (sessionId) clearCachedMessages(sessionId)
         processQueue()
       }),
       agentWs.on('error', (data) => {
@@ -259,12 +285,14 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
         setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'error' as const } : m))
         setIsRunning(false)
         setCurrentRunId(null)
+        if (sessionId) clearCachedMessages(sessionId)
         processQueue()
       }),
       agentWs.on('done', () => {
         setMessages(prev => prev.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m))
         setIsRunning(false)
         setCurrentRunId(null)
+        if (sessionId) clearCachedMessages(sessionId)
         processQueue()
       }),
       agentWs.on('run_started', (data) => {
@@ -280,7 +308,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       agentWs.disconnect()
       if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
     }
-  }, [sessionId, processQueue])
+  }, [sessionId, processQueue, clearCachedMessages])
 
   // ── Memoized setters ──
   const handleSetSessionId = useCallback((id: string | null) => setSessionId(id), [])
@@ -310,7 +338,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       messages, setMessages, isRunning, currentRunId, confirmRequest,
       msgCounter: msgCounterRef.current, incrementMsgCounter,
       // Actions
-      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage, resetForSessionSwitch,
+      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage, resetForSessionSwitch, getCachedMessages, clearCachedMessages,
       animatedIds: animatedIdsRef.current,
     }}>
       {children}

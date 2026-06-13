@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getCachedMessages,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -318,7 +318,16 @@ export default function ChatPage() {
     const initRestore = (sid: string) => {
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      loadAndDisplayMessages().catch(() => {})
+      // Use cached messages if available — they preserve streaming content
+      // (thinking, tokens) that hasn't been persisted to the backend yet.
+      const cached = getCachedMessages(sid)
+      if (cached) {
+        setMessages(cached)
+        // Mark cached messages as already animated
+        for (const m of cached) animatedIds.add(m.id)
+      } else {
+        loadAndDisplayMessages().catch(() => {})
+      }
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
