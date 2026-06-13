@@ -110,9 +110,9 @@ def eval_run(
     combinations = quick_combinations if quick else all_combinations
     max_workers = jobs if parallel else 1
     if quick:
-        output_console.print("[yellow]⚡ Quick mode: running 4 representative combinations[/yellow]")
+        output_console.print("[yellow]Quick mode: running 4 representative combinations[/yellow]")
     if max_workers > 1:
-        output_console.print(f"[cyan]⚡ Parallel mode: {max_workers} threads[/cyan]")
+        output_console.print(f"[cyan]Parallel mode: {max_workers} threads[/cyan]")
     output_console.print()
 
     results = []
@@ -126,9 +126,9 @@ def eval_run(
                 verbose=verbose, call_timeout=timeout,
             )
             results.append(run)
-            output_console.print(f"[green]✓[/green] faithfulness={run.faithfulness:.3f}")
+            output_console.print(f"[green]OK[/green] faithfulness={run.faithfulness:.3f}")
         except Exception as e:
-            output_console.print(f"[red]✗ {e}[/red]")
+            output_console.print(f"[red]FAIL {e}[/red]")
 
     if not results:
         output_console.print("[red]All evaluation combinations failed[/red]")
@@ -226,14 +226,14 @@ def eval_run(
         for r in results:
             show = []
             if not r.check_passed():
-                show.append(f"  [red]✗ {r.label}: FAIL[/red]")
+                show.append(f"  [red]X {r.label}: FAIL[/red]")
                 all_passed = False
             else:
-                show.append(f"  [green]✓ {r.label}: PASS[/green]")
+                show.append(f"  [green]OK {r.label}: PASS[/green]")
             for line in show:
                 output_console.print(line)
         if all_passed:
-            output_console.print("\n[bold green]All passed ✓[/bold green]")
+            output_console.print("\n[bold green]All passed[/bold green]")
         else:
             output_console.print("\n[bold red]Some combinations below threshold:[/bold red]")
             for k, v in sorted(DEFAULT_RAG_THRESHOLDS.items()):
@@ -372,7 +372,7 @@ def eval_compare(
     c_version = c_raw.get("dataset_version", "unknown") if isinstance(c_raw, dict) else "unknown"
 
     if b_version != c_version:
-        console.print(f"[yellow]⚠ Dataset version mismatch: baseline={b_version} vs candidate={c_version}[/yellow]\n")
+        console.print(f"[yellow]WARNING: Dataset version mismatch: baseline={b_version} vs candidate={c_version}[/yellow]\n")
 
     b_map = {r["label"]: r for r in b_configs}
     c_map = {r["label"]: r for r in c_configs}

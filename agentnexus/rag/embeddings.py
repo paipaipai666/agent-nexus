@@ -129,6 +129,7 @@ def get_embedding_model(
             if resolved_device != "cpu":
                 try:
                     _model = _model.to(resolved_device)
+                    _model = _model.half()
                 except Exception as move_err:
                     logger.warning("Failed to move embedding model to %s, staying on CPU: %s", resolved_device, move_err)
                     resolved_device = "cpu"
