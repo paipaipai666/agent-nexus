@@ -100,6 +100,7 @@ export function useSession() {
 export default function SessionProvider({ children }: { children: ReactNode }) {
   // ── Session metadata ──
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
   const [modelName, setModelName] = useState<string | null>(null)
   const [contextUsed, setContextUsed] = useState<number | null>(null)
   const [stmTokens, setStmTokens] = useState<number | null>(null)
@@ -166,13 +167,19 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [sendMessageInternal])
 
+  // Keep sessionIdRef in sync with sessionId state
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
+
   const resetForSessionSwitch = useCallback(() => {
     // Save current messages to per-session cache before clearing.
     // This preserves streaming content (thinking, tokens) that hasn't been
     // persisted to the backend yet.
+    const currentSid = sessionIdRef.current
     setMessages(prev => {
-      if (prev.length > 0 && sessionId) {
-        messagesCacheRef.current.set(sessionId, [...prev])
+      if (prev.length > 0 && currentSid) {
+        messagesCacheRef.current.set(currentSid, [...prev])
       }
       return prev
     })
@@ -187,7 +194,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       cancelAnimationFrame(tokenFlushRef.current)
       tokenFlushRef.current = 0
     }
-  }, [sessionId])
+  }, [])
 
   const getCachedMessages = useCallback((sid: string): Message[] | null => {
     return messagesCacheRef.current.get(sid) || null

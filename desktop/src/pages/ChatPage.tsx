@@ -359,7 +359,8 @@ export default function ChatPage() {
       api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
     }
     // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
-  }, [routeSessionId, resetForSessionSwitch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeSessionId])
 
   // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])
