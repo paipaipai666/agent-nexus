@@ -205,8 +205,7 @@ class ConversationVersionManager:
                 "VALUES (?, ?, ?) "
                 "ON CONFLICT(session_id) DO UPDATE SET "
                 "workspace_path = excluded.workspace_path, "
-                "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile), "
-                "updated_at = datetime('now')",
+                "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile)",
                 (self.session_id, normalized, self._profile),
             )
             self._conn.commit()
