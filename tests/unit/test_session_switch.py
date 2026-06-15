@@ -626,9 +626,7 @@ class TestReasoningContentPersistence:
         reasoning_streamed=True, leaving STM without any reasoning.
         """
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import (
-            ExecutionContext, RunState, MemoryRetrievalState, ToolCallState, AgentStep,
-        )
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext
 
         runtime, chat = mock_runtime
 
@@ -671,8 +669,6 @@ class TestReasoningContentPersistence:
         Simulates: agent produces reasoning → user navigates away → user comes
         back → loadAndDisplayMessages fetches from backend → reasoning visible.
         """
-        from agentnexus.memory.short_term import ShortTermMemory
-
         runtime, chat = mock_runtime
         session = chat.start_session()
 
@@ -696,9 +692,7 @@ class TestReasoningContentPersistence:
         should still be stored in STM via the existing path (no regression).
         """
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import (
-            ExecutionContext, RunState, MemoryRetrievalState, ToolCallState, AgentStep,
-        )
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext
 
         runtime, chat = mock_runtime
 
