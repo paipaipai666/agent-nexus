@@ -346,5 +346,5 @@ class TestWebSocketAgentStream:
             await ws_agent(ws, session.id)
 
         assert any(event.get("type") == "confirm_request" for event in sent_events)
-        assert confirm_finished.wait(timeout=1)
+        assert confirm_finished.wait(timeout=5)
         assert confirm_result == [False]

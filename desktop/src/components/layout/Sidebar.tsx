@@ -29,6 +29,13 @@ export default function Sidebar() {
     if (isChatActive) loadRecentSessions()
   }, [location.pathname])
 
+  // Refresh sidebar when a session is updated (e.g., first message sent)
+  useEffect(() => {
+    const handleSessionUpdated = () => loadRecentSessions()
+    window.addEventListener('session-updated', handleSessionUpdated)
+    return () => window.removeEventListener('session-updated', handleSessionUpdated)
+  }, [])
+
   const loadRecentSessions = async () => {
     setLoading(true)
     try {
@@ -57,6 +64,8 @@ export default function Sidebar() {
     if (diffDays < 7) return `${diffDays}d`
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
+
+  const parseTime = (dateStr: string) => new Date(dateStr + 'Z').getTime()
 
   const isActiveSession = (sid: string) => location.pathname === `/chat/${sid}`
 
@@ -97,7 +106,7 @@ export default function Sidebar() {
           </div>
         ) : recentSessions.length > 0 && (
           <div className="space-y-0.5">
-            {[...recentSessions].sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()).map((session) => {
+            {[...recentSessions].sort((a, b) => parseTime(b.last_message_at) - parseTime(a.last_message_at)).map((session) => {
               const active = isActiveSession(session.session_id)
               return (
                 <button

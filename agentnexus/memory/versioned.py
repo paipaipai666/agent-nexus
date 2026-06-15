@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS conversation_sessions (
     workspace_path TEXT NOT NULL,
     profile TEXT,
     head_checkpoint_id TEXT,
+    preview TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -54,6 +55,11 @@ ALTER TABLE conversation_sessions ADD COLUMN head_checkpoint_id TEXT;
 # Migration: add message_count column to checkpoints
 _MIGRATION_MSG_COUNT_SQL = """
 ALTER TABLE conversation_checkpoints ADD COLUMN message_count INTEGER;
+"""
+
+# Migration: add preview column to sessions
+_MIGRATION_PREVIEW_SQL = """
+ALTER TABLE conversation_sessions ADD COLUMN preview TEXT NOT NULL DEFAULT '';
 """
 
 
@@ -199,8 +205,7 @@ class ConversationVersionManager:
                 "VALUES (?, ?, ?) "
                 "ON CONFLICT(session_id) DO UPDATE SET "
                 "workspace_path = excluded.workspace_path, "
-                "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile), "
-                "updated_at = datetime('now')",
+                "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile)",
                 (self.session_id, normalized, self._profile),
             )
             self._conn.commit()
@@ -314,13 +319,9 @@ class ConversationVersionManager:
                 return []
             normalized = cls.normalize_workspace_path(workspace_path)
             rows = conn.execute(
-                "SELECT s.session_id, s.created_at, s.updated_at, s.profile "
+                "SELECT s.session_id, s.created_at, s.updated_at, s.profile, s.preview "
                 "FROM conversation_sessions s "
                 "WHERE s.workspace_path = ? "
-                "AND EXISTS ("
-                "  SELECT 1 FROM conversation_checkpoints c "
-                "  WHERE c.session_id = s.session_id"
-                ") "
                 "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
                 "LIMIT ?",
                 (normalized, limit),
@@ -329,32 +330,43 @@ class ConversationVersionManager:
             sessions = []
             for row in rows:
                 session_id = row["session_id"]
-                last_cp = conn.execute(
-                    "SELECT question, answer, created_at "
-                    "FROM conversation_checkpoints "
-                    "WHERE session_id = ? "
-                    "ORDER BY created_at DESC LIMIT 1",
-                    (session_id,),
-                ).fetchone()
-
-                preview = ""
+                preview = row["preview"] or ""
                 last_message_at = row["updated_at"]
-                if last_cp:
-                    preview = last_cp["question"] or last_cp["answer"] or ""
-                    if len(preview) > 100:
-                        preview = preview[:100] + "..."
-                    last_message_at = last_cp["created_at"] or row["updated_at"]
 
-                # Fallback: get preview from journal if question/answer empty
+                # If preview is empty, try to generate from checkpoint or messages
                 if not preview:
-                    last_msg = conn.execute(
-                        "SELECT content FROM conversation_messages "
-                        "WHERE session_id = ? AND role = 'user' "
-                        "ORDER BY id DESC LIMIT 1",
+                    last_cp = conn.execute(
+                        "SELECT question, answer, created_at "
+                        "FROM conversation_checkpoints "
+                        "WHERE session_id = ? "
+                        "ORDER BY created_at DESC LIMIT 1",
                         (session_id,),
                     ).fetchone()
-                    if last_msg:
-                        preview = last_msg["content"][:100] or ""
+
+                    if last_cp:
+                        preview = last_cp["question"] or last_cp["answer"] or ""
+                        if len(preview) > 100:
+                            preview = preview[:100] + "..."
+                        last_message_at = last_cp["created_at"] or row["updated_at"]
+
+                    # Fallback: get preview from journal if question/answer empty
+                    if not preview:
+                        last_msg = conn.execute(
+                            "SELECT content FROM conversation_messages "
+                            "WHERE session_id = ? AND role = 'user' "
+                            "ORDER BY id DESC LIMIT 1",
+                            (session_id,),
+                        ).fetchone()
+                        if last_msg:
+                            preview = last_msg["content"][:100] or ""
+
+                    # Persist generated preview for future queries
+                    if preview:
+                        conn.execute(
+                            "UPDATE conversation_sessions SET preview = ? WHERE session_id = ?",
+                            (preview, session_id),
+                        )
+                        conn.commit()
 
                 sessions.append({
                     "session_id": session_id,
@@ -365,6 +377,25 @@ class ConversationVersionManager:
                     "profile": row["profile"],
                 })
             return sessions
+        finally:
+            conn.close()
+
+    @classmethod
+    def update_session_preview(cls, db_path: str, session_id: str, preview: str) -> None:
+        """Update the preview text for a session. Typically called on first user message."""
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return
+            truncated = preview[:100] + "..." if len(preview) > 100 else preview
+            conn.execute(
+                "UPDATE conversation_sessions SET preview = ?, updated_at = datetime('now') "
+                "WHERE session_id = ?",
+                (truncated, session_id),
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -521,6 +552,10 @@ class ConversationVersionManager:
             pass  # Column already exists
         try:
             self._conn.execute(_MIGRATION_MSG_COUNT_SQL)
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            self._conn.execute(_MIGRATION_PREVIEW_SQL)
         except sqlite3.OperationalError:
             pass  # Column already exists
 

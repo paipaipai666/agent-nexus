@@ -103,7 +103,8 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run.id)
         assert snapshot.status == "empty_answer"
         assert "Agent 未能得出最终答案" in snapshot.answer
-        version.commit_with_messages.assert_called_once()
+        # Called twice: once to persist user question immediately, once for final result
+        assert version.commit_with_messages.call_count == 2
 
     def test_stream_events_unknown_run_id_raises_key_error(self):
         service = ChatService(agent=MagicMock())
@@ -208,7 +209,8 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run_id)
         assert snapshot.status == "failed"
         assert "something broke" in snapshot.answer
-        version.commit_with_messages.assert_called_once()
+        # Called twice: once to persist user question immediately, once for final result
+        assert version.commit_with_messages.call_count == 2
 
     def test_cancel_run_sets_cancel_checker(self):
         service = ChatService(agent=MagicMock())

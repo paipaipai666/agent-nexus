@@ -686,8 +686,15 @@ class ReActAgent:
         if not any(step.tool_outputs for step in ctx.steps):
             return
 
-        # Skip if reasoning_content was already streamed via STREAM_REASONING
+        # When reasoning was streamed, persist the reasoning_content to STM
+        # so it survives session navigation (the streaming tokens are lost
+        # when the user navigates away and back).
         if any(step.reasoning_streamed for step in ctx.steps):
+            reasoning = ctx.last_reasoning or ""
+            if reasoning:
+                memory_manager = ctx.memory_state.memory_manager
+                if memory_manager:
+                    memory_manager.append("system", f"[思考过程] {reasoning}")
             return
 
         raw_text = (ctx.last_response_text or "").strip()
