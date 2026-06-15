@@ -604,3 +604,133 @@ class TestSessionSwitchLifecycle:
             )
         finally:
             mock_patch.stop()
+
+
+# ── Bug 3: Reasoning content lost on session navigation ──────────
+
+
+class TestReasoningContentPersistence:
+    """Streaming reasoning content must be persisted to STM so it survives
+    session navigation (user switches to another page and comes back).
+
+    Reproduces Bug 3: When reasoning_streamed=True, _emit_answer_thought
+    skips storing the thought in STM. The reasoning was streamed via WebSocket
+    but never persisted — navigating away loses it.
+    """
+
+    def test_reasoning_content_stored_in_stm_when_streamed(self, mock_runtime):
+        """When the agent produces streamed reasoning, the reasoning_content
+        should be persisted to STM so it survives session navigation.
+
+        Before the fix, _emit_answer_thought returned early when
+        reasoning_streamed=True, leaving STM without any reasoning.
+        """
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import (
+            ExecutionContext, RunState, MemoryRetrievalState, ToolCallState, AgentStep,
+        )
+
+        runtime, chat = mock_runtime
+
+        # Create a real agent with mocked LLM
+        agent = ReActAgent.__new__(ReActAgent)
+        agent._output = lambda msg: None
+        agent.llm_client = MagicMock()
+        agent.llm_client.last_reasoning_content = "Deep thinking about the problem..."
+
+        # Build an ExecutionContext with reasoning_streamed=True
+        ctx = ExecutionContext(
+            question="test question",
+            memory_manager=MagicMock(),
+            last_reasoning="Deep thinking about the problem...",
+            steps=[AgentStep(
+                step_id=1,
+                strategy_used="native_tools",
+                reasoning_content="Deep thinking about the problem...",
+                reasoning_streamed=True,  # Key: reasoning was streamed
+            )],
+        )
+        ctx.steps[0].tool_outputs = ["some tool output"]
+
+        # Call _emit_answer_thought
+        agent._emit_answer_thought(ctx)
+
+        # BEFORE FIX: memory_manager.append was NOT called (early return)
+        # AFTER FIX: memory_manager.append should be called with reasoning
+        ctx.memory_manager.append.assert_called_once()
+        call_args = ctx.memory_manager.append.call_args
+        assert call_args[0][0] == "system", f"Expected role 'system', got {call_args[0][0]}"
+        assert "[思考过程]" in call_args[0][1], (
+            f"Expected reasoning content with [思考过程] prefix, got: {call_args[0][1]}"
+        )
+        assert "Deep thinking about the problem..." in call_args[0][1]
+
+    def test_reasoning_content_survives_session_restore(self, mock_runtime):
+        """After reasoning is persisted to STM, session history should include it.
+
+        Simulates: agent produces reasoning → user navigates away → user comes
+        back → loadAndDisplayMessages fetches from backend → reasoning visible.
+        """
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        runtime, chat = mock_runtime
+        session = chat.start_session()
+
+        # Simulate STM with reasoning content (as the fix would produce)
+        stm = chat._get_or_create_stm(session.id)
+        stm.append("user", "what is 2+2?")
+        stm.append("system", "[思考过程] Let me think about basic arithmetic...")
+        stm.append("assistant", "I need to calculate 2+2")
+        stm.append("system", "[最终答案] 2+2 = 4")
+
+        # Verify the reasoning content is in STM
+        all_msgs = stm.get_all()
+        reasoning_msgs = [m for m in all_msgs if "[思考过程]" in m.get("content", "")]
+        assert len(reasoning_msgs) == 1, (
+            f"Expected 1 reasoning message in STM, got {len(reasoning_msgs)}"
+        )
+        assert "basic arithmetic" in reasoning_msgs[0]["content"]
+
+    def test_thought_stored_normally_when_not_streamed(self, mock_runtime):
+        """When reasoning_streamed=False (no streaming reasoning), the thought
+        should still be stored in STM via the existing path (no regression).
+        """
+        from agentnexus.agents.re_act_agent import ReActAgent
+        from agentnexus.agents.react_types import (
+            ExecutionContext, RunState, MemoryRetrievalState, ToolCallState, AgentStep,
+        )
+
+        runtime, chat = mock_runtime
+
+        agent = ReActAgent.__new__(ReActAgent)
+        agent._output = lambda msg: None
+        agent.llm_client = MagicMock()
+        agent.llm_client.last_reasoning_content = ""
+
+        # Use a JSON response with a "thought" field — the non-streaming path
+        # parses the thought from JSON, and it differs from raw_text.
+        json_response = '{"thought": "I should search for the answer", "tool": "search", "params": {"q": "test"}}'
+        ctx = ExecutionContext(
+            question="test question",
+            memory_manager=MagicMock(),
+            last_response_text=json_response,
+            last_reasoning="",
+            steps=[AgentStep(
+                step_id=1,
+                strategy_used="native_tools",
+                reasoning_content="",
+                reasoning_streamed=False,
+            )],
+        )
+        ctx.steps[0].tool_outputs = ["some tool output"]
+
+        # Mock emit to capture events
+        emitted = []
+        ctx.emit = lambda evt_type, **kw: emitted.append((evt_type, kw))
+
+        agent._emit_answer_thought(ctx)
+
+        # The existing path should still work: thought stored as "assistant"
+        calls = ctx.memory_manager.append.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == "assistant"

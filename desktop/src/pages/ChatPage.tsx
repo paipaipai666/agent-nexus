@@ -235,6 +235,15 @@ export default function ChatPage() {
         if (role === 'system' && content.startsWith('[上下文已裁剪]')) continue
         if (role === 'system' && content.startsWith('[恢复文件]')) continue
 
+        if (role === 'system' && content.startsWith('[思考过程]')) {
+          const reasoning = content.replace(/^\[思考过程\]\s*/, '').trim()
+          if (reasoning) {
+            flushPendingTools()
+            transformed.push({ id: `h-${idx++}`, role: 'system', content: reasoning, timestamp: ts(m) })
+          }
+          continue
+        }
+
         if (role === 'system' && content.startsWith('[最终答案]')) {
           const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
           if (answer) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
