@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getCachedMessages,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getSessionState,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -206,17 +206,38 @@ export default function ChatPage() {
     return { name, display }
   }
 
-  const loadAndDisplayMessages = useCallback(async () => {
+  const loadAndDisplayMessages = useCallback(async (forceSessionId?: string) => {
+    const currentSid = forceSessionId || currentSessionIdRef.current
+    console.log('[loadAndDisplayMessages] sid:', currentSid)
+    // Check SessionManager's in-memory Map first — preserves streaming content
+    // that hasn't been persisted to the backend yet.
+    if (currentSid) {
+      const cachedState = getSessionState(currentSid)
+      if (cachedState && cachedState.messages.length > 0) {
+        console.log('[loadAndDisplayMessages] Using Map cache:', cachedState.messages.length, 'messages')
+        for (const m of cachedState.messages) animatedIds.add(m.id)
+        setMessages(cachedState.messages)
+        return
+      }
+    }
     try {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
-        const currentSid = currentSessionIdRef.current
         const hist = await api.listSessionHistory(0, currentSid || undefined)
         stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
       } catch {
         stm = (await api.listShortMemories()).messages
       }
-      if (!stm || stm.length === 0) { setMessages([]); return }
+      console.log('[loadAndDisplayMessages] Backend returned:', stm?.length, 'messages for sid:', currentSid)
+      if (!stm || stm.length === 0) {
+        // Backend returned no messages. Only clear if the Map also has nothing.
+        if (currentSid) {
+          const existingState = getSessionState(currentSid)
+          if (existingState && existingState.messages.length > 0) return
+        }
+        setMessages([])
+        return
+      }
 
       const transformed: Message[] = []
       let idx = 0
@@ -274,6 +295,7 @@ export default function ChatPage() {
       }
 
       flushPendingTools()
+      console.log('[loadAndDisplayMessages] Transformed:', transformed.length, 'messages. Setting on active session.')
       // Mark all restored messages as already animated
       for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
@@ -308,8 +330,9 @@ export default function ChatPage() {
     const initNew = (sid: string) => {
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      setMessages([])
-      animatedIds.clear()
+      // Don't call setMessages([]) here — React batching means activeSessionId
+      // is still the OLD session, so this would clear the old session's messages.
+      // The new session already starts with empty messages in SessionManager's Map.
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => {
         if (config.cwd) setCwd(config.cwd)
@@ -325,18 +348,13 @@ export default function ChatPage() {
     }
 
     const initRestore = (sid: string) => {
+      console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      // Use cached messages if available — they preserve streaming content
-      // (thinking, tokens) that hasn't been persisted to the backend yet.
-      const cached = getCachedMessages(sid)
-      if (cached) {
-        setMessages(cached)
-        // Mark cached messages as already animated
-        for (const m of cached) animatedIds.add(m.id)
-      } else {
-        loadAndDisplayMessages().catch(() => {})
-      }
+      // Pass session ID explicitly — currentSessionIdRef may not be updated yet
+      // due to React batching. loadAndDisplayMessages checks SessionManager's
+      // Map first, so it handles both cached and backend-fetched messages correctly.
+      loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
@@ -361,7 +379,16 @@ export default function ChatPage() {
       // Reset running state and queue before switching sessions
       resetForSessionSwitch()
       api.restoreSession(routeSessionId)
-        .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
+        .then(({ session_id, restored }) => {
+          currentSessionIdRef.current = session_id
+          if (restored === false || session_id !== routeSessionId) {
+            // Session was recreated (old one lost) — update URL to new session
+            navigate(`/chat/${session_id}`, { replace: true })
+            initNew(session_id)
+          } else {
+            initRestore(session_id)
+          }
+        })
         .catch(() => api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
       resetForSessionSwitch()

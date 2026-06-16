@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquare, Settings, Plus } from 'lucide-react'
 import { api } from '../../services/api'
+import { useSession } from '../session/SessionProvider'
 
 interface RecentSession {
   session_id: string
@@ -15,6 +16,7 @@ interface RecentSession {
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { isSessionRunning, activateSession, sessions } = useSession()
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -49,7 +51,10 @@ export default function Sidebar() {
   }
 
   const handleNewChat = () => navigate('/')
-  const handleSessionClick = (sessionId: string) => navigate(`/chat/${sessionId}`)
+  const handleSessionClick = (sessionId: string) => {
+    activateSession(sessionId)
+    navigate(`/chat/${sessionId}`)
+  }
 
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr + 'Z')
@@ -122,6 +127,32 @@ export default function Sidebar() {
                   <span className="text-[12px] truncate flex-1" title={session.preview || 'New session'}>
                     {session.preview || 'New session'}
                   </span>
+                  {isSessionRunning(session.session_id) && (
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 animate-pulse"
+                      style={{ background: 'var(--green, #22c55e)' }}
+                      title="Running"
+                    />
+                  )}
+                  {/* R5: pending confirm badge — orange pulsing "!" */}
+                  {sessions.get(session.session_id)?.pendingConfirm && (
+                    <span
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
+                      style={{ background: '#f59e0b', color: '#fff' }}
+                      title="等待工具确认"
+                    >
+                      !
+                    </span>
+                  )}
+                  {/* Unread count badge */}
+                  {sessions.get(session.session_id)?.unreadCount ? (
+                    <span
+                      className="text-[9px] px-1 py-0.5 rounded-full shrink-0"
+                      style={{ background: 'var(--accent)', color: '#fff' }}
+                    >
+                      {sessions.get(session.session_id)!.unreadCount}
+                    </span>
+                  ) : null}
                   <span className="text-[10px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
                     {formatTime(session.last_message_at)}
                   </span>

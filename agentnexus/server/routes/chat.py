@@ -211,6 +211,22 @@ def get_run_snapshot(run_id: str):
     return record
 
 
+@router.get("/sessions/{session_id}/run-snapshot")
+def run_snapshot(session_id: str):
+    """Return current run's accumulated tokens + cursor for WS reconnect (R8).
+    MUST be sync def — threading.Lock inside async def would block the event loop.
+    FastAPI runs sync handlers in a thread pool automatically."""
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    chat = runtime.services.chat
+    lock = chat._get_session_lock(session_id)
+    with lock:
+        content = chat._token_buffers.get(session_id, "")
+        cursor = chat._token_cursors.get(session_id, 0)
+    return {"content": content, "cursor": cursor}
+
+
 @router.get("/sessions")
 def list_sessions():
     from agentnexus.server.app import _get_runtime
@@ -254,32 +270,37 @@ def restore_session(req: CreateSessionRequest):
         session_id = ConversationVersionManager.find_latest_session(
             settings.memory_db_path, workspace
         )
-    if not session_id:
-        raise HTTPException(status_code=404, detail="No session to restore")
 
-    # Verify session belongs to workspace
-    if not ConversationVersionManager.session_belongs_to_workspace(
-        settings.memory_db_path, session_id, workspace
-    ):
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    # Create a new handle with the existing session_id
     from agentnexus.server.app import _get_runtime
     from agentnexus.services.chat import SessionHandle
 
     runtime = _get_runtime()
-    handle = SessionHandle(id=session_id, skill=None, profile=req.profile)
-    runtime.services.chat._sessions[session_id] = handle
+    chat = runtime.services.chat
 
-    # Restore memory from version manager
-    version = ConversationVersionManager(
-        session_id, settings.memory_db_path,
-        workspace_path=workspace, profile=req.profile or ""
-    )
-    snapshot = version.get_head_stm()
-    if snapshot:
-        # Store in per-session STM dict — don't mutate global STM
-        runtime.services.chat.set_session_stm_snapshot(session_id, snapshot)
+    # If session already exists in memory, just return it
+    if session_id and session_id in chat._sessions:
+        return {"session_id": session_id, "restored": True}
+
+    # Try to restore from database
+    if session_id and ConversationVersionManager.session_belongs_to_workspace(
+        settings.memory_db_path, session_id, workspace
+    ):
+        handle = SessionHandle(id=session_id, skill=None, profile=req.profile)
+        chat._sessions[session_id] = handle
+
+        # Restore memory from version manager
+        version = ConversationVersionManager(
+            session_id, settings.memory_db_path,
+            workspace_path=workspace, profile=req.profile or ""
+        )
+        snapshot = version.get_head_stm()
+        if snapshot:
+            chat.set_session_stm_snapshot(session_id, snapshot)
+        return {"session_id": session_id, "restored": True}
+
+    # Session not found in DB either — create a new one instead of 404
+    handle = chat.start_session(profile=req.profile)
+    return {"session_id": handle.id, "restored": False}
 
     return {"session_id": session_id, "restored": True}
 
@@ -339,8 +360,9 @@ def get_session(session_id: str):
 
 
 @router.websocket("/ws/agent/{session_id}")
-async def ws_agent(ws: WebSocket, session_id: str):
-    """WebSocket endpoint for real-time agent event streaming."""
+async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None):
+    """WebSocket endpoint for real-time agent event streaming.
+    R8: Accepts optional resumeFrom query param for cursor-based reconnect."""
     from agentnexus.server.app import _get_runtime
 
     await ws.accept()
@@ -348,9 +370,43 @@ async def ws_agent(ws: WebSocket, session_id: str):
     chat = runtime.services.chat
 
     if session_id not in chat._sessions:
-        await ws.send_json({"type": "error", "message": f"Unknown session: {session_id}"})
-        await ws.close()
-        return
+        # Try to restore from database on-demand
+        try:
+            from agentnexus.core.config import get_settings
+            from agentnexus.memory.versioned import ConversationVersionManager
+            from agentnexus.services.chat import SessionHandle
+            settings = get_settings()
+            workspace = str(Path.cwd())
+            if ConversationVersionManager.session_belongs_to_workspace(
+                settings.memory_db_path, session_id, workspace
+            ):
+                chat._sessions[session_id] = SessionHandle(id=session_id)
+                # Restore STM
+                version = ConversationVersionManager(session_id, settings.memory_db_path, workspace_path=workspace)
+                snapshot = version.get_head_stm()
+                if snapshot:
+                    chat.set_session_stm_snapshot(session_id, snapshot)
+        except Exception:
+            pass
+        # If still not found, reject
+        if session_id not in chat._sessions:
+            await ws.send_json({"type": "error", "message": f"Unknown session: {session_id}"})
+            await ws.close()
+            return
+
+    # R8: On reconnect with resumeFrom, send snapshot so client can catch up
+    token_cursor_offset = 0
+    if resumeFrom is not None and resumeFrom > 0:
+        token_cursor_offset = resumeFrom
+        lock = chat._get_session_lock(session_id)
+        with lock:
+            content = chat._token_buffers.get(session_id, "")
+            cursor = chat._token_cursors.get(session_id, 0)
+        await ws.send_json({
+            "type": "reconnect_snapshot",
+            "content": content,
+            "cursor": cursor,
+        })
 
     current_run_id: str | None = None
 
@@ -386,6 +442,17 @@ async def ws_agent(ws: WebSocket, session_id: str):
             return False
         # Fail closed if the client disconnects or never answers.
         if not confirm_event.wait(timeout=300):
+            # R5: notify frontend that confirm timed out and was auto-denied
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    ws.send_json({
+                        "type": "confirm_timeout",
+                        "message": "工具确认超时（5分钟），已自动拒绝",
+                    }),
+                    main_loop,
+                ).result(timeout=2)
+            except Exception:
+                pass  # Best-effort notification
             return False
         return confirm_approved[0]
 
@@ -412,16 +479,20 @@ async def ws_agent(ws: WebSocket, session_id: str):
 
     async def stream_events(run_id: str):
         """Stream events from chat service to WebSocket.
-
-        Uses async queue for real-time event delivery.
-        """
-        nonlocal current_run_id
+        R8: Skips token events before resumeFrom cursor for reconnect."""
+        nonlocal current_run_id, token_cursor_offset
         current_run_id = run_id
         seq = 0
+        local_token_count = 0
         try:
             async for event in chat.astream_events(run_id):
                 gui_event = _map_to_gui_event(event, chat, seq)
                 if gui_event is not None:
+                    # R8: Skip token events that the client already has
+                    if gui_event.get("type") in ("stream_token", "stream_reasoning"):
+                        local_token_count += 1
+                        if local_token_count <= token_cursor_offset:
+                            continue
                     await ws.send_json(gui_event)
                     seq += 1
         except WebSocketDisconnect:
@@ -476,7 +547,15 @@ async def ws_agent(ws: WebSocket, session_id: str):
                             ),
                         )
                     except Exception as e:
-                        logger.debug("WebSocket agent run failed: %s", e)
+                        logger.error("WebSocket agent run failed for session %s: %s", session_id, e, exc_info=True)
+                        # Report error to frontend via WebSocket
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                ws.send_json({"type": "error", "message": f"Agent error: {e}"}),
+                                main_loop,
+                            ).result(timeout=2)
+                        except Exception:
+                            pass
                     finally:
                         confirm_bridge.set_target(None, thread_id=thread_id)
                         active_thread_ids.discard(thread_id)
