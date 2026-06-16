@@ -4,11 +4,31 @@ class AgentWebSocket {
   private ws: WebSocket | null = null
   private handlers = new Map<string, Set<EventHandler>>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  private sessionId: string | null = null
+  private _sessionId: string | null = null
   private baseUrl = 'ws://127.0.0.1:18765'
 
+  get sessionId(): string | null {
+    return this._sessionId
+  }
+
   connect(sessionId: string, _apiKey?: string) {
-    this.sessionId = sessionId
+    // Close any existing connection first to prevent orphaned WebSockets.
+    // Without this, calling connect() twice leaves the old WebSocket alive
+    // with active event handlers that corrupt the new session's state.
+    if (this.ws) {
+      this.ws.onopen = null
+      this.ws.onmessage = null
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.close()
+      this.ws = null
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+
+    this._sessionId = sessionId
     const url = `${this.baseUrl}/api/ws/agent/${sessionId}`
     this.ws = new WebSocket(url)
 
@@ -38,9 +58,16 @@ class AgentWebSocket {
 
   disconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    this.ws?.close()
+    // Clear handlers before closing to prevent stale event emission
+    if (this.ws) {
+      this.ws.onopen = null
+      this.ws.onmessage = null
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.close()
+    }
     this.ws = null
-    this.sessionId = null
+    this._sessionId = null
   }
 
   send(data: any) {
@@ -77,17 +104,19 @@ class AgentWebSocket {
   }
 
   private scheduleReconnect() {
-    if (!this.sessionId) return
+    if (!this._sessionId) return
     this.reconnectTimer = setTimeout(() => {
-      if (this.sessionId) {
+      if (this._sessionId) {
         // Close stale connection before reconnecting
         if (this.ws) {
+          this.ws.onopen = null
+          this.ws.onmessage = null
           this.ws.onclose = null
           this.ws.onerror = null
           this.ws.close()
           this.ws = null
         }
-        this.connect(this.sessionId)
+        this.connect(this._sessionId)
       }
     }, 3000)
   }
