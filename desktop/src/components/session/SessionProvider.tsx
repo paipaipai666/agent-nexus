@@ -47,8 +47,10 @@ interface SessionContextType {
   processQueue: () => void
   queueMessage: (text: string) => void
   resetForSessionSwitch: () => void
+  reconnectWs: () => void
   getCachedMessages: (sessionId: string) => Message[] | null
   clearCachedMessages: (sessionId: string) => void
+  wasRunningOnSwitch: (sessionId: string) => boolean
 
   // Animation tracking
   animatedIds: Set<string>
@@ -88,8 +90,10 @@ const SessionContext = createContext<SessionContextType>({
   processQueue: () => {},
   queueMessage: () => {},
   resetForSessionSwitch: () => {},
+  reconnectWs: () => {},
   getCachedMessages: () => null,
   clearCachedMessages: () => {},
+  wasRunningOnSwitch: () => false,
   animatedIds: new Set(),
 })
 
@@ -115,13 +119,20 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   // ── Message state ──
   const [messages, setMessages] = useState<Message[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const isRunningRef = useRef(false)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const [confirmRequest, setConfirmRequest] = useState<{ summary: string } | null>(null)
+  // Counter to force WebSocket reconnection — incrementing triggers the WS useEffect
+  const [wsReconnectCount, setWsReconnectCount] = useState(0)
 
   const msgCounterRef = useRef(0)
   const currentAssistantIdRef = useRef<string | null>(null)
   const currentReasoningIdRef = useRef<string | null>(null)
   const tokenBufferRef = useRef<string>('')
+  // Tracks which sessions had a running agent when switched away.
+  // Used by initRestore to decide: prefer cache (streaming content)
+  // or backend (completed answer).
+  const wasRunningOnSwitchRef = useRef<Map<string, boolean>>(new Map())
   const tokenFlushRef = useRef<number>(0)
   const messageQueueRef = useRef<string[]>([])
   const animatedIdsRef = useRef(new Set<string>())
@@ -132,8 +143,21 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
 
   const incrementMsgCounter = useCallback(() => ++msgCounterRef.current, [])
 
+  // Keep isRunningRef in sync with isRunning state
+  useEffect(() => { isRunningRef.current = isRunning }, [isRunning])
+
+  // Force WebSocket reconnection — incrementing counter triggers WS useEffect
+  const reconnectWs = useCallback(() => {
+    setWsReconnectCount(c => c + 1)
+  }, [])
+
   // ── Actions (defined BEFORE useEffect to avoid stale closures) ──
   const sendMessageInternal = useCallback((text: string) => {
+    // Guard: only send if the WebSocket is connected to the current session.
+    // Without this, stale closures from processQueue can send messages
+    // to the wrong session after a page switch during streaming.
+    const currentSid = sessionIdRef.current
+    if (!currentSid || agentWs.sessionId !== currentSid) return
     currentAssistantIdRef.current = null
     currentReasoningIdRef.current = null
     setMessages(prev => [...prev, { id: `u-${++msgCounterRef.current}`, role: 'user', content: text, timestamp: new Date() }])
@@ -183,6 +207,12 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       }
       return prev
     })
+    // Remember if agent was running — used by initRestore to decide
+    // whether to prefer cache (streaming) or backend (completed answer).
+    // Use isRunningRef to avoid stale closure in useCallback(() => {}, [])
+    if (currentSid) {
+      wasRunningOnSwitchRef.current.set(currentSid, isRunningRef.current)
+    }
     setIsRunning(false)
     setCurrentRunId(null)
     setConfirmRequest(null)
@@ -194,6 +224,12 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       cancelAnimationFrame(tokenFlushRef.current)
       tokenFlushRef.current = 0
     }
+    // Disconnect WebSocket immediately to prevent stale event handlers
+    // from firing during the async gap before the new session connects.
+    // Without this, the old session's answer/done/error handlers can
+    // execute after isRunning was just set to false, setting it back
+    // to true and leaving the new session stuck.
+    agentWs.disconnect()
   }, [])
 
   const getCachedMessages = useCallback((sid: string): Message[] | null => {
@@ -202,6 +238,10 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
 
   const clearCachedMessages = useCallback((sid: string) => {
     messagesCacheRef.current.delete(sid)
+  }, [])
+
+  const wasRunningOnSwitch = useCallback((sid: string): boolean => {
+    return wasRunningOnSwitchRef.current.get(sid) || false
   }, [])
 
   // ── WebSocket lifecycle ──
@@ -315,7 +355,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       agentWs.disconnect()
       if (tokenFlushRef.current) { cancelAnimationFrame(tokenFlushRef.current); tokenFlushRef.current = 0 }
     }
-  }, [sessionId, processQueue, clearCachedMessages])
+  }, [sessionId, wsReconnectCount, processQueue, clearCachedMessages])
 
   // ── Memoized setters ──
   const handleSetSessionId = useCallback((id: string | null) => setSessionId(id), [])
@@ -345,7 +385,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       messages, setMessages, isRunning, currentRunId, confirmRequest,
       msgCounter: msgCounterRef.current, incrementMsgCounter,
       // Actions
-      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage, resetForSessionSwitch, getCachedMessages, clearCachedMessages,
+      sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage, resetForSessionSwitch, reconnectWs, getCachedMessages, clearCachedMessages, wasRunningOnSwitch,
       animatedIds: animatedIdsRef.current,
     }}>
       {children}

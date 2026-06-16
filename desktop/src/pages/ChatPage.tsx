@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getCachedMessages,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, reconnectWs, getCachedMessages, clearCachedMessages, wasRunningOnSwitch,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -206,7 +206,7 @@ export default function ChatPage() {
     return { name, display }
   }
 
-  const loadAndDisplayMessages = useCallback(async () => {
+  const loadAndDisplayMessages = useCallback(async (): Promise<{ loaded: boolean; hasAssistant: boolean }> => {
     try {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
@@ -216,12 +216,13 @@ export default function ChatPage() {
       } catch {
         stm = (await api.listShortMemories()).messages
       }
-      if (!stm || stm.length === 0) { setMessages([]); return }
+      if (!stm || stm.length === 0) { setMessages([]); return { loaded: false, hasAssistant: false } }
 
       const transformed: Message[] = []
       let idx = 0
       const ts = (m: any) => new Date(m.ts || Date.now())
       let pendingTools: Message[] = []
+      let hasAssistant = false
 
       const flushPendingTools = () => {
         for (const t of pendingTools) { t.id = `h-${idx++}`; transformed.push(t) }
@@ -246,7 +247,7 @@ export default function ChatPage() {
 
         if (role === 'system' && content.startsWith('[最终答案]')) {
           const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
-          if (answer) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
+          if (answer) { flushPendingTools(); hasAssistant = true; transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
           continue
         }
 
@@ -268,7 +269,7 @@ export default function ChatPage() {
           continue
         }
 
-        if (role === 'assistant') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
+        if (role === 'assistant') { flushPendingTools(); hasAssistant = true; transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
 
         if (role === 'system' && content.length > 0) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }) }
       }
@@ -277,7 +278,8 @@ export default function ChatPage() {
       // Mark all restored messages as already animated
       for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
-    } catch (err) { console.error('Failed to load messages:', err) }
+      return { loaded: transformed.length > 0, hasAssistant }
+    } catch (err) { console.error('Failed to load messages:', err); return { loaded: false, hasAssistant: false } }
   }, [])
 
   useEffect(() => {
@@ -322,20 +324,57 @@ export default function ChatPage() {
       }).catch(() => {})
       api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
       fetchDynamicCommands()
+      // Notify sidebar to refresh session list — api.createSession() is async,
+      // so the route-change effect may fire before the session exists.
+      window.dispatchEvent(new Event('session-updated'))
     }
 
     const initRestore = (sid: string) => {
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      // Use cached messages if available — they preserve streaming content
-      // (thinking, tokens) that hasn't been persisted to the backend yet.
+      // Force WebSocket reconnection — setGlobalSessionId may not trigger
+      // the WS useEffect if sid is the same as the current value (e.g.,
+      // navigating away and back to the same session).
+      reconnectWs()
+      // Restore messages: prefer backend (complete data) over cache (partial streaming).
+      //
+      // Key insight: the backend ALWAYS has at least the user message, so checking
+      // "hasData" alone is not enough. We must check "hasAssistant" to know if the
+      // agent completed its reply. If the agent was running when we switched away
+      // and the backend has no assistant message yet, the cache (with streaming tokens)
+      // is the best we have.
+      const agentWasRunning = wasRunningOnSwitch(sid)
       const cached = getCachedMessages(sid)
-      if (cached) {
+      if (agentWasRunning && cached && cached.length > 0) {
+        // Agent was still running when we switched away — use cache directly.
+        // Skip loadAndDisplayMessages entirely to avoid a race condition:
+        // API response calls setMessages(transformed) which overwrites WS tokens
+        // that arrived between reconnection and API resolution.
+        // Cache has streaming content from before navigation; WS tokens will
+        // append naturally via the token handler using currentAssistantIdRef.
+        // When agent finishes, answer handler replaces content and clears cache.
         setMessages(cached)
-        // Mark cached messages as already animated
         for (const m of cached) animatedIds.add(m.id)
       } else {
-        loadAndDisplayMessages().catch(() => {})
+        loadAndDisplayMessages()
+          .then(({ loaded, hasAssistant }) => {
+            if (hasAssistant) {
+              clearCachedMessages(sid)
+            } else if (!loaded) {
+              const fallback = getCachedMessages(sid)
+              if (fallback) {
+                setMessages(fallback)
+                for (const m of fallback) animatedIds.add(m.id)
+              }
+            }
+          })
+          .catch(() => {
+            const fallback = getCachedMessages(sid)
+            if (fallback) {
+              setMessages(fallback)
+              for (const m of fallback) animatedIds.add(m.id)
+            }
+          })
       }
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
