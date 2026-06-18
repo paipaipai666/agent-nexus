@@ -2,7 +2,7 @@
  * Fix verification: initRestore correctly prefers backend data over stale cache
  * when the agent finished while the user was away.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 describe('initRestore cache/backend priority fix', () => {
   // Simulate the initRestore logic

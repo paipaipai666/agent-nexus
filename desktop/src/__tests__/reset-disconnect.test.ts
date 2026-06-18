@@ -114,7 +114,6 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
 
   it('disconnect is idempotent — safe for useEffect cleanup to call again', () => {
     agentWs.connect('session-A')
-    const wsA = MockWebSocket.instances[0]
 
     // First disconnect (from resetForSessionSwitch)
     agentWs.disconnect()

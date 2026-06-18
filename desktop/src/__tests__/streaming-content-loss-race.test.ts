@@ -34,7 +34,7 @@ class MockWebSocket {
 }
 
 // ── API mock with controllable delay ──
-let apiResolveFn: ((value: any) => void) | null = null
+let apiResolveFn: (() => void) | null = null
 let apiPromise: Promise<any> | null = null
 
 function createDelayedApi(response: any) {
