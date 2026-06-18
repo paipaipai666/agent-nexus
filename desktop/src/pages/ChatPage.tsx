@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getSessionState,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveSessionState,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -211,8 +211,10 @@ export default function ChatPage() {
     console.log('[loadAndDisplayMessages] sid:', currentSid)
     // Check SessionManager's in-memory Map first — preserves streaming content
     // that hasn't been persisted to the backend yet.
+    // Use getLiveSessionState (reads from sessionsRef) to avoid stale closure:
+    // this function has empty deps and must always read the latest Map.
     if (currentSid) {
-      const cachedState = getSessionState(currentSid)
+      const cachedState = getLiveSessionState(currentSid)
       if (cachedState && cachedState.messages.length > 0) {
         console.log('[loadAndDisplayMessages] Using Map cache:', cachedState.messages.length, 'messages')
         for (const m of cachedState.messages) animatedIds.add(m.id)
@@ -232,7 +234,7 @@ export default function ChatPage() {
       if (!stm || stm.length === 0) {
         // Backend returned no messages. Only clear if the Map also has nothing.
         if (currentSid) {
-          const existingState = getSessionState(currentSid)
+          const existingState = getLiveSessionState(currentSid)
           if (existingState && existingState.messages.length > 0) return
         }
         setMessages([])

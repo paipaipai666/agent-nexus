@@ -116,6 +116,7 @@ interface SessionManagerContextType {
   // Multi-session operations (new)
   activateSession: (sessionId: string) => void
   getSessionState: (sessionId: string) => SessionState | null
+  getLiveSessionState: (sessionId: string) => SessionState | null
   isSessionRunning: (sessionId: string) => boolean
   sessions: Map<string, SessionState>
 }
@@ -161,6 +162,7 @@ const SessionContext = createContext<SessionManagerContextType>({
 
   activateSession: () => {},
   getSessionState: () => null,
+  getLiveSessionState: () => null,
   isSessionRunning: () => false,
   sessions: new Map(),
 })
@@ -261,6 +263,12 @@ export default function SessionManager({ children }: { children: ReactNode }) {
   const getSessionState = useCallback((sessionId: string): SessionState | null => {
     return sessions.get(sessionId) ?? null
   }, [sessions])
+
+  // Always reads from the latest Map ref — safe to use in stale closures
+  // (e.g., loadAndDisplayMessages with empty deps).
+  const getLiveSessionState = useCallback((sessionId: string): SessionState | null => {
+    return sessionsRef.current.get(sessionId) ?? null
+  }, [])
 
   const isSessionRunning = useCallback((sessionId: string): boolean => {
     return sessions.get(sessionId)?.isRunning ?? false
@@ -717,7 +725,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       // Animation tracking
       animatedIds: activeState?.animatedIds ?? new Set(),
       // Multi-session operations
-      activateSession, getSessionState, isSessionRunning, sessions,
+      activateSession, getSessionState, getLiveSessionState, isSessionRunning, sessions,
     }}>
       {children}
     </SessionContext.Provider>
