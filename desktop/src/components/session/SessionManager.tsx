@@ -578,10 +578,13 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       }),
     ]
 
-    // Don't disconnect on cleanup — keep WS alive for background streaming
-    // Only unsub from event handlers
+    // Don't disconnect on cleanup — keep WS alive for background streaming.
+    // Flush the token buffer NOW so buffered tokens are written to the Map
+    // before we unsubscribe. This ensures loadAndDisplayMessages sees the
+    // latest content when the user navigates back to this session.
     return () => {
       unsubs.forEach(u => u())
+      flushTokenBuffer(sid)
       const flushRef = tokenFlushRefs.current.get(sid)
       if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
     }
