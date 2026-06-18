@@ -297,8 +297,6 @@ def restore_session(req: CreateSessionRequest):
     handle = chat.start_session(profile=req.profile)
     return {"session_id": handle.id, "restored": False}
 
-    return {"session_id": session_id, "restored": True}
-
 
 @router.get("/session/{session_id}/checkpoints")
 def list_checkpoints(session_id: str):

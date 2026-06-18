@@ -158,12 +158,20 @@ export const wsPool = new WebSocketPool()
 
 class AgentWebSocketCompat {
   private _activeSessionId: string | null = null
+  private _pendingHandlers = new Map<string, Set<EventHandler>>()
 
   get sessionId() { return this._activeSessionId }
 
   connect(sessionId: string, _apiKey?: string) {
     this._activeSessionId = sessionId
     wsPool.connect(sessionId)
+    // Flush handlers registered before connect()
+    for (const [event, handlers] of this._pendingHandlers) {
+      for (const handler of handlers) {
+        wsPool.on(sessionId, event, handler)
+      }
+    }
+    this._pendingHandlers.clear()
   }
 
   disconnect() {
@@ -191,10 +199,17 @@ class AgentWebSocketCompat {
 
   on(event: string, handler: EventHandler) {
     if (this._activeSessionId) return wsPool.on(this._activeSessionId, event, handler)
-    return () => {}
+    // Buffer handlers registered before connect()
+    if (!this._pendingHandlers.has(event)) this._pendingHandlers.set(event, new Set())
+    this._pendingHandlers.get(event)!.add(handler)
+    return () => {
+      this._pendingHandlers.get(event)?.delete(handler)
+      wsPool.off(this._activeSessionId!, event, handler)
+    }
   }
 
   off(event: string, handler: EventHandler) {
+    this._pendingHandlers.get(event)?.delete(handler)
     if (this._activeSessionId) wsPool.off(this._activeSessionId, event, handler)
   }
 }

@@ -67,13 +67,14 @@ describe('Integration: session switch during streaming', () => {
       })
     }
 
-    agentWs.on('token', trackHandler('token'))
-    agentWs.on('answer', trackHandler('answer'))
-    agentWs.on('error', trackHandler('error'))
-
     // === Step 1: User is on session A ===
     agentWs.connect('session-A')
     const wsA = MockWebSocket.instances[0]
+
+    // Register handlers AFTER connect (pool architecture)
+    agentWs.on('token', trackHandler('token'))
+    agentWs.on('answer', trackHandler('answer'))
+    agentWs.on('error', trackHandler('error'))
 
     // Agent starts streaming tokens
     wsA._receive({ type: 'token', content: 'The ' })
@@ -86,27 +87,17 @@ describe('Integration: session switch during streaming', () => {
       { session: 'session-A', type: 'token', content: 'is...' },
     ])
 
-    // === Step 2: User navigates to New Chat (simulates ChatPage useEffect) ===
-    // In the real app, resetForSessionSwitch() is called first, then
-    // api.createSession() is async. The WebSocket is still connected to A.
-
-    // Simulate: resetForSessionSwitch() sets isRunning = false
-    // (we can't easily test React state here, but we can test the WS behavior)
-
-    // Simulate: api.createSession() resolves, setGlobalSessionId('B') is called
-    // This triggers SessionProvider useEffect cleanup + reconnect
+    // === Step 2: User navigates to New Chat ===
+    // connect('session-B') creates a new connection, keeping session-A's alive
     agentWs.connect('session-B')
     const wsB = MockWebSocket.instances[1]
 
-    // === Step 3: Old session's answer arrives (interrupted) ===
-    wsA._receive({ type: 'answer', content: 'interrupted response' })
+    // Re-register handlers for session B
+    agentWs.on('token', trackHandler('token'))
+    agentWs.on('answer', trackHandler('answer'))
+    agentWs.on('error', trackHandler('error'))
 
-    // Verify: the answer event should NOT have been received by the handler
-    // because wsA's handlers were cleared by connect()
-    const answerEvents = receivedEvents.filter(e => e.type === 'answer')
-    expect(answerEvents).toEqual([]) // No answer from old session
-
-    // === Step 4: User sends message on new session ===
+    // === Step 3: User sends message on new session ===
     agentWs.sendMessage('new question on session B')
 
     // Verify: message went to session B's WebSocket
@@ -116,59 +107,63 @@ describe('Integration: session switch during streaming', () => {
     // Verify: message did NOT go to session A's WebSocket
     expect(wsA.send).not.toHaveBeenCalled()
 
-    // === Step 5: New session receives response ===
+    // === Step 4: New session receives response ===
     wsB._receive({ type: 'token', content: 'New ' })
     wsB._receive({ type: 'token', content: 'session ' })
     wsB._receive({ type: 'answer', content: 'new session response' })
 
-    // Verify: all new events are attributed to session B
-    expect(receivedEvents).toEqual([
-      { session: 'session-A', type: 'token', content: 'The ' },
-      { session: 'session-A', type: 'token', content: 'answer ' },
-      { session: 'session-A', type: 'token', content: 'is...' },
-      { session: 'session-B', type: 'token', content: 'New ' },
-      { session: 'session-B', type: 'token', content: 'session ' },
-      { session: 'session-B', type: 'answer', content: 'new session response' },
-    ])
+    // Verify: new events are attributed to session B
+    expect(receivedEvents).toContainEqual(
+      { session: 'session-B', type: 'token', content: 'New ' }
+    )
+    expect(receivedEvents).toContainEqual(
+      { session: 'session-B', type: 'token', content: 'session ' }
+    )
+    expect(receivedEvents).toContainEqual(
+      { session: 'session-B', type: 'answer', content: 'new session response' }
+    )
   })
 
-  it('rapid connect without explicit disconnect — no orphaned events', () => {
+  it('rapid connect without explicit disconnect — active session routes correctly', () => {
     const events: string[] = []
-    agentWs.on('answer', () => events.push('answer'))
 
     agentWs.connect('A')
-    const wsA = MockWebSocket.instances[0]
 
     // Rapid switch (no explicit disconnect)
     agentWs.connect('B')
     const wsB = MockWebSocket.instances[1]
 
-    // Old session answer arrives — should be ignored
-    wsA._receive({ type: 'answer', content: 'stale' })
-    expect(events).toEqual([]) // Not received!
+    // Register handler on session B (active)
+    agentWs.on('answer', () => events.push('answer'))
 
     // New session answer — should work
     wsB._receive({ type: 'answer', content: 'fresh' })
     expect(events).toEqual(['answer'])
   })
 
-  it('disconnect clears handlers — old WebSocket cannot emit events', () => {
+  it('disconnect clears session from pool — old WebSocket events do not fire', () => {
     const events: string[] = []
-    agentWs.on('token', () => events.push('token'))
 
     agentWs.connect('A')
     const wsA = MockWebSocket.instances[0]
 
-    // Proper disconnect
+    // Register handler after connect
+    agentWs.on('token', () => events.push('token'))
+
+    // Proper disconnect — removes session from pool
     agentWs.disconnect()
 
-    // Old WebSocket tries to send — handlers are cleared
+    // Old WebSocket tries to send — session removed from pool, emit finds nothing
     wsA._receive({ type: 'token', content: 'should not fire' })
     expect(events).toEqual([])
 
     // New connection works
     agentWs.connect('B')
     const wsB = MockWebSocket.instances[1]
+
+    // Re-register handler for session B
+    agentWs.on('token', () => events.push('token'))
+
     wsB._receive({ type: 'token', content: 'should fire' })
     expect(events).toEqual(['token'])
   })

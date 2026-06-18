@@ -1,4 +1,6 @@
 """Tests for GUI event mapping — verifies answer reaches frontend."""
+import io
+import sys
 from unittest.mock import MagicMock
 
 from agentnexus.server.routes.chat import _map_to_gui_event
@@ -192,3 +194,90 @@ class TestChatServiceAnswerFlow:
         s = _map_to_gui_event(start, MagicMock(), 0)
         d = _map_to_gui_event(done, MagicMock(), 1)
         assert s["tool_name"] == d["tool_name"]
+
+
+class TestBackendOutputSuppression:
+    """Backend should not print agent output to stdout."""
+
+    def test_send_message_does_not_print_to_stdout(self):
+        """ChatService.send_message() should suppress agent _output (print)."""
+        agent = MagicMock()
+        agent._output = print
+        agent.run.return_value = "final answer"
+
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
+        session = service.start_session()
+
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+
+        try:
+            service.send_message(session.id, "hello")
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        assert "思考:" not in output
+        assert "行动:" not in output
+        assert "观察:" not in output
+        assert "最终答案:" not in output
+
+    def test_send_message_suppresses_output_with_real_agent(self):
+        agent = MagicMock()
+        agent._output = print
+
+        def run_that_outputs(_text, memory_manager=None):
+            agent._output("思考: some thought")
+            agent._output("行动: search(query)")
+            agent._output("观察: result")
+            agent._output("最终答案: the answer")
+            return "the answer"
+
+        agent.run.side_effect = run_that_outputs
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
+        session = service.start_session()
+
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+
+        try:
+            service.send_message(session.id, "hello")
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        assert "思考:" not in output
+        assert "行动:" not in output
+        assert "观察:" not in output
+        assert "最终答案:" not in output
+
+    def test_send_message_suppresses_output_even_with_on_event(self):
+        from agentnexus.agents.react_types import ReActEvent, ReActEventType
+
+        agent = MagicMock()
+
+        def run_with_events(_text, memory_manager=None):
+            if agent._on_event:
+                agent._on_event(
+                    ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "I need to search"}),
+                    None, None,
+                )
+            return "answer"
+
+        agent.run.side_effect = run_with_events
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
+        session = service.start_session()
+
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+
+        try:
+            service.send_message(session.id, "hello")
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        assert "思考:" not in output

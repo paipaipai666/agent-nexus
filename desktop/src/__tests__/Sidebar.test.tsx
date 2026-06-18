@@ -1,7 +1,23 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Sidebar from '../components/layout/Sidebar'
+
+// Mock the SessionProvider
+vi.mock('../components/session/SessionProvider', () => ({
+  useSession: () => ({
+    isSessionRunning: () => false,
+    activateSession: vi.fn(),
+    sessions: new Map(),
+  }),
+}))
+
+// Mock the API
+vi.mock('../services/api', () => ({
+  api: {
+    getRecentSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+  },
+}))
 
 function renderSidebar(path = '/') {
   return render(
@@ -12,39 +28,26 @@ function renderSidebar(path = '/') {
 }
 
 describe('Sidebar', () => {
-  it('renders all navigation items', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders New Chat button', () => {
     renderSidebar()
 
-    expect(screen.getByTitle('Chat')).toBeInTheDocument()
-    expect(screen.getByTitle('Knowledge')).toBeInTheDocument()
-    expect(screen.getByTitle('Skills')).toBeInTheDocument()
-    expect(screen.getByTitle('Memory')).toBeInTheDocument()
-    expect(screen.getByTitle('Settings')).toBeInTheDocument()
-    expect(screen.getByTitle('Stats')).toBeInTheDocument()
+    expect(screen.getByText('New Chat')).toBeInTheDocument()
   })
 
-  it('highlights the active route', () => {
-    renderSidebar('/')
+  it('renders RECENT section label', () => {
+    renderSidebar()
 
-    const chatButton = screen.getByTitle('Chat')
-    expect(chatButton.className).toContain('text-accent-primary')
+    expect(screen.getByText('RECENT')).toBeInTheDocument()
   })
 
-  it('does not highlight inactive routes', () => {
-    renderSidebar('/')
+  it('renders Settings button', () => {
+    renderSidebar()
 
-    const knowledgeButton = screen.getByTitle('Knowledge')
-    expect(knowledgeButton.className).not.toContain('text-accent-primary')
-  })
-
-  it('highlights knowledge when on knowledge route', () => {
-    renderSidebar('/knowledge')
-
-    const knowledgeButton = screen.getByTitle('Knowledge')
-    expect(knowledgeButton.className).toContain('text-accent-primary')
-
-    const chatButton = screen.getByTitle('Chat')
-    expect(chatButton.className).not.toContain('text-accent-primary')
+    expect(screen.getByText('Settings')).toBeInTheDocument()
   })
 
   it('renders as a nav element', () => {

@@ -58,11 +58,13 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
     // so the old session's answer handler could fire during the async gap.
 
     const events: string[] = []
-    agentWs.on('answer', () => events.push('answer'))
 
     // === Session A is active ===
     agentWs.connect('session-A')
     const wsA = MockWebSocket.instances[0]
+
+    // Register handler AFTER connect (pool architecture)
+    agentWs.on('answer', () => events.push('answer'))
 
     // === resetForSessionSwitch() is called ===
     // With the fix, this now disconnects the WebSocket immediately.
@@ -77,6 +79,9 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
     // === api.createSession() resolves, new session connects ===
     agentWs.connect('session-B')
     const wsB = MockWebSocket.instances[1]
+
+    // Register handler for new session
+    agentWs.on('answer', () => events.push('answer'))
 
     // === User sends message on new session ===
     agentWs.sendMessage('new question')
@@ -94,11 +99,13 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
     // resetForSessionSwitch() did NOT call agentWs.disconnect().
 
     const events: string[] = []
-    agentWs.on('answer', () => events.push('answer'))
 
     // Session A is active
     agentWs.connect('session-A')
     const wsA = MockWebSocket.instances[0]
+
+    // Register handler AFTER connect
+    agentWs.on('answer', () => events.push('answer'))
 
     // resetForSessionSwitch() WITHOUT disconnect (old behavior)
     // agentWs.disconnect() is NOT called — WebSocket stays connected
@@ -118,35 +125,39 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
     // First disconnect (from resetForSessionSwitch)
     agentWs.disconnect()
     expect(agentWs.sessionId).toBeNull()
-    expect((agentWs as any).ws).toBeNull()
 
     // Second disconnect (from useEffect cleanup) — should not throw
     expect(() => agentWs.disconnect()).not.toThrow()
     expect(agentWs.sessionId).toBeNull()
   })
 
-  it('full lifecycle: connect A → reset(disconnect) → connect B → events on B work', () => {
+  it('full lifecycle: connect A -> reset(disconnect) -> connect B -> events on B work', () => {
     const events: Array<{ session: string; type: string }> = []
-
-    const handler = (type: string) => () => {
-      events.push({ session: agentWs.sessionId || '?', type })
-    }
-
-    agentWs.on('token', handler('token'))
-    agentWs.on('answer', handler('answer'))
 
     // Session A
     agentWs.connect('A')
+    const handlerA = (type: string) => () => {
+      events.push({ session: agentWs.sessionId || '?', type })
+    }
+    agentWs.on('token', handlerA('token'))
+    agentWs.on('answer', handlerA('answer'))
+
     MockWebSocket.instances[0]._receive({ type: 'token', content: 'a1' })
 
     // Reset (disconnect)
     agentWs.disconnect()
 
-    // Old WS tries to send — no effect
+    // Old WS tries to send — no effect (handlers cleared)
     MockWebSocket.instances[0]._receive({ type: 'answer', content: 'stale' })
 
     // New session B
     agentWs.connect('B')
+    const handlerB = (type: string) => () => {
+      events.push({ session: agentWs.sessionId || '?', type })
+    }
+    agentWs.on('token', handlerB('token'))
+    agentWs.on('answer', handlerB('answer'))
+
     MockWebSocket.instances[1]._receive({ type: 'token', content: 'b1' })
     MockWebSocket.instances[1]._receive({ type: 'answer', content: 'b2' })
 

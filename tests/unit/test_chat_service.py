@@ -343,7 +343,8 @@ class TestChatService:
         assert any("tool start: web_search" in item for item in snapshot.journal)
         assert any("tool done: web_search" in item for item in snapshot.journal)
         event_types = [event.type for event in service.stream_events(run_handle.id)]
-        assert "turn_journal" in event_types
+        assert "tool_start" in event_types
+        assert "tool_done" in event_types
 
     def test_send_message_applies_session_skill(self):
         from agentnexus.services.skill import SkillService
