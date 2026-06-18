@@ -411,6 +411,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       }),
       wsPool.on(sid, 'tool_call', (data) => {
         currentAssistantIds.current.set(sid, null)
+        currentReasoningIds.current.set(sid, null)  // Next LLM call gets its own reasoning message
         updateSession(sid, prev => ({
           ...prev,
           messages: [...prev.messages, { id: `tc-${getSessionCounter(sid)}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolStatus: 'running', timestamp: new Date() }],
@@ -421,13 +422,26 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         updateSession(sid, prev => ({
           ...prev,
           messages: prev.messages.map(m => {
-            if (!updated && m.toolName === data.tool_name && m.toolStatus === 'running') {
+            if (updated) return m
+            // Exact name match first
+            if (m.toolName === data.tool_name && m.toolStatus === 'running') {
               updated = true
               return { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
             }
             return m
           }),
         }))
+        // Fallback: if no exact match, update the last running tool card
+        if (!updated) {
+          updateSession(sid, prev => {
+            const last = [...prev.messages].reverse().find(m => m.role === 'tool' && m.toolStatus === 'running')
+            if (!last) return prev
+            return {
+              ...prev,
+              messages: prev.messages.map(m => m.id === last.id ? { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` } : m),
+            }
+          })
+        }
       }),
       wsPool.on(sid, 'token', (data) => {
         currentReasoningIds.current.set(sid, null)
@@ -516,9 +530,8 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         updateSession(sid, prev => ({
           ...prev,
           messages: [
-            ...prev.messages,
+            ...prev.messages.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'error' as const } : m),
             { id: `e-${getSessionCounter(sid)}`, role: 'system', content: label, timestamp: new Date() },
-            ...prev.messages.filter(m => m.role === 'tool' && m.toolStatus === 'running').map(m => ({ ...m, toolStatus: 'error' as const })),
           ],
           isRunning: false,
           currentRunId: null,

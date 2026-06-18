@@ -1,1 +1,172 @@
-"use strict";const i=require("electron"),s=require("path"),f=require("child_process"),h=require("http"),w=require("fs");let e=null,n=null,l=!1;const c=18765,m=`http://127.0.0.1:${c}/health`,_=500,k=2e4;function g(){return!!process.env.VITE_DEV_SERVER_URL}function b(){const t=process.resourcesPath||s.join(__dirname,".."),o=process.platform==="win32"?".exe":"";return s.join(t,"backend",`agentnexus${o}`)}function x(){return new Promise(t=>{const o=h.get(m,r=>{r.resume(),t(r.statusCode===200)});o.on("error",()=>t(!1)),o.setTimeout(2e3,()=>{o.destroy(),t(!1)})})}async function E(){const t=Date.now()+k;for(;Date.now()<t;){if(await x())return!0;await new Promise(o=>setTimeout(o,_))}return!1}function T(){return new Promise(t=>{var r,d;const o=b();if(!w.existsSync(o)){console.error(`Backend binary not found: ${o}`),t(!1);return}console.log(`Starting backend: ${o}`),n=f.spawn(o,["serve","--port",String(c),"--no-auth"],{stdio:["ignore","pipe","pipe"],detached:!1}),(r=n.stdout)==null||r.on("data",a=>{console.log(`[backend] ${a.toString().trim()}`)}),(d=n.stderr)==null||d.on("data",a=>{console.error(`[backend] ${a.toString().trim()}`)}),n.on("error",a=>{console.error("Failed to start backend:",a),t(!1)}),n.on("exit",a=>{console.log(`Backend exited with code ${a}`),n=null,l=!1,e&&!e.isDestroyed()&&e.webContents.send("backend-error",`Backend exited with code ${a}`)}),E().then(a=>{l=a,!a&&n&&(n.kill(),n=null),t(a)})})}function u(){if(!n)return;console.log("Stopping backend..."),n.kill("SIGINT");const t=setTimeout(()=>{n==null||n.kill("SIGKILL"),n=null,l=!1},3e3);n.on("exit",()=>{clearTimeout(t),n=null,l=!1})}async function p(){e=new i.BrowserWindow({width:1280,height:800,minWidth:900,minHeight:600,frame:!1,titleBarStyle:"hidden",show:!1,webPreferences:{preload:s.join(__dirname,"preload.js"),contextIsolation:!0,nodeIntegration:!1},backgroundColor:"#111318"}),g()?(e.loadURL(process.env.VITE_DEV_SERVER_URL),e.webContents.openDevTools(),e.show()):(e.loadFile(s.join(__dirname,"../dist/loading.html")),e.show(),await T()?(e.webContents.send("backend-ready"),e.loadFile(s.join(__dirname,"../dist/index.html"))):e.webContents.send("backend-error","Failed to start backend")),e.on("closed",()=>{e=null})}i.app.whenReady().then(p);i.app.on("window-all-closed",()=>{u(),process.platform!=="darwin"&&i.app.quit()});i.app.on("activate",()=>{i.BrowserWindow.getAllWindows().length===0&&p()});i.app.on("before-quit",()=>{u()});i.ipcMain.on("window-minimize",()=>e==null?void 0:e.minimize());i.ipcMain.on("window-maximize",()=>{e!=null&&e.isMaximized()?e.unmaximize():e==null||e.maximize()});i.ipcMain.on("window-close",()=>e==null?void 0:e.close());i.ipcMain.handle("window-is-maximized",()=>(e==null?void 0:e.isMaximized())??!1);i.ipcMain.handle("get-backend-status",()=>({ready:l,port:c}));i.ipcMain.on("open-external",(t,o)=>{try{const r=new URL(o);["http:","https:"].includes(r.protocol)&&i.shell.openExternal(o)}catch{}});
+"use strict";
+const electron = require("electron");
+const path = require("path");
+const child_process = require("child_process");
+const http = require("http");
+const fs = require("fs");
+let mainWindow = null;
+let backendProcess = null;
+let backendReady = false;
+const BACKEND_PORT = 18765;
+const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`;
+const HEALTH_CHECK_INTERVAL_MS = 500;
+const HEALTH_CHECK_TIMEOUT_MS = 2e4;
+function isDev() {
+  return !!process.env.VITE_DEV_SERVER_URL;
+}
+function getBackendBinaryPath() {
+  const resourcePath = process.resourcesPath || path.join(__dirname, "..");
+  const ext = process.platform === "win32" ? ".exe" : "";
+  return path.join(resourcePath, "backend", `agentnexus${ext}`);
+}
+function checkHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(HEALTH_URL, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(2e3, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+async function waitForBackend() {
+  const deadline = Date.now() + HEALTH_CHECK_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await checkHealth()) return true;
+    await new Promise((r) => setTimeout(r, HEALTH_CHECK_INTERVAL_MS));
+  }
+  return false;
+}
+function startBackend() {
+  return new Promise((resolve) => {
+    var _a, _b;
+    const binaryPath = getBackendBinaryPath();
+    if (!fs.existsSync(binaryPath)) {
+      console.error(`Backend binary not found: ${binaryPath}`);
+      resolve(false);
+      return;
+    }
+    console.log(`Starting backend: ${binaryPath}`);
+    backendProcess = child_process.spawn(binaryPath, ["serve", "--port", String(BACKEND_PORT), "--no-auth"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false
+    });
+    (_a = backendProcess.stdout) == null ? void 0 : _a.on("data", (data) => {
+      console.log(`[backend] ${data.toString().trim()}`);
+    });
+    (_b = backendProcess.stderr) == null ? void 0 : _b.on("data", (data) => {
+      console.error(`[backend] ${data.toString().trim()}`);
+    });
+    backendProcess.on("error", (err) => {
+      console.error("Failed to start backend:", err);
+      resolve(false);
+    });
+    backendProcess.on("exit", (code) => {
+      console.log(`Backend exited with code ${code}`);
+      backendProcess = null;
+      backendReady = false;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("backend-error", `Backend exited with code ${code}`);
+      }
+    });
+    waitForBackend().then((ready) => {
+      backendReady = ready;
+      if (!ready && backendProcess) {
+        backendProcess.kill();
+        backendProcess = null;
+      }
+      resolve(ready);
+    });
+  });
+}
+function stopBackend() {
+  if (!backendProcess) return;
+  console.log("Stopping backend...");
+  backendProcess.kill("SIGINT");
+  const forceKill = setTimeout(() => {
+    backendProcess == null ? void 0 : backendProcess.kill("SIGKILL");
+    backendProcess = null;
+    backendReady = false;
+  }, 3e3);
+  backendProcess.on("exit", () => {
+    clearTimeout(forceKill);
+    backendProcess = null;
+    backendReady = false;
+  });
+}
+async function createWindow() {
+  mainWindow = new electron.BrowserWindow({
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
+    titleBarStyle: "hidden",
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    },
+    backgroundColor: "#111318"
+  });
+  if (isDev()) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    mainWindow.webContents.openDevTools();
+    mainWindow.show();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "../dist/loading.html"));
+    mainWindow.show();
+    const ready = await startBackend();
+    if (ready) {
+      mainWindow.webContents.send("backend-ready");
+      mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+    } else {
+      mainWindow.webContents.send("backend-error", "Failed to start backend");
+    }
+  }
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+electron.app.whenReady().then(createWindow);
+electron.app.on("window-all-closed", () => {
+  stopBackend();
+  if (process.platform !== "darwin") {
+    electron.app.quit();
+  }
+});
+electron.app.on("activate", () => {
+  if (electron.BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+electron.app.on("before-quit", () => {
+  stopBackend();
+});
+electron.ipcMain.on("window-minimize", () => mainWindow == null ? void 0 : mainWindow.minimize());
+electron.ipcMain.on("window-maximize", () => {
+  if (mainWindow == null ? void 0 : mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow == null ? void 0 : mainWindow.maximize();
+  }
+});
+electron.ipcMain.on("window-close", () => mainWindow == null ? void 0 : mainWindow.close());
+electron.ipcMain.handle("window-is-maximized", () => (mainWindow == null ? void 0 : mainWindow.isMaximized()) ?? false);
+electron.ipcMain.handle("get-backend-status", () => ({
+  ready: backendReady,
+  port: BACKEND_PORT
+}));
+electron.ipcMain.on("open-external", (_, url) => {
+  try {
+    const parsed = new URL(url);
+    if (["http:", "https:"].includes(parsed.protocol)) {
+      electron.shell.openExternal(url);
+    }
+  } catch {
+  }
+});

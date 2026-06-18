@@ -486,6 +486,28 @@ class ChatService:
                 has_reasoning = False
                 return
 
+            # TOOL_START/TOOL_DONE: carry payload directly to avoid journal-parsing bugs
+            if event_type == "TOOL_START":
+                self._put_event(run_id, AgentEvent(
+                    "tool_start",
+                    {"name": payload.get("name", ""), "arguments": payload.get("arguments", {})},
+                    run_id=run_id,
+                    session_id=session_id,
+                ))
+                return
+            if event_type == "TOOL_DONE":
+                self._put_event(run_id, AgentEvent(
+                    "tool_done",
+                    {
+                        "name": payload.get("name", ""),
+                        "arguments": payload.get("arguments", {}),
+                        "result": collapse_and_truncate(payload.get("result", ""), 300),
+                    },
+                    run_id=run_id,
+                    session_id=session_id,
+                ))
+                return
+
             agent_event = AgentEvent(
                 "turn_journal",
                 {"event": event_type},
