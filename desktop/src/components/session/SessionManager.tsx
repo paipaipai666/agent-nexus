@@ -411,6 +411,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       }),
       wsPool.on(sid, 'tool_call', (data) => {
         currentAssistantIds.current.set(sid, null)
+        currentReasoningIds.current.set(sid, null)  // Next LLM call gets its own reasoning message
         updateSession(sid, prev => ({
           ...prev,
           messages: [...prev.messages, { id: `tc-${getSessionCounter(sid)}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolStatus: 'running', timestamp: new Date() }],
