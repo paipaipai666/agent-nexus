@@ -1,5 +1,7 @@
 """Tests for agentnexus.rag.chunking."""
 
+import pytest
+
 from agentnexus.rag.chunking import (
     ChunkStrategy,
     _detect_block_type,
@@ -12,6 +14,29 @@ from agentnexus.rag.chunking import (
     chunk_text,
 )
 from agentnexus.rag.models import ChunkRecord, DocumentSection, SourceDocument
+
+
+@pytest.fixture(autouse=True)
+def _mock_recursive_split(monkeypatch):
+    """Mock _recursive_split to avoid importing langchain_text_splitters
+    (which triggers sentence_transformers → transformers → 300+ model modules)."""
+
+    def _fake_recursive_split(text: str, chunk_size: int, overlap: int) -> list[str]:
+        chunks: list[str] = []
+        start = 0
+        step = max(chunk_size - overlap, 1)
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            start += step
+        return chunks
+
+    monkeypatch.setattr(
+        "agentnexus.rag.chunking._recursive_split",
+        _fake_recursive_split,
+    )
 
 
 class TestChunkText:
