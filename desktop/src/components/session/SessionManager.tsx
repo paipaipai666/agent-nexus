@@ -617,7 +617,12 @@ export default function SessionManager({ children }: { children: ReactNode }) {
   // ── Memoized setters ─────────────────────────────────────────
 
   const handleSetSessionId = useCallback((id: string | null) => {
-    if (id) activateSession(id)
+    if (id) {
+      activateSession(id)
+    } else {
+      // Clear active session (e.g., "New Chat" click before user sends first message)
+      setActiveSessionId(null)
+    }
   }, [activateSession])
 
   const handleSetModelName = useCallback((name: string | null) => {

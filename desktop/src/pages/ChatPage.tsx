@@ -320,33 +320,33 @@ export default function ChatPage() {
     }
   }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
 
+  const fetchDynamicCommands = useCallback(() => {
+    api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
+    api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
+    api.getExtensions().then(setPlugins).catch(() => {})
+  }, [])
+
+  const initNew = useCallback((sid: string) => {
+    currentSessionIdRef.current = sid
+    setGlobalSessionId(sid)
+    // Don't call setMessages([]) here — React batching means activeSessionId
+    // is still the OLD session, so this would clear the old session's messages.
+    // The new session already starts with empty messages in SessionManager's Map.
+    api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+    api.getConfig().then((config: any) => {
+      if (config.cwd) setCwd(config.cwd)
+    }).catch(() => {})
+    Promise.all([
+      api.listMcpTools().catch(() => ({ tools: [] })),
+      api.listSkills().catch(() => ({ skills: [] })),
+    ]).then(([mcpData, skillsData]) => {
+      setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
+    }).catch(() => {})
+    api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
+    fetchDynamicCommands()
+  }, [fetchDynamicCommands])
+
   useEffect(() => {
-    const fetchDynamicCommands = () => {
-      api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
-      api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
-      api.getExtensions().then(setPlugins).catch(() => {})
-    }
-
-    const initNew = (sid: string) => {
-      currentSessionIdRef.current = sid
-      setGlobalSessionId(sid)
-      // Don't call setMessages([]) here — React batching means activeSessionId
-      // is still the OLD session, so this would clear the old session's messages.
-      // The new session already starts with empty messages in SessionManager's Map.
-      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
-      api.getConfig().then((config: any) => {
-        if (config.cwd) setCwd(config.cwd)
-      }).catch(() => {})
-      Promise.all([
-        api.listMcpTools().catch(() => ({ tools: [] })),
-        api.listSkills().catch(() => ({ skills: [] })),
-      ]).then(([mcpData, skillsData]) => {
-        setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
-      }).catch(() => {})
-      api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
-      fetchDynamicCommands()
-    }
-
     const initRestore = (sid: string) => {
       console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
@@ -391,8 +391,14 @@ export default function ChatPage() {
         })
         .catch(() => api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
+      // Don't create session eagerly — defer to first message send.
+      // This prevents empty "New session" cards from accumulating in the sidebar.
       resetForSessionSwitch()
-      api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
+      currentSessionIdRef.current = null
+      setGlobalSessionId(null)
+      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getConfig().then((config: any) => { if (config.cwd) setCwd(config.cwd) }).catch(() => {})
+      fetchDynamicCommands()
     }
     // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -401,16 +407,51 @@ export default function ChatPage() {
   // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])
 
-  // Handle URL redirect on first message (from / to /chat/{id})
-  const handleSendMessage = useCallback((text: string) => {
-    sendMessage(text)
-    if (location.pathname === '/' && currentSessionIdRef.current) {
-      navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
+  // Reset session state when "New Chat" is clicked (even when already on '/')
+  useEffect(() => {
+    const handleNewChat = () => {
+      currentSessionIdRef.current = null
+      pendingFirstMessageRef.current = null
+      setGlobalSessionId(null)
     }
-  }, [sendMessage, location.pathname, navigate])
+    window.addEventListener('new-chat', handleNewChat)
+    return () => window.removeEventListener('new-chat', handleNewChat)
+  }, [])
+
+  // Pending first message for lazy session creation (route '/' without session)
+  const pendingFirstMessageRef = useRef<string | null>(null)
+
+  // Send pending first message once session is activated (WS connects on activeSessionId change)
+  useEffect(() => {
+    const pending = pendingFirstMessageRef.current
+    if (!pending) return
+    pendingFirstMessageRef.current = null
+    // sendMessageInternal retries WS send if not yet connected, so this is safe
+    sendMessage(pending)
+  }, [sendMessage])
+
+  // Handle first message — create session lazily if needed, then send.
+  const handleSendMessage = useCallback((text: string) => {
+    if (!currentSessionIdRef.current) {
+      // No session yet (first message from route '/') — create lazily.
+      // Defer the actual send to a useEffect that fires after activeSessionId
+      // is set and the WS connection is established by SessionManager.
+      pendingFirstMessageRef.current = text
+      api.createSession().then(({ session_id }) => {
+        currentSessionIdRef.current = session_id
+        initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
+        navigate(`/chat/${session_id}`, { replace: true })
+      })
+    } else {
+      sendMessage(text)
+      if (location.pathname === '/') {
+        navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
+      }
+    }
+  }, [sendMessage, location.pathname, navigate, initNew])
 
   const handleSend = () => {
-    const text = input.trim(); if (!text || !sessionId) return
+    const text = input.trim(); if (!text) return
     setInput(''); setShowPalette(false)
     if (text.startsWith('/')) { handleSlashCommand(text); return }
     if (isRunning) { queueMessage(text) }

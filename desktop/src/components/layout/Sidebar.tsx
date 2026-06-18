@@ -42,7 +42,9 @@ export default function Sidebar() {
     setLoading(true)
     try {
       const { sessions } = await api.getRecentSessions(8)
-      setRecentSessions(sessions)
+      // Filter out empty sessions (no preview = never had a user message).
+      // These are created eagerly on mount and clutter the sidebar.
+      setRecentSessions(sessions.filter(s => s.preview && s.preview.trim()))
     } catch (error) {
       console.error('Failed to load recent sessions:', error)
     } finally {
@@ -50,7 +52,11 @@ export default function Sidebar() {
     }
   }
 
-  const handleNewChat = () => navigate('/')
+  const handleNewChat = () => {
+    // Dispatch event so ChatPage can reset session state even when already on '/'
+    window.dispatchEvent(new Event('new-chat'))
+    navigate('/')
+  }
   const handleSessionClick = (sessionId: string) => {
     activateSession(sessionId)
     navigate(`/chat/${sessionId}`)
