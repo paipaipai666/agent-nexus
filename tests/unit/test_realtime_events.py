@@ -45,7 +45,7 @@ class TestRealTimeEventStreaming:
             return "answer"
 
         agent.run.side_effect = run_with_events
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "hello")
@@ -82,7 +82,7 @@ class TestRealTimeEventStreaming:
             return "answer"
 
         agent.run.side_effect = run_with_events
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "hello")
@@ -107,7 +107,7 @@ class TestRealTimeEventStreaming:
         """Events should be put into async queue immediately."""
         from agentnexus.services.chat import AgentEvent, ChatService
 
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
 
         # Manually test _put_event
         service._async_run_events["test_run"] = asyncio.Queue()
@@ -129,7 +129,7 @@ class TestRealTimeEventStreaming:
         """None sentinel should terminate astream_events."""
         from agentnexus.services.chat import AgentEvent, ChatService
 
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         service._async_run_events["test_run"] = asyncio.Queue()
 
         # Put events and sentinel
@@ -174,7 +174,7 @@ class TestEventOrdering:
             return "answer"
 
         agent.run.side_effect = run
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "test")
 
@@ -210,7 +210,7 @@ class TestEventOrdering:
             return "final answer"
 
         agent.run.side_effect = run
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "test")
 
@@ -247,7 +247,7 @@ class TestEventOrdering:
 
         agent.run.side_effect = run
 
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "test")
 
@@ -270,7 +270,7 @@ class TestEventOrdering:
         agent = MagicMock()
         agent.run.return_value = "final answer"
 
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "test")
 
@@ -350,7 +350,7 @@ class TestDualQueueArchitecture:
         """_put_event should send to both sync and async queues."""
         from agentnexus.services.chat import AgentEvent, ChatService
 
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
 
         # Set up both queues
         import queue
@@ -374,7 +374,7 @@ class TestDualQueueArchitecture:
         """_put_event should not crash if queues don't exist."""
         from agentnexus.services.chat import AgentEvent, ChatService
 
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         event = AgentEvent("test", {}, run_id="nonexistent")
 
         # Should not raise
@@ -387,7 +387,7 @@ class TestDualQueueArchitecture:
         agent = MagicMock()
         agent.run.return_value = "answer"
 
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
 

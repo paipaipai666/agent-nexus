@@ -57,7 +57,7 @@ class TestChatServiceAnswerFlow:
     def test_send_message_emits_answer_event(self):
         agent = MagicMock()
         agent.run.return_value = "the final answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "question")
@@ -73,7 +73,7 @@ class TestChatServiceAnswerFlow:
     def test_send_message_maps_to_gui_format(self):
         agent = MagicMock()
         agent.run.return_value = "gui answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "question")
@@ -106,7 +106,7 @@ class TestChatServiceAnswerFlow:
             return ReActResult(answer="final answer from agent", steps=[])
 
         agent.run.side_effect = simulate_agent_run
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "test question")

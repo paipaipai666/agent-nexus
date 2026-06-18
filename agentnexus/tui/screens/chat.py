@@ -129,8 +129,8 @@ class ChatScreen(Screen):
         self._streaming_buffer = ""
         self._last_stream_update = 0.0
         self._chat_service = ChatService(
-            agent=agent,
-            memory_manager=memory,
+            agent_factory=lambda _sid=None: agent,
+            memory_factory_builder=lambda _sid: lambda: memory,
             version_manager=version,
             skill_service=skill_service,
             tool_executor=getattr(agent, "tool_executor", None),

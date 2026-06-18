@@ -1,6 +1,6 @@
 """Tests for ChatService."""
 import queue
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
@@ -9,29 +9,29 @@ from agentnexus.services.chat import AgentEvent, ChatService, RunHandle, Session
 
 class TestChatService:
     def test_start_session_creates_handle_with_unique_id(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         handle = service.start_session()
         assert isinstance(handle, SessionHandle)
         assert handle.id.startswith("session_")
 
     def test_start_session_multiple_calls_unique_ids(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         h1 = service.start_session()
         h2 = service.start_session()
         assert h1.id != h2.id
 
     def test_start_session_with_skill(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         handle = service.start_session(skill="python")
         assert handle.skill == "python"
 
     def test_start_session_with_profile(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         handle = service.start_session(profile="expert")
         assert handle.profile == "expert"
 
     def test_start_session_with_skill_and_profile(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         handle = service.start_session(skill="python", profile="expert")
         assert handle.skill == "python"
         assert handle.profile == "expert"
@@ -39,7 +39,7 @@ class TestChatService:
     def test_send_message_valid_session_returns_run_handle(self):
         agent = MagicMock()
         agent.run.return_value = "mock answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         assert isinstance(run, RunHandle)
@@ -48,20 +48,20 @@ class TestChatService:
 
     def test_send_message_invokes_agent_run(self):
         agent = MagicMock()
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         service.send_message(session.id, "hello")
-        agent.run.assert_called_once_with("hello", memory_manager=None)
+        agent.run.assert_called_once_with("hello", memory_manager=ANY)
 
     def test_send_message_invalid_session_raises_key_error(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         with pytest.raises(KeyError, match="Unknown session_id"):
             service.send_message("nonexistent", "hello")
 
     def test_send_message_emits_events_correctly(self):
         agent = MagicMock()
         agent.run.return_value = "mock answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         events = list(service.stream_events(run.id))
@@ -80,7 +80,7 @@ class TestChatService:
     def test_send_message_agent_returns_object_with_answer_attr(self):
         agent = MagicMock()
         agent.run.return_value = MagicMock(answer="extracted answer")
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         events = list(service.stream_events(run.id))
@@ -93,7 +93,7 @@ class TestChatService:
         memory = MagicMock()
         memory.short_term.to_json.return_value = '{"messages":[]}'
         version = MagicMock()
-        service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: memory, version_manager=version)
         service._get_version_manager = lambda _sid: version
         session = service.start_session()
         run = service.send_message(session.id, "hello")
@@ -107,14 +107,14 @@ class TestChatService:
         assert version.commit_with_messages.call_count == 2
 
     def test_stream_events_unknown_run_id_raises_key_error(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         with pytest.raises(KeyError, match="Unknown run_id"):
             next(service.stream_events("nonexistent"))
 
     def test_cancel_run_emits_run_failed_with_cancelled_error(self):
         agent = MagicMock()
         agent.run.return_value = "answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         # Consume events that are already queued
@@ -129,14 +129,14 @@ class TestChatService:
         assert events_after[1].type == "run_persisted"
 
     def test_cancel_run_unknown_run_id_is_noop(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         # Should not raise
         service.cancel_run("nonexistent")
 
     def test_confirm_tool_call_emits_confirmation_requested_with_true(self):
         agent = MagicMock()
         agent.run.return_value = "answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         # Drain initial events
@@ -150,7 +150,7 @@ class TestChatService:
     def test_confirm_tool_call_emits_confirmation_requested_with_false(self):
         agent = MagicMock()
         agent.run.return_value = "answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
         self._drain_queue(service, run.id)
@@ -161,28 +161,31 @@ class TestChatService:
         assert events[0].payload["approved"] is False
 
     def test_confirm_tool_call_unknown_run_id_is_noop(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         service.confirm_tool_call("nonexistent", approved=True)
 
     def test_get_session_snapshot_returns_correct_state(self):
         memory = MagicMock()
         version = MagicMock()
         agent = MagicMock()
-        service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: memory, version_manager=version)
         session = service.start_session(skill="python", profile="expert")
+        # Trigger lazy creation of per-session instances
+        service._get_or_create_memory(session.id)
+        service._version_managers[session.id] = version
         snapshot = service.get_session_snapshot(session.id)
         assert snapshot["session"] is session
         assert snapshot["memory"] is memory
         assert snapshot["version"] is version
 
     def test_get_session_snapshot_unknown_session_raises_key_error(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         with pytest.raises(KeyError, match="Unknown session_id"):
             service.get_session_snapshot("nonexistent")
 
     def test_get_session_snapshot_memory_and_version_can_be_none(self):
         agent = MagicMock()
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         snapshot = service.get_session_snapshot(session.id)
         assert snapshot["memory"] is None
@@ -194,7 +197,7 @@ class TestChatService:
         memory = MagicMock()
         memory.short_term.to_json.return_value = '{"messages":[]}'
         version = MagicMock()
-        service = ChatService(agent=agent, memory_manager=memory, version_manager=version)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: memory, version_manager=version)
         service._get_version_manager = lambda _sid: version
         session = service.start_session()
         with pytest.raises(RuntimeError, match="something broke"):
@@ -213,7 +216,7 @@ class TestChatService:
         assert version.commit_with_messages.call_count == 2
 
     def test_cancel_run_sets_cancel_checker(self):
-        service = ChatService(agent=MagicMock())
+        service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run, _events, turn = service.begin_turn(session.id, "hello")
 
@@ -228,7 +231,7 @@ class TestChatService:
     def test_multiple_sessions_independent(self):
         agent = MagicMock()
         agent.run.return_value = "answer"
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         s1 = service.start_session(skill="python")
         s2 = service.start_session(skill="rust")
         r1 = service.send_message(s1.id, "hello")
@@ -262,7 +265,7 @@ class TestChatService:
         memory = MagicMock()
         agent = MagicMock()
         agent.run.return_value = "answer"
-        service = ChatService(agent=agent, memory_manager=memory)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: memory)
         session = service.start_session()
         service.send_message(session.id, "hello")
         agent.run.assert_called_once_with("hello", memory_manager=memory)
@@ -288,7 +291,7 @@ class TestChatService:
         agent.run.return_value = "answer"
         skill = SkillService(registry, agent=agent)
         skill.current = entry
-        service = ChatService(agent=agent, skill_service=skill)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock(), skill_service=skill)
         session = service.start_session()
 
         run = service.send_message(session.id, "hello")
@@ -331,7 +334,7 @@ class TestChatService:
             return "answer"
 
         agent.run.side_effect = run
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run_handle = service.send_message(session.id, "hello")
@@ -362,7 +365,7 @@ class TestChatService:
         agent = MagicMock()
         agent.run.return_value = "answer"
         skill = SkillService(registry, agent=agent)
-        service = ChatService(agent=agent, skill_service=skill)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock(), skill_service=skill)
         session = service.start_session(skill="review/review")
 
         service.send_message(session.id, "hello")
@@ -394,7 +397,7 @@ class TestChatService:
         agent = MagicMock()
         agent.run.return_value = "answer"
         skill = SkillService(registry, agent=agent)
-        service = ChatService(agent=agent, skill_service=skill)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock(), skill_service=skill)
         session = service.start_session()
 
         run = service.send_message(session.id, "Please write concise release notes.")

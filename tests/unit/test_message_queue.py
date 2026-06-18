@@ -8,7 +8,7 @@ from agentnexus.services.chat import ChatService
 def _make_service() -> ChatService:
     agent = MagicMock()
     agent.run.return_value = MagicMock(answer="test answer")
-    return ChatService(agent=agent)
+    return ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
 
 
 class TestMessageQueue:
@@ -51,9 +51,10 @@ class TestMessageQueue:
 
     def test_mark_processing(self):
         service = _make_service()
-        service.mark_processing(True)
+        session = service.start_session()
+        service.mark_processing(True, session_id=session.id)
         assert service.is_processing is True
-        service.mark_processing(False)
+        service.mark_processing(False, session_id=session.id)
         assert service.is_processing is False
 
     def test_multiple_sessions_queued(self):

@@ -22,7 +22,7 @@ class TestBackendOutputSuppression:
         agent._output = print
         agent.run.return_value = "final answer"
 
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         captured = io.StringIO()
@@ -54,7 +54,7 @@ class TestBackendOutputSuppression:
             return "the answer"
 
         agent.run.side_effect = run_that_outputs
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         captured = io.StringIO()
@@ -87,7 +87,7 @@ class TestBackendOutputSuppression:
             return "answer"
 
         agent.run.side_effect = run_with_events
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         captured = io.StringIO()
@@ -215,7 +215,7 @@ class TestGuiEventMapping:
             return "final answer"
 
         agent.run.side_effect = run_with_full_cycle
-        service = ChatService(agent=agent)
+        service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
 
         run = service.send_message(session.id, "hello")
