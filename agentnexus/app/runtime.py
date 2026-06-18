@@ -107,10 +107,45 @@ class AppRuntime:
         agent_output = (lambda _: None) if profile == "server" else None
         if profile == "server":
             llm.silent = True
-        agent = ReActAgent(llm, executor, conversation_mode=True, output=agent_output, confirm_fn=subagent_confirm)
-        agent._todo_list = todo_list
-        if mcp_manager is not None and hasattr(agent, "set_mcp_context"):
-            agent.set_mcp_context(mcp_manager.auto_context())
+
+        # Capture MCP context once for all per-session agents
+        mcp_ctx = mcp_manager.auto_context() if mcp_manager is not None else None
+
+        # ── Per-session factories (Phase 1: multi-session) ──
+
+        def agent_factory(session_id: str | None = None) -> ReActAgent:
+            """Create a lightweight agent per session. Shares LLM, tools, etc."""
+            a = ReActAgent(llm, executor, conversation_mode=True, output=agent_output, confirm_fn=subagent_confirm)
+            if mcp_ctx is not None and hasattr(a, "set_mcp_context"):
+                a.set_mcp_context(mcp_ctx)
+            # Each agent needs its own todo_list for persistence
+            if session_id:
+                from agentnexus.memory.todo import SessionTodoList
+                a._todo_list = SessionTodoList(session_id=session_id, db_path=settings.memory_db_path)
+            return a
+
+        def make_memory_factory(stm_store: dict, session_id: str):
+            """R7: Closure-based factory — absorbs STM on first call, then gone."""
+            _restore = cls._restore_memory_from_version if restore_session else None
+            _version_for_restore = version
+            def factory() -> MemoryManager:
+                mm = MemoryManager(session_id, llm=llm)
+                # One-time STM migration from legacy _stms dict
+                if session_id in stm_store:
+                    from agentnexus.memory.short_term import ShortTermMemory
+                    restored = ShortTermMemory.from_json(stm_store.pop(session_id))
+                    mm.short_term._messages = restored._messages
+                    mm.short_term._summary = restored._summary
+                # Restore from version manager if this is the build-time session
+                elif _restore is not None and _version_for_restore is not None:
+                    _restore(mm, _version_for_restore)
+                return mm
+            return factory
+
+        # Create a build-time agent for SkillService and CapabilityRuntime
+        # (they need a reference agent at build time)
+        build_agent = agent_factory()
+        build_agent._todo_list = todo_list
         skill_registry = SkillRegistry.from_settings(settings)
         skill_registry.discover()
         auto_route = getattr(settings, "skill_auto_route", True)
@@ -120,7 +155,7 @@ class AppRuntime:
         default_skill = getattr(settings, "default_skill", "")
         skill_service = SkillService(
             skill_registry,
-            agent=agent,
+            agent=build_agent,
             auto_route=auto_route if isinstance(auto_route, bool) else True,
             auto_route_llm_fallback=(
                 auto_route_llm_fallback if isinstance(auto_route_llm_fallback, bool) else True
@@ -133,7 +168,7 @@ class AppRuntime:
         capability_runtime = CapabilityRuntime(
             settings=settings,
             executor=executor,
-            agent=agent,
+            agent=build_agent,
             skill_service=skill_service,
             mcp_manager=mcp_manager,
             extension_manager=extension_manager,
@@ -155,11 +190,15 @@ class AppRuntime:
             "mcp_enabled": mcp_manager is not None,
         })
 
+        # Capture _stms reference for closure-based factory migration (R7)
+        # ChatService will be created with factories; _stms is populated lazily
+        _stm_store: dict = {}
+
         services = AppServices(
             chat=ChatService(
-                agent,
-                memory,
-                version,
+                agent_factory=agent_factory,
+                memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid),
+                version_manager=version,
                 skill_service=skill_service,
                 tool_executor=executor,
                 capability_runtime=capability_runtime,
@@ -169,11 +208,33 @@ class AppRuntime:
             eval=EvalService(settings),
             config=ConfigService(settings, extension_manager),
         )
+
+        # Restore existing sessions from database into chat._sessions
+        # so the frontend can access them without needing restoreSession first.
+        try:
+            from agentnexus.memory.versioned import ConversationVersionManager
+            from agentnexus.services.chat import SessionHandle
+            recent = ConversationVersionManager.find_recent_sessions(
+                settings.memory_db_path, workspace_path, limit=50
+            )
+            restored_count = 0
+            for s in recent:
+                sid = s.get("session_id")
+                if sid and sid not in services.chat._sessions:
+                    services.chat._sessions[sid] = SessionHandle(
+                        id=sid, skill=None, profile=s.get("profile")
+                    )
+                    restored_count += 1
+            print(f"[SessionRestore] Restored {restored_count} sessions from DB (total {len(recent)} found, workspace={ConversationVersionManager.normalize_workspace_path(workspace_path)})")
+        except Exception as e:
+            print(f"[SessionRestore] FAILED: {e}")
+            logger.warning("Session restore from DB failed: %s", e, exc_info=True)
+
         return cls(
             settings=settings,
             llm=llm,
             executor=executor,
-            agent=agent,
+            agent=build_agent,
             memory_manager=memory,
             version_manager=version,
             mcp_manager=mcp_manager,

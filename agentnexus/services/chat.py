@@ -47,30 +47,42 @@ class ChatService:
 
     def __init__(
         self,
-        agent: Any,
-        memory_manager: Any = None,
+        agent_factory: Callable[[], Any],
+        memory_factory_builder: Callable[[str], Callable[[], Any]],
         version_manager: Any = None,
         skill_service: Any = None,
         tool_executor: Any = None,
         capability_runtime: Any = None,
     ):
-        self._agent = agent
-        self._memory = memory_manager
-        self._version = version_manager
-        self._skill_service = skill_service
-        self._tool_executor = tool_executor or getattr(agent, "tool_executor", None)
+        # Factories for per-session agent/memory creation (Phase 1: multi-session)
+        self._agent_factory = agent_factory
+        self._memory_factory_builder = memory_factory_builder
+        # Legacy references
+        self._version = version_manager  # Used by _get_version_manager for workspace path
+        self._tool_executor = tool_executor
         self._capability_runtime = capability_runtime
+        self._skill_service = skill_service
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
         self._turns: dict[str, TurnRuntime] = {}
-        self._stm_lock = threading.Lock()
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-        self._is_processing = False
+        # Per-session locking (R0 resolved: threading, R1, R2)
+        self._session_locks: dict[str, threading.Lock] = {}
+        self._locks_lock = threading.Lock()
+        self._processing_lock = threading.Lock()
+        self._processing_sessions: set[str] = set()
+        # Per-session agent and memory instances (R1: isolation)
+        self._agents: dict[str, Any] = {}
+        self._memory_managers: dict[str, Any] = {}
+        # Per-session token buffers for WS reconnect snapshot (R8)
+        self._token_buffers: dict[str, str] = {}
+        self._token_cursors: dict[str, int] = {}
         # Per-session version managers — each session gets its own journal + checkpoints
         self._version_managers: dict[str, Any] = {}
         # Per-session short-term memories — each session gets its own STM deque
+        # (R7: migrated into MemoryManager via closure factory)
         self._stms: dict[str, Any] = {}
 
     def start_session(self, skill: str | None = None, profile: str | None = None) -> SessionHandle:
@@ -78,11 +90,59 @@ class ChatService:
         self._sessions[handle.id] = handle
         return handle
 
+    # ── Per-Session Lock & Instance Management (Phase 1) ──────────
+
+    def _get_session_lock(self, session_id: str) -> threading.Lock:
+        """Get or create a per-session lock. Thread-safe creation via meta-lock."""
+        with self._locks_lock:
+            if session_id not in self._session_locks:
+                self._session_locks[session_id] = threading.Lock()
+            return self._session_locks[session_id]
+
+    def _get_or_create_agent(self, session_id: str) -> Any:
+        """Get or create a per-session ReActAgent instance."""
+        lock = self._get_session_lock(session_id)
+        with lock:
+            if session_id not in self._agents:
+                self._agents[session_id] = self._agent_factory(session_id)
+            return self._agents[session_id]
+
+    def _get_or_create_memory(self, session_id: str) -> Any:
+        """Get or create a per-session MemoryManager.
+        R7: factory_builder returns a closure that absorbs STM on first call."""
+        lock = self._get_session_lock(session_id)
+        with lock:
+            if session_id not in self._memory_managers:
+                factory = self._memory_factory_builder(session_id)
+                self._memory_managers[session_id] = factory()
+            return self._memory_managers[session_id]
+
+    def delete_session(self, session_id: str) -> None:
+        """Explicit cleanup for all per-session state (R3). Lock ordering: acquire session lock first."""
+        session_lock = self._get_session_lock(session_id)
+        with session_lock:
+            self._agents.pop(session_id, None)
+            self._memory_managers.pop(session_id, None)
+            self._token_buffers.pop(session_id, None)  # R8
+            self._token_cursors.pop(session_id, None)  # R8
+        # Session lock is idle now, safe to remove
+        with self._locks_lock:
+            self._session_locks.pop(session_id, None)
+        with self._processing_lock:
+            self._processing_sessions.discard(session_id)
+
+    def is_session_processing(self, session_id: str) -> bool:
+        """Check if a specific session is currently processing."""
+        with self._processing_lock:
+            return session_id in self._processing_sessions
+
     # ── Message Queue ──────────────────────────────────────────────
 
     @property
     def is_processing(self) -> bool:
-        return self._is_processing
+        """Check if ANY session is currently processing."""
+        with self._processing_lock:
+            return len(self._processing_sessions) > 0
 
     @property
     def queue_size(self) -> int:
@@ -100,9 +160,18 @@ class ChatService:
         except queue.Empty:
             return None
 
-    def mark_processing(self, processing: bool) -> None:
-        """Mark whether the agent is currently processing a message."""
-        self._is_processing = processing
+    def mark_processing(self, processing: bool, session_id: str | None = None) -> None:
+        """Mark whether a session is currently processing. Backward-compatible: if no session_id, affects all."""
+        with self._processing_lock:
+            if session_id is not None:
+                if processing:
+                    self._processing_sessions.add(session_id)
+                else:
+                    self._processing_sessions.discard(session_id)
+            else:
+                # Legacy fallback: clear all processing state
+                if not processing:
+                    self._processing_sessions.clear()
 
     def _put_event(self, run_id: str, event: AgentEvent) -> None:
         """Put event into both sync and async queues."""
@@ -124,17 +193,16 @@ class ChatService:
     ) -> RunHandle:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
-        # Swap per-session STM into memory_manager so the agent and TurnRuntime
-        # read/write the correct session's context (not the global scratch STM).
-        # Lock protects the shared self._memory.short_term from concurrent
-        # swap/restore by two sessions running in parallel threads.
-        stm_lock = self._stm_lock if self._memory is not None else None
-        saved_stm = None
-        if stm_lock is not None:
-            stm_lock.acquire()
-            saved_stm = self._memory.short_term
-            self._memory.short_term = self._get_or_create_stm(session_id)
-        run, events, turn = self.begin_turn(session_id, text)
+        # Per-session agent and memory — no shared lock needed (R1)
+        agent = self._get_or_create_agent(session_id)
+        memory = self._get_or_create_memory(session_id)
+        # Reset token buffers for new run (R8)
+        with self._get_session_lock(session_id):
+            self._token_buffers[session_id] = ""
+            self._token_cursors[session_id] = 0
+        # Mark this session as processing
+        self.mark_processing(True, session_id=session_id)
+        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
         if on_run_started is not None:
             on_run_started(run)
         # Persist user question immediately so it survives even if the run
@@ -149,31 +217,31 @@ class ChatService:
                 )
         except Exception as e:
             logger.debug("Failed to persist user question immediately: %s", e)
-        old_on_event = getattr(self._agent, "_on_event", None)
-        old_output = getattr(self._agent, "_output", None)
+        old_on_event = getattr(agent, "_on_event", None)
+        old_output = getattr(agent, "_output", None)
         try:
             if self._capability_runtime is not None:
                 self._capability_runtime.refresh_if_stale()
-            if hasattr(self._agent, "set_cancel_checker"):
-                self._agent.set_cancel_checker(turn.cancel_checker)
-            agent_text = self._prepare_message(text, events, run.id, session_id)
-            self._install_agent_event_bridge(turn, events, run.id, session_id, old_on_event)
+            if hasattr(agent, "set_cancel_checker"):
+                agent.set_cancel_checker(turn.cancel_checker)
+            agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
+            self._install_agent_event_bridge(turn, events, run.id, session_id, old_on_event, agent=agent)
             # Suppress agent _output (print) — events are sent via WebSocket
             try:
-                self._agent._output = lambda _msg: None
+                agent._output = lambda _msg: None
             except Exception as e:
                 logger.debug("Failed to suppress agent output: %s", e)
             # 启动 trace，记录任务级元数据
             from agentnexus.observability.tracer import trace_manager as _tm
             _tm.start_trace(agent_text, metadata={
                 "user_goal": text,
-                "model_version": self._agent.llm_client.model,
-                "agent_id": self._agent.agent_id,
-                "max_steps": self._agent.max_steps,
+                "model_version": agent.llm_client.model,
+                "agent_id": agent.agent_id,
+                "max_steps": agent.max_steps,
                 "session_id": session_id,
             })
             try:
-                result = self._agent.run(agent_text, memory_manager=self._memory)
+                result = agent.run(agent_text, memory_manager=memory)
             finally:
                 _tm.end_trace()
             answer = getattr(result, "answer", result)
@@ -217,19 +285,15 @@ class ChatService:
             ))
             raise
         finally:
-            # Restore global STM — per-session STM stays in self._stms
-            if saved_stm is not None:
-                self._memory.short_term = saved_stm
-            if stm_lock is not None:
-                stm_lock.release()
-            if hasattr(self._agent, "set_cancel_checker"):
-                self._agent.set_cancel_checker(None)
+            self.mark_processing(False, session_id=session_id)
+            if hasattr(agent, "set_cancel_checker"):
+                agent.set_cancel_checker(None)
             try:
-                self._agent._on_event = old_on_event
+                agent._on_event = old_on_event
             except Exception as e:
                 logger.debug("Failed to restore agent _on_event: %s", e)
             try:
-                self._agent._output = old_output
+                agent._output = old_output
             except Exception as e:
                 logger.debug("Failed to restore agent _output: %s", e)
             self._put_event(run.id, None)
@@ -267,7 +331,7 @@ class ChatService:
         from agentnexus.memory.short_term import ShortTermMemory
         self._stms[session_id] = ShortTermMemory.from_json(snapshot)
 
-    def begin_turn(self, session_id: str, text: str) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
+    def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
         run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
@@ -280,7 +344,7 @@ class ChatService:
             run_id=run.id,
             session_id=session_id,
             question=text,
-            memory_manager=self._memory,
+            memory_manager=memory_manager,
             version_manager=version_mgr,
         )
         self._turns[run.id] = turn
@@ -307,20 +371,27 @@ class ChatService:
         events: queue.Queue[AgentEvent | None],
         run_id: str,
         session_id: str,
+        agent: Any = None,
+        memory_manager: Any = None,
     ) -> str:
         service = self._skill_service
+        agent = agent or getattr(self, "_agent", None)
+        memory_manager = memory_manager or getattr(self, "_memory", None)
         if service is None:
             return text
         session = self._sessions[session_id]
         if session.skill:
             service.use(session.skill)
+        # Set session profile on per-session agent (replaces SkillService.agent reference)
+        if agent is not None and session.skill and hasattr(agent, "set_session_profile"):
+            agent.set_session_profile(session.skill)
 
         # Get router recommendations (fast, deterministic, ~45ms)
         recommendations = service.get_recommendations(text)
 
         # Inject skill context WITH recommendations into agent prompt
-        if hasattr(self._agent, "set_available_skill_context"):
-            self._agent.set_available_skill_context(
+        if agent is not None and hasattr(agent, "set_available_skill_context"):
+            agent.set_available_skill_context(
                 service.available_skill_context(recommendations=recommendations),
             )
 
@@ -333,7 +404,7 @@ class ChatService:
         result = service.prepare_message(
             text,
             tool_executor=self._tool_executor,
-            memory_manager=self._memory,
+            memory_manager=memory_manager,
         )
         snapshot = service.snapshot()
         if snapshot.auto_route_reason:
@@ -364,8 +435,8 @@ class ChatService:
         # Pass workflow context to agent as a separate system message
         # (not embedded in the user question — that buryies the actual question)
         workflow_ctx = getattr(result, "workflow_context", None)
-        if workflow_ctx and hasattr(self._agent, "set_workflow_context"):
-            self._agent.set_workflow_context(workflow_ctx)
+        if workflow_ctx and agent is not None and hasattr(agent, "set_workflow_context"):
+            agent.set_workflow_context(workflow_ctx)
         return result.enhanced_question
 
     def _install_agent_event_bridge(
@@ -375,7 +446,9 @@ class ChatService:
         run_id: str,
         session_id: str,
         previous,
+        agent: Any = None,
     ) -> None:
+        agent = agent or getattr(self, "_agent", None)
         has_reasoning = False
 
         def _on_event(event, from_state, to_state):
@@ -397,6 +470,13 @@ class ChatService:
                         session_id=session_id,
                     )
                     self._put_event(run_id, token_event)
+                    # Update token buffer + cursor atomically (R8)
+                    # Same lock as snapshot read — ensures content/cursor consistency
+                    with self._get_session_lock(session_id):
+                        self._token_buffers[session_id] = \
+                            self._token_buffers.get(session_id, "") + token
+                        self._token_cursors[session_id] = \
+                            self._token_cursors.get(session_id, 0) + 1
                 return
 
             self._record_agent_event(turn, event)
@@ -417,7 +497,8 @@ class ChatService:
                 previous(event, from_state, to_state)
 
         try:
-            self._agent._on_event = _on_event
+            if agent is not None:
+                agent._on_event = _on_event
         except Exception as e:
             logger.debug("Failed to install agent event bridge: %s", e)
 
@@ -506,8 +587,8 @@ class ChatService:
             raise KeyError(f"Unknown session_id: {session_id}")
         return {
             "session": self._sessions[session_id],
-            "memory": self._memory,
-            "version": self._version,
+            "memory": self._memory_managers.get(session_id),
+            "version": self._version_managers.get(session_id),
         }
 
     def get_run_snapshot(self, run_id: str) -> TurnRecord | None:

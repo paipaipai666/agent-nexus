@@ -183,7 +183,7 @@ export default function ChatPage() {
   const {
     sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, reconnectWs, getCachedMessages, clearCachedMessages, wasRunningOnSwitch,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveSessionState,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -206,23 +206,45 @@ export default function ChatPage() {
     return { name, display }
   }
 
-  const loadAndDisplayMessages = useCallback(async (): Promise<{ loaded: boolean; hasAssistant: boolean }> => {
+  const loadAndDisplayMessages = useCallback(async (forceSessionId?: string) => {
+    const currentSid = forceSessionId || currentSessionIdRef.current
+    console.log('[loadAndDisplayMessages] sid:', currentSid)
+    // Check SessionManager's in-memory Map first — preserves streaming content
+    // that hasn't been persisted to the backend yet.
+    // Use getLiveSessionState (reads from sessionsRef) to avoid stale closure:
+    // this function has empty deps and must always read the latest Map.
+    if (currentSid) {
+      const cachedState = getLiveSessionState(currentSid)
+      if (cachedState && cachedState.messages.length > 0) {
+        console.log('[loadAndDisplayMessages] Using Map cache:', cachedState.messages.length, 'messages')
+        for (const m of cachedState.messages) animatedIds.add(m.id)
+        setMessages(cachedState.messages)
+        return
+      }
+    }
     try {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
-        const currentSid = currentSessionIdRef.current
         const hist = await api.listSessionHistory(0, currentSid || undefined)
         stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
       } catch {
         stm = (await api.listShortMemories()).messages
       }
-      if (!stm || stm.length === 0) { setMessages([]); return { loaded: false, hasAssistant: false } }
+      console.log('[loadAndDisplayMessages] Backend returned:', stm?.length, 'messages for sid:', currentSid)
+      if (!stm || stm.length === 0) {
+        // Backend returned no messages. Only clear if the Map also has nothing.
+        if (currentSid) {
+          const existingState = getLiveSessionState(currentSid)
+          if (existingState && existingState.messages.length > 0) return
+        }
+        setMessages([])
+        return
+      }
 
       const transformed: Message[] = []
       let idx = 0
       const ts = (m: any) => new Date(m.ts || Date.now())
       let pendingTools: Message[] = []
-      let hasAssistant = false
 
       const flushPendingTools = () => {
         for (const t of pendingTools) { t.id = `h-${idx++}`; transformed.push(t) }
@@ -247,7 +269,7 @@ export default function ChatPage() {
 
         if (role === 'system' && content.startsWith('[最终答案]')) {
           const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
-          if (answer) { flushPendingTools(); hasAssistant = true; transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
+          if (answer) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
           continue
         }
 
@@ -269,17 +291,17 @@ export default function ChatPage() {
           continue
         }
 
-        if (role === 'assistant') { flushPendingTools(); hasAssistant = true; transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
+        if (role === 'assistant') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
 
         if (role === 'system' && content.length > 0) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }) }
       }
 
       flushPendingTools()
+      console.log('[loadAndDisplayMessages] Transformed:', transformed.length, 'messages. Setting on active session.')
       // Mark all restored messages as already animated
       for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
-      return { loaded: transformed.length > 0, hasAssistant }
-    } catch (err) { console.error('Failed to load messages:', err); return { loaded: false, hasAssistant: false } }
+    } catch (err) { console.error('Failed to load messages:', err) }
   }, [])
 
   useEffect(() => {
@@ -300,82 +322,41 @@ export default function ChatPage() {
     }
   }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
 
+  const fetchDynamicCommands = useCallback(() => {
+    api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
+    api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
+    api.getExtensions().then(setPlugins).catch(() => {})
+  }, [])
+
+  const initNew = useCallback((sid: string) => {
+    currentSessionIdRef.current = sid
+    setGlobalSessionId(sid)
+    // Don't call setMessages([]) here — React batching means activeSessionId
+    // is still the OLD session, so this would clear the old session's messages.
+    // The new session already starts with empty messages in SessionManager's Map.
+    api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+    api.getConfig().then((config: any) => {
+      if (config.cwd) setCwd(config.cwd)
+    }).catch(() => {})
+    Promise.all([
+      api.listMcpTools().catch(() => ({ tools: [] })),
+      api.listSkills().catch(() => ({ skills: [] })),
+    ]).then(([mcpData, skillsData]) => {
+      setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
+    }).catch(() => {})
+    api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
+    fetchDynamicCommands()
+  }, [fetchDynamicCommands])
+
   useEffect(() => {
-    const fetchDynamicCommands = () => {
-      api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
-      api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
-      api.getExtensions().then(setPlugins).catch(() => {})
-    }
-
-    const initNew = (sid: string) => {
-      currentSessionIdRef.current = sid
-      setGlobalSessionId(sid)
-      setMessages([])
-      animatedIds.clear()
-      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
-      api.getConfig().then((config: any) => {
-        if (config.cwd) setCwd(config.cwd)
-      }).catch(() => {})
-      Promise.all([
-        api.listMcpTools().catch(() => ({ tools: [] })),
-        api.listSkills().catch(() => ({ skills: [] })),
-      ]).then(([mcpData, skillsData]) => {
-        setToolCount((mcpData.tools || []).length + (skillsData.skills || []).filter((s: any) => s.enabled).length)
-      }).catch(() => {})
-      api.getTodos(sid).then(d => setTodoCount(d.count || 0)).catch(() => {})
-      fetchDynamicCommands()
-      // Notify sidebar to refresh session list — api.createSession() is async,
-      // so the route-change effect may fire before the session exists.
-      window.dispatchEvent(new Event('session-updated'))
-    }
-
     const initRestore = (sid: string) => {
+      console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      // Force WebSocket reconnection — setGlobalSessionId may not trigger
-      // the WS useEffect if sid is the same as the current value (e.g.,
-      // navigating away and back to the same session).
-      reconnectWs()
-      // Restore messages: prefer backend (complete data) over cache (partial streaming).
-      //
-      // Key insight: the backend ALWAYS has at least the user message, so checking
-      // "hasData" alone is not enough. We must check "hasAssistant" to know if the
-      // agent completed its reply. If the agent was running when we switched away
-      // and the backend has no assistant message yet, the cache (with streaming tokens)
-      // is the best we have.
-      const agentWasRunning = wasRunningOnSwitch(sid)
-      const cached = getCachedMessages(sid)
-      if (agentWasRunning && cached && cached.length > 0) {
-        // Agent was still running when we switched away — use cache directly.
-        // Skip loadAndDisplayMessages entirely to avoid a race condition:
-        // API response calls setMessages(transformed) which overwrites WS tokens
-        // that arrived between reconnection and API resolution.
-        // Cache has streaming content from before navigation; WS tokens will
-        // append naturally via the token handler using currentAssistantIdRef.
-        // When agent finishes, answer handler replaces content and clears cache.
-        setMessages(cached)
-        for (const m of cached) animatedIds.add(m.id)
-      } else {
-        loadAndDisplayMessages()
-          .then(({ loaded, hasAssistant }) => {
-            if (hasAssistant) {
-              clearCachedMessages(sid)
-            } else if (!loaded) {
-              const fallback = getCachedMessages(sid)
-              if (fallback) {
-                setMessages(fallback)
-                for (const m of fallback) animatedIds.add(m.id)
-              }
-            }
-          })
-          .catch(() => {
-            const fallback = getCachedMessages(sid)
-            if (fallback) {
-              setMessages(fallback)
-              for (const m of fallback) animatedIds.add(m.id)
-            }
-          })
-      }
+      // Pass session ID explicitly — currentSessionIdRef may not be updated yet
+      // due to React batching. loadAndDisplayMessages checks SessionManager's
+      // Map first, so it handles both cached and backend-fetched messages correctly.
+      loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
@@ -400,11 +381,26 @@ export default function ChatPage() {
       // Reset running state and queue before switching sessions
       resetForSessionSwitch()
       api.restoreSession(routeSessionId)
-        .then(({ session_id }) => { currentSessionIdRef.current = session_id; initRestore(session_id) })
+        .then(({ session_id, restored }) => {
+          currentSessionIdRef.current = session_id
+          if (restored === false || session_id !== routeSessionId) {
+            // Session was recreated (old one lost) — update URL to new session
+            navigate(`/chat/${session_id}`, { replace: true })
+            initNew(session_id)
+          } else {
+            initRestore(session_id)
+          }
+        })
         .catch(() => api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
     } else {
+      // Don't create session eagerly — defer to first message send.
+      // This prevents empty "New session" cards from accumulating in the sidebar.
       resetForSessionSwitch()
-      api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) })
+      currentSessionIdRef.current = null
+      setGlobalSessionId(null)
+      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getConfig().then((config: any) => { if (config.cwd) setCwd(config.cwd) }).catch(() => {})
+      fetchDynamicCommands()
     }
     // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -413,16 +409,51 @@ export default function ChatPage() {
   // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])
 
-  // Handle URL redirect on first message (from / to /chat/{id})
-  const handleSendMessage = useCallback((text: string) => {
-    sendMessage(text)
-    if (location.pathname === '/' && currentSessionIdRef.current) {
-      navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
+  // Reset session state when "New Chat" is clicked (even when already on '/')
+  useEffect(() => {
+    const handleNewChat = () => {
+      currentSessionIdRef.current = null
+      pendingFirstMessageRef.current = null
+      setGlobalSessionId(null)
     }
-  }, [sendMessage, location.pathname, navigate])
+    window.addEventListener('new-chat', handleNewChat)
+    return () => window.removeEventListener('new-chat', handleNewChat)
+  }, [])
+
+  // Pending first message for lazy session creation (route '/' without session)
+  const pendingFirstMessageRef = useRef<string | null>(null)
+
+  // Send pending first message once session is activated (WS connects on activeSessionId change)
+  useEffect(() => {
+    const pending = pendingFirstMessageRef.current
+    if (!pending) return
+    pendingFirstMessageRef.current = null
+    // sendMessageInternal retries WS send if not yet connected, so this is safe
+    sendMessage(pending)
+  }, [sendMessage])
+
+  // Handle first message — create session lazily if needed, then send.
+  const handleSendMessage = useCallback((text: string) => {
+    if (!currentSessionIdRef.current) {
+      // No session yet (first message from route '/') — create lazily.
+      // Defer the actual send to a useEffect that fires after activeSessionId
+      // is set and the WS connection is established by SessionManager.
+      pendingFirstMessageRef.current = text
+      api.createSession().then(({ session_id }) => {
+        currentSessionIdRef.current = session_id
+        initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
+        navigate(`/chat/${session_id}`, { replace: true })
+      })
+    } else {
+      sendMessage(text)
+      if (location.pathname === '/') {
+        navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
+      }
+    }
+  }, [sendMessage, location.pathname, navigate, initNew])
 
   const handleSend = () => {
-    const text = input.trim(); if (!text || !sessionId) return
+    const text = input.trim(); if (!text) return
     setInput(''); setShowPalette(false)
     if (text.startsWith('/')) { handleSlashCommand(text); return }
     if (isRunning) { queueMessage(text) }

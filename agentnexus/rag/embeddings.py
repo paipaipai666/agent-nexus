@@ -9,6 +9,10 @@ from collections.abc import Callable
 from hashlib import blake2b
 from typing import Any
 
+# Default to offline mode — use local HuggingFace cache, skip network checks.
+# Set HF_HUB_OFFLINE=0 to re-enable online mode for model updates.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
