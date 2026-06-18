@@ -148,31 +148,25 @@ class TestGuiEventMapping:
         assert result["type"] == "thinking"
         assert "I need to search" in result["content"]
 
-    def test_turn_journal_tool_start_maps_to_tool_call(self):
-        chat = MagicMock()
-        turn = MagicMock()
-        turn._journal = ["tool start: web_search {'query': 'test'}"]
-        chat._turns = {"run_test": turn}
-
-        event = self._make_event("turn_journal", {"event": "TOOL_START"})
-        result = _map_to_gui_event(event, chat, 0)
+    def test_direct_tool_start_maps_to_tool_call(self):
+        """tool_start carries payload directly — no journal parsing."""
+        event = self._make_event("tool_start", {"name": "web_search", "arguments": {"query": "test"}})
+        result = _map_to_gui_event(event, MagicMock(), 0)
 
         assert result is not None
         assert result["type"] == "tool_call"
         assert result["tool_name"] == "web_search"
+        assert result["arguments"] == {"query": "test"}
 
-    def test_turn_journal_tool_done_maps_to_tool_result(self):
-        chat = MagicMock()
-        turn = MagicMock()
-        turn._journal = ["tool done: web_search -> search results here"]
-        chat._turns = {"run_test": turn}
-
-        event = self._make_event("turn_journal", {"event": "TOOL_DONE"})
-        result = _map_to_gui_event(event, chat, 0)
+    def test_direct_tool_done_maps_to_tool_result(self):
+        """tool_done carries payload directly — no journal parsing."""
+        event = self._make_event("tool_done", {"name": "web_search", "result": "search results here"})
+        result = _map_to_gui_event(event, MagicMock(), 0)
 
         assert result is not None
         assert result["type"] == "tool_result"
         assert result["tool_name"] == "web_search"
+        assert result["result"] == "search results here"
 
     def test_answer_thought_maps_to_thinking(self):
         chat = MagicMock()

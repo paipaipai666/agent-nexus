@@ -146,18 +146,49 @@ class TestChatServiceAnswerFlow:
         assert result["content"] == "I need to search for info"
         assert result["seq"] == 0
 
-    def test_turn_journal_tool_start_maps_to_tool_call(self):
-        service = MagicMock()
-        turn = MagicMock()
-        turn._journal = ["tool start: web_search {\"query\": \"test\"}"]
-        service._turns = {"run_123": turn}
-
+    def test_direct_tool_start_maps_to_tool_call(self):
+        """tool_start event carries payload directly — no journal parsing."""
         event = AgentEvent(
-            type="turn_journal",
-            payload={"event": "TOOL_START"},
+            type="tool_start",
+            payload={"name": "web_search", "arguments": {"query": "test"}},
             run_id="run_123",
         )
-        result = _map_to_gui_event(event, service, 0)
+        result = _map_to_gui_event(event, MagicMock(), 5)
         assert result is not None
         assert result["type"] == "tool_call"
         assert result["tool_name"] == "web_search"
+        assert result["arguments"] == {"query": "test"}
+        assert result["seq"] == 5
+
+    def test_direct_tool_done_maps_to_tool_result(self):
+        """tool_done event carries payload directly — no journal parsing."""
+        event = AgentEvent(
+            type="tool_done",
+            payload={"name": "web_search", "result": "search results here"},
+            run_id="run_123",
+        )
+        result = _map_to_gui_event(event, MagicMock(), 6)
+        assert result is not None
+        assert result["type"] == "tool_result"
+        assert result["tool_name"] == "web_search"
+        assert result["result"] == "search results here"
+        assert result["seq"] == 6
+
+    def test_tool_start_with_space_in_name(self):
+        """Tool names with spaces are preserved through direct payload."""
+        event = AgentEvent(
+            type="tool_start",
+            payload={"name": "web search", "arguments": {"query": "test"}},
+            run_id="run_123",
+        )
+        result = _map_to_gui_event(event, MagicMock(), 0)
+        assert result is not None
+        assert result["tool_name"] == "web search"
+
+    def test_tool_done_matching_name_with_result(self):
+        """tool_done name matches tool_start name — frontend can pair them."""
+        start = AgentEvent(type="tool_start", payload={"name": "read_file", "arguments": {"path": "/tmp/x"}})
+        done = AgentEvent(type="tool_done", payload={"name": "read_file", "result": "file contents"})
+        s = _map_to_gui_event(start, MagicMock(), 0)
+        d = _map_to_gui_event(done, MagicMock(), 1)
+        assert s["tool_name"] == d["tool_name"]

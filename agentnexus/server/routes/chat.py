@@ -40,6 +40,25 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
     payload = getattr(event, "payload", {})
     run_id = getattr(event, "run_id", None)
 
+    # Direct tool events — payload carries structured data, no journal parsing needed
+    if event_type == "tool_start":
+        return {
+            "type": "tool_call",
+            "tool_name": payload.get("name", ""),
+            "arguments": payload.get("arguments", {}),
+            "run_id": run_id,
+            "seq": seq,
+        }
+
+    if event_type == "tool_done":
+        return {
+            "type": "tool_result",
+            "tool_name": payload.get("name", ""),
+            "result": payload.get("result", ""),
+            "run_id": run_id,
+            "seq": seq,
+        }
+
     if event_type == "turn_journal":
         agent_event_name = payload.get("event", "")
 
@@ -53,30 +72,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
                         thought = parsed["content"]
                         break
             return {"type": "thinking", "content": thought, "run_id": run_id, "seq": seq}
-
-        elif agent_event_name == "TOOL_START":
-            turn = chat_service._turns.get(run_id)
-            tool_name, arguments = "", "{}"
-            if turn:
-                for entry in reversed(turn._journal):
-                    parsed = _parse_journal_entry(entry)
-                    if parsed["kind"] == "tool_start":
-                        tool_name = parsed["name"]
-                        arguments = parsed["arguments"]
-                        break
-            return {"type": "tool_call", "tool_name": tool_name, "arguments": arguments, "run_id": run_id, "seq": seq}
-
-        elif agent_event_name == "TOOL_DONE":
-            turn = chat_service._turns.get(run_id)
-            tool_name, result = "", ""
-            if turn:
-                for entry in reversed(turn._journal):
-                    parsed = _parse_journal_entry(entry)
-                    if parsed["kind"] == "tool_done":
-                        tool_name = parsed["name"]
-                        result = parsed["result"]
-                        break
-            return {"type": "tool_result", "tool_name": tool_name, "result": result, "run_id": run_id, "seq": seq}
 
         return None
 
