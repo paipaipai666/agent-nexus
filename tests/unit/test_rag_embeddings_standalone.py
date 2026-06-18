@@ -1,9 +1,11 @@
 import math
+from unittest.mock import patch
 
 from agentnexus.rag.embeddings import (
     VECTOR_DIM,
     _fallback_tokenize,
     _FallbackEmbeddingModel,
+    _resolve_local_model_path,
     embedding_to_list,
     get_embedding_model,
     reset_embedding_model,
@@ -126,3 +128,22 @@ class TestEmbeddingToList:
         data = (1.0, 2.0)
         result = embedding_to_list(data)
         assert result is data
+
+
+class TestResolveLocalModelPath:
+    @patch("huggingface_hub.snapshot_download")
+    def test_returns_path_when_cached(self, mock_download):
+        mock_download.return_value = "/home/user/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5"
+
+        result = _resolve_local_model_path("BAAI/bge-small-zh-v1.5")
+
+        assert result == "/home/user/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5"
+        mock_download.assert_called_once_with("BAAI/bge-small-zh-v1.5", local_files_only=True)
+
+    @patch("huggingface_hub.snapshot_download", side_effect=FileNotFoundError("not cached"))
+    def test_returns_none_when_not_cached(self, mock_download):
+        assert _resolve_local_model_path("nonexistent/model") is None
+
+    @patch("huggingface_hub.snapshot_download", side_effect=Exception("unexpected"))
+    def test_returns_none_on_exception(self, mock_download):
+        assert _resolve_local_model_path("any/model") is None

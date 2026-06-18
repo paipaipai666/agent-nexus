@@ -13,6 +13,22 @@ logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
 
+
+def _resolve_local_model_path(model_name: str) -> str | None:
+    """Return the local cache path for a HuggingFace model, or ``None``.
+
+    Uses ``snapshot_download(local_files_only=True)`` which **never** makes
+    HTTP requests — it returns the cached directory path or raises an error.
+    This is more reliable than ``HF_HUB_OFFLINE`` because
+    ``sentence_transformers`` can bypass the hub's offline check.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+
+        return snapshot_download(model_name, local_files_only=True)
+    except Exception:
+        return None
+
 VECTOR_DIM = 512
 _EMBED_BATCH_SIZE = 1024
 _EMBED_TORCH_THREADS_CAP = 12
@@ -124,8 +140,20 @@ def get_embedding_model(
         try:
             from sentence_transformers import SentenceTransformer
 
+            # Prefer local cache to avoid network timeouts (e.g. behind GFW).
+            # snapshot_download(local_files_only=True) returns the cached path
+            # without making ANY HTTP requests.  Passing a local path to
+            # SentenceTransformer also bypasses its own hub fetch for modules.json.
+            local_path = _resolve_local_model_path(settings.embedding_model)
+            if local_path is not None:
+                logger.info("Embedding model '%s' found in local cache, loading offline.", settings.embedding_model)
+                model_source = local_path
+            else:
+                logger.info("Embedding model '%s' not cached, will download from HuggingFace Hub.", settings.embedding_model)
+                model_source = settings.embedding_model
+
             # Load to CPU first then move to target device to avoid meta tensor issues
-            _model = SentenceTransformer(settings.embedding_model, device="cpu")
+            _model = SentenceTransformer(model_source, device="cpu")
             if resolved_device != "cpu":
                 try:
                     _model = _model.to(resolved_device)
