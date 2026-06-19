@@ -109,6 +109,7 @@ class TestExecuteTool:
         )
         assert "错误" in result
         assert "my_tool" in result
+        # LOW-02: ValueError is a safe domain exception, message preserved
         assert "bad input" in result
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")

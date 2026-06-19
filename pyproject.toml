@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "litellm>=1.60,<3",
+    "litellm>=1.60,<2",
     "openai>=1.50,<3",
     "tiktoken>=0.7",
     "pydantic>=2.10,<3",

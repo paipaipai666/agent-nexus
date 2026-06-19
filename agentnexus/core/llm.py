@@ -3,7 +3,10 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
+
+if TYPE_CHECKING:
+    from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
 from rich.console import Console
 from rich.live import Live
@@ -82,7 +85,7 @@ class AgentLLM:
             self._session_tracker = SessionCapabilityTracker()
         return self._session_tracker
 
-    def reset_session_capabilities(self):
+    def reset_session_capabilities(self) -> None:
         self._session_tracker = SessionCapabilityTracker()
 
     def think(self, messages: List[Dict[str, str]], temperature: float = 0, silent: bool = False,
@@ -278,7 +281,16 @@ class AgentLLM:
         # All retries exhausted with transient errors
         return ""
 
-    def _call_via_provider(self, provider, messages, temperature, tools, response_format, thinking, on_token=None):
+    def _call_via_provider(
+        self,
+        provider: "BaseLLMProvider",
+        messages: list[dict],
+        temperature: float,
+        tools: list[dict] | None,
+        response_format: dict | None,
+        thinking: bool | None,
+        on_token: Callable[[str], None] | None = None,
+    ) -> "StreamResult":
         """Call LLM via a direct provider (OpenAI SDK)."""
         caps = self.capabilities
         tracker = self.session_tracker

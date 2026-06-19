@@ -23,8 +23,8 @@ def _log_tool_error(name: str, exc: Exception) -> None:
             f.write(f"Tool: {name}\n")
             f.write(f"Error: {exc}\n")
             f.write(f"Traceback:\n{traceback.format_exc()}\n")
-    except Exception:
-        pass
+    except Exception as io_err:
+        logger.debug("Failed to write tool error log: %s", io_err)
 
 
 def execute_tool(
@@ -101,4 +101,7 @@ def execute_tool(
             "error": exc,
         })
         _log_tool_error(name, exc)
-        return f"错误: 工具 '{name}' 执行失败: {exc}"
+        # LOW-02: Include message for safe domain exceptions, strip for generic ones
+        if isinstance(exc, (PermissionError, ValueError, TypeError, KeyError)):
+            return f"错误: 工具 '{name}' 执行失败: {exc}"
+        return f"错误: 工具 '{name}' 执行失败"

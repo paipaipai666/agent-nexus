@@ -30,7 +30,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_SENSITIVE_PARAM_TOKENS = ("api_key", "apikey", "token", "secret", "password", "authorization")
+_SENSITIVE_PARAM_TOKENS = (
+    "api_key", "apikey", "token", "secret", "password", "authorization",
+    "credential", "auth", "private", "access_key", "session_key", "signing_key",
+)
 _VALIDATOR_CACHE: dict[str, Any] = {}
 
 

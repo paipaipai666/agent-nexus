@@ -471,7 +471,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
 
     async def send_stream_error(run_id: str, seq: int, exc: Exception) -> None:
         try:
-            await ws.send_json({"type": "error", "message": str(exc), "run_id": run_id, "seq": seq})
+            await ws.send_json({"type": "error", "message": "Internal server error", "run_id": run_id, "seq": seq})
         except WebSocketDisconnect:
             return
         except RuntimeError as send_error:

@@ -201,7 +201,7 @@ class MemoryManager:
         """Reload LTM context after new memories are detected."""
         return self.init_session(question)
 
-    def append(self, role: str, content: str, metadata: dict | None = None):
+    def append(self, role: str, content: str, metadata: dict | None = None) -> None:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()
@@ -230,7 +230,7 @@ class MemoryManager:
         """Write large tool result to disk, return a stub with preview."""
         return offload_large_result(content, self._offload_dir, self.session_id)
 
-    def bridge_read(self, filepath: str, content_preview: str = ""):
+    def bridge_read(self, filepath: str, content_preview: str = "") -> None:
         self._recent_reads.append((filepath, content_preview[:5000], time.time()))
         if len(self._recent_reads) > 20:
             self._recent_reads = self._recent_reads[-20:]
@@ -328,7 +328,7 @@ class MemoryManager:
         if drained:
             self._fire_compact("ltm_drain", drained=drained)
 
-    def mark_api_call(self):
+    def mark_api_call(self) -> None:
         """Record that an API call just happened for time-based microcompact tracking."""
         self._last_api_call_ts = time.time()
 
@@ -382,7 +382,7 @@ class MemoryManager:
             importance_fn=compute_importance,
         )
 
-    def microcompact(self):
+    def microcompact(self) -> None:
         compacted, cleaned = microcompact_messages(
             self.short_term.get_all(),
             parse_tool_message=_parse_tool_message,
@@ -526,7 +526,7 @@ class MemoryManager:
         finally:
             self._compacting = False
 
-    def conclude(self, question: str, answer: str, allow_memory: bool = True):
+    def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()

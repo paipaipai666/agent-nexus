@@ -18,6 +18,13 @@ def generate_token() -> str:
     return _token
 
 
+def rotate_token() -> str:
+    """Generate a new API token, replacing the current one. Returns the new token."""
+    global _token
+    _token = secrets.token_urlsafe(32)
+    return _token
+
+
 def get_token() -> str | None:
     return _token
 
