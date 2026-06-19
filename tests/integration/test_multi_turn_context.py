@@ -6,7 +6,8 @@ in later turns.
 """
 from unittest.mock import MagicMock, patch
 
-from agentnexus.memory.manager import MemoryManager, _GateCircuitState
+from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
 
@@ -32,9 +33,7 @@ class TestMultiTurnContext:
             mgr._embed_model = mock_embed
             mgr._enable_long_term = True
             mgr._ctx_max = 8000
-            mgr._gate_state = _GateCircuitState.CLOSED
-            mgr._gate_failures = 0
-            mgr._gate_opened_at = 0.0
+            mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
             return mgr
 
     def test_earlier_context_available_in_later_turn(self, temp_agentnexus_home):

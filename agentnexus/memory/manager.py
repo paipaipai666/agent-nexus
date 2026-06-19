@@ -4,13 +4,13 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.core.pii import contains_pii as _contains_pii
 from agentnexus.core.pii import mask_pii as _mask_pii
+from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.compaction import is_recoverable_tool
 from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
 from agentnexus.memory.extraction import CATEGORY_LABELS, extract_and_save_memories
@@ -36,15 +36,6 @@ SUMMARIZE_PROMPT = load_prompt("memory_summarize")
 GATE_PROMPT = load_prompt("memory_gate")
 
 
-class _GateCircuitState(Enum):
-    """Three-state circuit breaker for the LLM memory gate."""
-    CLOSED = "closed"       # normal operation
-    OPEN = "open"           # tripped — reject all LLM gate calls
-    HALF_OPEN = "half_open" # probe — allow one request to test recovery
-
-
-
-
 
 class MemoryManager:
     """Session-scoped memory manager combining STM, LTM, compaction, and extraction.
@@ -66,14 +57,16 @@ class MemoryManager:
         self._embed_ready = threading.Event()
         threading.Thread(target=self._preload_embed_model, daemon=True).start()
         self._enable_long_term = enable_long_term
-        self._compact_failures: int = 0
-        self._circuit_open: bool = False
-        self._circuit_opened_at: float = 0.0
-        self._circuit_half_open: bool = False  # half-open probe state
-        # LLM gate circuit breaker
-        self._gate_state = _GateCircuitState.CLOSED
-        self._gate_failures: int = 0
-        self._gate_opened_at: float = 0.0
+        # Compaction circuit breaker (exponential backoff)
+        self._compact_circuit = CircuitBreaker(
+            failure_threshold=3,
+            exponential_backoff=True,
+        )
+        # LLM gate circuit breaker (fixed recovery)
+        self._gate_circuit = CircuitBreaker(
+            failure_threshold=3,
+            recovery_seconds=20.0,
+        )
         self._microcompacts_since_open: int = 0
         self._compacting: bool = False
         self._last_api_call_ts: float = 0.0
@@ -413,22 +406,18 @@ class MemoryManager:
             "is_auto": is_auto, "threshold": threshold,
         })
 
-        if self._circuit_open:
-            # Standard circuit breaker: closed → open → half-open → closed/open
-            backoff = min(30 * (2 ** min(self._compact_failures - 3, 2)), 120)
-            elapsed = time.time() - self._circuit_opened_at
+        circuit = self._compact_circuit
+        half_open_probe = False
 
-            if elapsed < backoff:
-                # Still in cooldown — only do microcompact
-                logger.debug("Circuit breaker in cooldown (%.0fs remaining)", backoff - elapsed)
+        if circuit.is_open:
+            remaining = circuit.backoff_remaining()
+            if remaining > 0:
+                logger.debug("Circuit breaker in cooldown (%.0fs remaining)", remaining)
                 self.microcompact()
                 return 0
-
-            # Cooldown expired — enter half-open state
-            # Don't return here; let the LLM summarization below run as the probe.
-            # The success/failure branches below will handle closing/re-opening.
-            self._circuit_half_open = True
-            self._fire_compact("circuit_half_open", elapsed=elapsed)
+            # Cooldown expired — enter half-open state for probe
+            half_open_probe = True
+            self._fire_compact("circuit_half_open", elapsed=remaining)
 
         if threshold is None:
             threshold = self._compact_threshold
@@ -439,7 +428,7 @@ class MemoryManager:
         tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
 
         # Half-open probe bypasses threshold — we need to test LLM health
-        if not self._circuit_half_open:
+        if not half_open_probe:
             if tokens_before < threshold:
                 if self._settings.time_microcompact_interval > 0:
                     self.microcompact_time_based()
@@ -489,31 +478,21 @@ class MemoryManager:
                 prompt = SUMMARIZE_PROMPT.format(history=augmented)
                 response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
                 if not response:
-                    self._compact_failures += 1
-                    if self._circuit_half_open:
+                    circuit.record_failure()
+                    if half_open_probe:
                         logger.warning("Half-open probe got empty response, re-opening circuit")
-                        self._circuit_half_open = False
-                        self._circuit_open = True
-                        self._circuit_opened_at = time.time()
-                        self._fire_compact("circuit_open")
-                    elif self._compact_failures >= 3:
-                        self._circuit_open = True
-                        self._circuit_opened_at = time.time()
-                        self._microcompacts_since_open = 0
-                        self._fire_compact("circuit_open")
+                    self._fire_compact("circuit_open")
                     return 0
 
                 summary_content = _extract_xml_tag(response, "summary")
                 final_summary = (summary_content or response).strip()
                 self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
                                              is_auto=is_auto, keep_recent=6)
-                # Close circuit if we were in half-open probe
-                if self._circuit_half_open:
+                # Close circuit on success
+                if half_open_probe:
                     logger.info("Circuit breaker closed after successful half-open probe")
                     self._fire_compact("circuit_reset")
-                self._circuit_open = False
-                self._circuit_half_open = False
-                self._compact_failures = 0
+                circuit.record_success()
                 self._microcompacts_since_open = 0
                 self._snip_freed_tokens = 0
                 self._recent_reads.clear()
@@ -539,19 +518,10 @@ class MemoryManager:
                 return tokens_saved
         except Exception as e:
             logger.warning("Compaction failed: %s", e)
-            self._compact_failures += 1
-            if self._circuit_half_open:
-                # Half-open probe failed — re-open circuit
+            circuit.record_failure()
+            if half_open_probe:
                 logger.warning("Half-open probe failed, re-opening circuit breaker")
-                self._circuit_half_open = False
-                self._circuit_open = True
-                self._circuit_opened_at = time.time()
-                self._fire_compact("circuit_open")
-            elif self._compact_failures >= 3:
-                self._circuit_open = True
-                self._circuit_opened_at = time.time()
-                self._microcompacts_since_open = 0
-                self._fire_compact("circuit_open")
+            self._fire_compact("circuit_open")
             return 0
         finally:
             self._compacting = False
@@ -574,8 +544,6 @@ class MemoryManager:
     _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])
     _STRONG_SIGNALS = frozenset(["记住", "我叫", "我的名字", "我喜欢", "我不喜欢", "以后都", "偏好"])
 
-    _GATE_RECOVERY_SECONDS = 20.0
-
     def _should_extract_rules(self, question: str, answer: str) -> str:
         """First-level rule filter. Returns 'yes' / 'no' / 'uncertain'.
 
@@ -595,23 +563,6 @@ class MemoryManager:
             return "no"
         return "uncertain"
 
-    def _gate_on_success(self) -> None:
-        """Reset circuit breaker to CLOSED on successful gate call."""
-        self._gate_state = _GateCircuitState.CLOSED
-        self._gate_failures = 0
-
-    def _gate_on_failure(self) -> None:
-        """Record a gate failure; trip to OPEN if threshold exceeded."""
-        if self._gate_state is _GateCircuitState.HALF_OPEN:
-            # Half-open probe failed → back to OPEN, reset timer
-            self._gate_state = _GateCircuitState.OPEN
-            self._gate_opened_at = time.time()
-            return
-        self._gate_failures += 1
-        if self._gate_failures >= 3:
-            self._gate_state = _GateCircuitState.OPEN
-            self._gate_opened_at = time.time()
-
     def _should_extract(self, question: str, answer: str) -> bool:
         """Two-level filtering: rules first (free), LLM gate second (boundary cases only)."""
         metrics = get_metrics()
@@ -622,32 +573,29 @@ class MemoryManager:
             return rule_result == "yes"
 
         # Level 2: LLM gate (only for boundary cases)
-        # Circuit breaker check
-        if self._gate_state is _GateCircuitState.OPEN:
-            if time.time() - self._gate_opened_at > self._GATE_RECOVERY_SECONDS:
-                self._gate_state = _GateCircuitState.HALF_OPEN
-            else:
-                metrics.incr("writes_skipped_gate")
-                return False
+        gate = self._gate_circuit
+        if not gate.should_allow():
+            metrics.incr("writes_skipped_gate")
+            return False
 
         try:
             prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
             result = self._llm.think([{"role": "user", "content": prompt}], silent=True)
             normalized = result.strip().lower().strip('"').strip("'").strip(".")
             if normalized == "yes" or normalized.startswith("yes"):
-                self._gate_on_success()
+                gate.record_success()
                 return True
             if normalized == "no" or normalized.startswith("no"):
-                self._gate_on_success()
+                gate.record_success()
                 metrics.incr("writes_skipped_gate")
                 return False
             # Format anomaly — not a failure, but counted separately
             logger.warning("Gate returned unexpected format: %s", result[:100])
-            self._gate_on_success()
+            gate.record_success()
             metrics.incr("writes_skipped_gate_format_error")
             return False
         except Exception:
-            self._gate_on_failure()
+            gate.record_failure()
             metrics.incr("writes_skipped_gate_error")
             return False
 

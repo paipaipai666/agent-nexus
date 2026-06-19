@@ -1163,7 +1163,7 @@ class TestRefreshLtmContext:
 class TestConclude:
 
     def _make_mgr(self):
-        from agentnexus.memory.manager import _GateCircuitState
+        from agentnexus.memory.circuit_breaker import CircuitBreaker
         mgr = MemoryManager.__new__(MemoryManager)
         mgr.short_term = ShortTermMemory()
         mgr._llm = MagicMock()
@@ -1173,9 +1173,7 @@ class TestConclude:
         mgr.long_term.write_counter = 0
         mgr._settings = MagicMock()
         mgr.session_id = "test"
-        mgr._gate_state = _GateCircuitState.CLOSED
-        mgr._gate_failures = 0
-        mgr._gate_opened_at = 0.0
+        mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
         return mgr
 
     def test_calls_llm_with_extract_prompt(self):

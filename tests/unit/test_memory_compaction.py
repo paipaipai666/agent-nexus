@@ -1,6 +1,7 @@
 import time
 from unittest.mock import MagicMock
 
+from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.manager import (
     MemoryManager,
     _contains_pii,
@@ -289,10 +290,10 @@ class TestMaybeCompactCircuitBreaker:
         mgr._settings.offload_enabled = False
         mgr._ctx_max = 128000
         mgr._compact_threshold = 120000
-        mgr._compact_failures = 0
-        mgr._circuit_open = False
-        mgr._circuit_opened_at = 0.0
-        mgr._circuit_half_open = False
+        mgr._compact_circuit = CircuitBreaker(
+            failure_threshold=3,
+            exponential_backoff=True,
+        )
         mgr._microcompacts_since_open = 0
         mgr._compacting = False
         mgr._snip_freed_tokens = 0
@@ -317,13 +318,15 @@ class TestMaybeCompactCircuitBreaker:
         mgr._llm.think.return_value = ""
         for _ in range(3):
             mgr.maybe_compact()
-        assert mgr._circuit_open is True
-        assert mgr._compact_failures == 3
+        assert mgr._compact_circuit.is_open is True
+        assert mgr._compact_circuit.failure_count == 3
 
     def test_circuit_open_only_microcompact_runs(self):
         mgr = self._make_mgr()
-        mgr._circuit_open = True
-        mgr._circuit_opened_at = time.time()  # cooldown hasn't expired
+        mgr._compact_circuit.record_failure()
+        mgr._compact_circuit.record_failure()
+        mgr._compact_circuit.record_failure()
+        assert mgr._compact_circuit.is_open
         for i in range(10):
             mgr.short_term.append(
                 "tool", f"Action: read[file=f{i}.py]\nObservation: content of file {i}"
@@ -334,22 +337,27 @@ class TestMaybeCompactCircuitBreaker:
         cleared = [m for m in msgs if "工具结果已清理" in m.get("content", "")]
         assert len(cleared) == 5
 
-    def test_circuit_resets_after_5_successful_microcompacts(self, monkeypatch):
+    def test_circuit_resets_after_successful_compact(self, monkeypatch):
         monkeypatch.setattr(
             "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
             lambda self: 125000,
         )
         mgr = self._make_mgr()
-        mgr._circuit_open = True
-        mgr._compact_failures = 3
+        # Simulate circuit in OPEN state with expired backoff (will transition to HALF_OPEN)
+        mgr._compact_circuit.record_failure()
+        mgr._compact_circuit.record_failure()
+        mgr._compact_circuit.record_failure()
+        assert mgr._compact_circuit.is_open
+        # Force backoff to expire by setting opened_at to past
+        mgr._compact_circuit._opened_at = time.time() - 9999
         mgr._microcompacts_since_open = 4
         for i in range(10):
             mgr.short_term.append("user", f"msg{i}")
         mgr.short_term._token_count = 0  # force fallback to monkeypatched estimate_tokens
         mgr._llm.think.return_value = "<summary>Compacted summary of conversation.</summary>"
         mgr.maybe_compact()
-        assert mgr._circuit_open is False
-        assert mgr._compact_failures == 0
+        assert mgr._compact_circuit.is_closed is True
+        assert mgr._compact_circuit.failure_count == 0
         assert mgr._microcompacts_since_open == 0
 
 

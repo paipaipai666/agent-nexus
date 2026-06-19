@@ -1,7 +1,8 @@
 """Integration tests for multi-turn conversation with long-term memory (LTM)."""
 from unittest.mock import MagicMock, patch
 
-from agentnexus.memory.manager import MemoryManager, _GateCircuitState
+from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
 
@@ -27,10 +28,14 @@ class TestMultiTurnLTM:
             mgr._enable_long_term = True
             mgr._ctx_max = 128000
             mgr._compact_threshold = 120000
-            mgr._compact_failures = 0
-            mgr._circuit_open = False
-            mgr._circuit_opened_at = 0.0
-            mgr._circuit_half_open = False
+            mgr._compact_circuit = CircuitBreaker(
+                failure_threshold=3,
+                exponential_backoff=True,
+            )
+            mgr._gate_circuit = CircuitBreaker(
+                failure_threshold=3,
+                recovery_seconds=20.0,
+            )
             mgr._microcompacts_since_open = 0
             mgr._compacting = False
             mgr._snip_freed_tokens = 0
@@ -47,9 +52,6 @@ class TestMultiTurnLTM:
             mgr._settings.post_compact_max_files = 0
             mgr._settings.offload_enabled = False
             mgr._settings.large_result_threshold = 10000
-            mgr._gate_state = _GateCircuitState.CLOSED
-            mgr._gate_failures = 0
-            mgr._gate_opened_at = 0.0
             return mgr
 
     def test_init_session_returns_empty_without_ltm(self, temp_agentnexus_home):

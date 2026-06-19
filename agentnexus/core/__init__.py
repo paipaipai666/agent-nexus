@@ -1,8 +1,19 @@
-from .config import Settings, get_settings
+from .config import (
+    BrowserSettings,
+    ComputerUseSettings,
+    ExtensionSettings,
+    Settings,
+    WikiSettings,
+    get_settings,
+)
 from .hooks import SLOW_HOOK_THRESHOLD_MS, HookContext, HookManager, HookType, get_hook_manager, on
 
 __all__ = [
+    "BrowserSettings",
+    "ComputerUseSettings",
+    "ExtensionSettings",
     "Settings",
+    "WikiSettings",
     "get_settings",
     "HookContext",
     "HookManager",

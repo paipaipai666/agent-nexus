@@ -186,6 +186,67 @@ class PersonaConfig(BaseModel):
     projects: list[PersonaProject] = Field(default_factory=list)
 
 
+class BrowserSettings(BaseModel):
+    """Browser automation configuration."""
+
+    mode: str = "isolated"
+    cdp_endpoint: str = "http://localhost:9222"
+    headless: bool = False
+    viewport_width: int = 1280
+    viewport_height: int = 720
+    default_timeout: int = 30000
+    networkidle_timeout: int = 5000
+    screenshot_dir: str = ""
+    context_ttl: int = 600
+    allow_js_execution: bool = False
+    snapshot_max_nodes: int = 100
+    hitl_rules: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ComputerUseSettings(BaseModel):
+    """Desktop automation configuration."""
+
+    enabled: bool = False
+    backend: str = "auto"
+    snapshot_max_nodes: int = 100
+    hitl_rules: list[dict[str, str]] = Field(default_factory=list)
+    allowed_apps: list[str] = Field(default_factory=list)
+    blocked_apps: list[str] = Field(
+        default_factory=lambda: ["taskmgr", "regedit", "cmd", "powershell", "terminal"]
+    )
+
+
+class WikiSettings(BaseModel):
+    """Wiki knowledge system configuration."""
+
+    enabled: bool = False
+    namespace: str = "wiki"
+    review_sla_p1_days: int = 7
+    review_sla_p2_days: int = 14
+    review_sla_p3_days: int = 30
+    propagation_max_depth: int = 3
+    calibration_retrigger_pct: float = 0.5
+    jaccard_direct_quote: float = 0.6
+    jaccard_paraphrase: float = 0.4
+    cosine_paraphrase: float = 0.7
+    cosine_source: float = 0.35
+    drift_threshold: float = 0.5
+
+
+class ExtensionSettings(BaseModel):
+    """Extensions, plugins, and skills configuration."""
+
+    enabled: bool = True
+    dirs: list[str] = Field(default_factory=list)
+    plugins_auto_discover: bool = True
+    skills_default_namespace: str = "default"
+    default_skill: str = ""
+    skill_auto_route: bool = True
+    skill_auto_route_llm_fallback: bool = True
+    skill_auto_route_min_score: float = 2.0
+    skill_auto_route_margin: float = 0.75
+
+
 class Settings(BaseSettings):
     """Application-wide settings loaded from config.yaml + environment variables.
 
@@ -488,6 +549,69 @@ class Settings(BaseSettings):
         """Return typed persona settings."""
         raw = getattr(self, "_raw_persona", None) or {}
         return PersonaConfig(**raw)
+
+    @property
+    def browser(self) -> BrowserSettings:
+        """Return typed browser automation settings."""
+        return BrowserSettings(
+            mode=self.browser_mode,
+            cdp_endpoint=self.browser_cdp_endpoint,
+            headless=self.browser_headless,
+            viewport_width=self.browser_viewport_width,
+            viewport_height=self.browser_viewport_height,
+            default_timeout=self.browser_default_timeout,
+            networkidle_timeout=self.browser_networkidle_timeout,
+            screenshot_dir=self.browser_screenshot_dir,
+            context_ttl=self.browser_context_ttl,
+            allow_js_execution=self.browser_allow_js_execution,
+            snapshot_max_nodes=self.browser_snapshot_max_nodes,
+            hitl_rules=self.browser_hitl_rules,
+        )
+
+    @property
+    def computer_use(self) -> ComputerUseSettings:
+        """Return typed desktop automation settings."""
+        return ComputerUseSettings(
+            enabled=self.computer_use_enabled,
+            backend=self.computer_use_backend,
+            snapshot_max_nodes=self.computer_use_snapshot_max_nodes,
+            hitl_rules=self.computer_use_hitl_rules,
+            allowed_apps=self.computer_use_allowed_apps,
+            blocked_apps=self.computer_use_blocked_apps,
+        )
+
+    @property
+    def wiki(self) -> WikiSettings:
+        """Return typed wiki settings."""
+        return WikiSettings(
+            enabled=self.wiki_enabled,
+            namespace=self.wiki_namespace,
+            review_sla_p1_days=self.wiki_review_sla_p1_days,
+            review_sla_p2_days=self.wiki_review_sla_p2_days,
+            review_sla_p3_days=self.wiki_review_sla_p3_days,
+            propagation_max_depth=self.wiki_propagation_max_depth,
+            calibration_retrigger_pct=self.wiki_calibration_retrigger_pct,
+            jaccard_direct_quote=self.wiki_jaccard_direct_quote,
+            jaccard_paraphrase=self.wiki_jaccard_paraphrase,
+            cosine_paraphrase=self.wiki_cosine_paraphrase,
+            cosine_source=self.wiki_cosine_source,
+            drift_threshold=self.wiki_drift_threshold,
+        )
+
+    @property
+    def extensions(self) -> ExtensionSettings:
+        """Return typed extension and skill settings."""
+        return ExtensionSettings(
+            enabled=self.extensions_enabled,
+            dirs=self.extensions_dirs,
+            plugins_auto_discover=self.plugins_auto_discover,
+            skills_default_namespace=self.skills_default_namespace,
+            default_skill=self.default_skill,
+            skill_auto_route=self.skill_auto_route,
+            skill_auto_route_llm_fallback=self.skill_auto_route_llm_fallback,
+            skill_auto_route_min_score=self.skill_auto_route_min_score,
+            skill_auto_route_margin=self.skill_auto_route_margin,
+        )
 
 
 class AgentNexusDumper(yaml.SafeDumper):
