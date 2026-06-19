@@ -10,9 +10,6 @@ import pytest
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_adapter import MCPToolManager
 
-from .conftest import FakeExitStack, _make_descriptor
-
-
 # ── HTTP transport connection tests ──────────────────────────────
 
 

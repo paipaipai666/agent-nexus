@@ -2,15 +2,12 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_adapter import (
-    MCPServerState,
-    MCPToolDescriptor,
     MCPToolManager,
 )
 from agentnexus.tools.registry import ToolRegistry

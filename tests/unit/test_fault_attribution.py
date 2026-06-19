@@ -9,7 +9,6 @@ from agentnexus.observability.fault_attribution import (
     classify_tool_fault,
 )
 
-
 # ── FaultAttributionReport properties ────────────────────────────
 
 

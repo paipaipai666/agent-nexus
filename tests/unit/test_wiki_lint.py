@@ -1,11 +1,10 @@
 """Tests for agentnexus.wiki.lint — consistency, drift detection, coverage, and linter orchestration."""
 
-from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from agentnexus.wiki.lint import (
     ConsistencyChecker,
-    CoverageChecker,
     DriftDetector,
     WikiLinter,
     _deadline,

@@ -1,7 +1,5 @@
 """Tests for agentnexus.wiki.store — SQLite-backed wiki storage."""
 
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +13,7 @@ from agentnexus.wiki.models import (
     WikiPage,
     WikiStatement,
 )
-from agentnexus.wiki.store import WikiStore, _encode_json, _decode_json, _encode_definitions, _decode_definitions
+from agentnexus.wiki.store import WikiStore, _decode_definitions, _decode_json, _encode_definitions, _encode_json
 
 
 @pytest.fixture

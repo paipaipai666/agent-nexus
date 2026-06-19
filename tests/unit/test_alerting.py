@@ -1,8 +1,6 @@
 """Tests for agentnexus.observability.alerting."""
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agentnexus.observability.alerting import (
     Alert,
@@ -20,7 +18,6 @@ from agentnexus.observability.alerting import (
     get_alert_manager,
     setup_default_alerts,
 )
-
 
 # ── Alert dataclass ──────────────────────────────────────────────
 

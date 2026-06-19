@@ -11,12 +11,10 @@ import pytest
 
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp_adapter import (
-    MCPServerState,
     MCPToolManager,
 )
 
 from .conftest import FakeExitStack, _make_descriptor
-
 
 # ── Resource cleanup tests ──────────────────────────────────────
 

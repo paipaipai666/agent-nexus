@@ -1,5 +1,4 @@
 """Tests for agentnexus.observability.drift_detector."""
-import time
 
 import pytest
 
@@ -11,7 +10,6 @@ from agentnexus.observability.drift_detector import (
     DriftSignalType,
     _keyword_overlap,
 )
-
 
 # ── _keyword_overlap ─────────────────────────────────────────────
 

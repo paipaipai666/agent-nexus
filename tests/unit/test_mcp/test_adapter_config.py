@@ -3,7 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -16,7 +16,6 @@ from agentnexus.tools.mcp_adapter import (
 )
 
 from .conftest import FakeExitStack, _make_descriptor
-
 
 # ── create_mcp_manager_from_settings ────────────────────────────
 

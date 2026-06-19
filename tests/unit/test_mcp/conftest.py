@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from agentnexus.tools.mcp_adapter import MCPToolDescriptor
 
 

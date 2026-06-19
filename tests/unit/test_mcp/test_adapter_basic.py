@@ -3,8 +3,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentnexus.tools.mcp_adapter import (
     _content_block_to_text,
     _normalize_tool_result,

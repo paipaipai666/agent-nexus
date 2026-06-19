@@ -1,6 +1,6 @@
 """Tests for agentnexus.wiki.confidence — confidence routing and page trust computation."""
 
-from agentnexus.wiki.confidence import ConfidenceRouter, QueryRouteResult, _TRUST_RANK
+from agentnexus.wiki.confidence import ConfidenceRouter
 from agentnexus.wiki.models import (
     ConfidenceLevel,
     QueryDecision,

@@ -14,8 +14,8 @@ from agentnexus.skills.router.types import (
     _TOKEN_RE,
     _VERB_FORMS,
     _VERB_LEXICON,
-    IntentSignals,
     IndexedSkillMetadata,
+    IntentSignals,
     SkillRoute,
     SkillRouteDecision,
     SkillRouterIndex,
@@ -142,6 +142,7 @@ class TestCompositeActionOverrides:
 class TestSkillRoute:
     def test_frozen_dataclass(self):
         from pathlib import Path
+
         from agentnexus.skills.workflow import Workflow
 
         workflow = Workflow.model_validate({
@@ -188,8 +189,9 @@ class TestIntentSignals:
 class TestIndexedSkillMetadata:
     def test_frozen_with_defaults(self):
         from pathlib import Path
-        from agentnexus.skills.workflow import Workflow
+
         from agentnexus.skills.registry import SkillEntry
+        from agentnexus.skills.workflow import Workflow
 
         workflow = Workflow.model_validate({
             "id": "test", "version": "1", "display_name": "Test",
