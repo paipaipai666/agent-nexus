@@ -322,7 +322,7 @@ class TestCall:
             usage={"input_tokens": 10, "output_tokens": 5},
             finish_reason="stop",
         )
-        with patch.object(llm, "_call_via_provider", return_value=result_obj):
+        with patch.object(llm, "_call_via_litellm", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.last_usage.get("input_tokens", 0) >= 0
