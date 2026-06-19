@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,28 @@ class GraderScore:
     weight: float = 1.0
     raw_output: dict[str, Any] | None = None
     duration_ms: float = 0.0
+
+    @classmethod
+    def from_result(
+        cls,
+        grader_name: str,
+        grader_type: str,
+        score: float,
+        passed: bool,
+        details: str,
+        weight: float,
+        start_time: float,
+    ) -> "GraderScore":
+        """Factory to reduce boilerplate in grader.grade() methods."""
+        return cls(
+            name=grader_name,
+            grader_type=grader_type,
+            score=score,
+            passed=passed,
+            details=details,
+            weight=weight,
+            duration_ms=(time.monotonic() - start_time) * 1000,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {

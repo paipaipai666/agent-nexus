@@ -52,9 +52,9 @@ def _mark_stale_ingestion_runs() -> None:
                 stale_count += 1
 
         if stale_count > 0:
-            logger.info(f"Marked {stale_count} interrupted ingestion run(s) as failed")
+            logger.info("Marked %d interrupted ingestion run(s) as failed", stale_count)
     except Exception as e:
-        logger.warning(f"Failed to mark stale ingestion runs: {e}")
+        logger.warning("Failed to mark stale ingestion runs: %s", e)
 
 
 def create_app(runtime: Any | None = None) -> FastAPI:
@@ -83,7 +83,7 @@ def create_app(runtime: Any | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["http://localhost", "http://127.0.0.1"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

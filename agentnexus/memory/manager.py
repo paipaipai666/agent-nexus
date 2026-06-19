@@ -47,6 +47,16 @@ class _GateCircuitState(Enum):
 
 
 class MemoryManager:
+    """Session-scoped memory manager combining STM, LTM, compaction, and extraction.
+
+    TODO: This class is a monolith (~600 lines). Consider splitting into:
+      - ShortTermManager (STM lifecycle, compaction trigger)
+      - LongTermManager (LTM search/save, scoring)
+      - MemoryExtractionPipeline (extraction, gate, PII)
+      - CompactionEngine (prompt-based summarization, token budgeting)
+    Each sub-component would receive a shared config/context object.
+    """
+
     def __init__(self, session_id: str, llm=None, enable_long_term: bool = True):
         self.session_id = session_id
         self.short_term = ShortTermMemory()
@@ -387,9 +397,7 @@ class MemoryManager:
             importance_fn=compute_importance,
         )
         if cleaned:
-            self.short_term._messages.clear()
-            for message in compacted:
-                self.short_term._messages.append(message)
+            self.short_term.replace_messages(compacted)
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
                        is_auto: bool = True) -> int:
@@ -560,7 +568,7 @@ class MemoryManager:
         try:
             self._conclude_impl(question, answer, allow_memory)
         except Exception as e:
-            logger.warning("LTM extraction failed (non-fatal): %s", e)
+            logger.warning("LTM extraction failed (non-fatal): %s", e, exc_info=True)
 
     # ── Two-level filtering: class constants ────────────────────────
     _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])

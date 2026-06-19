@@ -1,5 +1,4 @@
 import ast
-import os
 import platform
 import re
 import shutil
@@ -98,7 +97,7 @@ def _execute_auto(code: str, settings, timeout: int) -> str:
             raise
         except SandboxUnavailable as e:
             failures.append(f"e2b: {e}")
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             failures.append(f"e2b: {e}")
     else:
         failures.append("e2b: AGENTNEXUS_E2B_API_KEY not configured")
@@ -109,7 +108,7 @@ def _execute_auto(code: str, settings, timeout: int) -> str:
         raise
     except SandboxUnavailable as e:
         failures.append(f"native: {e}")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         failures.append(f"native: {e}")
 
     try:
@@ -118,10 +117,10 @@ def _execute_auto(code: str, settings, timeout: int) -> str:
         raise
     except SandboxUnavailable as e:
         failures.append(f"docker: {e}")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         failures.append(f"docker: {e}")
 
-    return _execute_locally_with_warning(code, timeout, failures)
+    return _unavailable_message(failures)
 
 
 def _has_e2b_key(settings) -> bool:
@@ -138,31 +137,23 @@ def _execute_e2b(code: str, settings) -> str:
     if Sandbox is None:
         raise SandboxUnavailable("e2b-code-interpreter package is not available")
 
-    previous_api_key = os.environ.get("E2B_API_KEY")
-    try:
-        os.environ["E2B_API_KEY"] = api_key
-        with Sandbox() as sandbox:
-            execution = sandbox.run_code(code)
+    with Sandbox(api_key=api_key) as sandbox:
+        execution = sandbox.run_code(code)
 
-        parts = []
-        if execution.logs.stdout:
-            parts.append(f"[stdout]\n{execution.logs.stdout}")
-        if execution.logs.stderr:
-            parts.append(f"[stderr]\n{execution.logs.stderr}")
-        for res in execution.results:
-            if res.text:
-                parts.append(f"[result]\n{res.text}")
-            elif res.png:
-                parts.append("[result] <image output>")
-            elif res.json:
-                parts.append(f"[result]\n{res.json}")
+    parts = []
+    if execution.logs.stdout:
+        parts.append(f"[stdout]\n{execution.logs.stdout}")
+    if execution.logs.stderr:
+        parts.append(f"[stderr]\n{execution.logs.stderr}")
+    for res in execution.results:
+        if res.text:
+            parts.append(f"[result]\n{res.text}")
+        elif res.png:
+            parts.append("[result] <image output>")
+        elif res.json:
+            parts.append(f"[result]\n{res.json}")
 
-        return "\n\n".join(parts) if parts else "[execution completed with no output]"
-    finally:
-        if previous_api_key is None:
-            os.environ.pop("E2B_API_KEY", None)
-        else:
-            os.environ["E2B_API_KEY"] = previous_api_key
+    return "\n\n".join(parts) if parts else "[execution completed with no output]"
 
 
 def _execute_native_sandbox(code: str, timeout: int) -> str:

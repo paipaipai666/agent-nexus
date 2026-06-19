@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import threading
 from pathlib import Path
 
@@ -353,10 +354,18 @@ def get_session(session_id: str):
 
 
 @router.websocket("/ws/agent/{session_id}")
-async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None):
+async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None, api_key: str | None = None):
     """WebSocket endpoint for real-time agent event streaming.
     R8: Accepts optional resumeFrom query param for cursor-based reconnect."""
     from agentnexus.server.app import _get_runtime
+    from agentnexus.server.auth import get_token
+
+    # Authenticate via query param (WebSocket cannot use headers)
+    token = get_token()
+    if token is not None:
+        if api_key is None or not secrets.compare_digest(api_key, token):
+            await ws.close(code=4001, reason="Invalid or missing API key")
+            return
 
     await ws.accept()
     runtime = _get_runtime()
@@ -541,10 +550,10 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                         )
                     except Exception as e:
                         logger.error("WebSocket agent run failed for session %s: %s", session_id, e, exc_info=True)
-                        # Report error to frontend via WebSocket
+                        # Report sanitized error to frontend via WebSocket
                         try:
                             asyncio.run_coroutine_threadsafe(
-                                ws.send_json({"type": "error", "message": f"Agent error: {e}"}),
+                                ws.send_json({"type": "error", "message": "Agent encountered an error. Check server logs for details."}),
                                 main_loop,
                             ).result(timeout=2)
                         except Exception:
@@ -593,8 +602,9 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
     except WebSocketDisconnect:
         pass
     except Exception as e:
+        logger.exception("WebSocket handler error for session %s", session_id)
         try:
-            await ws.send_json({"type": "error", "message": str(e)})
+            await ws.send_json({"type": "error", "message": "Connection error. Check server logs for details."})
         except Exception:
             pass
     finally:

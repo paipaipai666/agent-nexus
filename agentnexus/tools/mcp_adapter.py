@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools import (
@@ -184,8 +187,8 @@ class MCPToolManager:
         if self._loop is not None and self._thread is not None:
             try:
                 self._submit(self._close_all(), timeout=10)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("MCP close_all cleanup error (non-fatal): %s", e)
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join(timeout=5)
         self._loop = None

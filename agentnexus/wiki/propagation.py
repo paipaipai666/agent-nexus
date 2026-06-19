@@ -48,7 +48,7 @@ class PropagationEngine:
         Uses min inheritance: dependent confidence = min(own, source).
         """
         if depth >= self.max_depth:
-            logger.debug(f"Max propagation depth reached at {page_id}")
+            logger.debug("Max propagation depth reached at %s", page_id)
             return
 
         page = self.store.get_page(page_id, include_statements=False)
@@ -115,7 +115,7 @@ class PropagationEngine:
                 new_conf = self.router.compute_page_confidence(updated_page)
                 if new_conf != updated_page.confidence:
                     self.store.update_page_confidence(page_id, new_conf)
-                    logger.info(f"Page {page_id} confidence updated to {new_conf} after re-verification")
+                    logger.info("Page %s confidence updated to %s after re-verification", page_id, new_conf)
 
     # ── RAG → Wiki Reverse Trigger ──────────────────────────────────
 
@@ -128,7 +128,7 @@ class PropagationEngine:
             return
 
         affected_statements = self.store.find_statements_by_chunks(chunk_ids)
-        logger.info(f"Chunk update: {len(chunk_ids)} chunks, {len(affected_statements)} affected statements")
+        logger.info("Chunk update: %d chunks, %d affected statements", len(chunk_ids), len(affected_statements))
 
         affected_pages: set[str] = set()
         for stmt in affected_statements:
@@ -187,5 +187,5 @@ class PropagationEngine:
                 if rows:
                     result[chunk_id] = rows[0]["text"]
             except Exception as e:
-                logger.warning(f"Failed to fetch chunk {chunk_id}: {e}")
+                logger.warning("Failed to fetch chunk %s: %s", chunk_id, e)
         return result

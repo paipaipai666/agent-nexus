@@ -1,3 +1,4 @@
+import logging
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -17,6 +18,8 @@ from .models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
 from .store import get_knowledge_base_catalog
 
 warnings.filterwarnings("ignore", message=".*pkg_resources.*")
+
+logger = logging.getLogger(__name__)
 
 QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
 MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
@@ -187,7 +190,7 @@ def rewrite_query(query: str, llm: AgentLLM | None = None) -> str:
         if len(rewritten) >= 2:
             return rewritten
     except Exception:
-        pass
+        logger.debug("Query rewrite failed, using original query", exc_info=True)
     return query
 
 
@@ -439,7 +442,8 @@ class HybridRetriever:
     def load_reranker(self, model_name: str | None = None):
         try:
             from sentence_transformers import CrossEncoder
-        except Exception:
+        except ImportError:
+            logger.warning("sentence_transformers not installed, reranker disabled")
             self._reranker = None
             return
 
@@ -447,6 +451,7 @@ class HybridRetriever:
         try:
             self._reranker = CrossEncoder(model_name or settings.reranker_model)
         except Exception:
+            logger.warning("Failed to load reranker model '%s'", model_name or settings.reranker_model, exc_info=True)
             self._reranker = None
 
     def search(

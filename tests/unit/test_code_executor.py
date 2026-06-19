@@ -70,8 +70,8 @@ class TestPythonExecute:
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.code_execution_backend = "auto"
         mock_settings.return_value.code_execution_timeout = 30
-        mock_e2b.side_effect = Exception("e2b down")
-        mock_native.side_effect = Exception("native down")
+        mock_e2b.side_effect = SandboxUnavailable("e2b down")
+        mock_native.side_effect = SandboxUnavailable("native down")
         mock_docker.return_value = "docker ok"
 
         result = python_execute("print('hello')")
@@ -83,7 +83,7 @@ class TestPythonExecute:
 
     @patch("agentnexus.tools.code_executor.shutil.which")
     @patch("agentnexus.tools.code_executor.get_settings")
-    def test_auto_warns_and_runs_local_when_no_safe_backend(self, mock_settings, mock_which):
+    def test_auto_blocks_when_no_safe_backend(self, mock_settings, mock_which):
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
         mock_settings.return_value.code_execution_backend = "auto"
         mock_settings.return_value.code_execution_timeout = 30
@@ -91,9 +91,9 @@ class TestPythonExecute:
 
         result = python_execute("print('hello')")
 
-        assert "[warning]" in result
-        assert "unsafe local subprocess" in result
-        assert "hello" in result
+        assert "[blocked]" in result
+        assert "No safe Python execution sandbox" in result
+        assert "hello" not in result
 
     @patch("agentnexus.tools.code_executor.subprocess.run")
     @patch("agentnexus.tools.code_executor.shutil.which")

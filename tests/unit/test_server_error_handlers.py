@@ -104,7 +104,8 @@ class TestAPIErrorHandler:
         assert resp.status_code == 500
         body = resp.json()
         assert body["error"]["code"] == "internal_error"
-        assert "bad value" in body["error"]["message"]
+        # Must not leak internal exception details to the client
+        assert body["error"]["message"] == "Internal server error"
 
     def test_generic_type_error_returns_500(self, client):
         resp = client.get("/type-error")
@@ -116,7 +117,8 @@ class TestAPIErrorHandler:
         assert resp.status_code == 500
         body = resp.json()
         assert body["error"]["code"] == "internal_error"
-        assert "something broke" in body["error"]["message"]
+        # Must not leak internal exception details to the client
+        assert body["error"]["message"] == "Internal server error"
 
 
 class TestRegisterErrorHandlers:

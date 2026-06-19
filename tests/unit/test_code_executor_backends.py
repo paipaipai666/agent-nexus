@@ -54,27 +54,9 @@ class TestExecuteE2B:
         with pytest.raises(SandboxUnavailable, match="package is not available"):
             _execute_e2b("print(1)", settings)
 
-    def test_env_key_set(self, mocker):
+    def test_api_key_passed_to_sandbox(self, mocker):
+        """CRIT-05: api_key passed directly to Sandbox, not via os.environ."""
         from pydantic import SecretStr
-        os.environ.pop("E2B_API_KEY", None)
-        settings = type("Settings", (), {"e2b_api_key": SecretStr("sk-env")})()
-
-        mock_sandbox_cls = mocker.patch("agentnexus.tools.code_executor.Sandbox")
-        instance = mock_sandbox_cls.return_value.__enter__.return_value
-        env_log = []
-
-        def capture(code):
-            env_log.append(os.environ.get("E2B_API_KEY"))
-            return mocker.MagicMock(logs=mocker.MagicMock(stdout=[], stderr=[]), results=[])
-
-        instance.run_code.side_effect = capture
-        _execute_e2b("print(1)", settings)
-        assert env_log[0] == "sk-env"
-        assert os.environ.get("E2B_API_KEY") is None
-
-    def test_env_key_restored(self, mocker):
-        from pydantic import SecretStr
-        os.environ["E2B_API_KEY"] = "previous"
         settings = type("Settings", (), {"e2b_api_key": SecretStr("sk-env")})()
 
         mock_sandbox_cls = mocker.patch("agentnexus.tools.code_executor.Sandbox")
@@ -82,10 +64,22 @@ class TestExecuteE2B:
         instance.run_code.return_value = mocker.MagicMock(
             logs=mocker.MagicMock(stdout=[], stderr=[]), results=[]
         )
-
         _execute_e2b("print(1)", settings)
-        assert os.environ["E2B_API_KEY"] == "previous"
+        mock_sandbox_cls.assert_called_once_with(api_key="sk-env")
+
+    def test_does_not_mutate_os_environ(self, mocker):
+        """CRIT-05: os.environ should not be modified during e2b execution."""
+        from pydantic import SecretStr
         os.environ.pop("E2B_API_KEY", None)
+        settings = type("Settings", (), {"e2b_api_key": SecretStr("sk-env")})()
+
+        mock_sandbox_cls = mocker.patch("agentnexus.tools.code_executor.Sandbox")
+        instance = mock_sandbox_cls.return_value.__enter__.return_value
+        instance.run_code.return_value = mocker.MagicMock(
+            logs=mocker.MagicMock(stdout=[], stderr=[]), results=[]
+        )
+        _execute_e2b("print(1)", settings)
+        assert os.environ.get("E2B_API_KEY") is None
 
     def test_stdout_parsed(self, mocker):
         from pydantic import SecretStr
@@ -210,17 +204,16 @@ class TestExecuteAuto:
     @patch("agentnexus.tools.code_executor._execute_e2b")
     @patch("agentnexus.tools.code_executor._execute_native_sandbox")
     @patch("agentnexus.tools.code_executor._execute_docker")
-    @patch("agentnexus.tools.code_executor._execute_locally_with_warning")
-    def test_all_fail_to_local_warning(self, mock_local, mock_docker, mock_native, mock_e2b):
+    def test_all_fail_returns_blocked(self, mock_docker, mock_native, mock_e2b):
+        """CRIT-03: auto mode stops at Docker, no local fallback."""
         mock_e2b.side_effect = SandboxUnavailable("e2b")
         mock_native.side_effect = SandboxUnavailable("native")
         mock_docker.side_effect = SandboxUnavailable("docker")
-        mock_local.return_value = "[warning]\nfallback"
         settings = type("Settings", (), {})()
         with patch("agentnexus.tools.code_executor._has_e2b_key", return_value=True):
             result = _execute_auto("print(1)", settings, 30)
-        assert mock_local.called
-        assert "warning" in result
+        assert "[blocked]" in result
+        assert "No safe Python execution sandbox" in result
 
     @patch("agentnexus.tools.code_executor._execute_e2b")
     @patch("agentnexus.tools.code_executor._execute_native_sandbox")

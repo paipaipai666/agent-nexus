@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from agentnexus.tools.code_executor import SandboxUnavailable
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 
@@ -202,7 +203,7 @@ class TestCodeExecutorSecurity:
             from agentnexus.tools.code_executor import python_execute
 
             with patch("agentnexus.tools.code_executor.Sandbox") as mock_sandbox:
-                mock_sandbox.side_effect = Exception("E2B unavailable")
+                mock_sandbox.side_effect = SandboxUnavailable("E2B unavailable")
                 with patch("agentnexus.tools.code_executor._execute_native_sandbox") as mock_native:
                     mock_native.return_value = "native result"
                     result = python_execute("print(1)")

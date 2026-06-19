@@ -25,17 +25,17 @@ def get_token() -> str | None:
 def verify_api_key(api_key: str | None = Security(_api_key_header)) -> None:
     """Dependency that verifies the X-API-Key header."""
     if _token is None:
-        return  # Auth not configured
-    if api_key != _token:
+        raise HTTPException(status_code=503, detail="Authentication not initialized")
+    if api_key is None or not secrets.compare_digest(api_key, _token):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 def optional_verify(request: Request) -> None:
     """Optional auth — skip for health endpoint, require for everything else."""
-    if _token is None:
-        return
     if request.url.path in ("/health", "/docs", "/openapi.json"):
         return
+    if _token is None:
+        raise HTTPException(status_code=503, detail="Authentication not initialized")
     api_key = request.headers.get("X-API-Key")
-    if api_key != _token:
+    if api_key is None or not secrets.compare_digest(api_key, _token):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")

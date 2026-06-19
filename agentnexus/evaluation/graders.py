@@ -17,6 +17,10 @@ from typing import Any
 from agentnexus.evaluation.task import EvalTask, GraderConfig, ScoringMode
 from agentnexus.evaluation.trial import GraderScore, TrialResult
 
+# ── Named constants for subprocess timeouts ─────────────────────────────
+_STATIC_ANALYSIS_TIMEOUT_SEC = 60
+_CODE_EXECUTION_TIMEOUT_SEC = 30
+
 # ---------------------------------------------------------------------------
 # Base Grader
 # ---------------------------------------------------------------------------
@@ -92,14 +96,14 @@ class TranscriptGrader(BaseGrader):
         score = max(0.0, score)
         elapsed = (time.monotonic() - start) * 1000
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=score >= (config.threshold or 0.5),
             details="; ".join(issues) if issues else "Within constraints",
             weight=config.weight,
-            duration_ms=elapsed,
+            start_time=start,
         )
 
 
@@ -120,14 +124,14 @@ class ToolCallsGrader(BaseGrader):
         tool_spans = [s for s in transcript if s.get("name") == "tool"]
 
         if not config.required_tools:
-            return GraderScore(
-                name=config.name or self.name,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name,
                 grader_type=self.grader_type,
                 score=1.0,
                 passed=True,
                 details="No required tools specified",
                 weight=config.weight,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         matched = 0
@@ -160,14 +164,14 @@ class ToolCallsGrader(BaseGrader):
         total = len(config.required_tools)
         score = matched / total if total > 0 else 1.0
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=score >= (config.threshold or 1.0),
             details="; ".join(details_list) if details_list else f"All {total} required tools used",
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -187,14 +191,14 @@ class StateCheckGrader(BaseGrader):
         start = time.monotonic()
 
         if not config.expect_state:
-            return GraderScore(
-                name=config.name or self.name,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name,
                 grader_type=self.grader_type,
                 score=1.0,
                 passed=True,
                 details="No expected state specified",
                 weight=config.weight,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         issues: list[str] = []
@@ -219,14 +223,14 @@ class StateCheckGrader(BaseGrader):
 
         score = matched / total if total > 0 else 1.0
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=score >= (config.threshold or 1.0),
             details="; ".join(issues) if issues else "All state checks passed",
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -248,14 +252,14 @@ class StaticAnalysisGrader(BaseGrader):
         start = time.monotonic()
 
         if not config.commands:
-            return GraderScore(
-                name=config.name or self.name,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name,
                 grader_type=self.grader_type,
                 score=1.0,
                 passed=True,
                 details="No static analysis commands specified",
                 weight=config.weight,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         issues: list[str] = []
@@ -267,7 +271,7 @@ class StaticAnalysisGrader(BaseGrader):
                     cmd.split(),
                     capture_output=True,
                     text=True,
-                    timeout=60,
+                    timeout=_STATIC_ANALYSIS_TIMEOUT_SEC,
                     cwd=task_input.get("workdir"),
                 )
                 if result.returncode != 0:
@@ -281,14 +285,14 @@ class StaticAnalysisGrader(BaseGrader):
                 issues.append(f"{cmd} timed out")
                 all_passed = False
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=1.0 if all_passed else 0.0,
             passed=all_passed,
             details="; ".join(issues) if issues else "All static analysis passed",
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -323,14 +327,14 @@ class LLMRubricGrader(BaseGrader):
                 break
 
         if not answer:
-            return GraderScore(
-                name=config.name or self.name,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name,
                 grader_type=self.grader_type,
                 score=0.0,
                 passed=False,
                 details="No final answer found in transcript",
                 weight=config.weight,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         # 构建 judge prompt
@@ -344,24 +348,24 @@ class LLMRubricGrader(BaseGrader):
             response = judge.think([{"role": "user", "content": prompt}])
             score, details = self._parse_score(response, config)
         except Exception as e:
-            return GraderScore(
-                name=config.name or self.name,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name,
                 grader_type=self.grader_type,
                 score=0.0,
                 passed=False,
                 details=f"Judge LLM error: {e}",
                 weight=config.weight,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=score >= (config.threshold or 0.7),
             details=details,
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
     def _build_prompt(
@@ -472,26 +476,23 @@ class CompositeGrader(BaseGrader):
 
         if self._mode == ScoringMode.BINARY.value:
             all_passed = all(s.passed for s in scores)
-            return GraderScore(
-                name=self.name,
+            return GraderScore.from_result(
+                grader_name=self.name,
                 grader_type=self.grader_type,
                 score=1.0 if all_passed else 0.0,
                 passed=all_passed,
                 details=f"Binary: {sum(1 for s in scores if s.passed)}/{len(scores)} passed",
                 weight=1.0,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         if self._mode == ScoringMode.HYBRID.value:
-            # 检查 required grader
-            required_scores = [s for s in scores if s.weight < 0 or not s.passed]
-            # 实际上我们需要从 config 判断 required
-            # 简化：检查所有 grader，required 的必须通过
+            # Check required graders — those marked required must pass
             required_passed = all(
                 s.passed for s, (_, gc) in zip(scores, self._graders) if gc.required
             )
 
-            # 加权计算非 required 的分数
+            # Weighted average of non-required scores
             weighted_scores = [
                 (s.score, s.weight) for s, (_, gc) in zip(scores, self._graders) if not gc.required
             ]
@@ -503,14 +504,14 @@ class CompositeGrader(BaseGrader):
 
             final_passed = required_passed and weighted_avg >= 0.5
 
-            return GraderScore(
-                name=self.name,
+            return GraderScore.from_result(
+                grader_name=self.name,
                 grader_type=self.grader_type,
                 score=weighted_avg,
                 passed=final_passed,
                 details=f"Hybrid: required={'pass' if required_passed else 'fail'}, weighted={weighted_avg:.2f}",
                 weight=1.0,
-                duration_ms=(time.monotonic() - start) * 1000,
+                start_time=start,
             )
 
         # Default: weighted
@@ -524,14 +525,14 @@ class CompositeGrader(BaseGrader):
             s.passed for s, (_, gc) in zip(scores, self._graders) if gc.required
         )
 
-        return GraderScore(
-            name=self.name,
+        return GraderScore.from_result(
+            grader_name=self.name,
             grader_type=self.grader_type,
             score=weighted_score,
             passed=weighted_score >= 0.5 and all_required_passed,
             details=f"Weighted: {weighted_score:.2f} ({len(scores)} graders)",
             weight=1.0,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -571,14 +572,14 @@ class TrajectoryGraderAdapter(BaseGrader):
             passed = False
             issues = [f"Evaluation error: {e}"]
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=passed,
             details="; ".join(issues) if issues else "No trajectory issues",
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -609,11 +610,11 @@ class HallucinationGraderAdapter(BaseGrader):
                     answer = span.get("output", {}).get("answer", "")
                     break
             if not answer:
-                return GraderScore(
-                    name=config.name or self.name, grader_type=self.grader_type,
+                return GraderScore.from_result(
+                    grader_name=config.name or self.name, grader_type=self.grader_type,
                     score=1.0, passed=True,
                     details="No answer to check for hallucination",
-                    weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+                    weight=config.weight, start_time=start,
                 )
             # 调用 _evaluate_one 直接操作内存数据
             report = detector._evaluate_one("inline", answer, transcript)
@@ -627,14 +628,14 @@ class HallucinationGraderAdapter(BaseGrader):
             passed = False
             details = f"Evaluation error: {e}"
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=passed,
             details=details,
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -671,14 +672,14 @@ class CoherenceGraderAdapter(BaseGrader):
             passed = False
             details = f"Evaluation error: {e}"
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=passed,
             details=details,
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
 
@@ -705,21 +706,21 @@ class CodeExecutionGrader(BaseGrader):
         start = time.monotonic()
 
         if not config.test_files:
-            return GraderScore(
-                name=config.name or self.name, grader_type=self.grader_type,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name, grader_type=self.grader_type,
                 score=1.0, passed=True,
                 details="No test assertions specified",
-                weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+                weight=config.weight, start_time=start,
             )
 
         # 从 transcript 提取 agent 生成的代码
         code = self._extract_code(transcript)
         if not code:
-            return GraderScore(
-                name=config.name or self.name, grader_type=self.grader_type,
+            return GraderScore.from_result(
+                grader_name=config.name or self.name, grader_type=self.grader_type,
                 score=0.0, passed=False,
                 details="No code found in transcript",
-                weight=config.weight, duration_ms=(time.monotonic() - start) * 1000,
+                weight=config.weight, start_time=start,
             )
 
         # 组装测试脚本
@@ -738,7 +739,7 @@ class CodeExecutionGrader(BaseGrader):
 
             result = subprocess.run(
                 ["python", tmp_path],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=_CODE_EXECUTION_TIMEOUT_SEC,
             )
 
             passed = result.returncode == 0 and "ALL_TESTS_PASSED" in result.stdout
@@ -750,7 +751,7 @@ class CodeExecutionGrader(BaseGrader):
                 details = f"Test failed: {stderr}"
                 score = 0.0
         except subprocess.TimeoutExpired:
-            details = "Test execution timed out (30s)"
+            details = f"Test execution timed out ({_CODE_EXECUTION_TIMEOUT_SEC}s)"
             score = 0.0
             passed = False
         except Exception as e:
@@ -764,14 +765,14 @@ class CodeExecutionGrader(BaseGrader):
             except Exception:
                 pass
 
-        return GraderScore(
-            name=config.name or self.name,
+        return GraderScore.from_result(
+            grader_name=config.name or self.name,
             grader_type=self.grader_type,
             score=score,
             passed=passed,
             details=details,
             weight=config.weight,
-            duration_ms=(time.monotonic() - start) * 1000,
+            start_time=start,
         )
 
     def _extract_code(self, transcript: list[dict[str, Any]]) -> str:

@@ -250,7 +250,7 @@ class TestCall:
             with patch("litellm.completion", side_effect=ConnectionError("connection")):
                 result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
-        assert result is None
+        assert result == ""
         assert "connection" in llm.last_error.lower()
 
     @patch("agentnexus.core.llm.get_settings")

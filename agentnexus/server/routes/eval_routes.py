@@ -115,8 +115,19 @@ def compare_reports(req: CompareRequest):
     settings = get_settings()
     evals_dir = Path(settings.traces_dir) / "evals"
 
-    baseline_path = evals_dir / req.baseline
-    candidate_path = evals_dir / req.candidate
+    # Reject path traversal attempts
+    for name in (req.baseline, req.candidate):
+        if ".." in name or "/" in name or "\\" in name:
+            raise HTTPException(status_code=400, detail=f"Invalid filename: {name}")
+
+    baseline_path = (evals_dir / req.baseline).resolve()
+    candidate_path = (evals_dir / req.candidate).resolve()
+    evals_resolved = evals_dir.resolve()
+
+    if not str(baseline_path).startswith(str(evals_resolved)):
+        raise HTTPException(status_code=400, detail="Baseline path outside evals directory")
+    if not str(candidate_path).startswith(str(evals_resolved)):
+        raise HTTPException(status_code=400, detail="Candidate path outside evals directory")
 
     if not baseline_path.exists():
         raise HTTPException(status_code=404, detail=f"Baseline not found: {req.baseline}")

@@ -142,9 +142,23 @@ class HumanEvalEvaluator:
                             error = result.stderr.strip() or result.stdout.strip()
                 else:
                     # fallback: exec in-process (for testing/docstring-only)
-                    namespace: dict = {}
-                    exec(candidate_code, namespace)
-                    exec(tc, namespace)
+                    # Use restricted builtins to prevent abuse
+                    safe_builtins = {
+                        k: __builtins__[k] if isinstance(__builtins__, dict) else getattr(__builtins__, k)
+                        for k in (
+                            "abs", "all", "any", "bool", "chr", "dict", "divmod",
+                            "enumerate", "filter", "float", "format", "frozenset",
+                            "getattr", "hasattr", "hash", "int", "isinstance",
+                            "issubclass", "iter", "len", "list", "map", "max",
+                            "min", "next", "ord", "pow", "print", "range", "repr",
+                            "reversed", "round", "set", "slice", "sorted", "str",
+                            "sum", "tuple", "type", "zip",
+                        )
+                        if (k in __builtins__ if isinstance(__builtins__, dict) else hasattr(__builtins__, k))
+                    }
+                    restricted_globals = {"__builtins__": safe_builtins}
+                    exec(candidate_code, restricted_globals)
+                    exec(tc, restricted_globals)
                     passed += 1
             except subprocess.TimeoutExpired:
                 failed += 1

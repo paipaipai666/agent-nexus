@@ -106,7 +106,7 @@ def delete_by_file(file_path: str, exclude_content_hash: str | None = None) -> i
             collection.delete(ids=results["ids"])
             return len(results["ids"])
         except Exception as e:
-            logger.warning(f"ChromaDB delete failed: {e}")
+            logger.warning("ChromaDB delete failed: %s", e)
             return 0
 
 

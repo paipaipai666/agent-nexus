@@ -45,10 +45,15 @@ class TestGetToken:
 
 
 class TestVerifyApiKey:
-    def test_token_none_allows_any_key(self):
-        # _token is None (reset by fixture), should not raise
-        verify_api_key("anything")
-        verify_api_key(None)
+    def test_token_none_rejects_requests(self):
+        # _token is None (reset by fixture), should reject (auth not initialized)
+        with pytest.raises(HTTPException) as exc_info:
+            verify_api_key("anything")
+        assert exc_info.value.status_code == 503
+
+        with pytest.raises(HTTPException) as exc_info:
+            verify_api_key(None)
+        assert exc_info.value.status_code == 503
 
     def test_correct_key_passes(self):
         token = generate_token()
@@ -86,9 +91,15 @@ class TestOptionalVerify:
         request.headers = headers
         return request
 
-    def test_token_none_passes_for_any_path(self):
+    def test_token_none_rejects_non_health_paths(self):
         request = self._make_request("/api/something")
-        optional_verify(request)  # should not raise
+        with pytest.raises(HTTPException) as exc_info:
+            optional_verify(request)
+        assert exc_info.value.status_code == 503
+
+    def test_token_none_allows_health_path(self):
+        request = self._make_request("/health")
+        optional_verify(request)  # health is always allowed
 
     def test_health_path_passes_with_wrong_key(self):
         generate_token()

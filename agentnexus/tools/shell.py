@@ -274,9 +274,10 @@ def _execute_shell_docker(command: str, work_dir: str, settings, timeout_sec: in
 
 def _execute_shell_locally(command: str, work_dir: str, timeout_sec: int) -> str:
     if _SYSTEM == "Windows":
+        cmd = ["cmd", "/c", command]
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd,
+            shell=False,
             cwd=work_dir,
             capture_output=True,
             text=True,

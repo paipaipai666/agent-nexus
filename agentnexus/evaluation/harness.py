@@ -240,9 +240,11 @@ class EvalHarness:
         # 执行 setup 命令
         setup_cmd = env.get("setup_cmd")
         if setup_cmd:
+            import shlex
+
             try:
                 result = subprocess.run(
-                    setup_cmd, shell=True, capture_output=True, text=True, timeout=30,
+                    shlex.split(setup_cmd), shell=False, capture_output=True, text=True, timeout=30,
                 )
                 env_state["setup_returncode"] = result.returncode
                 env_state["setup_stdout"] = result.stdout[:500]
@@ -265,9 +267,11 @@ class EvalHarness:
 
         teardown_cmd = env.get("teardown_cmd")
         if teardown_cmd:
+            import shlex
+
             try:
                 subprocess.run(
-                    teardown_cmd, shell=True, capture_output=True, text=True, timeout=10,
+                    shlex.split(teardown_cmd), shell=False, capture_output=True, text=True, timeout=10,
                 )
             except Exception as e:
                 logger.debug("Task %s teardown error: %s", task.id, e)

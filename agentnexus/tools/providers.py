@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentnexus.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agentnexus.core.llm import AgentLLM
+    from agentnexus.memory.todo import SessionTodoList
+    from agentnexus.tools.confirm_bridge import ConfirmBridge
+    from agentnexus.tools.mcp_adapter import MCPManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +34,18 @@ class ToolProviderContext:
     """Runtime inputs shared by tool providers during registration."""
 
     non_interactive: bool = False
-    llm_client: Any = None
+    llm_client: "AgentLLM | None" = None
     include_tools: set[str] | None = None
     enable_subagent: bool = True
-    subagent_confirm: Any = None
-    mcp_manager: Any = None
+    subagent_confirm: "ConfirmBridge | None" = None
+    mcp_manager: "MCPManager | None" = None
     runtime: Any = None
     extension_context: Any = None
     source_type: str = "builtin"
     source_id: str = ""
     generation: int = 0
     registered_tools: list[str] = field(default_factory=list)
-    todo_list: Any = None
+    todo_list: "SessionTodoList | None" = None
 
     def want(self, name: str) -> bool:
         return self.include_tools is None or name in self.include_tools

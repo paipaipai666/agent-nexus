@@ -218,7 +218,7 @@ class WikiLinter:
         logger.info("Running coverage check...")
         items.extend(self.coverage.check(self.store, source_namespace, rag_namespace))
 
-        logger.info(f"Lint complete: {len(items)} items found")
+        logger.info("Lint complete: %d items found", len(items))
         return items
 
     def enqueue_items(self, items: list[ReviewItem]):

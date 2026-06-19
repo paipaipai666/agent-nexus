@@ -13,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Protocol
 
 from agentnexus.core.config import get_settings
 
@@ -23,6 +23,52 @@ def _get_embedding_service():
     return embedding_service
 
 logger = logging.getLogger(__name__)
+
+
+class StorageBackend(Protocol):
+    """Protocol defining the storage interface for vector stores.
+
+    Any storage backend (ChromaDB, FAISS, in-memory, etc.) should implement
+    these methods to be usable by the RAG retriever and memory system.
+    """
+
+    def query(
+        self,
+        query_embeddings: list[list[float]],
+        n_results: int,
+        include: list[str],
+        where: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query the vector store for similar embeddings."""
+        ...
+
+    def add(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Add documents with embeddings to the store."""
+        ...
+
+    def upsert(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Insert or update documents with embeddings."""
+        ...
+
+    def delete(
+        self,
+        ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
+    ) -> None:
+        """Delete documents by IDs or metadata filter."""
+        ...
 
 COLLECTION_NAME = "documents"
 DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
@@ -155,7 +201,7 @@ def delete_collection(name: str | None = None, namespace: str | None = None):
         except Exception as exc:
             # "does not exist" is expected on first run or after cleanup — not a real error
             if "does not exist" not in str(exc).lower():
-                logger.warning(f"ChromaDB 删除集合异常: {exc}")
+                logger.warning("ChromaDB 删除集合异常: %s", exc)
         _collections.pop(collection_name, None)
 
 
@@ -258,17 +304,25 @@ def search(
     collection_provider=get_collection,
     embedding_model_provider=None,
 ) -> list[dict]:
-    collection = collection_provider(name=name, namespace=namespace)
+    try:
+        collection = collection_provider(name=name, namespace=namespace)
+    except Exception as exc:
+        logger.error("ChromaDB collection access failed (namespace=%s): %s", namespace, exc)
+        return []
     if embedding_model_provider is None:
         embedding_model_provider = _get_embedding_service().get_embedding_model
     model = embedding_model_provider()
     query_vec = _get_embedding_service().embedding_to_list(model.encode(query, normalize_embeddings=True))
-    results = collection.query(
-        query_embeddings=[query_vec],
-        n_results=limit,
-        include=["documents", "distances", "metadatas"],
-        where=where,
-    )
+    try:
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=limit,
+            include=["documents", "distances", "metadatas"],
+            where=where,
+        )
+    except Exception as exc:
+        logger.error("ChromaDB query failed (namespace=%s): %s", namespace, exc)
+        return []
     if not results["ids"] or not results["ids"][0]:
         return []
 

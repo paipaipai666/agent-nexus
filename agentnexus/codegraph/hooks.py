@@ -40,7 +40,7 @@ def sync_codegraph_on_file_write(ctx) -> None:
         from agentnexus.codegraph.updater import sync_file
         sync_file(path)
     except Exception:
-        pass  # Silent failure
+        logger.debug("Codegraph sync failed for %s", path, exc_info=True)
 
 
 @on(HookType.AFTER_TOOL_CALL, name="codegraph_sync_read", priority=300)
@@ -71,7 +71,7 @@ def sync_codegraph_on_file_read(ctx) -> None:
         from agentnexus.codegraph.updater import check_and_sync_file
         check_and_sync_file(path)
     except Exception:
-        pass  # Silent failure
+        logger.debug("Codegraph check_and_sync failed for %s", path, exc_info=True)
 
 
 __all__ = ["sync_codegraph_on_file_write", "sync_codegraph_on_file_read"]

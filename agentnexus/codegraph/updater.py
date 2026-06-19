@@ -216,7 +216,7 @@ def _process_files(
             content = fpath.read_text(encoding="utf-8", errors="replace")
         except (OSError, UnicodeDecodeError) as e:
             result.files_errored += 1
-            logger.warning(f"Failed to read {rel_path}: {e}")
+            logger.warning("Failed to read %s: %s", rel_path, e)
             continue
 
         content_hash = _compute_content_hash(content)
@@ -331,7 +331,7 @@ def _process_single_file(
                     content_hash, file_size, project_root, result
                 )
             except Exception as e:
-                logger.warning(f"Failed to re-process affected file {affected_path}: {e}")
+                logger.warning("Failed to re-process affected file %s: %s", affected_path, e)
 
 
 def _process_deleted_file(
@@ -368,7 +368,7 @@ def _recover_wal(store: CodeGraphStore, project_root: Path, result: BuildResult)
                     content_hash, file_size, project_root, result
                 )
             except Exception as e:
-                logger.warning(f"WAL recovery failed for {entry['file_path']}: {e}")
+                logger.warning("WAL recovery failed for %s: %s", entry['file_path'], e)
                 store.wal_clear(entry["file_path"])
         else:
             # File no longer exists, clean up
@@ -424,7 +424,7 @@ def _check_consistency(store: CodeGraphStore) -> None:
             vector_store.delete_by_ids(list(only_in_chroma))
 
     except Exception as e:
-        logger.warning(f"Consistency check failed: {e}")
+        logger.warning("Consistency check failed: %s", e)
 
 
 def sync_file(file_path: str | Path, project_root: Path | None = None) -> None:
@@ -458,7 +458,7 @@ def sync_file(file_path: str | Path, project_root: Path | None = None) -> None:
         finally:
             store.close()
     except Exception as e:
-        logger.debug(f"sync_file failed for {file_path}: {e}")
+        logger.debug("sync_file failed for %s: %s", file_path, e)
 
 
 def check_and_sync_file(file_path: str | Path, project_root: Path | None = None) -> None:
@@ -490,7 +490,7 @@ def check_and_sync_file(file_path: str | Path, project_root: Path | None = None)
         finally:
             store.close()
     except Exception as e:
-        logger.debug(f"check_and_sync_file failed for {file_path}: {e}")
+        logger.debug("check_and_sync_file failed for %s: %s", file_path, e)
 
 
 def verify_consistency(project_root: Path | None = None) -> list[str]:

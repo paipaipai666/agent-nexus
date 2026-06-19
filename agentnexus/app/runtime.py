@@ -6,26 +6,38 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService, SkillService
+
+if TYPE_CHECKING:
+    from agentnexus.agents.re_act_agent import ReActAgent
+    from agentnexus.capabilities.runtime import CapabilityRuntime
+    from agentnexus.core.config import Settings
+    from agentnexus.core.llm import AgentLLM
+    from agentnexus.extensions import ExtensionManager
+    from agentnexus.memory.manager import MemoryManager
+    from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.tools.confirm_bridge import ConfirmBridge
+    from agentnexus.tools.mcp_adapter import MCPManager
+    from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AppRuntime:
-    settings: Any
-    llm: Any
-    executor: Any
-    agent: Any
-    memory_manager: Any
-    version_manager: Any
-    mcp_manager: Any
-    extension_manager: Any
-    capability_runtime: Any
+    settings: "Settings"
+    llm: "AgentLLM"
+    executor: "ToolRegistry"
+    agent: "ReActAgent"
+    memory_manager: "MemoryManager"
+    version_manager: "ConversationVersionManager"
+    mcp_manager: "MCPManager | None"
+    extension_manager: "ExtensionManager"
+    capability_runtime: "CapabilityRuntime"
     services: AppServices
-    subagent_confirm: Any
+    subagent_confirm: "ConfirmBridge"
     session_id: str
 
     @classmethod

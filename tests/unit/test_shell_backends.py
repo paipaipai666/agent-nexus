@@ -412,7 +412,8 @@ class TestExecuteShellDocker:
 
 
 class TestExecuteShellLocally:
-    def test_windows_uses_shell_true(self, mocker):
+    def test_windows_uses_cmd_c(self, mocker):
+        """CRIT-04: Windows uses cmd /c instead of shell=True."""
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
         mock_run = mocker.patch("subprocess.run")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="ok")
@@ -422,8 +423,8 @@ class TestExecuteShellLocally:
 
         _execute_shell_locally("echo hi", "C:\\tmp", 30)
 
-        assert mock_run.call_args[1].get("shell") is True
-        assert mock_run.call_args[0][0] == "echo hi"
+        assert mock_run.call_args[1].get("shell") is False
+        assert mock_run.call_args[0][0] == ["cmd", "/c", "echo hi"]
 
     def test_unix_uses_sh_dash_lc(self, mocker):
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Linux")

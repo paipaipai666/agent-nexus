@@ -13,10 +13,16 @@ import queue
 import threading
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.services.turn import TurnRecord, TurnRuntime
+
+if TYPE_CHECKING:
+    from agentnexus.capabilities.runtime import CapabilityRuntime
+    from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.skills import SkillRegistry
+    from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +53,12 @@ class ChatService:
 
     def __init__(
         self,
-        agent_factory: Callable[[], Any],
+        agent_factory: Callable[[str | None], Any],
         memory_factory_builder: Callable[[str], Callable[[], Any]],
-        version_manager: Any = None,
-        skill_service: Any = None,
-        tool_executor: Any = None,
-        capability_runtime: Any = None,
+        version_manager: "ConversationVersionManager | None" = None,
+        skill_service: "SkillRegistry | None" = None,
+        tool_executor: "ToolRegistry | None" = None,
+        capability_runtime: "CapabilityRuntime | None" = None,
     ):
         # Factories for per-session agent/memory creation (Phase 1: multi-session)
         self._agent_factory = agent_factory

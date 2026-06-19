@@ -53,11 +53,10 @@ SETTABLE_KEYS = {
     # Code Execution
     "code_execution_backend", "code_execution_timeout",
     "code_execution_memory_mb", "code_execution_docker_image",
-    "code_execution_allow_unsafe_local",
     # Shell Execution
     "shell_enabled", "shell_confirm", "shell_timeout",
     "shell_execution_backend", "shell_execution_memory_mb",
-    "shell_execution_docker_image", "shell_blacklist",
+    "shell_execution_docker_image",
     # File Operations
     "file_read_max_mb",
     # Extensions & Skills
@@ -81,6 +80,13 @@ SETTABLE_KEYS = {
     "computer_use_enabled", "computer_use_backend",
     "computer_use_snapshot_max_nodes",
     "computer_use_allowed_apps", "computer_use_blocked_apps",
+}
+
+# Security-sensitive keys that cannot be modified via the API.
+# These can weaken sandboxing, bypass safety checks, or alter audit behavior.
+_SECURITY_BLOCKED_KEYS = {
+    "code_execution_allow_unsafe_local",
+    "shell_blacklist",
 }
 
 
@@ -112,6 +118,12 @@ def update_config(req: ConfigUpdateRequest):
 
     if req.key not in SETTABLE_KEYS:
         raise HTTPException(status_code=400, detail=f"Key '{req.key}' is not settable")
+
+    if req.key in _SECURITY_BLOCKED_KEYS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Key '{req.key}' is security-sensitive and cannot be modified via API",
+        )
 
     data = load_config_yaml()
     data[req.key] = req.value

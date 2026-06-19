@@ -122,7 +122,7 @@ class MechanicalVerifier:
         primary_text = chunk_texts.get(primary_chunk_id, "")
 
         if not primary_text:
-            logger.warning(f"Chunk {primary_chunk_id} not found in chunk_texts, marking as synthesis")
+            logger.warning("Chunk %s not found in chunk_texts, marking as synthesis", primary_chunk_id)
             return SynthesisLevel.SYNTHESIS.value
 
         # Step 1: For direct_quote and paraphrase, check string overlap with primary chunk

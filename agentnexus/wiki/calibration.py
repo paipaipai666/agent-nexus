@@ -142,7 +142,7 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
     dq_total = sum(dq_actual.values())
     if dq_total > 0 and dq_missed_as_para / dq_total > 0.3:
         adjusted["jaccard_direct_quote"] = max(0.3, current["jaccard_direct_quote"] - 0.1)
-        logger.info(f"Lowering jaccard_direct_quote to {adjusted['jaccard_direct_quote']}")
+        logger.info("Lowering jaccard_direct_quote to %s", adjusted['jaccard_direct_quote'])
 
     # Check paraphrase degradation rate
     para_actual = matrix.get(SynthesisLevel.PARAPHRASE.value, {})
@@ -150,7 +150,7 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
     para_total = sum(para_actual.values())
     if para_total > 0 and para_degraded / para_total > 0.3:
         adjusted["cosine_paraphrase"] = max(0.3, current["cosine_paraphrase"] - 0.1)
-        logger.info(f"Lowering cosine_paraphrase to {adjusted['cosine_paraphrase']}")
+        logger.info("Lowering cosine_paraphrase to %s", adjusted['cosine_paraphrase'])
 
     # Check cross_reference degradation
     cr_actual = matrix.get(SynthesisLevel.CROSS_REFERENCE.value, {})
@@ -158,7 +158,7 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
     cr_total = sum(cr_actual.values())
     if cr_total > 0 and cr_degraded / cr_total > 0.3:
         adjusted["cosine_source"] = max(0.15, current["cosine_source"] - 0.05)
-        logger.info(f"Lowering cosine_source to {adjusted['cosine_source']}")
+        logger.info("Lowering cosine_source to %s", adjusted['cosine_source'])
 
     # Check false positive rate in direct_quote
     false_dq = sum(
@@ -167,7 +167,7 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
     )
     if dq_total > 0 and false_dq / (dq_total + false_dq) > 0.2:
         adjusted["jaccard_direct_quote"] = min(0.8, current["jaccard_direct_quote"] + 0.05)
-        logger.info(f"Raising jaccard_direct_quote to {adjusted['jaccard_direct_quote']}")
+        logger.info("Raising jaccard_direct_quote to %s", adjusted['jaccard_direct_quote'])
 
     return adjusted
 
@@ -195,8 +195,8 @@ def run_calibration(
     for round_num in range(max_rounds):
         cm = evaluate_thresholds(samples, thresholds)
         score = cm.false_degradation_rate() + cm.miss_rate()
-        logger.info(f"Calibration round {round_num + 1}: score={score:.4f} "
-                     f"(degradation={cm.false_degradation_rate():.4f}, miss={cm.miss_rate():.4f})")
+        logger.info("Calibration round %d: score=%.4f (degradation=%.4f, miss=%.4f)",
+                     round_num + 1, score, cm.false_degradation_rate(), cm.miss_rate())
 
         if score < best_score:
             best_score = score

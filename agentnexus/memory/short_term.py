@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -59,6 +60,7 @@ def compute_importance(msg: dict, position: int, total: int) -> float:
 class ShortTermMemory:
     def __init__(self, max_messages: int = 50, max_tokens: int = 0,
                  wal_path: str | None = None):
+        self._lock = threading.RLock()
         self._messages: deque[dict] = deque(maxlen=max_messages)
         self._summary: str = ""
         self._append_count: int = 0
@@ -72,28 +74,31 @@ class ShortTermMemory:
         msg = {"role": role, "content": content, "ts": time.time()}
         if metadata:
             msg["metadata"] = metadata
-        # Incremental token tracking
-        self._token_count += self._estimate_msg_tokens(msg)
-        # If deque is full, the evicted message's tokens should be subtracted
-        if self._messages.maxlen and len(self._messages) == self._messages.maxlen:
-            evicted = self._messages[0]
-            self._token_count -= self._estimate_msg_tokens(evicted)
-        self._messages.append(msg)
-        self._append_count += 1
-        if self._wal_path and self._append_count % 5 == 0:
-            self._flush_wal()
+        with self._lock:
+            # Incremental token tracking
+            self._token_count += self._estimate_msg_tokens(msg)
+            # If deque is full, the evicted message's tokens should be subtracted
+            if self._messages.maxlen and len(self._messages) == self._messages.maxlen:
+                evicted = self._messages[0]
+                self._token_count -= self._estimate_msg_tokens(evicted)
+            self._messages.append(msg)
+            self._append_count += 1
+            if self._wal_path and self._append_count % 5 == 0:
+                self._flush_wal()
 
     def get_all(self) -> list[dict]:
-        return list(self._messages)
+        with self._lock:
+            return list(self._messages)
 
     def compact(self, summary: str, keep_recent: int = 4):
-        recent = list(self._messages)[-keep_recent:] if len(self._messages) > keep_recent else list(self._messages)
-        self._messages.clear()
-        self._messages.append({"role": "system", "content": f"[会话摘要] {summary}", "ts": time.time()})
-        for e in recent:
-            self._messages.append(e)
-        self._summary = summary
-        self._recalc_token_count()
+        with self._lock:
+            recent = list(self._messages)[-keep_recent:] if len(self._messages) > keep_recent else list(self._messages)
+            self._messages.clear()
+            self._messages.append({"role": "system", "content": f"[会话摘要] {summary}", "ts": time.time()})
+            for e in recent:
+                self._messages.append(e)
+            self._summary = summary
+            self._recalc_token_count()
 
     def compact_full(self, summary: str, message_count: int = 0, is_auto: bool = True,
                      keep_recent: int = 6):
@@ -102,73 +107,77 @@ class ShortTermMemory:
         Preserves role structure in the tail so the LLM can distinguish
         user vs assistant messages after compaction.
         """
-        recent = list(self._messages)[-keep_recent:] if keep_recent > 0 else []
-        self._messages.clear()
-        boundary = (
-            "本会话是从之前一次因上下文耗尽而中断的对话延续过来的。"
-            "以下摘要概述了之前的对话内容：\n\n"
-        ) if is_auto else (
-            "对话已被手动压缩。以下是压缩后的摘要：\n\n"
-        )
-        self._messages.append({
-            "role": "system",
-            "content": boundary + summary,
-            "ts": time.time(),
-        })
-        for msg in recent:
-            self._messages.append(msg)
-        self._summary = summary
-        self._recalc_token_count()
+        with self._lock:
+            recent = list(self._messages)[-keep_recent:] if keep_recent > 0 else []
+            self._messages.clear()
+            boundary = (
+                "本会话是从之前一次因上下文耗尽而中断的对话延续过来的。"
+                "以下摘要概述了之前的对话内容：\n\n"
+            ) if is_auto else (
+                "对话已被手动压缩。以下是压缩后的摘要：\n\n"
+            )
+            self._messages.append({
+                "role": "system",
+                "content": boundary + summary,
+                "ts": time.time(),
+            })
+            for msg in recent:
+                self._messages.append(msg)
+            self._summary = summary
+            self._recalc_token_count()
 
     def snip(self, keep_recent: int = 10) -> int:
-        if len(self._messages) <= keep_recent:
-            return 0
-        all_msgs = list(self._messages)
-        total = len(all_msgs)
-        # Partition: recent tail is always kept
-        tail = all_msgs[-keep_recent:]
-        head = all_msgs[:-keep_recent]
-        # Score head messages and keep those above threshold
-        _IMPORTANCE_KEEP_THRESHOLD = 0.65
-        preserved_head = []
-        removed_count = 0
-        for i, msg in enumerate(head):
-            imp = compute_importance(msg, i, total)
-            if imp >= _IMPORTANCE_KEEP_THRESHOLD:
-                preserved_head.append(msg)
-            else:
-                removed_count += 1
-        if removed_count == 0:
-            return 0
-        # Rebuild deque
-        self._messages.clear()
-        marker = {
-            "role": "system",
-            "content": "[上下文已裁剪] 此标记之前的对话历史已被移除，共移除 {} 条消息。".format(removed_count),
-            "ts": time.time(),
-        }
-        self._messages.append(marker)
-        for msg in preserved_head:
-            self._messages.append(msg)
-        for msg in tail:
-            self._messages.append(msg)
+        with self._lock:
+            if len(self._messages) <= keep_recent:
+                return 0
+            all_msgs = list(self._messages)
+            total = len(all_msgs)
+            # Partition: recent tail is always kept
+            tail = all_msgs[-keep_recent:]
+            head = all_msgs[:-keep_recent]
+            # Score head messages and keep those above threshold
+            _IMPORTANCE_KEEP_THRESHOLD = 0.65
+            preserved_head = []
+            removed_count = 0
+            for i, msg in enumerate(head):
+                imp = compute_importance(msg, i, total)
+                if imp >= _IMPORTANCE_KEEP_THRESHOLD:
+                    preserved_head.append(msg)
+                else:
+                    removed_count += 1
+            if removed_count == 0:
+                return 0
+            # Rebuild deque
+            self._messages.clear()
+            marker = {
+                "role": "system",
+                "content": "[上下文已裁剪] 此标记之前的对话历史已被移除，共移除 {} 条消息。".format(removed_count),
+                "ts": time.time(),
+            }
+            self._messages.append(marker)
+            for msg in preserved_head:
+                self._messages.append(msg)
+            for msg in tail:
+                self._messages.append(msg)
         self._recalc_token_count()
         return removed_count
 
     def get_last_ts(self) -> float:
-        if self._messages:
-            return self._messages[-1]["ts"]
-        return 0.0
+        with self._lock:
+            if self._messages:
+                return self._messages[-1]["ts"]
+            return 0.0
 
     def estimate_tokens(self) -> int:
-        enc = _get_tiktoken_encoding()
-        if enc is None:
-            return self._estimate_tokens_fallback()
-        total = 0
-        for m in self._messages:
-            content = m.get("content", "")
-            total += len(enc.encode(content))
-        return total
+        with self._lock:
+            enc = _get_tiktoken_encoding()
+            if enc is None:
+                return self._estimate_tokens_fallback()
+            total = 0
+            for m in self._messages:
+                content = m.get("content", "")
+                total += len(enc.encode(content))
+            return total
 
     def _estimate_tokens_fallback(self) -> int:
         total = 0
@@ -210,10 +219,21 @@ class ShortTermMemory:
         """Return the current compressed summary, or empty string if none."""
         return self._summary
 
+    def replace_messages(self, messages: list[dict]) -> None:
+        """Replace all messages atomically (thread-safe, triggers WAL flush)."""
+        with self._lock:
+            self._messages.clear()
+            for msg in messages:
+                self._messages.append(msg)
+            self._recalc_token_count()
+            if self._wal_path:
+                self._flush_wal()
+
     def clear(self):
-        self._messages.clear()
-        self._summary = ""
-        self._token_count = 0
+        with self._lock:
+            self._messages.clear()
+            self._summary = ""
+            self._token_count = 0
 
     def _flush_wal(self):
         """Write current state to a lightweight WAL file for crash recovery."""

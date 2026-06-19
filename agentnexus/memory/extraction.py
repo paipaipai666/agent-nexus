@@ -91,6 +91,7 @@ def _check_conflict(llm: Any, old_content: str, new_content: str) -> bool:
         result = llm.think([{"role": "user", "content": prompt}], silent=True)
         return "矛盾" in (result or "")
     except Exception:
+        logger.debug("Conflict check failed, assuming no conflict", exc_info=True)
         return False
 
 

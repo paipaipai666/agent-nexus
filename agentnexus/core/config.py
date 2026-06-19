@@ -187,6 +187,13 @@ class PersonaConfig(BaseModel):
 
 
 class Settings(BaseSettings):
+    """Application-wide settings loaded from config.yaml + environment variables.
+
+    Grouped into logical sections with comment headers for navigation.
+    Use the ``.llm``, ``.rag``, ``.memory``, ``.mcp``, ``.runtime`` properties
+    to get typed sub-settings objects.
+    """
+
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
 
     def __init__(self, **data: Any):
@@ -196,6 +203,7 @@ class Settings(BaseSettings):
         self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
         self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
+    # ── LLM / Model Configuration ────────────────────────────────────────
     llm_api_key: SecretStr = Field(default=SecretStr(""))
     llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
@@ -205,12 +213,19 @@ class Settings(BaseSettings):
     model_json_mode: bool | None = Field(default=None)
     model_thinking: bool | None = Field(default=None)
     model_thinking_budget: int = Field(default=4000, ge=1024, le=32000)
+    # Judge LLM (used by evaluators)
     judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
     judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
+
+    # ── External Service Keys ─────────────────────────────────────────────
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
     e2b_api_key: SecretStr = Field(default=SecretStr(""))
+
+    # ── Agent Runtime ─────────────────────────────────────────────────────
     max_agent_steps: int = Field(default=50, ge=1, le=200)
+
+    # ── RAG / Retrieval ──────────────────────────────────────────────────
     enable_contextual_retrieval: bool = Field(default=False)
     enable_query_rewrite: bool = Field(default=True)
     enable_multi_query: bool = Field(default=True)
@@ -223,14 +238,20 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="BAAI/bge-small-zh-v1.5")
     reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3")
     chroma_persist_dir: str = Field(default="")
-    memory_db_path: str = Field(default="")
-    traces_dir: str = Field(default="")
     rag_catalog_db_path: str = Field(default="")
     rag_default_namespace: str = Field(default="default")
     rag_collection_prefix: str = Field(default="kb_")
+
+    # ── Storage Paths ─────────────────────────────────────────────────────
+    memory_db_path: str = Field(default="")
+    traces_dir: str = Field(default="")
+
+    # ── Memory System ─────────────────────────────────────────────────────
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
+
+    # ── MCP (Model Context Protocol) ──────────────────────────────────────
     mcp_enabled: bool = Field(default=False)
     mcp_startup_timeout: int = Field(default=15, ge=1, le=300)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)

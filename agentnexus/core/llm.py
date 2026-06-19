@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
 from typing import Dict, List
@@ -25,6 +26,7 @@ LLM_RETRY_BASE_DELAY = 2.0
 
 # Provider health tracking for circuit breaker
 _provider_health: dict[str, tuple[int, float]] = {}  # key -> (failure_count, last_failure_time)
+_provider_health_lock = threading.Lock()
 _PROVIDER_FAILURE_THRESHOLD = 3
 _PROVIDER_COOLDOWN_SECONDS = 60
 
@@ -39,13 +41,23 @@ def get_default_llm() -> "AgentLLM":
 
 
 class AgentLLM:
-    def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: int | None = None,
+        *,
+        # Backward-compatible camelCase aliases (deprecated)
+        apiKey: str | None = None,
+        baseUrl: str | None = None,
+    ):
         from agentnexus.core.capabilities import _normalize_model_id
         settings = get_settings()
-        self.base_url = baseUrl or settings.llm_base_url
+        self.base_url = base_url or baseUrl or settings.llm_base_url
         raw_model = (model or settings.llm_model_id).strip()
         self.model = _normalize_model_id(raw_model, self.base_url) if "/" not in raw_model else raw_model
-        self.api_key = apiKey or settings.llm_api_key.get_secret_value()
+        self.api_key = api_key or apiKey or settings.llm_api_key.get_secret_value()
         self.timeout = timeout or settings.llm_timeout
         self.last_error: str = ""
         self.last_truncated: bool = False
@@ -160,13 +172,14 @@ class AgentLLM:
             provider = select_provider(model, self.base_url)
             if provider is not None:
                 provider_key = f"{type(provider).__name__}/{self.model}"
-                health = _provider_health.get(provider_key)
-                if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
-                    elapsed = time.time() - health[1]
-                    if elapsed < _PROVIDER_COOLDOWN_SECONDS:
-                        provider = None  # Skip to fallback
-                    else:
-                        _provider_health.pop(provider_key, None)
+                with _provider_health_lock:
+                    health = _provider_health.get(provider_key)
+                    if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
+                        elapsed = time.time() - health[1]
+                        if elapsed < _PROVIDER_COOLDOWN_SECONDS:
+                            provider = None  # Skip to fallback
+                        else:
+                            _provider_health.pop(provider_key, None)
             if provider is not None:
                 try:
                     result = self._call_via_provider(
@@ -183,35 +196,23 @@ class AgentLLM:
                     self.total_usage["cache_hit_tokens"] += self.last_usage.get("cache_hit_tokens", 0)
 
                     if ctx and span:
-                        meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **self.last_usage}
-                        if self.last_tool_calls:
-                            meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
-                        # Cache hit rate metadata
-                        cache_hit = self.last_usage.get("cache_hit_tokens", 0)
-                        cache_miss = self.last_usage.get("cache_miss_tokens", 0)
-                        if cache_hit or cache_miss:
-                            meta["cache_hit_tokens"] = cache_hit
-                            meta["cache_miss_tokens"] = cache_miss
-                            total_cache = cache_hit + cache_miss
-                            meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
-                        ctx.end_span(span,
-                            output_data={"output_preview": _preview(result.text), "output_length": len(result.text)},
-                            metadata=meta,
-                        )
+                        self._end_trace_span(ctx, span, model, result.text)
 
                     if not silent and result.text:
                         text = Text(result.text)
                         console.print(text)
 
                     # Reset provider health on success
-                    _provider_health.pop(provider_key, None)
+                    with _provider_health_lock:
+                        _provider_health.pop(provider_key, None)
 
                     return result.text
                 except Exception as provider_err:
                     # Track provider failure for circuit breaker
-                    fail_count, _ = _provider_health.get(provider_key, (0, 0))
-                    _provider_health[provider_key] = (fail_count + 1, time.time())
-                    logger.warning(f"Direct provider failed, falling back to LiteLLM: {provider_err}")
+                    with _provider_health_lock:
+                        fail_count, _ = _provider_health.get(provider_key, (0, 0))
+                        _provider_health[provider_key] = (fail_count + 1, time.time())
+                    logger.warning("Direct provider failed, falling back to LiteLLM: %s", provider_err)
 
             # ── Step 2: LiteLLM fallback ────────────────────────
             result = self._call_via_litellm(
@@ -220,21 +221,7 @@ class AgentLLM:
             )
 
             if ctx and span:
-                meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **self.last_usage}
-                if self.last_tool_calls:
-                    meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
-                # Cache hit rate metadata
-                cache_hit = self.last_usage.get("cache_hit_tokens", 0)
-                cache_miss = self.last_usage.get("cache_miss_tokens", 0)
-                if cache_hit or cache_miss:
-                    meta["cache_hit_tokens"] = cache_hit
-                    meta["cache_miss_tokens"] = cache_miss
-                    total_cache = cache_hit + cache_miss
-                    meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
-                ctx.end_span(span,
-                    output_data={"output_preview": _preview(result), "output_length": len(result)},
-                    metadata=meta,
-                )
+                self._end_trace_span(ctx, span, model, result)
 
             return result
 
@@ -274,7 +261,7 @@ class AgentLLM:
                 is_transient = True
 
             retry_tag = f"[retry {attempt + 1}/{LLM_MAX_RETRIES}]" if attempt < LLM_MAX_RETRIES - 1 else "[exhausted]"
-            logger.error(f"LLM 错误{retry_tag}: {error_msg}")
+            logger.error("LLM 错误%s: %s", retry_tag, error_msg)
 
             if ctx and span:
                 ctx.end_span(span, metadata={
@@ -287,6 +274,9 @@ class AgentLLM:
                 return ""
 
             # transient error — outer retry loop continues
+
+        # All retries exhausted with transient errors
+        return ""
 
     def _call_via_provider(self, provider, messages, temperature, tools, response_format, thinking, on_token=None):
         """Call LLM via a direct provider (OpenAI SDK)."""
@@ -483,7 +473,26 @@ class AgentLLM:
                 "total_tokens": input_tokens + output_tokens,
             }
         except Exception:
+            logger.debug("Token usage estimation failed", exc_info=True)
             return {}
+
+    def _end_trace_span(self, ctx, span, model: str, result_text: str) -> None:
+        """End a trace span with standard metadata (cache hit rate, tool calls, etc.)."""
+        meta = {"model": model, "status": "ok", "truncated": self.last_truncated, **self.last_usage}
+        if self.last_tool_calls:
+            meta["tool_calls"] = [tc["name"] for tc in self.last_tool_calls]
+        cache_hit = self.last_usage.get("cache_hit_tokens", 0)
+        cache_miss = self.last_usage.get("cache_miss_tokens", 0)
+        if cache_hit or cache_miss:
+            meta["cache_hit_tokens"] = cache_hit
+            meta["cache_miss_tokens"] = cache_miss
+            total_cache = cache_hit + cache_miss
+            meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
+        ctx.end_span(
+            span,
+            output_data={"output_preview": _preview(result_text), "output_length": len(result_text)},
+            metadata=meta,
+        )
 
 
 def _preview(text: str, max_len: int = 500) -> str:
