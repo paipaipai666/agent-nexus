@@ -1,6 +1,7 @@
 """Integration tests for memory compaction pipeline: STM growth → snip → microcompact → projection."""
 from unittest.mock import MagicMock, patch
 
+from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -25,10 +26,8 @@ class TestMemoryCompactionIntegration:
             mgr._enable_long_term = True
             mgr._ctx_max = ctx_max
             mgr._compact_threshold = ctx_max - 8000
-            mgr._compact_failures = 0
-            mgr._circuit_open = False
-            mgr._circuit_opened_at = 0.0
-            mgr._circuit_half_open = False
+            mgr._compact_circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
+            mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
             mgr._microcompacts_since_open = 0
             mgr._compacting = False
             mgr._snip_freed_tokens = 0

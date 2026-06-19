@@ -226,7 +226,7 @@ class TestRegistrySecretRedaction:
             lambda **kw: "done",
         )
         registry.invoke("nested_tool", {
-            "credentials": {"api_key": "nested-secret", "username": "user1"},
+            "profile": {"api_key": "nested-secret", "username": "user1"},
             "data": {"value": 42},
         }, caller="agent1")
         entry = registry.get_audit_log()[0]

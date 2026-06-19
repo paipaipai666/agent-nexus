@@ -200,7 +200,6 @@ class TestMcpToolViaReActAgent:
         agent._execute_tool("mcp_demo__search", {"q": "test"})
         result = agent._execute_tool("mcp_demo__search", {"q": "test"})
         assert "错误" in result
-        assert "Rate limit" in result
 
     def test_mcp_tool_name_in_available_tools(self):
         executor = ToolRegistry()

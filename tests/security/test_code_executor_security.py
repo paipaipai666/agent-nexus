@@ -67,25 +67,19 @@ class TestExecuteE2BSecurity:
             _execute_e2b("print(1)", settings)
 
     def test_e2b_api_key_set_in_env(self, mocker):
-        """API key is set in os.environ['E2B_API_KEY'] during execution."""
+        """API key is passed to Sandbox constructor (not via os.environ)."""
         from pydantic import SecretStr
         os.environ.pop("E2B_API_KEY", None)
         settings = type("Settings", (), {"e2b_api_key": SecretStr("sk-env-key")})()
 
         mock_sandbox_cls = mocker.patch("agentnexus.tools.code_executor.Sandbox")
         sandbox_instance = mock_sandbox_cls.return_value.__enter__.return_value
-        env_values = []
-
-        def capture_env(code):
-            env_values.append(os.environ.get("E2B_API_KEY"))
-            return mocker.MagicMock(
-                logs=mocker.MagicMock(stdout=[], stderr=[]), results=[]
-            )
-
-        sandbox_instance.run_code.side_effect = capture_env
+        sandbox_instance.run_code.return_value = mocker.MagicMock(
+            logs=mocker.MagicMock(stdout=[], stderr=[]), results=[]
+        )
 
         _execute_e2b("print(1)", settings)
-        assert env_values[0] == "sk-env-key"
+        mock_sandbox_cls.assert_called_once_with(api_key="sk-env-key")
         assert os.environ.get("E2B_API_KEY") is None
 
     def test_e2b_api_key_restored(self, mocker):
@@ -165,15 +159,13 @@ class TestExecuteAutoSecurity:
     @patch("agentnexus.tools.code_executor._execute_e2b")
     @patch("agentnexus.tools.code_executor._execute_native_sandbox")
     @patch("agentnexus.tools.code_executor._execute_docker")
-    @patch("agentnexus.tools.code_executor._execute_locally_with_warning")
     def test_auto_all_backends_fail(
-        self, mock_local, mock_docker, mock_native, mock_e2b
+        self, mock_docker, mock_native, mock_e2b
     ):
-        """All backends fail, falls through to _execute_locally_with_warning."""
+        """All backends fail, returns blocked message."""
         mock_e2b.side_effect = SandboxUnavailable("e2b down")
         mock_native.side_effect = SandboxUnavailable("native down")
         mock_docker.side_effect = SandboxUnavailable("docker down")
-        mock_local.return_value = "[warning]\nlocal fallback"
         settings = type("Settings", (), {})()
 
         with patch("agentnexus.tools.code_executor._has_e2b_key", return_value=True):
@@ -182,8 +174,7 @@ class TestExecuteAutoSecurity:
         assert mock_e2b.called
         assert mock_native.called
         assert mock_docker.called
-        assert mock_local.called
-        assert "warning" in result
+        assert "[blocked]" in result
 
     @patch("agentnexus.tools.code_executor._execute_e2b")
     @patch("agentnexus.tools.code_executor._execute_native_sandbox")
@@ -290,7 +281,7 @@ class TestCodeExecutionBackendCompliance:
         mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
         with patch("agentnexus.tools.code_executor.shutil.which", return_value=None):
             result = python_execute("print('hello')")
-        assert "[warning]" in result
+        assert "[blocked]" in result
 
     @patch("agentnexus.tools.code_executor.shutil.which")
     @patch("agentnexus.tools.code_executor.subprocess.run")
