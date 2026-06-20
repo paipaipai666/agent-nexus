@@ -6,6 +6,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-backend:
     runs-on: ${{ matrix.os }}
@@ -17,6 +21,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: "pip"
+      - name: Validate version tag matches pyproject.toml
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION=$(python -c "import re; f=open('pyproject.toml').read(); m=re.search(r'^version\s*=\s*\"(.+?)\"',f,re.MULTILINE); print(m.group(1) if m else 'NOTFOUND')")
+          echo "Tag: $TAG_VERSION | pyproject.toml: $FILE_VERSION"
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::Version mismatch! Tag=$TAG_VERSION, pyproject.toml=$FILE_VERSION"
+            exit 1
+          fi
+          echo "✓ Versions match: $TAG_VERSION"
       - name: Install deps
         run: pip install pyinstaller .
       - name: Build backend binary
