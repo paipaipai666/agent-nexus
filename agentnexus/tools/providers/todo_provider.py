@@ -26,7 +26,8 @@ class TodoToolProvider:
 
             executor.register_tool(
                 "todo_add",
-                "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。",
+                "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。"
+                "[不适用] 管理文件(用file_write)。",
                 _todo_add,
                 param_schema={
                     "type": "object",
@@ -73,6 +74,7 @@ class TodoToolProvider:
                 _todo_list,
                 param_schema={"type": "object", "properties": {}},
                 risk_level="low",
+                concurrency_safe=True,
             )
 
         context.mark_registered(executor, before)

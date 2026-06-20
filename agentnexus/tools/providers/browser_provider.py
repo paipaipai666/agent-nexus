@@ -40,7 +40,8 @@ class BrowserToolProvider:
                 "browser_navigate",
                 "导航浏览器到指定URL。参数: url(必填), wait_until(load/domcontentloaded/networkidle,默认load)。"
                 "返回页面标题、URL、readyState和页面结构概览。"
-                "⚠️ 导航后所有旧ref失效，必须重新调用browser_snapshot获取新ref。",
+                "⚠️ 导航后所有旧ref失效，必须重新调用browser_snapshot获取新ref。"
+                "[不适用] 抓取已知URL内容(用web_fetch, 更快)。",
                 browser_navigate,
                 param_schema={
                     "type": "object",
@@ -105,6 +106,7 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("browser_click"):
@@ -179,13 +181,15 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=20,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("browser_screenshot"):
             executor.register_tool(
                 "browser_screenshot",
                 "截取当前页面截图。目标用户: 人类开发者（调试用），Agent无法消费图片文件。"
-                "参数: path(保存路径,可选), full_page(是否截取完整页面,默认false)。",
+                "参数: path(保存路径,可选), full_page(是否截取完整页面,默认false)。"
+                "[不适用] Agent需要页面结构信息(用browser_snapshot)。",
                 browser_screenshot,
                 param_schema={
                     "type": "object",
@@ -197,6 +201,7 @@ class BrowserToolProvider:
                 },
                 risk_level="medium",
                 rate_limit_per_min=10,
+                concurrency_safe=True,
             )
 
         if context.want("browser_evaluate"):
@@ -238,6 +243,7 @@ class BrowserToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=10,
+                concurrency_safe=True,
             )
 
         if context.want("browser_scroll"):
@@ -303,6 +309,7 @@ class BrowserToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=10,
+                concurrency_safe=True,
             )
 
         if context.want("browser_dismiss_popup"):
@@ -335,6 +342,7 @@ class BrowserToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=30,
+                concurrency_safe=True,
             )
 
         if context.want("browser_switch_page"):

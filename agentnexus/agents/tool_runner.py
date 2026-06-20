@@ -9,6 +9,7 @@ import traceback
 from typing import Any, Callable
 
 from agentnexus.core.hooks import HookType, get_hook_manager
+from agentnexus.tools.errors import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def execute_tool(
     hitl_approver: Callable[[str], bool],
     tool_policy: Any = None,
     cancel_checker: Callable[[], bool] | None = None,
-) -> str:
+) -> str | dict | ToolError:
     hook_mgr = get_hook_manager()
 
     # ── before hook (can modify params or abort) ───────────────
@@ -47,7 +48,12 @@ def execute_tool(
         "selection_reason": f"LLM selected '{name}' tool",
     })
     if hook_ctx.aborted:
-        return f"[{hook_ctx.abort_code}] {hook_ctx.abort_reason}"
+        return ToolError(
+            error_code=hook_ctx.abort_code or "EXECUTION_FAILED",
+            message=str(hook_ctx.abort_reason),
+            recoverable=False,
+            suggested_action="Check tool policy and agent permissions",
+        )
     arguments = hook_ctx.payload.get("params", arguments)
 
     try:
@@ -73,7 +79,12 @@ def execute_tool(
                         raise RuntimeError("cancelled")
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        result = f"[错误: 工具 {name} 执行超时 (60s)]"
+                        result = ToolError(
+                            error_code=ToolErrorCode.TIMEOUT,
+                            message=f"工具 {name} 执行超时 (60s)",
+                            recoverable=True,
+                            suggested_action="Retry with a longer timeout or simplify the request",
+                        )
                         break
                     try:
                         result = future.result(timeout=min(remaining, 1.0))
@@ -81,7 +92,12 @@ def execute_tool(
                     except concurrent.futures.TimeoutError:
                         continue
             except concurrent.futures.TimeoutError:
-                result = f"[错误: 工具 {name} 执行超时 (60s)]"
+                result = ToolError(
+                    error_code=ToolErrorCode.TIMEOUT,
+                    message=f"工具 {name} 执行超时 (60s)",
+                    recoverable=True,
+                    suggested_action="Retry with a longer timeout or simplify the request",
+                )
 
         # ── after hook (observer) ──────────────────────────────
         hook_mgr.fire(HookType.AFTER_TOOL_CALL, {
@@ -90,7 +106,7 @@ def execute_tool(
             "result": result,
         })
 
-        if isinstance(result, dict):
+        if isinstance(result, (dict, ToolError)):
             return result
         return str(result)
     except Exception as exc:
@@ -102,6 +118,44 @@ def execute_tool(
         })
         _log_tool_error(name, exc)
         # LOW-02: Include message for safe domain exceptions, strip for generic ones
-        if isinstance(exc, (PermissionError, ValueError, TypeError, KeyError)):
-            return f"错误: 工具 '{name}' 执行失败: {exc}"
-        return f"错误: 工具 '{name}' 执行失败"
+        if isinstance(exc, RuntimeError) and str(exc) == "cancelled":
+            return ToolError(
+                error_code=ToolErrorCode.CANCELLED,
+                message=f"工具 '{name}' 调用被取消",
+                recoverable=True,
+                suggested_action="Retry if cancellation was unintended",
+            )
+        if isinstance(exc, RuntimeError) and "rate limit" in str(exc).lower():
+            return ToolError(
+                error_code=ToolErrorCode.RATE_LIMITED,
+                message=str(exc),
+                recoverable=True,
+                suggested_action="Wait and retry after the rate limit window resets",
+            )
+        if isinstance(exc, PermissionError):
+            return ToolError(
+                error_code=ToolErrorCode.PERMISSION_DENIED,
+                message=str(exc),
+                recoverable=False,
+                suggested_action="Check agent permissions and tool RBAC configuration",
+            )
+        if isinstance(exc, (ValueError, TypeError)):
+            return ToolError(
+                error_code=ToolErrorCode.VALIDATION_FAILED,
+                message=str(exc),
+                recoverable=False,
+                suggested_action="Verify input parameters match the tool schema",
+            )
+        if isinstance(exc, KeyError):
+            return ToolError(
+                error_code=ToolErrorCode.EXECUTION_FAILED,
+                message=str(exc),
+                recoverable=False,
+                suggested_action="Check that the requested resource exists",
+            )
+        return ToolError(
+            error_code=ToolErrorCode.EXECUTION_FAILED,
+            message=f"工具 '{name}' 执行失败",
+            recoverable=False,
+            suggested_action="Check tool_errors.log for details",
+        )

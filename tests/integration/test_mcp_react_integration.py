@@ -156,7 +156,7 @@ class TestMcpToolViaReActAgent:
 
         agent = ReActAgent(MagicMock(), executor, agent_id="react_agent")
         result = agent._execute_tool("nonexistent_mcp_tool", {})
-        assert "错误" in result
+        assert "EXECUTION_FAILED" in str(result)
 
     def test_agent_execute_tool_hitl_blocked(self):
         executor = ToolRegistry()
@@ -183,8 +183,8 @@ class TestMcpToolViaReActAgent:
 
         agent = ReActAgent(MagicMock(), executor, agent_id="react_agent")
         result = agent._execute_tool("mcp_admin__secret", {})
-        assert "错误" in result
-        assert "not allowed" in result
+        assert "PERMISSION_DENIED" in str(result)
+        assert "not allowed" in str(result)
 
     def test_agent_execute_tool_rate_limited(self):
         executor = ToolRegistry()
@@ -199,7 +199,7 @@ class TestMcpToolViaReActAgent:
         agent = ReActAgent(MagicMock(), executor, agent_id="react_agent")
         agent._execute_tool("mcp_demo__search", {"q": "test"})
         result = agent._execute_tool("mcp_demo__search", {"q": "test"})
-        assert "错误" in result
+        assert "RATE_LIMITED" in str(result)
 
     def test_mcp_tool_name_in_available_tools(self):
         executor = ToolRegistry()

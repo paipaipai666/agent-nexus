@@ -14,6 +14,9 @@ def summarize_tool_result(result: Any) -> str:
     optional preview content. This helper keeps runtime layers decoupled from
     tool-specific response schemas.
     """
+    from agentnexus.tools.errors import ToolError
+    if isinstance(result, ToolError):
+        return str(result)
     if not isinstance(result, dict):
         return str(result)
 

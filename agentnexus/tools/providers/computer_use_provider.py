@@ -65,6 +65,7 @@ class ComputerUseToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("computer_list_windows"):
@@ -82,6 +83,7 @@ class ComputerUseToolProvider:
                 risk_level="low",
                 rate_limit_per_min=30,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("computer_switch_window"):
@@ -148,7 +150,8 @@ class ComputerUseToolProvider:
                 "点击桌面应用中的元素。"
                 "参数: element_id(元素标识,从snapshot获取,必填), "
                 "button(left/right/middle,默认left), "
-                "clicks(点击次数,1=单击2=双击,默认1)。",
+                "clicks(点击次数,1=单击2=双击,默认1)。"
+                "[不适用] 操控浏览器网页元素(用browser_*系列工具)。",
                 computer_click,
                 param_schema={
                     "type": "object",
@@ -181,7 +184,8 @@ class ComputerUseToolProvider:
                 "computer_type",
                 "在桌面应用的输入框中键入文本。"
                 "参数: element_id(元素标识,从snapshot获取,必填), "
-                "text(要输入的文本,必填), clear(是否先清空,默认true)。",
+                "text(要输入的文本,必填), clear(是否先清空,默认true)。"
+                "[不适用] 操控浏览器网页元素(用browser_*系列工具)。",
                 computer_type,
                 param_schema={
                     "type": "object",

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from agentnexus.core.hooks import HookContext, HookType
+from agentnexus.tools.errors import ToolError
 
 
 class TestExecuteTool:
@@ -69,8 +70,9 @@ class TestExecuteTool:
             hitl_approver=lambda s: True,
         )
         executor.invoke.assert_not_called()
-        assert "[PERMISSION_DENIED]" in result
-        assert "not allowed" in result
+        assert isinstance(result, ToolError)
+        assert result.error_code == "PERMISSION_DENIED"
+        assert "not allowed" in result.message
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")
     def test_cancel_checker_raises_runtime_error(self, mock_get_hook):
@@ -88,8 +90,9 @@ class TestExecuteTool:
             hitl_approver=lambda s: True,
             cancel_checker=lambda: True,
         )
-        assert "错误" in result
-        assert "t" in result
+        assert isinstance(result, ToolError)
+        assert result.error_code == "CANCELLED"
+        assert "t" in result.message
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")
     def test_exception_returns_error_string_with_tool_name(self, mock_get_hook):
@@ -107,10 +110,10 @@ class TestExecuteTool:
             caller="agent",
             hitl_approver=lambda s: True,
         )
-        assert "错误" in result
-        assert "my_tool" in result
+        assert isinstance(result, ToolError)
+        assert result.error_code == "VALIDATION_FAILED"
         # LOW-02: ValueError is a safe domain exception, message preserved
-        assert "bad input" in result
+        assert "bad input" in result.message
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")
     def test_hook_can_modify_params(self, mock_get_hook):

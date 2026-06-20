@@ -18,7 +18,8 @@ class MemoryToolProvider:
         if context.want("memory_search"):
             executor.register_tool(
                 "memory_search",
-                "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词",
+                "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词。"
+                "[不适用] 搜索代码文件(用grep_search), 搜索知识库文档(用kb_search)。",
                 memory_search,
                 param_schema={
                     "type": "object",
@@ -27,12 +28,14 @@ class MemoryToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=10,
+                concurrency_safe=True,
             )
 
         if context.want("memory_save"):
             executor.register_tool(
                 "memory_save",
-                "主动保存重要信息到长期记忆。当用户明确分享个人信息(姓名/偏好/背景)或发现重要事实时使用",
+                "主动保存重要信息到长期记忆。当用户明确分享个人信息(姓名/偏好/背景)或发现重要事实时使用。"
+                "[不适用] 写入文件(用file_write)。",
                 memory_save,
                 param_schema={
                     "type": "object",

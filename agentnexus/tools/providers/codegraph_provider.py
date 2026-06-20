@@ -24,7 +24,8 @@ class CodeGraphToolProvider:
         if context.want("codegraph_search"):
             executor.register_tool(
                 "codegraph_search",
-                "语义搜索代码实体。参数: query(搜索词,必填), kind(节点类型过滤,可选), limit(返回条数,默认10)",
+                "语义搜索代码实体。参数: query(搜索词,必填), kind(节点类型过滤,可选), limit(返回条数,默认10)。"
+                "[不适用] 搜索代码文本内容(用grep_search), 搜索知识库(用kb_search)。",
                 codegraph_search,
                 param_schema={
                     "type": "object",
@@ -46,12 +47,14 @@ class CodeGraphToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                concurrency_safe=True,
             )
 
         if context.want("codegraph_relations"):
             executor.register_tool(
                 "codegraph_relations",
-                "查询代码实体的关系。参数: symbol(实体名,必填), relation(关系类型:callers/callees/inherits/imports)",
+                "查询代码实体的关系。参数: symbol(实体名,必填), relation(关系类型:callers/callees/inherits/imports)。"
+                "[不适用] 搜索代码文本(用grep_search)。",
                 codegraph_relations,
                 param_schema={
                     "type": "object",
@@ -67,12 +70,14 @@ class CodeGraphToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                concurrency_safe=True,
             )
 
         if context.want("codegraph_context"):
             executor.register_tool(
                 "codegraph_context",
-                "获取代码实体的完整上下文。参数: symbol(实体名,必填)",
+                "获取代码实体的完整上下文。参数: symbol(实体名,必填)。"
+                "[不适用] 搜索代码文本(用grep_search)。",
                 codegraph_context,
                 param_schema={
                     "type": "object",
@@ -83,6 +88,7 @@ class CodeGraphToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                concurrency_safe=True,
             )
 
         context.mark_registered(executor, before)

@@ -18,7 +18,8 @@ class FilesystemToolProvider:
             executor.register_tool(
                 "file_read",
                 "读取文件内容，返回带行号的内容以及当前 version 指纹。参数: path(文件路径,必填), "
-                "offset(起始行号,0起,默认0), limit(返回行数,默认最多1000)",
+                "offset(起始行号,0起,默认0), limit(返回行数,默认最多1000)。"
+                "[不适用] 搜索代码内容(用grep_search), 读取知识库文档(用kb_search)。",
                 file_read,
                 param_schema={
                     "type": "object",
@@ -32,12 +33,14 @@ class FilesystemToolProvider:
                 risk_level="low",
                 rate_limit_per_min=30,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("file_list"):
             executor.register_tool(
                 "file_list",
-                "列出目录内容。参数: path(目录路径,默认当前目录), pattern(glob过滤,如 '*.py')",
+                "列出目录内容。参数: path(目录路径,默认当前目录), pattern(glob过滤,如 '*.py')。"
+                "[不适用] 搜索文件内容(用grep_search)。",
                 file_list,
                 param_schema={
                     "type": "object",
@@ -54,6 +57,7 @@ class FilesystemToolProvider:
                 risk_level="low",
                 rate_limit_per_min=20,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("file_write"):
@@ -62,7 +66,8 @@ class FilesystemToolProvider:
                 "写入/创建文件。参数: path(文件路径), content(文件内容), "
                 "mode(create=创建新文件/overwrite=覆盖已有文件/append=追加), "
                 "expected_version(可选，来自 file_read 的 version，用于写前版本校验)。"
-                "覆盖已有文件时需要确认",
+                "覆盖已有文件时需要确认。"
+                "[不适用] 执行代码(用python_execute), 执行命令(用shell_exec)。",
                 file_write,
                 param_schema={
                     "type": "object",
