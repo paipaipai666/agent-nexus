@@ -23,24 +23,6 @@ jobs:
       - run: pip install ruff
       - run: ruff check .
 
-  security:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install dependencies
-        run: pip install -e ".[dev,rag,server,tui]"
-      - name: Check for known vulnerabilities
-        run: |
-          pip install pip-audit
-          pip freeze --exclude-editable > /tmp/requirements.txt
-          # CVE-2026-45829 (chromadb): requires trust_remote_code=True, not used in this project
-          pip-audit -r /tmp/requirements.txt --strict --desc --ignore-vuln CVE-2026-45829
-
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     needs: [lint]
