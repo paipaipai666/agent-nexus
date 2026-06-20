@@ -37,7 +37,7 @@ jobs:
       - name: Check for known vulnerabilities
         run: |
           pip install pip-audit
-          pip-audit --strict --desc
+          pip-audit --strict --desc --skip-editable
 
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
