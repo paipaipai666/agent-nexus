@@ -134,18 +134,58 @@ jobs:
             desktop/release/*.AppImage
             desktop/release/*.deb
 
+  smoke-test:
+    needs: [build-backend]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download backend binary
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-${{ matrix.os }}
+          path: dist/
+      - name: Make executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x dist/agentnexus-*
+      - name: Binary starts and shows version
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./dist/agentnexus-windows-x64.exe --version
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            ./dist/agentnexus-macos-x64 --version
+          else
+            ./dist/agentnexus-linux-x64 --version
+          fi
+
   release:
-    needs: [build-backend, build-desktop]
-    if: always()
+    needs: [build-backend, build-desktop, smoke-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
       - name: List release files
         run: find . -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name 'agentnexus*' \) ! -path '*/node_modules/*' | sort
+      - name: Generate SHA256 checksums
+        run: |
+          cd backend-ubuntu-latest || true
+          cd ..
+          find . -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name 'agentnexus*' \) \
+            ! -path '*/node_modules/*' ! -name 'SHA256SUMS.txt' \
+            -exec sha256sum {} \; > SHA256SUMS.txt
+          echo "=== Checksums ==="
+          cat SHA256SUMS.txt
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             backend-*/*
             desktop-*/*
+            SHA256SUMS.txt
           generate_release_notes: true

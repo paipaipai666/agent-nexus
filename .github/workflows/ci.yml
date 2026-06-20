@@ -15,22 +15,41 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       - run: pip install ruff
       - run: ruff check .
 
+  security:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -e ".[dev,rag,server,tui]"
+      - name: Check for known vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit --strict --desc
+
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    needs: [lint]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
       - name: Install dependencies
         run: pip install -e ".[dev,rag,server,tui]"
       - name: Run unit and integration tests
@@ -54,6 +73,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -e ".[dev,rag,server,tui]"
       - name: Validate eval dataset
