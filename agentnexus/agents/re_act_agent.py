@@ -4,8 +4,10 @@ Thought -> Action -> Observation loop driven by a transfer-table state machine.
 Each decision point is an explicit state; each transition is a handler method.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from agentnexus.agents import json_helpers, react_runtime
 from agentnexus.agents.fsm import StateMachine
@@ -26,6 +28,9 @@ from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.drift_detector import DriftDetector
 from agentnexus.observability.tracer import trace_manager
+
+if TYPE_CHECKING:
+    from agentnexus.tools.errors import ToolError
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import (
     CompiledSessionProfile,
@@ -446,6 +451,14 @@ class ReActAgent:
 
     def _exec_next_tool(self, ctx: ExecutionContext) -> ReActEvent:
         """Execute the next pending tool call. Emits TOOL_DONE or ALL_TOOLS_DONE."""
+        # Batch dispatch when multiple tool calls — read-only tools run concurrently
+        if len(ctx.tool_state.pending_tool_calls) > 1:
+            return react_runtime.execute_pending_tools_batch(
+                ctx,
+                registry=self.tool_executor,
+                execute_tool=self._execute_tool,
+                output=self._output,
+            )
         return react_runtime.execute_pending_tool(
             ctx,
             execute_tool=self._execute_tool,
@@ -794,7 +807,7 @@ class ReActAgent:
     def _build_conversation_context(self, memory_manager) -> str:
         return build_conversation_context(memory_manager)
 
-    def _execute_tool(self, name: str, arguments: dict) -> str:
+    def _execute_tool(self, name: str, arguments: dict) -> str | dict | ToolError:
         policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
         return execute_tool(
             tool_executor=self.tool_executor,

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agentnexus.agents.react_types import AgentStep, CallingStrategy, ExecutionContext, ReActEvent, ReActEventType
+from agentnexus.tools.dispatcher import ToolDispatcher
 from agentnexus.tools.result_format import summarize_tool_result
 
 
@@ -152,6 +153,66 @@ def execute_pending_tool(
             "id": tool_call.get("id", ""),
         },
     )
+
+
+def execute_pending_tools_batch(
+    ctx: ExecutionContext,
+    *,
+    registry: Any,
+    execute_tool: Callable[[str, dict], str],
+    output: Callable[[str], None],
+) -> ReActEvent:
+    """Execute all pending tool calls in one batch using read/write dispatch.
+
+    Read-only tools (concurrency_safe=True) run concurrently; write tools
+    run sequentially.  Results are recorded in the original order.
+    """
+    tool_state = ctx.tool_state
+    memory_state = ctx.memory_state
+    run_state = ctx.run_state
+
+    if not tool_state.pending_tool_calls:
+        if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
+            memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)
+        run_state.json_retries = 0
+        return ReActEvent(ReActEventType.ALL_TOOLS_DONE)
+
+    calls = list(tool_state.pending_tool_calls)
+    tool_state.pending_tool_calls = []
+
+    # Emit actions for all tools
+    for tc in calls:
+        output(f"行动: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['arguments'].items())})")
+        ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"])
+
+    # Dispatch with read/write partitioning
+    dispatcher = ToolDispatcher(registry)
+    results = dispatcher.execute(calls, execute_fn=execute_tool)
+
+    # Record results in original order
+    for tc, result_obj in zip(calls, results):
+        observation = result_obj.result if result_obj.error is None else result_obj.error
+        rendered_observation = summarize_tool_result(observation)
+        output(f"观察: {rendered_observation}")
+
+        ctx.messages.append({
+            "role": "tool",
+            "tool_call_id": tc.get("id", ""),
+            "content": rendered_observation,
+        })
+
+        record_tool_done(ctx, {
+            "name": tc["name"],
+            "arguments": tc["arguments"],
+            "result": observation,
+            "id": tc.get("id", ""),
+        })
+
+    if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
+        memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)
+
+    run_state.json_retries = 0
+    return ReActEvent(ReActEventType.ALL_TOOLS_DONE)
 
 
 def execute_json_tool_call(

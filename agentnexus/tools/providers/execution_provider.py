@@ -23,7 +23,8 @@ class ExecutionToolProvider:
         if context.want("python_execute"):
             executor.register_tool(
                 "python_execute",
-                "在安全沙箱中执行Python代码，参数为代码字符串",
+                "在安全沙箱中执行Python代码，参数为代码字符串。"
+                "[不适用] 执行shell命令(用shell_exec), 读写文件(用file_write)。",
                 python_execute,
                 param_schema={
                     "type": "object",
@@ -41,7 +42,8 @@ class ExecutionToolProvider:
                 "shell_exec",
                 f"执行控制台命令（当前系统: {os_info}）。参数: command(命令字符串,必填), "
                 "cwd(工作目录,可选,默认项目根目录), timeout(超时秒数,默认30)。"
-                "[!] 此工具需要用户确认才能执行，同时受安全黑名单保护",
+                "[!] 此工具需要用户确认才能执行，同时受安全黑名单保护。"
+                "[不适用] 执行Python代码(用python_execute)。",
                 shell_exec,
                 param_schema={
                     "type": "object",

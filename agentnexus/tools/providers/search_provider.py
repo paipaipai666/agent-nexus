@@ -26,7 +26,8 @@ class SearchToolProvider:
                 "path(搜索目录,默认当前目录), "
                 "glob(文件过滤,如 '*.py' 或 '**/*.py', 默认 '*'), "
                 "max_results(最大结果数,1-50,默认10), "
-                "literal(字面量匹配,默认true; 设为false启用正则)",
+                "literal(字面量匹配,默认true; 设为false启用正则)。"
+                "[不适用] 搜索知识库文档(用kb_search), 搜索网页(用web_search)。",
                 grep_search,
                 param_schema={
                     "type": "object",
@@ -54,6 +55,7 @@ class SearchToolProvider:
                 risk_level="low",
                 rate_limit_per_min=20,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("web_search"):
@@ -66,7 +68,8 @@ class SearchToolProvider:
                 "topic(话题:general/news,默认general), "
                 "include_answer(是否返回直接摘要,默认false), "
                 "include_domains(限定搜索域名列表,如['arxiv.org']), "
-                "exclude_domains(排除域名列表,如['reddit.com'])",
+                "exclude_domains(排除域名列表,如['reddit.com'])。"
+                "[不适用] 搜索本地代码(用grep_search), 搜索知识库文档(用kb_search)。",
                 web_search,
                 param_schema={
                     "type": "object",
@@ -114,6 +117,7 @@ class SearchToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("kb_search"):
@@ -124,7 +128,8 @@ class SearchToolProvider:
                 "namespace(知识库命名空间,默认default), "
                 "top_k(返回条数,默认5), "
                 "view(section=去重章节视图/chunk=原始块视图), "
-                "source/format/section/page/block_type/has_code/has_list/heading_depth(可选过滤)",
+                "source/format/section/page/block_type/has_code/has_list/heading_depth(可选过滤)。"
+                "[不适用] 搜索本地代码文件(用grep_search), 搜索网页(用web_search)。",
                 kb_search,
                 param_schema={
                     "type": "object",
@@ -165,6 +170,7 @@ class SearchToolProvider:
                 risk_level="low",
                 rate_limit_per_min=20,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         if context.want("web_fetch"):
@@ -173,7 +179,8 @@ class SearchToolProvider:
                 "抓取指定URL的完整网页内容并返回正文。"
                 "参数: urls(要抓取的URL,必填,单个字符串或URL数组), "
                 "extract_depth(提取深度:basic/advanced,默认basic), "
-                "format(输出格式:markdown/text,默认markdown)",
+                "format(输出格式:markdown/text,默认markdown)。"
+                "[不适用] 搜索/检索(用web_search或grep_search), 仅用于抓取已知URL的内容。",
                 web_fetch,
                 param_schema={
                     "type": "object",
@@ -198,6 +205,7 @@ class SearchToolProvider:
                 risk_level="low",
                 rate_limit_per_min=5,
                 recoverable=True,
+                concurrency_safe=True,
             )
 
         context.mark_registered(executor, before)

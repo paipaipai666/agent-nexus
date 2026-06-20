@@ -90,6 +90,7 @@ class ToolMeta:
     generation: int = 0
     recoverable: bool = False            # result can be cleaned during STM compaction
     max_retention: int = 5               # keep last N results when compacting
+    concurrency_safe: bool = False       # True = read-only, safe to run in parallel
 
 
 @dataclass
@@ -143,6 +144,7 @@ class ToolRegistry:
         generation: int = 0,
         recoverable: bool = False,
         max_retention: int = 5,
+        concurrency_safe: bool = False,
     ) -> None:
         """Register a tool with flat parameters (convenience wrapper)."""
         risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
@@ -163,6 +165,7 @@ class ToolRegistry:
             generation=generation,
             recoverable=recoverable,
             max_retention=max_retention,
+            concurrency_safe=concurrency_safe,
         )
         self.register(meta, func)
 

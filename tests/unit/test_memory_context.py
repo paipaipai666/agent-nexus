@@ -253,7 +253,7 @@ class TestReActAgentConversationMode:
         result = agent._execute_tool("shell_exec", {})
 
         assert called["value"] is False
-        assert "not visible" in result
+        assert "not visible" in str(result)
 
     def test_run_with_profile_sends_guidance_to_llm(self):
         from agentnexus.agents.re_act_agent import ReActAgent

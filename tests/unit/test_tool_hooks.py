@@ -75,7 +75,7 @@ class TestToolHooks:
             hitl_approver=lambda s: True,
         )
         executor.invoke.assert_not_called()
-        assert "BLOCKED" in result
+        assert "BLOCKED" in str(result)
 
     def test_after_tool_call_fires(self):
         from agentnexus.agents.tool_runner import execute_tool
@@ -115,7 +115,7 @@ class TestToolHooks:
         )
         assert len(fired) == 1
         assert "boom" in str(fired[0]["error"])
-        assert "错误" in result
+        assert "EXECUTION_FAILED" in str(result)
 
     def test_no_hooks_works_normally(self):
         from agentnexus.agents.tool_runner import execute_tool
