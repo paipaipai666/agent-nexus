@@ -39,7 +39,7 @@ class TestKbAdd:
             result = runner.invoke(app, ["kb", "add", str(filepath)])
             assert result.exit_code == 0
             assert "test.md" in result.stdout
-            assert "(1 chunks)" in result.stdout
+            assert "(1 chunks)" in result.stdout.replace("\n", "")
 
     def test_directory_ingestion(self, temp_agentnexus_home):
         docs_dir = temp_agentnexus_home / "docs"
