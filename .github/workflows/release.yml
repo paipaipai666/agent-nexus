@@ -174,11 +174,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/agentnexus-windows-x64.exe --version
+            ./dist/agentnexus-windows-x64.exe version
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            ./dist/agentnexus-macos-x64 --version
+            ./dist/agentnexus-macos-x64 version
           else
-            ./dist/agentnexus-linux-x64 --version
+            ./dist/agentnexus-linux-x64 version
           fi
 
   release:
