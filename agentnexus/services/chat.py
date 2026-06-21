@@ -252,6 +252,16 @@ class ChatService:
                 _tm.end_trace()
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
+            # Persist cumulative token usage and step count to DB
+            try:
+                usage = getattr(agent, "_total_usage", {}) or {}
+                version_mgr.update_session_stats(
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    step_count=getattr(agent, "_step_count", 0),
+                )
+            except Exception as e:
+                logger.warning("Failed to persist session stats: %s", e)
             self._run_snapshots[run.id] = record
             self._put_event(run.id, AgentEvent(
                 "message_delta", {"text": answer or ""},

@@ -9,6 +9,22 @@ from fastapi import APIRouter, Query
 router = APIRouter(tags=["runtime"])
 
 
+def _read_db_stats(runtime, session_id: str) -> Optional[dict]:
+    """Read persisted session stats from the database as a fallback."""
+    try:
+        from agentnexus.memory.versioned import ConversationVersionManager
+        # Try runtime first (testable), fall back to settings
+        db_path = getattr(runtime, "_db_path", None)
+        if not db_path:
+            from agentnexus.core.config import get_settings
+            db_path = get_settings().memory_db_path
+        if not db_path:
+            return None
+        return ConversationVersionManager.get_session_stats(db_path, session_id)
+    except Exception:
+        return None
+
+
 def _resolve_session_refs(runtime, session_id: Optional[str]):
     """Return (agent, memory_manager) for the given session.
 
@@ -44,7 +60,7 @@ def runtime_status(session_id: Optional[str] = Query(None, description="Session 
     # Model info
     model_id = getattr(agent, "model_id", None) or getattr(settings, "llm_model_id", "unknown")
 
-    # Token usage
+    # Token usage — prefer in-memory agent stats; fall back to DB for historical sessions
     usage = {}
     if agent and hasattr(agent, "total_usage"):
         usage = agent.total_usage
@@ -64,10 +80,17 @@ def runtime_status(session_id: Optional[str] = Query(None, description="Session 
         except Exception:
             pass
 
-    # Agent step count
+    # Agent step count — prefer in-memory; fall back to DB
     step_count = 0
     if agent and hasattr(agent, "_step_count"):
         step_count = agent._step_count
+
+    # DB fallback: when no per-session agent exists, read persisted stats
+    if session_id and agent is runtime.agent:
+        db_stats = _read_db_stats(runtime, session_id)
+        if db_stats:
+            usage = {"input_tokens": db_stats["input_tokens"], "output_tokens": db_stats["output_tokens"]}
+            step_count = db_stats["step_count"]
 
     # Skill info
     skill_id = None

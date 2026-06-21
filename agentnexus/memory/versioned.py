@@ -62,6 +62,11 @@ _MIGRATION_PREVIEW_SQL = """
 ALTER TABLE conversation_sessions ADD COLUMN preview TEXT NOT NULL DEFAULT '';
 """
 
+# Migration: add runtime stats columns to sessions
+_MIGRATION_STATS_INPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_input_tokens INTEGER DEFAULT 0"
+_MIGRATION_STATS_OUTPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_output_tokens INTEGER DEFAULT 0"
+_MIGRATION_STATS_STEPS_SQL = "ALTER TABLE conversation_sessions ADD COLUMN step_count INTEGER DEFAULT 0"
+
 
 class ConversationVersionManager:
     """Linear checkpoint manager for chat conversations.
@@ -558,6 +563,11 @@ class ConversationVersionManager:
             self._conn.execute(_MIGRATION_PREVIEW_SQL)
         except sqlite3.OperationalError:
             pass  # Column already exists
+        for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
+            try:
+                self._conn.execute(_sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     def _current_head_id(self) -> str | None:
         """Get the current HEAD checkpoint ID from conversation_sessions."""
@@ -602,6 +612,53 @@ class ConversationVersionManager:
             "UPDATE conversation_sessions SET updated_at = datetime('now') WHERE session_id = ?",
             (self.session_id,),
         )
+
+    def update_session_stats(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        step_count: int = 0,
+    ) -> None:
+        """Persist cumulative runtime stats for this session."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversation_sessions SET "
+                "total_input_tokens = ?, total_output_tokens = ?, step_count = ?, "
+                "updated_at = datetime('now') WHERE session_id = ?",
+                (input_tokens, output_tokens, step_count, self.session_id),
+            )
+            self._conn.commit()
+
+    @classmethod
+    def get_session_stats(cls, db_path: str, session_id: str) -> dict:
+        """Read persisted runtime stats for a session. Returns zeros if not found."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                pass
+            # Ensure stats columns exist (migration)
+            for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
+                try:
+                    conn.execute(_sql)
+                except sqlite3.OperationalError:
+                    pass
+            row = conn.execute(
+                "SELECT total_input_tokens, total_output_tokens, step_count "
+                "FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row:
+                return {
+                    "input_tokens": row["total_input_tokens"] or 0,
+                    "output_tokens": row["total_output_tokens"] or 0,
+                    "step_count": row["step_count"] or 0,
+                }
+            return {"input_tokens": 0, "output_tokens": 0, "step_count": 0}
+        finally:
+            conn.close()
 
     def _ancestor_chain(self, head_id: str | None) -> list[sqlite3.Row]:
         """Walk the parent chain from head_id back to root."""
