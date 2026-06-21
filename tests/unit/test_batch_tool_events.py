@@ -5,7 +5,6 @@ call) instead of ctx.emit(TOOL_DONE), so the event bridge never sees
 individual TOOL_DONE events. The GUI shows "Calling: X" forever.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 from agentnexus.agents.react_types import (
@@ -14,11 +13,7 @@ from agentnexus.agents.react_types import (
     ExecutionContext,
     ReActEvent,
     ReActEventType,
-    RunState,
-    MemoryRetrievalState,
-    ToolCallState,
 )
-
 
 # ── helpers ──────────────────────────────────────────────────────────
 

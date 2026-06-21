@@ -9,7 +9,6 @@ import pytest
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-
 # ── fakes ────────────────────────────────────────────────────────────
 
 class _FakeAgent:

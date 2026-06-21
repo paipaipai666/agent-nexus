@@ -20,6 +20,7 @@ class TestResolveCtxMax:
             assert resolve_ctx_max("test-model") == 128000
 
     def test_registry_fallback_handles_deepseek_v4_flash(self):
+        """Static registry returns 262144 for deepseek-v4-flash when LiteLLM is unavailable."""
         with patch("litellm.get_model_info", side_effect=Exception):
             assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") == 262144
 

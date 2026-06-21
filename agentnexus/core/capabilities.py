@@ -148,10 +148,15 @@ def _normalize_model_id(model_id: str, base_url: str = "") -> str:
 
 
 def _lookup_registry(model_id: str) -> ModelCapabilities:
-    """Match model_id against the static registry. First match wins (ordered)."""
+    """Match model_id against the static registry. First match wins (ordered).
+
+    Returns a *copy* so that detect_capabilities can mutate the result
+    without polluting the static registry entry.
+    """
+    from dataclasses import replace
     for pattern, caps in CAPABILITY_REGISTRY.items():
         if fnmatch(model_id, pattern):
-            return caps
+            return replace(caps)
     return ModelCapabilities()  # unreachable — "*" matches everything
 
 

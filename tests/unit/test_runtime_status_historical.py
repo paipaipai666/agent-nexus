@@ -5,26 +5,22 @@ show 0 for input/output tokens and step_count because stats are never
 persisted to the database.
 """
 
-import queue
 import sqlite3
-import tempfile
-from pathlib import Path
 
 import pytest
 
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-
 # ── helpers ──────────────────────────────────────────────────────────
 
 def _init_db(db_path: str):
     """Create the conversation_sessions table with stats columns."""
     from agentnexus.memory.versioned import (
-        SCHEMA,
         _MIGRATION_STATS_INPUT_SQL,
         _MIGRATION_STATS_OUTPUT_SQL,
         _MIGRATION_STATS_STEPS_SQL,
+        SCHEMA,
     )
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
@@ -136,7 +132,6 @@ def server_app(temp_agentnexus_home, db_dir):
     chat._sessions["hist-new"] = type("Handle", (), {"id": "hist-new", "skill": None, "profile": None})()
 
     # Active session: has agent in chat._agents (in-memory stats)
-    from unittest.mock import MagicMock
     active_agent = _FakeAgent()
     active_agent.total_usage = {"input_tokens": 5000, "output_tokens": 2500}
     active_agent._step_count = 8
