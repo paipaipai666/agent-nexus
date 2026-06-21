@@ -74,6 +74,7 @@ class ReActAgent:
         self.conversation_mode = conversation_mode
         self.agent_id = agent_id
         self._total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+        self._step_count: int = 0
         self._on_event: Callable | None = None
         self._session_profile: SessionProfile | None = None
         self._compiled_session_profile: CompiledSessionProfile | None = None
@@ -150,6 +151,7 @@ class ReActAgent:
         })
 
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
+        self._step_count = 0
         self._degrade_count = 0
         self._thought_retries = 0
         self._drift_detector = DriftDetector(
@@ -182,10 +184,12 @@ class ReActAgent:
                 self._get_handlers(),
             )
             self._total_usage = ctx._total_usage
+            self._step_count = len(steps)
         except KeyboardInterrupt:
             answer = "[Agent execution cancelled by user]"
             steps = []
             self._total_usage = {"input_tokens": 0, "output_tokens": 0}
+            self._step_count = 0
 
         # ── agent end hook ───────────────────────────────────────
         hook_mgr.fire(HookType.AGENT_END, {

@@ -60,3 +60,5 @@ ERROR/*.stackdump
 
 config/
 .mcp.json
+
+**/.codegraph/

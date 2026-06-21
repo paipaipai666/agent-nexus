@@ -187,6 +187,7 @@ export default function ChatPage() {
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
+  const prevIsRunningRef = useRef(false)
   const lastEscapeAtRef = useRef<number>(0)
   const ESC_DOUBLE_TAP_MS = 600
   const scrollToBottom = useCallback(() => {
@@ -322,6 +323,14 @@ export default function ChatPage() {
     }
   }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
 
+  // Re-fetch runtime status when agent run completes (isRunning: true → false)
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning) {
+      api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
+    }
+    prevIsRunningRef.current = isRunning
+  }, [isRunning])
+
   const fetchDynamicCommands = useCallback(() => {
     api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
     api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
@@ -334,7 +343,7 @@ export default function ChatPage() {
     // Don't call setMessages([]) here — React batching means activeSessionId
     // is still the OLD session, so this would clear the old session's messages.
     // The new session already starts with empty messages in SessionManager's Map.
-    api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+    api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
     api.getConfig().then((config: any) => {
       if (config.cwd) setCwd(config.cwd)
     }).catch(() => {})
@@ -359,7 +368,7 @@ export default function ChatPage() {
       loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
-      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => {
         if (config.cwd) setCwd(config.cwd)
       }).catch(() => {})
@@ -398,7 +407,7 @@ export default function ChatPage() {
       resetForSessionSwitch()
       currentSessionIdRef.current = null
       setGlobalSessionId(null)
-      api.getRuntimeStatus().then(setRuntimeStatus).catch(() => {})
+      api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => { if (config.cwd) setCwd(config.cwd) }).catch(() => {})
       fetchDynamicCommands()
     }

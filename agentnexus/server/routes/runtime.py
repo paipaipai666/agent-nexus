@@ -2,19 +2,44 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Optional
+
+from fastapi import APIRouter, Query
 
 router = APIRouter(tags=["runtime"])
 
 
+def _resolve_session_refs(runtime, session_id: Optional[str]):
+    """Return (agent, memory_manager) for the given session.
+
+    Looks up per-session instances from ChatService when *session_id* is
+    provided, falling back to the build-time agent/memory on the runtime
+    itself (which always have zero stats — they never run queries).
+    """
+    agent = runtime.agent
+    mm = runtime.memory_manager
+
+    if session_id:
+        chat = getattr(runtime.services, "chat", None)
+        if chat:
+            per_session_agent = getattr(chat, "_agents", {}).get(session_id)
+            per_session_mm = getattr(chat, "_memory_managers", {}).get(session_id)
+            if per_session_agent is not None:
+                agent = per_session_agent
+            if per_session_mm is not None:
+                mm = per_session_mm
+
+    return agent, mm
+
+
 @router.get("/status")
-def runtime_status():
+def runtime_status(session_id: Optional[str] = Query(None, description="Session ID for per-session stats")):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    agent = runtime.agent
-    mm = runtime.memory_manager
     settings = runtime.settings
+
+    agent, mm = _resolve_session_refs(runtime, session_id)
 
     # Model info
     model_id = getattr(agent, "model_id", None) or getattr(settings, "llm_model_id", "unknown")

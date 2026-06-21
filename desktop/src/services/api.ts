@@ -308,15 +308,17 @@ export const api = {
   getExtensions: () => request<Record<string, any>>('/api/config/extensions'),
 
   // Runtime Status
-  getRuntimeStatus: () =>
-    request<{
+  getRuntimeStatus: (sessionId?: string) => {
+    const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+    return request<{
       model_id: string
       total_usage: { input_tokens: number; output_tokens: number }
       ctx_max: number
       stm_tokens: number
       step_count: number
       skill_id: string | null
-    }>('/api/runtime/status'),
+    }>(`/api/runtime/status${qs}`)
+  },
 
   // Eval — Tasks
   listEvalTasks: (category?: string, difficulty?: string, evalType?: string) => {
