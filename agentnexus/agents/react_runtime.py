@@ -207,6 +207,7 @@ def execute_pending_tools_batch(
             "result": observation,
             "id": tc.get("id", ""),
         })
+        ctx.emit(ReActEventType.TOOL_DONE, name=tc["name"], arguments=tc["arguments"], result=observation, id=tc.get("id", ""))
 
     if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
         memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)
