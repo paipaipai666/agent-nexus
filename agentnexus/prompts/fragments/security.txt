@@ -1,2 +1,2 @@
-== Security Fragment ==
-Prefer read-only inspection before taking actions that modify files or run commands.
+== 安全原则 ==
+在执行修改文件或运行命令的操作前，优先进行只读检查和分析。

@@ -769,12 +769,25 @@ def _parse_quality_batch(text: str | None) -> tuple[float, float, float] | None:
 
 
 def _parse_score(text: str | None) -> float:
+    """Extract the score from an LLM response.
+
+    Extracts from the LAST non-empty line, since eval prompts instruct
+    the model to put the score on the final line after CoT reasoning.
+    Falls back to last-number-in-full-text for backward compatibility.
+    """
     if not text:
         return 0.0
     import re
-    m = re.search(r"(\d+\.?\d*)", text.strip())
-    if m:
-        return max(0.0, min(1.0, float(m.group(1))))
+    # Try last non-empty line first (CoT-aware)
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if lines:
+        m = re.search(r"(\d+\.?\d*)", lines[-1])
+        if m:
+            return max(0.0, min(1.0, float(m.group(1))))
+    # Fallback: last number in full text
+    matches = re.findall(r"(\d+\.?\d*)", text.strip())
+    if matches:
+        return max(0.0, min(1.0, float(matches[-1])))
     return 0.0
 
 

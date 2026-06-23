@@ -62,3 +62,4 @@ config/
 .mcp.json
 
 **/.codegraph/
+**/paper/

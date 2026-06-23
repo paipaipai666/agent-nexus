@@ -24,6 +24,18 @@ _CORE_TEMPLATE_KEYS = {"tools", "question", "history", "memory_context", "conver
 # Platform-level behavioral fragments — always loaded, cannot be disabled.
 _CORE_FRAGMENTS = ["stance", "autonomy", "accountability"]
 
+# Priority preamble — injected before all fragments to resolve conflicts.
+# NOTE: must NOT contain the exact fragment headers "行为原则", "自主权边界",
+# "Accountability" — tests use substring matching to verify fragment ordering.
+_PRIORITY_PREAMBLE = (
+    "== 准则优先级 ==\n"
+    "当以下原则之间存在冲突时，按此顺序裁决：\n"
+    "1. 安全约束 > 用户操作边界 > 核心准则 > 问责机制\n"
+    "2. 高风险操作的安全约束永远不可被其他原则覆盖\n"
+    "3. '直接指出问题'不等于'绕过安全确认直接执行'\n"
+    "4. 如果两条原则冲突且无法调和，选择更保守的行动并说明理由"
+)
+
 
 @dataclass(frozen=True)
 class CompiledSessionProfile:
@@ -66,7 +78,7 @@ def validate_session_profile(profile: SessionProfile) -> CompiledSessionProfile:
 
 def load_core_fragments() -> str:
     """Load platform-level behavioral fragments. Always loaded, cannot be disabled."""
-    parts: list[str] = []
+    parts: list[str] = [_PRIORITY_PREAMBLE]
     for name in _CORE_FRAGMENTS:
         fragment_path = _FRAGMENTS_DIR / f"{name}.txt"
         try:
@@ -77,21 +89,26 @@ def load_core_fragments() -> str:
 
 
 def compile_persona_fragment(persona_config: PersonaConfig) -> str:
-    """Compile a validated PersonaConfig into a prompt fragment string."""
+    """Compile a validated PersonaConfig into a prompt fragment string.
+
+    Uses behavioral language instead of declarative statements to produce
+    stronger guidance on how the agent should act, not just who it is.
+    """
     if not persona_config:
         return ""
 
     lines: list[str] = []
     if persona_config.agent_name:
-        lines.append(f"你是 {persona_config.agent_name}。")
+        lines.append(f"你的名字是 {persona_config.agent_name}。在回答中保持这个身份的一致性。")
     if persona_config.identity:
-        lines.append(f"你的角色：{persona_config.identity}。")
+        lines.append(f"你的角色：{persona_config.identity}。以这个角色的专业视角分析问题、给出建议。")
     if persona_config.tone:
-        lines.append(f"沟通风格：{persona_config.tone}。")
+        lines.append(f"沟通风格：{persona_config.tone}。在所有回复中贯彻这一风格，包括错误说明和不确定性表达。")
     if persona_config.projects:
         lines.append("当前关注：")
         for project in persona_config.projects:
             lines.append(f"- {project.name}：{project.focus}")
+        lines.append("当用户的问题涉及以上领域时，优先利用这些上下文。")
     if not lines:
         return ""
     return "== Persona ==\n" + "\n".join(lines)

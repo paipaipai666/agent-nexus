@@ -42,7 +42,7 @@ def _meta(name: str, risk: RiskLevel = RiskLevel.LOW) -> ToolMeta:
 def test_validate_session_profile_loads_prompt_and_fragments():
     compiled = validate_session_profile(_profile())
     assert "ReAct" in compiled.prompt_template
-    assert "Security Fragment" in compiled.fragments_text
+    assert "安全原则" in compiled.fragments_text
     assert "Skill Workflow" in compiled.workflow_guidance
     assert "Review diff" in compiled.workflow_guidance
     assert "Inspect diff." in compiled.workflow_guidance
@@ -158,9 +158,9 @@ def test_compile_persona_fragment_full_config():
         ],
     )
     result = compile_persona_fragment(config)
-    assert "你是 Nexus。" in result
-    assert "你的角色：开发搭档。" in result
-    assert "沟通风格：直接、简洁。" in result
+    assert "你的名字是 Nexus" in result
+    assert "你的角色：开发搭档" in result
+    assert "沟通风格：直接、简洁" in result
     assert "AgentNexus：v0.2.0 发布" in result
     assert "SideProject：原型验证" in result
 
@@ -168,7 +168,7 @@ def test_compile_persona_fragment_full_config():
 def test_compile_persona_fragment_partial_config():
     config = PersonaConfig(agent_name="Hermes")
     result = compile_persona_fragment(config)
-    assert "你是 Hermes。" in result
+    assert "你的名字是 Hermes" in result
     assert "角色" not in result
     assert "沟通" not in result
 
