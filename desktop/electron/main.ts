@@ -11,10 +11,21 @@ let backendReady = false
 const BACKEND_PORT = 18765
 const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`
 const HEALTH_CHECK_INTERVAL_MS = 500
-const HEALTH_CHECK_TIMEOUT_MS = 20_000
+const HEALTH_CHECK_TIMEOUT_MS = 120_000
 
 function isDev(): boolean {
   return !!process.env.VITE_DEV_SERVER_URL
+}
+// PyInstaller onefile 的 bootloader 会派生子进程；只 kill 父进程会把真正的后端
+// 留在 %TEMP%\_MEI 里继续占端口。Windows 下用 taskkill /T 终止整棵进程树。
+function killBackendTree(signal: NodeJS.Signals) {
+  const proc = backendProcess
+  if (!proc || proc.killed || proc.pid == null) return
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
+  } else {
+    try { proc.kill(signal) } catch { /* already exited */ }
+  }
 }
 
 function getBackendBinaryPath(): string {
@@ -88,7 +99,7 @@ function startBackend(): Promise<boolean> {
     waitForBackend().then((ready) => {
       backendReady = ready
       if (!ready && backendProcess) {
-        backendProcess.kill()
+        killBackendTree('SIGKILL')
         backendProcess = null
       }
       resolve(ready)
@@ -99,9 +110,9 @@ function startBackend(): Promise<boolean> {
 function stopBackend() {
   if (!backendProcess) return
   console.log('Stopping backend...')
-  backendProcess.kill('SIGINT')
+  killBackendTree('SIGINT')
   const forceKill = setTimeout(() => {
-    backendProcess?.kill('SIGKILL')
+    killBackendTree('SIGKILL')
     backendProcess = null
     backendReady = false
   }, 3000)

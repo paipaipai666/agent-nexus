@@ -57,8 +57,6 @@ a = Analysis(
         'agentnexus.memory.offload',
         'agentnexus.memory.projection',
         'agentnexus.observability.audit_log',
-        'agentnexus.rag.citations',
-        'agentnexus.rag.embeddings',
         'agentnexus.rag.kb_service',
         'agentnexus.rag.loaders',
         'agentnexus.rag.loaders.common',

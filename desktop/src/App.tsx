@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import ThemeProvider from './components/theme/ThemeProvider'
 import SessionProvider from './components/session/SessionProvider'
@@ -20,6 +20,10 @@ import EvalPage from './pages/EvalPage'
 import WikiPage from './pages/WikiPage'
 
 const DEFAULT_BACKEND_PORT = 18765
+
+// file:// 打包环境下路径是磁盘文件路径，BrowserRouter 无法匹配路由；
+// Electron 窗口（有 preload 注入的 electronAPI）用 HashRouter，纯浏览器开发/E2E 用 BrowserRouter。
+const Router = window.electronAPI ? HashRouter : BrowserRouter
 
 export default function App() {
   const [backendReady, setBackendReady] = useState(false)
@@ -47,7 +51,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <SessionProvider>
-        <BrowserRouter>
+        <Router>
           <AppShell>
           <Routes>
             <Route path="/" element={<ChatPage />} />
@@ -69,7 +73,7 @@ export default function App() {
             </Route>
           </Routes>
           </AppShell>
-        </BrowserRouter>
+        </Router>
       </SessionProvider>
     </ThemeProvider>
   )
