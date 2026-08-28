@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
 from agentnexus.memory.manager import MemoryManager
-from agentnexus.memory.short_term import ShortTermMemory
+from agentnexus.memory.projection import project_aggressive, project_mild
+from agentnexus.memory.short_term import ShortTermMemory, compute_importance
 
 _RECOVERABLE_TOOLS = frozenset({
     "read", "bash", "grep", "glob", "web_search", "web_fetch",
@@ -74,7 +76,7 @@ class TestProjectAggressiveBenchmark:
              "content": "content " * 200}
             for i in range(500)
         ]
-        result = benchmark(mgr._project_aggressive, messages)
+        result = benchmark(project_aggressive, messages, parse_tool_message=parse_tool_message, is_recoverable_tool=is_recoverable_tool)
         assert isinstance(result, list)
 
 
@@ -95,5 +97,5 @@ class TestProjectMildBenchmark:
              "content": "content " * 200}
             for i in range(500)
         ]
-        result = benchmark(mgr._project_mild, messages)
+        result = benchmark(project_mild, messages, importance_fn=compute_importance)
         assert isinstance(result, list)

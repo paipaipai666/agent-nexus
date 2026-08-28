@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -24,6 +25,11 @@ def _make_mgr(llm=None) -> MemoryManager:
     mgr._compact_threshold = 120000
     mgr._compact_failures = 0
     mgr._circuit_open = False
+    mgr._compact_circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
+    mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+    mgr._settings.transcript_enabled = False
+    mgr._settings.post_compact_max_files = 0
+    mgr.long_term = None
     mgr._microcompacts_since_open = 0
     mgr._compacting = False
     mgr._last_api_call_ts = 0.0
@@ -83,7 +89,8 @@ class TestMaybeCompact:
 
         mgr = _make_mgr(llm=llm)
         mgr._compact_threshold = 1
-        mgr._circuit_open = True
+        for _ in range(3):
+            mgr._compact_circuit.record_failure()
         _populate_messages(mgr, 100)
 
         result = benchmark(mgr.maybe_compact, threshold=1)
