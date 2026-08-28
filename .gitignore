@@ -30,6 +30,7 @@ venv/
 # Claude / OMC local state
 .omc/
 .claude/
+.serena/
 **/.omc/
 **/.claude/
 **/.opencode/
