@@ -36,22 +36,38 @@ class ToolSelectionReport:
         return "\n".join(lines)
 
 
-# Minimal labeled eval set for AgentNexus's built-in tools.
+# Labeled eval set for AgentNexus's built-in tools.
 # Format: {query_fragment: expected_tool_name}
+# Order matters: more specific keywords first (first-match wins).
 LABELED_EVAL_SET: dict[str, str] = {
-    "搜索": "web_search",
-    "search": "web_search",
-    "查询": "web_search",
-    "最新": "web_search",
+    # File operations (specific — before generic "搜索")
+    "查看": "read",
+    "内容": "read",
+    "对比": "read",
+    "重命名": "bash",
+    "安装": "bash",
+    "提交": "bash",
+    "保存": "write",
+    "grep": "grep",
+    "包含": "grep",
+    "文档": "search",
+    # Code execution
     "代码": "python_execute",
     "code": "python_execute",
     "计算": "python_execute",
     "运行": "python_execute",
     "生成图表": "python_execute",
+    # Memory
     "记忆": "memory_search",
     "偏好": "memory_search",
     "记住": "memory_search",
     "之前": "memory_search",
+    # Web search (generic — catch-all after more specific matches)
+    "搜索": "web_search",
+    "search": "web_search",
+    "查询": "web_search",
+    "最新": "web_search",
+    "网络": "web_search",
 }
 
 
