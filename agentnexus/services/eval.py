@@ -237,7 +237,7 @@ class EvalService:
 
     def _default_agent_runner(self, task: EvalTask, trial_index: int) -> Any:
         """默认 agent runner — 使用 ReActAgentRunner 执行真实 agent。"""
-        from agentnexus.evaluation.graders import ReActAgentRunner
+        from agentnexus.evaluation.runner import ReActAgentRunner
 
         runner = ReActAgentRunner(self.settings)
         return runner(task, trial_index)

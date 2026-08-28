@@ -62,19 +62,11 @@ def _create_trace_from_eval_record(record: dict, traces_dir: Path) -> None:
     # Create tool spans based on tools_used
     tool_spans = []
     for i, tool in enumerate(tools_used):
-        # Map tool names to node names
-        if tool in ["web_search", "search"]:
-            node_name = "research_node"
-        elif tool in ["bash", "read", "edit", "write", "grep", "glob"]:
-            node_name = "execute_node"
-        else:
-            node_name = "execute_node"
-
         tool_span = {
             "trace_id": trace_id,
             "span_id": f"{trace_id}_tool_{i}",
-            "name": node_name,
-            "input": {"tool": tool},
+            "name": "tool",
+            "input": {"tool_name": tool},
             "start_time": 0.1 + i * 0.1,
             "end_time": 0.2 + i * 0.1,
             "latency_ms": 100.0,
