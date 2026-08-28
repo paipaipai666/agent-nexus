@@ -1,52 +1,65 @@
-import json
+"""Memory manager — session-scoped facade over the memory subsystems.
+
+Responsibilities kept here:
+  - wiring and configuration (STM/LTM/embed model lifecycle, ctx resolution)
+  - append orchestration (offload large tool results, compaction trigger)
+  - LTM context retrieval (init_session / has_new_memories / refresh)
+
+Compaction lives in ``compaction_engine.CompactionEngine``; extraction lives
+in ``extraction_pipeline.MemoryExtractionPipeline``. Both borrow the manager
+as their shared context. State attributes historically set directly on the
+manager (``_compact_circuit``, ``_on_compact``, …) are forwarded to the
+owning sub-component via __getattr__/__setattr__, so existing callers and
+tests that construct via ``MemoryManager.__new__`` keep working.
+"""
+
 import logging
-import re
 import threading
-import time
-from collections.abc import Callable
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
-from agentnexus.core.pii import contains_pii as _contains_pii
-from agentnexus.core.pii import mask_pii as _mask_pii
-from agentnexus.memory.circuit_breaker import CircuitBreaker
-from agentnexus.memory.compaction import is_recoverable_tool
-from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
-from agentnexus.memory.extraction import CATEGORY_LABELS, extract_and_save_memories
+from agentnexus.core.pii import contains_pii as _contains_pii  # noqa: F401  (re-export)
+from agentnexus.core.pii import mask_pii as _mask_pii  # noqa: F401  (re-export)
+from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message  # noqa: F401  (re-export)
+from agentnexus.memory.compaction_engine import CompactionEngine, _extract_xml_tag  # noqa: F401  (re-export)
+from agentnexus.memory.extraction import CATEGORY_LABELS
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.long_term import get_long_term_memory
-from agentnexus.memory.metrics import get_metrics
 from agentnexus.memory.offload import offload_large_result
-from agentnexus.memory.projection import build_projection as build_projected_messages
-from agentnexus.memory.projection import microcompact_messages
-from agentnexus.memory.short_term import ShortTermMemory, compute_importance
-from agentnexus.prompts import load_prompt
+from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_xml_tag(text: str, tag: str) -> str | None:
-    """Extract content between <tag> and </tag> from text. Returns None if not found."""
-    pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-    return match.group(1) if match else None
-
-SUMMARIZE_PROMPT = load_prompt("memory_summarize")
-GATE_PROMPT = load_prompt("memory_gate")
-
-
-
 class MemoryManager:
     """Session-scoped memory manager combining STM, LTM, compaction, and extraction.
 
-    TODO: This class is a monolith (~600 lines). Consider splitting into:
-      - ShortTermManager (STM lifecycle, compaction trigger)
-      - LongTermManager (LTM search/save, scoring)
-      - MemoryExtractionPipeline (extraction, gate, PII)
-      - CompactionEngine (prompt-based summarization, token budgeting)
-    Each sub-component would receive a shared config/context object.
+    Facade: owns shared resources (STM, LTM, LLM, embed model, settings) and
+    delegates compaction to ``_engine`` and extraction to ``_pipeline``.
     """
+
+    # Private state attributes that live on the sub-components. Reads go
+    # through __getattr__ (only fired when normal lookup fails), writes
+    # through __setattr__ — both lazily create the sub-component so
+    # __new__-constructed test instances work without __init__.
+    _FORWARD_TO_ENGINE = {
+        "_compact_circuit": "circuit",
+        "_microcompacts_since_open": "microcompacts_since_open",
+        "_compacting": "compacting",
+        "_snip_freed_tokens": "snip_freed_tokens",
+        "_recent_reads": "recent_reads",
+        "_last_api_call_ts": "last_api_call_ts",
+        "_on_compact": "on_compact",
+        "_on_after_compact": "on_after_compact",
+        "_ctx_max": "ctx_max",
+        "_compact_threshold": "compact_threshold",
+        "_transcript_dir": "transcript_dir",
+    }
+    _FORWARD_TO_PIPELINE = {
+        "_gate_circuit": "gate_circuit",
+    }
 
     def __init__(self, session_id: str, llm=None, enable_long_term: bool = True):
         self.session_id = session_id
@@ -57,51 +70,60 @@ class MemoryManager:
         self._embed_ready = threading.Event()
         threading.Thread(target=self._preload_embed_model, daemon=True).start()
         self._enable_long_term = enable_long_term
-        # Compaction circuit breaker (exponential backoff)
-        self._compact_circuit = CircuitBreaker(
-            failure_threshold=3,
-            exponential_backoff=True,
-        )
-        # LLM gate circuit breaker (fixed recovery)
-        self._gate_circuit = CircuitBreaker(
-            failure_threshold=3,
-            recovery_seconds=20.0,
-        )
-        self._microcompacts_since_open: int = 0
-        self._compacting: bool = False
-        self._last_api_call_ts: float = 0.0
-        self._recent_reads: list[tuple[str, str, float]] = []  # (filepath, preview, ts)
-        self._snip_freed_tokens: int = 0
         settings = get_settings()
         if "/" in settings.chroma_persist_dir:
             base = settings.chroma_persist_dir.rsplit("/", 1)[0]
         else:
             base = str(Path(settings.chroma_persist_dir).parent)
         self._offload_dir = f"{base}/offload"
-        self._transcript_dir = f"{base}/transcripts"
         self._settings = settings
+        self._engine = CompactionEngine(self)
+        self._engine.transcript_dir = f"{base}/transcripts"
+        self._pipeline = MemoryExtractionPipeline(self)
         ctx_max = self._resolve_ctx_max()
         if ctx_max:
-            self._ctx_max = ctx_max
-            self._compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
-        else:
-            self._ctx_max = 128000
-            self._compact_threshold = 120000
+            self._engine.ctx_max = ctx_max
+            self._engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
         self._last_write_count: int = 0
-        self._on_compact: Callable[[dict], None] | None = None
-        self._on_after_compact: Callable[[], None] | None = None
 
-    def estimate_stm_tokens(self) -> int:
-        """Return current STM token estimate.
+    # ── Sub-component access + attribute forwarding ──────────────────
 
-        Prefers the incremental counter (O(1)) when available and populated,
-        falls back to full re-encoding.
-        """
-        # Use incremental counter if it has been populated (non-zero or messages are empty)
-        stm = self.short_term
-        if stm._token_count > 0 or len(stm._messages) == 0:
-            return stm._token_count
-        return stm.estimate_tokens()
+    def _get_engine(self) -> CompactionEngine:
+        engine = self.__dict__.get("_engine")
+        if engine is None:
+            engine = CompactionEngine(self)
+            self.__dict__["_engine"] = engine
+        return engine
+
+    def _get_pipeline(self) -> MemoryExtractionPipeline:
+        pipeline = self.__dict__.get("_pipeline")
+        if pipeline is None:
+            pipeline = MemoryExtractionPipeline(self)
+            self.__dict__["_pipeline"] = pipeline
+        return pipeline
+
+    def __setattr__(self, name, value):
+        engine_attr = self._FORWARD_TO_ENGINE.get(name)
+        if engine_attr is not None:
+            setattr(self._get_engine(), engine_attr, value)
+            return
+        pipeline_attr = self._FORWARD_TO_PIPELINE.get(name)
+        if pipeline_attr is not None:
+            setattr(self._get_pipeline(), pipeline_attr, value)
+            return
+        object.__setattr__(self, name, value)
+
+    def __getattr__(self, name):
+        # Only fired when normal lookup fails (i.e. forwarded state attrs).
+        engine_attr = self._FORWARD_TO_ENGINE.get(name)
+        if engine_attr is not None:
+            return getattr(self._get_engine(), engine_attr)
+        pipeline_attr = self._FORWARD_TO_PIPELINE.get(name)
+        if pipeline_attr is not None:
+            return getattr(self._get_pipeline(), pipeline_attr)
+        raise AttributeError(f"{type(self).__name__} has no attribute {name!r}")
+
+    # ── Embedding model lifecycle ────────────────────────────────────
 
     def _preload_embed_model(self):
         """Background thread: load embedding model without blocking startup."""
@@ -122,14 +144,6 @@ class MemoryManager:
             raise RuntimeError("Embedding model failed to load")
         return self._embed_model
 
-    def _fire_compact(self, event_type: str, **kwargs):
-        """Fire compact event callback if set."""
-        if self._on_compact:
-            try:
-                self._on_compact({"event": event_type, **kwargs})
-            except Exception as e:
-                logger.debug("Compact event callback failed: %s", e)
-
     @staticmethod
     def _resolve_ctx_max() -> int | None:
         """Query LiteLLM for the current model's max input tokens."""
@@ -141,6 +155,20 @@ class MemoryManager:
         except Exception as e:
             logger.debug("Failed to resolve ctx_max from litellm: %s", e)
             return None
+
+    def estimate_stm_tokens(self) -> int:
+        """Return current STM token estimate.
+
+        Prefers the incremental counter (O(1)) when available and populated,
+        falls back to full re-encoding.
+        """
+        # Use incremental counter if it has been populated (non-zero or messages are empty)
+        stm = self.short_term
+        if stm._token_count > 0 or len(stm._messages) == 0:
+            return stm._token_count
+        return stm.estimate_tokens()
+
+    # ── LTM context retrieval ────────────────────────────────────────
 
     def init_session(self, question: str) -> str:
         if not self.long_term:
@@ -201,6 +229,8 @@ class MemoryManager:
         """Reload LTM context after new memories are detected."""
         return self.init_session(question)
 
+    # ── Append pipeline (offload + compaction trigger) ───────────────
+
     def append(self, role: str, content: str, metadata: dict | None = None) -> None:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
@@ -230,391 +260,49 @@ class MemoryManager:
         """Write large tool result to disk, return a stub with preview."""
         return offload_large_result(content, self._offload_dir, self.session_id)
 
-    def bridge_read(self, filepath: str, content_preview: str = "") -> None:
-        self._recent_reads.append((filepath, content_preview[:5000], time.time()))
-        if len(self._recent_reads) > 20:
-            self._recent_reads = self._recent_reads[-20:]
-
-    def _restore_files(self):
-        max_files = self._settings.post_compact_max_files
-        per_file = self._settings.post_compact_token_per_file
-        budget = self._settings.post_compact_token_budget
-        if max_files <= 0 or not self._recent_reads:
-            return
-        seen: set[str] = set()
-        recent: list[tuple[str, str]] = []
-        for fp, preview, _ts in reversed(self._recent_reads):
-            if fp not in seen:
-                seen.add(fp)
-                recent.insert(0, (fp, preview))
-            if len(recent) >= max_files:
-                break
-        total_tokens = 0
-        restored = 0
-        for fp, preview in recent:
-            if total_tokens + per_file > budget:
-                break
-            try:
-                raw = Path(fp).read_text(encoding="utf-8")
-                content = raw[:per_file * 4]
-            except Exception as e:
-                logger.debug("Failed to read file %s for restore: %s", fp, e)
-                content = preview or f"[无法读取文件] {fp}"
-            self.short_term.append("system", f"[恢复文件] {fp}\n{content}")
-            total_tokens += per_file
-            restored += 1
-        if restored:
-            self._fire_compact("file_restore", restored=restored, files=[fp for fp, _ in recent[:restored]])
-
-    def _write_transcript(self):
-        if not self._settings.transcript_enabled:
-            return
-        Path(self._transcript_dir).mkdir(parents=True, exist_ok=True)
-        ts = int(time.time())
-        fname = f"{self.session_id}_compact_{ts}.jsonl"
-        fpath = Path(self._transcript_dir) / fname
-        messages = self.short_term.get_all()
-        lines = [json.dumps(m, ensure_ascii=False) for m in messages]
-        fpath.write_text("\n".join(lines), encoding="utf-8")
-        self._fire_compact("transcript_saved", path=str(fpath), message_count=len(messages))
-
-    def _drain_to_ltm(self, messages: list[dict]):
-        """Sink high-importance messages to LTM before destructive compaction.
-
-        This ensures critical information (user constraints, key decisions)
-        survives even if the LLM summary loses them.
-        """
-        if not self.long_term:
-            return
-        embed_model = None
-        try:
-            embed_model = self._get_embed_model(timeout=5)
-        except Exception:
-            pass
-
-        drained = 0
-        for i, msg in enumerate(messages):
-            role = msg.get("role", "")
-            # Skip tool results — not useful for LTM
-            if role == "tool":
-                continue
-            # Only drain high-importance messages
-            imp = compute_importance(msg, i, len(messages))
-            if imp < 0.7:
-                continue
-            content = msg.get("content", "")
-            if len(content) < 20:
-                continue
-            # Truncate very long content
-            save_content = content[:2000]
-            try:
-                embedding = None
-                if embed_model:
-                    from agentnexus.rag.embeddings import embedding_to_list
-                    embedding = embedding_to_list(
-                        embed_model.encode(save_content, normalize_embeddings=True)
-                    )
-                self.long_term.save(
-                    session_id=self.session_id,
-                    content=save_content,
-                    category="note",
-                    importance=imp,
-                    embedding=embedding,
-                )
-                drained += 1
-            except Exception as e:
-                logger.debug("LTM drain failed for message %d: %s", i, e)
-
-        if drained:
-            self._fire_compact("ltm_drain", drained=drained)
-
-    def mark_api_call(self) -> None:
-        """Record that an API call just happened for time-based microcompact tracking."""
-        self._last_api_call_ts = time.time()
-
-    def snip(self, keep_recent: int = 10) -> int:
-        if not self._settings.snip_enabled:
-            return 0
-        all_msgs = self.short_term.get_all()
-        if len(all_msgs) <= keep_recent + 4:
-            return 0
-        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
-        removed = self.short_term.snip(keep_recent)
-        if removed:
-            tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
-            freed = max(0, tokens_before - tokens_after)
-            self._snip_freed_tokens += freed
-            self._fire_compact("snip", removed=removed, freed_tokens=freed)
-        return removed
-
-    def microcompact_time_based(self, interval: int | None = None) -> bool:
-        """Layer 3: time-decay based microcompact. Clears recoverable tool results
-        when the last API call was more than `interval` seconds ago.
-
-        Returns True if microcompact was performed.
-        """
-        if interval is None:
-            interval = self._settings.time_microcompact_interval
-        if self._last_api_call_ts <= 0:
-            return False
-        elapsed = time.time() - self._last_api_call_ts
-        if elapsed < interval:
-            return False
-        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
-        self.microcompact()
-        tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
-        self._fire_compact("time_microcompact", tokens_before=tokens_before, elapsed=elapsed)
-        return tokens_before != tokens_after
-
-    def build_projection(self, messages: list[dict]) -> list[dict]:
-        """Layer 4: non-destructive read-time projection. Returns a compressed view
-        of messages without modifying STM. Called before every LLM API call.
-
-        90% ctx used → mild compression. 95% → aggressive compression.
-        """
-        tokens = self.short_term.estimate_tokens()
-        return build_projected_messages(
-            messages,
-            token_count=tokens,
-            ctx_max=self._ctx_max,
-            parse_tool_message=_parse_tool_message,
-            is_recoverable_tool=is_recoverable_tool,
-            importance_fn=compute_importance,
-        )
-
-    def microcompact(self) -> None:
-        compacted, cleaned = microcompact_messages(
-            self.short_term.get_all(),
-            parse_tool_message=_parse_tool_message,
-            is_recoverable_tool=is_recoverable_tool,
-            importance_fn=compute_importance,
-        )
-        if cleaned:
-            self.short_term.replace_messages(compacted)
+    # ── Compaction delegates (see CompactionEngine) ──────────────────
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
-                       is_auto: bool = True) -> int:
-        """5-layer compaction pyramid. Returns tokens saved, or 0.
+                      is_auto: bool = True) -> int:
+        return self._get_engine().maybe_compact(threshold, custom_instructions, is_auto)
 
-        is_auto=False enables manual /compact mode (accepts custom_instructions,
-        does not suppress follow-up questions).
-        """
-        from agentnexus.core.hooks import HookType, get_hook_manager
+    def snip(self, keep_recent: int = 10) -> int:
+        return self._get_engine().snip(keep_recent)
 
-        hook_mgr = get_hook_manager()
-        hook_mgr.fire(HookType.BEFORE_COMPACT, {
-            "is_auto": is_auto, "threshold": threshold,
-        })
+    def microcompact(self) -> None:
+        self._get_engine().microcompact()
 
-        circuit = self._compact_circuit
-        half_open_probe = False
+    def microcompact_time_based(self, interval: int | None = None) -> bool:
+        return self._get_engine().microcompact_time_based(interval)
 
-        if circuit.is_open:
-            remaining = circuit.backoff_remaining()
-            if remaining > 0:
-                logger.debug("Circuit breaker in cooldown (%.0fs remaining)", remaining)
-                self.microcompact()
-                return 0
-            # Cooldown expired — enter half-open state for probe
-            half_open_probe = True
-            self._fire_compact("circuit_half_open", elapsed=remaining)
+    def build_projection(self, messages: list[dict]) -> list[dict]:
+        return self._get_engine().build_projection(messages)
 
-        if threshold is None:
-            threshold = self._compact_threshold
-            if self._snip_freed_tokens > 0:
-                threshold = max(threshold - self._snip_freed_tokens, threshold // 2)
+    def mark_api_call(self) -> None:
+        self._get_engine().mark_api_call()
 
-        # Prefer incremental counter (O(1)) over full re-encoding
-        tokens_before = self.short_term.token_count or self.short_term.estimate_tokens()
+    def bridge_read(self, filepath: str, content_preview: str = "") -> None:
+        self._get_engine().bridge_read(filepath, content_preview)
 
-        # Half-open probe bypasses threshold — we need to test LLM health
-        if not half_open_probe:
-            if tokens_before < threshold:
-                if self._settings.time_microcompact_interval > 0:
-                    self.microcompact_time_based()
-                return 0
+    def _fire_compact(self, event_type: str, **kwargs):
+        self._get_engine()._fire_compact(event_type, **kwargs)
 
-            all_msgs = self.short_term.get_all()
-            if len(all_msgs) <= 4:
-                return 0
-        else:
-            all_msgs = self.short_term.get_all()
+    def _write_transcript(self):
+        self._get_engine()._write_transcript()
 
-        # Layer 2: Snip
-        self.snip()
+    def _restore_files(self):
+        self._get_engine()._restore_files()
 
-        # Layer 3: Time-based microcompact
-        if self._settings.time_microcompact_interval > 0:
-            self.microcompact_time_based()
+    def _drain_to_ltm(self, messages: list[dict]):
+        self._get_engine()._drain_to_ltm(messages)
 
-        # Layer 3b: MicroCompact before LLM summarization
-        self.microcompact()
-
-        # Full rewrite: send ALL messages to summarizer
-        all_msgs_after = self.short_term.get_all()
-        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs_after)
-        if not history_text.strip():
-            return 0
-
-        from agentnexus.observability.tracer import get_trace_manager
-
-        trace_mgr = get_trace_manager()
-
-        # Layer 5: Kairos transcript backup before destructive compact
-        self._write_transcript()
-
-        # Layer 5b: Drain high-importance messages to LTM before summarization
-        self._drain_to_ltm(all_msgs_after)
-
-        augmented = history_text
-        if custom_instructions:
-            augmented = f"[压缩指令] {custom_instructions}\n\n{augmented}"
-
-        self._fire_compact("start", tokens_before=tokens_before)
-
-        self._compacting = True
-        try:
-            with trace_mgr.span("memory_compact", {"is_auto": is_auto}):
-                prompt = SUMMARIZE_PROMPT.format(history=augmented)
-                response = self._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
-                if not response:
-                    circuit.record_failure()
-                    if half_open_probe:
-                        logger.warning("Half-open probe got empty response, re-opening circuit")
-                    self._fire_compact("circuit_open")
-                    return 0
-
-                summary_content = _extract_xml_tag(response, "summary")
-                final_summary = (summary_content or response).strip()
-                self.short_term.compact_full(final_summary, message_count=len(all_msgs_after),
-                                             is_auto=is_auto, keep_recent=6)
-                # Close circuit on success
-                if half_open_probe:
-                    logger.info("Circuit breaker closed after successful half-open probe")
-                    self._fire_compact("circuit_reset")
-                circuit.record_success()
-                self._microcompacts_since_open = 0
-                self._snip_freed_tokens = 0
-                self._recent_reads.clear()
-
-                # A3: File recovery after compact
-                self._restore_files()
-
-                # A6: System prompt rebuild hook
-                if self._on_after_compact:
-                    try:
-                        self._on_after_compact()
-                    except Exception as e:
-                        logger.debug("After-compact callback failed: %s", e)
-
-                tokens_after = self.short_term.token_count or self.short_term.estimate_tokens()
-                tokens_saved = max(0, tokens_before - tokens_after)
-                self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
-
-                hook_mgr.fire(HookType.AFTER_COMPACT, {
-                    "is_auto": is_auto, "tokens_saved": tokens_saved,
-                    "tokens_before": tokens_before, "tokens_after": tokens_after,
-                })
-                return tokens_saved
-        except Exception as e:
-            logger.warning("Compaction failed: %s", e)
-            circuit.record_failure()
-            if half_open_probe:
-                logger.warning("Half-open probe failed, re-opening circuit breaker")
-            self._fire_compact("circuit_open")
-            return 0
-        finally:
-            self._compacting = False
+    # ── Extraction delegates (see MemoryExtractionPipeline) ──────────
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
-        from agentnexus.core.hooks import HookType, get_hook_manager
-
-        hook_mgr = get_hook_manager()
-        hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
-            "op": "conclude", "question": question[:200],
-            "allow_memory": allow_memory,
-        })
-
-        try:
-            self._conclude_impl(question, answer, allow_memory)
-        except Exception as e:
-            logger.warning("LTM extraction failed (non-fatal): %s", e, exc_info=True)
-
-    # ── Two-level filtering: class constants ────────────────────────
-    _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])
-    _STRONG_SIGNALS = frozenset(["记住", "我叫", "我的名字", "我喜欢", "我不喜欢", "以后都", "偏好"])
+        self._get_pipeline().run(question, answer, allow_memory)
 
     def _should_extract_rules(self, question: str, answer: str) -> str:
-        """First-level rule filter. Returns 'yes' / 'no' / 'uncertain'.
-
-        Only filters formatally useless content — does NOT judge importance.
-        Strong signals are checked FIRST to avoid killing short but valuable answers
-        (e.g. "我叫张三" → answer "张三" is <5 chars but contains strong signal "我叫").
-        """
-        combined = question + answer
-        # Strong signals: always pass, regardless of answer length
-        if any(sig in combined for sig in self._STRONG_SIGNALS):
-            return "yes"
-        # Format-level exclusion: empty / whitespace-only
-        if len(answer.strip()) < 5:
-            return "no"
-        # Transactional + very short: tool echo
-        if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 50:
-            return "no"
-        return "uncertain"
+        return self._get_pipeline().should_extract_rules(question, answer)
 
     def _should_extract(self, question: str, answer: str) -> bool:
-        """Two-level filtering: rules first (free), LLM gate second (boundary cases only)."""
-        metrics = get_metrics()
-
-        # Level 1: rule filter (0ms, deterministic)
-        rule_result = self._should_extract_rules(question, answer)
-        if rule_result != "uncertain":
-            return rule_result == "yes"
-
-        # Level 2: LLM gate (only for boundary cases)
-        gate = self._gate_circuit
-        if not gate.should_allow():
-            metrics.incr("writes_skipped_gate")
-            return False
-
-        try:
-            prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
-            result = self._llm.think([{"role": "user", "content": prompt}], silent=True)
-            normalized = result.strip().lower().strip('"').strip("'").strip(".")
-            if normalized == "yes" or normalized.startswith("yes"):
-                gate.record_success()
-                return True
-            if normalized == "no" or normalized.startswith("no"):
-                gate.record_success()
-                metrics.incr("writes_skipped_gate")
-                return False
-            # Format anomaly — not a failure, but counted separately
-            logger.warning("Gate returned unexpected format: %s", result[:100])
-            gate.record_success()
-            metrics.incr("writes_skipped_gate_format_error")
-            return False
-        except Exception:
-            gate.record_failure()
-            metrics.incr("writes_skipped_gate_error")
-            return False
-
-    def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
-        if not answer or not self.long_term:
-            return
-        if not allow_memory:
-            return
-        if not self._should_extract(question, answer):
-            return
-        # PII masking on input side (defense in depth — extraction prompt also controls this)
-        if _contains_pii(question) or _contains_pii(answer):
-            question = _mask_pii(question)
-            answer = _mask_pii(answer)
-        extract_and_save_memories(
-            llm=self._llm,
-            embed_model=self._get_embed_model(),
-            long_term=self.long_term,
-            session_id=self.session_id,
-            question=question,
-            answer=answer,
-        )
+        return self._get_pipeline().should_extract(question, answer)
