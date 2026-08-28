@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agentnexus.rag.models import ChunkRecord
-from agentnexus.rag.retriever import BM25Index
+from agentnexus.rag.ranking import BM25Index
 
 
 @pytest.mark.parametrize("chunk_records", [100], indirect=True)

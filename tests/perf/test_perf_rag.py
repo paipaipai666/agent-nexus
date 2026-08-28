@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from agentnexus.rag.models import ChunkRecord
-from agentnexus.rag.retriever import BM25Index, SearchResult
+from agentnexus.rag.ranking import BM25Index
+from agentnexus.rag.retriever import SearchResult
 
 BM25_BUILD_P95_MAX_MS = 100      # BM25Index.build(500 chunks) < 100ms
 CHROMA_SEARCH_P95_MAX_MS = 400   # ChromaDB search(500 chunks) < 400ms
@@ -299,7 +300,7 @@ BM25_SEARCH_5000_P95_MAX_MS = 50
 @pytest.mark.parametrize("chunk_records", [5000], indirect=True)
 def test_bm25_build_5000(benchmark, chunk_records):
     """Build BM25 index with 5000 chunks."""
-    from agentnexus.rag.retriever import BM25Index
+    from agentnexus.rag.ranking import BM25Index
     bm25 = BM25Index()
     result = benchmark(bm25.build, chunk_records)
     assert result is None
@@ -308,7 +309,7 @@ def test_bm25_build_5000(benchmark, chunk_records):
 @pytest.mark.parametrize("chunk_records", [5000], indirect=True)
 def test_bm25_search_5000(benchmark, chunk_records):
     """Search BM25 index built from 5000 chunks."""
-    from agentnexus.rag.retriever import BM25Index
+    from agentnexus.rag.ranking import BM25Index
     bm25 = BM25Index()
     bm25.build(chunk_records)
 

@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 import typer
 from rich.panel import Panel
@@ -34,9 +33,9 @@ eval_app.add_typer(suite_app, name="suite")
 
 @task_app.command("list")
 def task_list(
-    category: Optional[str] = typer.Option(None, "-c", "--category", help="按类别过滤"),
-    difficulty: Optional[str] = typer.Option(None, "-d", "--difficulty", help="按难度过滤"),
-    eval_type: Optional[str] = typer.Option(None, "-t", "--type", help="按评估类型过滤"),
+    category: str | None = typer.Option(None, "-c", "--category", help="按类别过滤"),
+    difficulty: str | None = typer.Option(None, "-d", "--difficulty", help="按难度过滤"),
+    eval_type: str | None = typer.Option(None, "-t", "--type", help="按评估类型过滤"),
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """列出所有评估任务。"""

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.panel import Panel
@@ -197,7 +196,7 @@ def _show_grader_scores(spans: list[dict]) -> None:
 def transcript_list(
     days: int = typer.Option(1, "-d", "--days", help="查看最近几天"),
     limit: int = typer.Option(20, "-n", "--limit", help="最多显示几条"),
-    tool: Optional[str] = typer.Option(None, "--tool", "-t", help="按工具名过滤"),
+    tool: str | None = typer.Option(None, "--tool", "-t", help="按工具名过滤"),
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """列出最近的 transcripts。"""
@@ -275,8 +274,8 @@ def transcript_list(
 
 @app.command("search")
 def transcript_search(
-    tool: Optional[str] = typer.Option(None, "--tool", "-t", help="按工具名搜索"),
-    keyword: Optional[str] = typer.Option(None, "--keyword", "-k", help="按关键字搜索"),
+    tool: str | None = typer.Option(None, "--tool", "-t", help="按工具名搜索"),
+    keyword: str | None = typer.Option(None, "--keyword", "-k", help="按关键字搜索"),
     days: int = typer.Option(7, "-d", "--days", help="搜索最近几天"),
     limit: int = typer.Option(10, "-n", "--limit", help="最多显示几条"),
 ) -> None:

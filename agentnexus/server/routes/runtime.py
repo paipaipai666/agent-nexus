@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Query
 
 router = APIRouter(tags=["runtime"])
 
 
-def _read_db_stats(runtime, session_id: str) -> Optional[dict]:
+def _read_db_stats(runtime, session_id: str) -> dict | None:
     """Read persisted session stats from the database as a fallback."""
     try:
         from agentnexus.memory.versioned import ConversationVersionManager
@@ -25,7 +23,7 @@ def _read_db_stats(runtime, session_id: str) -> Optional[dict]:
         return None
 
 
-def _resolve_session_refs(runtime, session_id: Optional[str]):
+def _resolve_session_refs(runtime, session_id: str | None):
     """Return (agent, memory_manager) for the given session.
 
     Looks up per-session instances from ChatService when *session_id* is
@@ -49,7 +47,7 @@ def _resolve_session_refs(runtime, session_id: Optional[str]):
 
 
 @router.get("/status")
-def runtime_status(session_id: Optional[str] = Query(None, description="Session ID for per-session stats")):
+def runtime_status(session_id: str | None = Query(None, description="Session ID for per-session stats")):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()

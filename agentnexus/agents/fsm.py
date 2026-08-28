@@ -2,7 +2,7 @@
 
 import logging
 from collections import deque
-from typing import Callable, Optional
+from typing import Callable
 
 from agentnexus.agents.react_types import (
     ExecutionContext,
@@ -44,7 +44,7 @@ class StateMachine:
             except Exception as e:
                 logger.debug("Observer error in FSM transition %s -> %s: %s", from_state, to_state, e)
 
-    def _lookup(self, event: ReActEvent) -> Optional[Transition]:
+    def _lookup(self, event: ReActEvent) -> Transition | None:
         """Find the first matching transition for (current_state, event_type)."""
         for t in self._table:
             if t.state == self._state and (t.event is None or t.event == event.type):
@@ -52,7 +52,7 @@ class StateMachine:
         return None
 
     def run_loop(self, initial_event: ReActEvent, ctx: ExecutionContext,
-                 handlers: dict) -> tuple[Optional[str], list]:
+                 handlers: dict) -> tuple[str | None, list]:
         """Process events until DONE state.
 
         Returns (last_answer, steps) — the same contract as ReActAgent.run().

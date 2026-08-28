@@ -4,6 +4,8 @@
 最终以 JSONL 格式写入 ~/.agentnexus/traces/ 目录。
 """
 
+from __future__ import annotations
+
 import atexit
 import json
 import threading
@@ -12,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # ── Span ────────────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ class TraceContext:
 
     def __init__(
         self,
-        trace_id: Optional[str] = None,
+        trace_id: str | None = None,
         on_span_end: Callable[["TraceContext", TraceSpan], None] | None = None,
     ):
         self.trace_id = trace_id or str(uuid.uuid4())[:8]
@@ -54,7 +56,7 @@ class TraceContext:
         self._lock = threading.RLock()
         self._on_span_end = on_span_end
 
-    def start_span(self, name: str, input_data: Optional[dict] = None) -> TraceSpan:
+    def start_span(self, name: str, input_data: dict | None = None) -> TraceSpan:
         """鍒涘缓瀛?span 骞舵帹鍏ユ爤椤?"""
         with self._lock:
             parent_id = self._span_stack[-1].span_id if self._span_stack else ""
@@ -68,8 +70,8 @@ class TraceContext:
             self._span_stack.append(span)
             return span
 
-    def end_span(self, span: TraceSpan, output_data: Optional[dict] = None,
-                 metadata: Optional[dict] = None):
+    def end_span(self, span: TraceSpan, output_data: dict | None = None,
+                 metadata: dict | None = None):
         """缁撴潫 span 骞惰褰曞埌 spans 鍒楄〃"""
         should_flush = False
         with self._lock:
@@ -97,7 +99,7 @@ class TraceContext:
 class TraceManager:
     """管理 trace 上下文的单例管理器"""
 
-    _instance: Optional["TraceManager"] = None
+    _instance: "TraceManager" | None = None
     _lock = threading.Lock()
     _write_lock = threading.Lock()
     _local = threading.local()
@@ -116,10 +118,10 @@ class TraceManager:
         cls._traces_dir = traces_dir
 
     @property
-    def active(self) -> Optional[TraceContext]:
+    def active(self) -> TraceContext | None:
         return getattr(self._local, "trace", None)
 
-    def start_trace(self, task: str, metadata: Optional[dict[str, Any]] = None) -> TraceContext:
+    def start_trace(self, task: str, metadata: dict[str, Any] | None = None) -> TraceContext:
         """开始一次新 trace，可选传入任务级元数据"""
         ctx = TraceContext(on_span_end=self._flush_span)
         root_span = ctx.start_span("task", {"task": _truncate(task)})
@@ -143,7 +145,7 @@ class TraceManager:
         self._flush(ctx)
         self._local.trace = None
 
-    def span(self, name: str, input_data: Optional[dict] = None):
+    def span(self, name: str, input_data: dict | None = None):
         """获取一个上下文管理器来包裹 span"""
         return _SpanContext(self, name, input_data)
 
@@ -255,11 +257,11 @@ class TraceManager:
 class _SpanContext:
     """用 with 语句管理 span 生命周期"""
 
-    def __init__(self, manager: TraceManager, name: str, input_data: Optional[dict]):
+    def __init__(self, manager: TraceManager, name: str, input_data: dict | None):
         self._manager = manager
         self._name = name
         self._input = input_data
-        self.span: Optional[TraceSpan] = None
+        self.span: TraceSpan | None = None
 
     def __enter__(self) -> TraceSpan:
         ctx = self._manager.active

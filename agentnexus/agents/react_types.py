@@ -3,7 +3,7 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 # ============================================================
 # CallingStrategy — how the agent communicates with the LLM
@@ -29,7 +29,7 @@ class AgentStep:
     content: str = ""
     tool_calls: list[dict] = field(default_factory=list)
     tool_outputs: list[dict] = field(default_factory=list)
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 # ============================================================
@@ -109,7 +109,7 @@ class ReActEvent:
 
 class Transition(NamedTuple):
     state: ReActState
-    event: Optional[ReActEventType]  # None = unconditional (always fire)
+    event: ReActEventType | None  # None = unconditional (always fire)
     next_state: ReActState
     handler: str  # method name on ReActAgent
 
@@ -144,7 +144,7 @@ class ToolCallState:
     tools: list[dict] = field(default_factory=list)
     tools_desc: str = ""
     pending_tool_calls: list[dict] = field(default_factory=list)
-    last_subagent_payload: Optional[dict] = None
+    last_subagent_payload: dict | None = None
 
 
 def _state_property(state_name: str, attr_name: str):
@@ -175,10 +175,10 @@ class ExecutionContext:
     # -- per-step transient --
     last_response_text: str = ""
     last_reasoning: str = ""
-    last_answer: Optional[str] = None
+    last_answer: str | None = None
 
     # -- TUI event side-channel (bypasses FSM queue) --
-    _on_emit: Any = None  # Callable[[ReActEvent, Optional[ReActState], Optional[ReActState]], None]
+    _on_emit: Any = None  # Callable[[ReActEvent, ReActState | None, ReActState | None], None]
 
     question = _state_property("run_state", "question")
     current_step = _state_property("run_state", "current_step")
@@ -217,9 +217,9 @@ class ExecutionContext:
         last_response_text: str = "",
         last_reasoning: str = "",
         pending_tool_calls: list[dict] | None = None,
-        last_answer: Optional[str] = None,
+        last_answer: str | None = None,
         thinking_enabled: bool = False,
-        last_subagent_payload: Optional[dict] = None,
+        last_subagent_payload: dict | None = None,
         _on_emit: Any = None,
         cancel_checker: Any = None,
         run_state: RunState | None = None,
@@ -269,5 +269,5 @@ class ExecutionContext:
 
 @dataclass
 class ReActResult:
-    answer: Optional[str] = None
+    answer: str | None = None
     steps: list = field(default_factory=list)

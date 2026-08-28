@@ -37,22 +37,6 @@ class SearchResult:
     citation: str | None = None
 
 
-class BM25Index:
-    def __init__(self):
-        self._impl = _ranking.BM25Index()
-
-    def build(self, chunks: list[ChunkRecord]):
-        self._impl.build(chunks)
-
-    def search(
-        self,
-        query: str,
-        top_k: int = 10,
-        metadata_filters: dict[str, object] | None = None,
-    ) -> list[tuple[str, float]]:
-        return self._impl.search(query, top_k=top_k, metadata_filters=metadata_filters)
-
-
 def reciprocal_rank_fusion(
     dense_results: list[tuple[str, float]],
     sparse_results: list[tuple[str, float]],
@@ -237,7 +221,7 @@ def generate_hypothetical_document(query: str, llm: AgentLLM | None = None) -> s
 class HybridRetriever:
     def __init__(self, namespace: str = "default"):
         self.namespace = namespace
-        self._bm25 = BM25Index()
+        self._bm25 = _ranking.BM25Index()
         self._chunks: dict[str, ChunkRecord] = {}
         self._reranker: "CrossEncoder | None" = None
 
