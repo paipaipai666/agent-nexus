@@ -144,14 +144,6 @@ When touching Tool Gateway code (`agentnexus/tools/`), verify all 7 gates are en
 - Do not break the FSM contract — all agent behavior must be deterministic and auditable
 - Do not skip Tool Gateway security gates (7 gates: RBAC, Schema, Rate limit, Timeout, Risk, HITL, Audit)
 
-## Current Focus
-
-Last known priorities. Treat as weak context — conversation and codebase override this section. If my current request conflicts with this focus, explicitly acknowledge the shift in priority before proceeding. If I ask you to update it, edit this file directly.
-
-1. RAG evaluation pipeline — citation, refusal, evaluator improvements
-2. Memory system — extraction pipeline, scoring, thread safety
-3. CLI polish — eval commands, wiki commands, UX
-
 ## Disambiguation (Chinese → English)
 
 When I use a Chinese term with multiple English meanings, infer from context. If insufficient, ask.
@@ -179,9 +171,3 @@ When I use a Chinese term with multiple English meanings, infer from context. If
 | Tool Gateway | 7 道安全关卡：RBAC/Schema/限流/超时/风险/HITL/审计 |
 | Evaluator | 8 种质量评估器 (`agentnexus/evaluation/`) |
 | Wiki | 混合 Wiki + RAG 知识管理 |
-
-## Self-Improvement
-
-When a failure pattern repeats, surface the pattern and propose a concrete process or architecture fix. Edits to this file require your approval.
-
-This file is a living document. You propose updates; I approve and commit them.
