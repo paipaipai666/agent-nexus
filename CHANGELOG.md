@@ -2,7 +2,7 @@
 
 All notable changes to AgentNexus will be documented in this file.
 
-## [Unreleased]
+## [0.2.15] - 2026-08-28
 
 ### New Features
 
@@ -17,8 +17,17 @@ All notable changes to AgentNexus will be documented in this file.
 ### Refactoring
 
 - Split `ReActAgentRunner`/`TranscriptCollector` out of `graders.py` into `evaluation/runner.py`
+- **Split `MemoryManager` monolith** (~620 → ~330 lines) — `compaction_engine.py` owns the 5-layer compaction pyramid and its state; `extraction_pipeline.py` owns the two-level extraction gate; manager is now a facade with attribute forwarding for backward compatibility
 - Modernized typing annotations (`Optional[X]` → `X | None`) across fsm, react_types, tracer, runtime routes, eval CLI
 - Removed pass-through `BM25Index` wrapper in `rag/retriever.py` — callers use `rag.ranking.BM25Index` directly
+### Documentation
+
+- **CLI help text standardized to Chinese** (CLI-018) — all `help=` strings and command docstrings across 19 CLI modules; proper nouns stay in English
+- Backfilled CHANGELOG for v0.2.1–v0.2.14
+
+### Tests
+
+- Fixed pre-existing perf benchmark failures — fixtures predated CircuitBreaker; projection benchmarks now call the real `project_mild`/`project_aggressive` APIs
 
 ## [0.2.14] - 2026-06-21
 
