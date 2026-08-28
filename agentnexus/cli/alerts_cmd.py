@@ -13,10 +13,10 @@ from . import app, console
 
 @app.command()
 def alerts(
-    days: int = typer.Option(7, "--days", "-d", help="Show alerts from the last N days"),
-    severity: str = typer.Option(None, "--severity", "-s", help="Filter by severity: info/warning/critical"),
+    days: int = typer.Option(7, "--days", "-d", help="显示最近 N 天的告警"),
+    severity: str = typer.Option(None, "--severity", "-s", help="按级别过滤：info/warning/critical"),
 ):
-    """Show alert history."""
+    """显示告警历史。"""
     from agentnexus.observability.alerting import get_alert_manager
 
     manager = get_alert_manager()

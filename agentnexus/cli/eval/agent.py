@@ -12,9 +12,9 @@ from agentnexus.core.config import get_settings
 
 @eval_app.command("agent")
 def eval_agent(
-    days: int = typer.Option(7, "--days", "-d", help="Look back N days"),
+    days: int = typer.Option(7, "--days", "-d", help="回溯最近 N 天"),
 ):
-    """Evaluate single-agent execution quality (from JSONL traces)."""
+    """评估单智能体执行质量（基于 JSONL trace）。"""
     from agentnexus.evaluation.agent_eval import AgentEvaluator
 
     traces_dir = get_settings().traces_dir

@@ -28,7 +28,7 @@ def _rag_evaluator_cls():
 
 @eval_app.command("list")
 def eval_list():
-    """List available evaluation datasets."""
+    """列出可用的评估数据集。"""
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
 
     console.print(f"[bold]Knowledge base documents:[/bold] {len(KNOWLEDGE_BASE)}")
@@ -50,18 +50,18 @@ def eval_list():
 
 @eval_app.command("run")
 def eval_run(
-    ci: bool = typer.Option(False, "--ci", "-c", help="CI mode: exit(1) if thresholds not met"),
-    top_k: int = typer.Option(10, "--top-k", "-k", help="Retrieval cutoff for Hit Rate / MRR"),
-    dataset: str = typer.Option("", "--dataset", "-D", help="External JSONL eval dataset path"),
-    output: str = typer.Option("", "--output", "-o", help="Export report path, or '-' for stdout"),
-    export_format: str = typer.Option("json", "--format", "-f", help="Export format: json or csv"),
-    quick: bool = typer.Option(False, "--quick", "-q", help="Quick mode: run only 4 representative combinations"),
-    parallel: bool = typer.Option(False, "--parallel", "-p", help="Parallel mode: multi-threaded evaluation"),
-    jobs: int = typer.Option(8, "--jobs", "-j", help="Number of parallel threads (use with --parallel)"),
-    verbose: bool = typer.Option(False, "--verbose", "-V", help="Verbose mode: output per-step timing and progress"),
-    timeout: int = typer.Option(120, "--timeout", "-T", help="Per-call LLM timeout in seconds (0=unlimited)"),
+    ci: bool = typer.Option(False, "--ci", "-c", help="CI 模式：阈值不达标时 exit(1)"),
+    top_k: int = typer.Option(10, "--top-k", "-k", help="Hit Rate / MRR 的检索截断值"),
+    dataset: str = typer.Option("", "--dataset", "-D", help="外部 JSONL 评估数据集路径"),
+    output: str = typer.Option("", "--output", "-o", help="报告导出路径，'-' 表示输出到 stdout"),
+    export_format: str = typer.Option("json", "--format", "-f", help="导出格式：json 或 csv"),
+    quick: bool = typer.Option(False, "--quick", "-q", help="快速模式：只运行 4 组代表性组合"),
+    parallel: bool = typer.Option(False, "--parallel", "-p", help="并行模式：多线程评估"),
+    jobs: int = typer.Option(8, "--jobs", "-j", help="并行线程数（配合 --parallel 使用）"),
+    verbose: bool = typer.Option(False, "--verbose", "-V", help="详细模式：输出每步耗时和进度"),
+    timeout: int = typer.Option(120, "--timeout", "-T", help="单次 LLM 调用超时秒数（0=不限制）"),
 ):
-    """Run RAG evaluation and output metrics report."""
+    """运行 RAG 评估并输出指标报告。"""
     from agentnexus.rag.eval_dataset import DATASET_VERSION, EVAL_SAMPLES, KNOWLEDGE_BASE, load_eval_dataset
     from agentnexus.rag.evaluator import DEFAULT_RAG_THRESHOLDS
 
@@ -304,7 +304,7 @@ def _report_to_csv(report_data: dict) -> str:
 
 @eval_app.command("history")
 def eval_history():
-    """List historical RAG evaluation reports."""
+    """列出历史 RAG 评估报告。"""
 
     report_dir = Path(get_settings().traces_dir) / "evals"
     if not report_dir.exists():
@@ -349,10 +349,10 @@ def eval_history():
 
 @eval_app.command("compare")
 def eval_compare(
-    baseline: str = typer.Option(..., "--baseline", "-b", help="Baseline report JSON path"),
-    candidate: str = typer.Option(..., "--candidate", "-c", help="Candidate report JSON path"),
+    baseline: str = typer.Option(..., "--baseline", "-b", help="基线报告 JSON 路径"),
+    candidate: str = typer.Option(..., "--candidate", "-c", help="候选报告 JSON 路径"),
 ):
-    """Compare two RAG evaluation results."""
+    """对比两份 RAG 评估结果。"""
     b_path = Path(baseline)
     c_path = Path(candidate)
 

@@ -9,7 +9,7 @@ from . import app, console
 
 @app.command()
 def health():
-    """Run system health checks."""
+    """运行系统健康检查。"""
     from rich.panel import Panel
 
     from agentnexus.core.config import get_settings

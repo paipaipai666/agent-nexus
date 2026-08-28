@@ -70,11 +70,7 @@ PR 标题格式：`<type>: <简短描述>`
 
 ## 代码规范
 
-<!-- TODO(CLI-018): CLI help text currently mixes Chinese and English inconsistently.
-     Some commands use Chinese-only help strings, others English, and some a mix.
-     A full standardization pass is needed (estimated 6h). Until then, new commands
-     should use Chinese help text to match the majority of existing commands. -->
-
+- **CLI 帮助文本**：统一使用中文（CLI-018 已完成）；专有名词（RAG、JSON、Trace ID 等）保留英文
 - **Python 版本**：3.11+
 - **行长度**：120 字符
 - **类型标注**：所有新函数和方法的参数必须有类型标注；返回类型尽量标注

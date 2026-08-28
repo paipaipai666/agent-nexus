@@ -15,10 +15,10 @@ from . import codegraph_app, console
 
 @codegraph_app.command()
 def build(
-    force: bool = typer.Option(False, "--force", "-f", help="Force full rebuild"),
-    path: str = typer.Option(".", "--path", "-p", help="Project path"),
+    force: bool = typer.Option(False, "--force", "-f", help="强制全量重建"),
+    path: str = typer.Option(".", "--path", "-p", help="项目路径"),
 ):
-    """Build or update the code knowledge graph."""
+    """构建或更新代码知识图谱。"""
     from agentnexus.codegraph.updater import build_graph
 
     try:
@@ -32,11 +32,11 @@ def build(
 
 @codegraph_app.command()
 def search(
-    query: str = typer.Argument(help="Search query"),
-    kind: str = typer.Option(None, "--kind", "-k", help="Filter by node type"),
-    limit: int = typer.Option(10, "--limit", "-l", help="Max results"),
+    query: str = typer.Argument(help="搜索关键词"),
+    kind: str = typer.Option(None, "--kind", "-k", help="按节点类型过滤"),
+    limit: int = typer.Option(10, "--limit", "-l", help="最大结果数"),
 ):
-    """Search code entities by semantics."""
+    """按语义搜索代码实体。"""
     from agentnexus.codegraph.queries import search_entities
 
     results = search_entities(query, kind=kind, limit=limit)
@@ -54,10 +54,10 @@ def search(
 
 @codegraph_app.command()
 def callers(
-    symbol: str = typer.Argument(help="Entity name"),
-    depth: int = typer.Option(2, "--depth", "-d", help="Recursion depth"),
+    symbol: str = typer.Argument(help="实体名称"),
+    depth: int = typer.Option(2, "--depth", "-d", help="递归深度"),
 ):
-    """Find callers of a given entity."""
+    """查找指定实体的调用方。"""
     from agentnexus.codegraph.queries import get_callers
 
     results = get_callers(symbol, depth=depth)
@@ -72,10 +72,10 @@ def callers(
 
 @codegraph_app.command()
 def callees(
-    symbol: str = typer.Argument(help="Entity name"),
-    depth: int = typer.Option(2, "--depth", "-d", help="Recursion depth"),
+    symbol: str = typer.Argument(help="实体名称"),
+    depth: int = typer.Option(2, "--depth", "-d", help="递归深度"),
 ):
-    """Find callees of a given entity."""
+    """查找指定实体的被调用方。"""
     from agentnexus.codegraph.queries import get_callees
 
     results = get_callees(symbol, depth=depth)
@@ -90,9 +90,9 @@ def callees(
 
 @codegraph_app.command()
 def inherits(
-    cls: str = typer.Argument(help="Class name"),
+    cls: str = typer.Argument(help="类名"),
 ):
-    """View inheritance tree."""
+    """查看继承树。"""
     from agentnexus.codegraph.queries import get_inheritance_tree
 
     results = get_inheritance_tree(cls)
@@ -107,9 +107,9 @@ def inherits(
 
 @codegraph_app.command()
 def imports(
-    module: str = typer.Argument(help="Module path"),
+    module: str = typer.Argument(help="模块路径"),
 ):
-    """View import relationships."""
+    """查看导入关系。"""
     from agentnexus.codegraph.queries import get_imports
 
     results = get_imports(module)
@@ -124,9 +124,9 @@ def imports(
 
 @codegraph_app.command()
 def context(
-    symbol: str = typer.Argument(help="Entity name"),
+    symbol: str = typer.Argument(help="实体名称"),
 ):
-    """Get full context for an entity."""
+    """获取实体的完整上下文。"""
     from agentnexus.codegraph.queries import get_entity_context
 
     ctx = get_entity_context(symbol)
@@ -156,7 +156,7 @@ def context(
 
 @codegraph_app.command()
 def stats():
-    """Show code graph statistics."""
+    """显示代码图谱统计信息。"""
     from agentnexus.codegraph.store import CodeGraphStore, detect_project_root, get_db_path
 
     project_root = detect_project_root()
@@ -190,9 +190,9 @@ def stats():
 
 @codegraph_app.command()
 def verify(
-    fix: bool = typer.Option(False, "--fix", help="Auto-fix inconsistencies"),
+    fix: bool = typer.Option(False, "--fix", help="自动修复不一致项"),
 ):
-    """Run consistency diagnostics."""
+    """运行一致性诊断。"""
     from agentnexus.codegraph.updater import verify_consistency
 
     issues = verify_consistency()

@@ -12,8 +12,8 @@ from . import app, console
 
 
 @app.command()
-def stats(days: int = typer.Option(7, "--days", "-d", help="Statistics for the last N days")):
-    """Show token cost statistics."""
+def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")):
+    """显示 token 成本统计。"""
     from agentnexus.core.config import get_settings
     from agentnexus.observability.stats import compute_stats
 

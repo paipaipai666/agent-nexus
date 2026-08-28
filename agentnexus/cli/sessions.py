@@ -9,10 +9,10 @@ from . import app, console
 
 @app.command("sessions")
 def sessions(
-    limit: int = typer.Option(10, "--limit", "-n", help="Maximum number of sessions to show"),
-    restore: str = typer.Option(None, "--restore", "-r", help="Restore a specific session by ID"),
+    limit: int = typer.Option(10, "--limit", "-n", help="最多显示的会话数"),
+    restore: str = typer.Option(None, "--restore", "-r", help="按 ID 恢复指定会话"),
 ):
-    """List recent chat sessions or restore a specific session."""
+    """列出最近的聊天会话，或恢复指定会话。"""
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
 

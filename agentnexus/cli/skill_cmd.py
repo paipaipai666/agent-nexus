@@ -125,7 +125,7 @@ def _resource_summary(entry) -> str:
 
 @skill_app.command("list")
 def list_skills():
-    """List available skills."""
+    """列出可用技能。"""
     registry = _registry()
     table = Table(title="Skills")
     table.add_column("ID", style="cyan")
@@ -148,12 +148,12 @@ def list_skills():
 
 @skill_app.command("init")
 def init_skill(
-    target: str = typer.Argument(..., help="Skill name, or namespace/skill_id"),
-    display_name: str = typer.Option("", "--name", help="Display name (defaults to derived from skill_id)"),
-    force: bool = typer.Option(False, "--force", help="Overwrite existing SKILL.md or workflow.yaml"),
-    workflow: bool = typer.Option(False, "--workflow", help="Generate legacy workflow.yaml instead of generic SKILL.md"),
+    target: str = typer.Argument(..., help="技能名称，或 namespace/skill_id"),
+    display_name: str = typer.Option("", "--name", help="显示名称（默认从 skill_id 派生）"),
+    force: bool = typer.Option(False, "--force", help="覆盖已存在的 SKILL.md 或 workflow.yaml"),
+    workflow: bool = typer.Option(False, "--workflow", help="生成旧式 workflow.yaml 而非通用 SKILL.md"),
 ):
-    """Create a generic SKILL.md skill template under ~/.agentnexus/skills."""
+    """在 ~/.agentnexus/skills 下创建通用 SKILL.md 技能模板。"""
     from agentnexus.core.config import get_config_dir, get_settings
 
     settings = get_settings()
@@ -179,9 +179,9 @@ def init_skill(
 
 @skill_app.command("validate")
 def validate_skill(
-    target: str = typer.Argument("", help="Optional skill_id or namespace/skill_id"),
+    target: str = typer.Argument("", help="可选的 skill_id 或 namespace/skill_id"),
 ):
-    """Validate skill and prompt resources."""
+    """校验技能与提示词资源。"""
     registry = _registry()
     errors = registry.validate(target or None)
     if not errors:
@@ -194,8 +194,8 @@ def validate_skill(
 
 
 @skill_app.command("use")
-def use_skill(target: str = typer.Argument(..., help="skill_id or namespace/skill_id")):
-    """Set the default skill for TUI sessions."""
+def use_skill(target: str = typer.Argument(..., help="skill_id 或 namespace/skill_id")):
+    """设置 TUI 会话的默认技能。"""
     from agentnexus.core.config import load_config_yaml, write_config_yaml
 
     registry = _registry()
@@ -221,7 +221,7 @@ def use_skill(target: str = typer.Argument(..., help="skill_id or namespace/skil
 
 @skill_app.command("reset")
 def reset_skill():
-    """Clear the default skill."""
+    """清除默认技能。"""
     from agentnexus.core.config import load_config_yaml, write_config_yaml
 
     data = load_config_yaml()
@@ -232,7 +232,7 @@ def reset_skill():
 
 @skill_app.command("status")
 def skill_status():
-    """Show the default skill and discovery status."""
+    """显示默认技能与发现状态。"""
     from agentnexus.core.config import get_settings
 
     settings = get_settings()

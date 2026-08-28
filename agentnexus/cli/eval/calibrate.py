@@ -17,15 +17,15 @@ def _rag_evaluator_cls():
 
 @eval_app.command("calibrate")
 def eval_calibrate(
-    output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="Output file path"),
+    output: str = typer.Option("./calibrate_samples.json", "--output", "-o", help="输出文件路径"),
     score_file: str = typer.Option(
         "",
         "--score-file",
         "-s",
-        help="Human score JSON file path (with human_precision/human_recall fields)",
+        help="人工评分 JSON 文件路径（含 human_precision/human_recall 字段）",
     ),
 ):
-    """Judge calibration: export samples for human scoring, compute Judge-to-human agreement."""
+    """Judge 校准：导出人工评分样本，计算 Judge 与人工的一致性。"""
     from agentnexus.rag.eval_dataset import EVAL_SAMPLES, KNOWLEDGE_BASE
     from agentnexus.rag.ingestion import ChunkStrategy
     from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base

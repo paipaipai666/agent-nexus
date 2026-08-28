@@ -45,8 +45,8 @@ def _read_trace_spans(days: int):
 
 
 @logs_app.command("list")
-def logs_list(days: int = typer.Option(7, "--days", "-d", help="Look back N days of traces")):
-    """List historical trace records."""
+def logs_list(days: int = typer.Option(7, "--days", "-d", help="回溯最近 N 天的 trace")):
+    """列出历史 trace 记录。"""
     spans = _read_trace_spans(days)
 
     if not spans:
@@ -107,8 +107,8 @@ def logs_list(days: int = typer.Option(7, "--days", "-d", help="Look back N days
 
 
 @logs_app.command("view")
-def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="Trace ID to view")):
-    """View the complete span tree for a given trace."""
+def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查看的 Trace ID")):
+    """查看指定 trace 的完整 span 树。"""
     traces_dir = Path(get_settings().traces_dir)
     if not traces_dir.exists():
         console.print("[dim]No trace records[/dim]")

@@ -10,13 +10,13 @@ from agentnexus.cli import console, eval_app
 @eval_app.command("humaneval")
 def eval_humaneval(
     dataset: str = typer.Option(
-        "", "--dataset", "-D", help="HumanEval JSONL dataset path",
+        "", "--dataset", "-D", help="HumanEval JSONL 数据集路径",
     ),
     trace_id: str = typer.Option(
-        "", "--trace", "-t", help="Filter a single problem by trace_id",
+        "", "--trace", "-t", help="按 trace_id 过滤单个题目",
     ),
 ):
-    """Evaluate HumanEval code generation quality (requires solutions JSON)."""
+    """评估 HumanEval 代码生成质量（需要 solutions JSON）。"""
     from pathlib import Path
 
     from agentnexus.evaluation.humaneval import HumanEvalEvaluator
@@ -47,10 +47,10 @@ def eval_humaneval(
 @eval_app.command("swe-bench")
 def eval_swebench(
     dataset: str = typer.Option(
-        "", "--dataset", "-D", help="SWE-bench JSONL dataset path",
+        "", "--dataset", "-D", help="SWE-bench JSONL 数据集路径",
     ),
 ):
-    """Evaluate SWE-bench issue fixing quality (requires patches JSON)."""
+    """评估 SWE-bench issue 修复质量（需要 patches JSON）。"""
     from pathlib import Path
 
     from agentnexus.evaluation.swebench import SWEBenchEvaluator

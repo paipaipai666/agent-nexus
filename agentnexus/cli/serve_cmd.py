@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 @app.command("serve")
 def serve(
-    port: int = typer.Option(18765, help="Port to listen on"),
-    host: str = typer.Option("127.0.0.1", help="Host to bind to"),
-    no_auth: bool = typer.Option(False, help="Disable API key authentication"),
+    port: int = typer.Option(18765, help="监听端口"),
+    host: str = typer.Option("127.0.0.1", help="绑定主机"),
+    no_auth: bool = typer.Option(False, help="禁用 API key 认证"),
 ):
-    """Start the HTTP/WebSocket API server for desktop GUI."""
+    """启动桌面 GUI 的 HTTP/WebSocket API 服务。"""
     import uvicorn
 
     from agentnexus.server.app import create_app

@@ -21,10 +21,10 @@ __all__ = [
 
 @app.command("audit")
 def audit(
-    limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show"),
-    tool: str = typer.Option("", "--tool", "-t", help="Filter by tool name"),
+    limit: int = typer.Option(20, "--limit", "-n", help="显示的条目数"),
+    tool: str = typer.Option("", "--tool", "-t", help="按工具名过滤"),
 ):
-    """Show tool-call audit logs."""
+    """显示工具调用审计日志。"""
     from agentnexus.observability.audit_log import get_audit_log as _get_audit_log
 
     entries = _get_audit_log()

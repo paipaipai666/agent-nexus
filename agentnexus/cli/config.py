@@ -12,12 +12,12 @@ from . import app, console
 
 @app.command()
 def config(
-    set_key: str = typer.Argument(None, help="Config key name (nexus config <key> <value>)"),
-    set_value: str = typer.Argument(None, help="Config value"),
-    key: str = typer.Option(None, "--set", "-s", help="Set a config key (legacy)"),
-    value: str = typer.Option(None, "--value", "-v", help="Config value (legacy)"),
+    set_key: str = typer.Argument(None, help="配置项名称 (nexus config <key> <value>)"),
+    set_value: str = typer.Argument(None, help="配置值"),
+    key: str = typer.Option(None, "--set", "-s", help="设置配置项（旧式用法）"),
+    value: str = typer.Option(None, "--value", "-v", help="配置值（旧式用法）"),
 ):
-    """View or modify configuration."""
+    """查看或修改配置。"""
     from agentnexus.core.config import Settings, get_config_dir, get_settings, load_config_yaml, write_config_yaml
 
     settings = get_settings()
@@ -100,7 +100,7 @@ def config(
 
 @app.command()
 def init():
-    """First-time initialization wizard."""
+    """首次初始化向导。"""
     from agentnexus.core.config import get_config_dir, load_config_yaml, write_config_yaml
 
     console.print(Panel("[bold]AgentNexus Setup Wizard[/bold]", border_style="cyan"))

@@ -30,5 +30,5 @@ def launch_tui(session_id: str | None = None, restore_session: bool = False):
 
 @app.command("tui")
 def tui():
-    """Start the terminal-native chat interface."""
+    """启动终端聊天界面。"""
     launch_tui()

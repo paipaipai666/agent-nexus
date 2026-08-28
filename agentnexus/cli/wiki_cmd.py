@@ -10,7 +10,7 @@ from rich.table import Table
 
 from . import console, wiki_app
 
-review_app = typer.Typer(help="Review queue management")
+review_app = typer.Typer(help="审查队列管理")
 wiki_app.add_typer(review_app, name="review")
 
 
@@ -23,9 +23,9 @@ def _get_wiki_service():
 
 @wiki_app.command("init")
 def wiki_init(
-    namespace: str = typer.Argument(..., help="RAG namespace to bind wiki to"),
+    namespace: str = typer.Argument(..., help="wiki 绑定的 RAG 命名空间"),
 ):
-    """Initialize wiki for a RAG namespace."""
+    """为 RAG 命名空间初始化 wiki。"""
     from agentnexus.rag.store import get_knowledge_base_catalog
     from agentnexus.wiki.store import get_wiki_store
 
@@ -46,11 +46,11 @@ def wiki_init(
 
 @wiki_app.command("ingest")
 def wiki_ingest(
-    source: str = typer.Argument(..., help="Path to source document"),
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
-    page_type: str = typer.Option("concept", "--type", "-t", help="Page type: entity|concept|overview|source_summary"),
+    source: str = typer.Argument(..., help="源文档路径"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
+    page_type: str = typer.Option("concept", "--type", "-t", help="页面类型：entity|concept|overview|source_summary"),
 ):
-    """Ingest a source document into the wiki."""
+    """将源文档摄取进 wiki。"""
     source_path = Path(source)
     if not source_path.exists():
         console.print(f"[red]Source file not found: {source}[/red]")
@@ -80,12 +80,12 @@ def wiki_ingest(
 
 @wiki_app.command("query")
 def wiki_query(
-    question: str = typer.Argument(..., help="Question to ask"),
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
-    rag_fallback: bool = typer.Option(False, "--rag-fallback", "-r", help="Force RAG fallback"),
-    top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results"),
+    question: str = typer.Argument(..., help="要提问的问题"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
+    rag_fallback: bool = typer.Option(False, "--rag-fallback", "-r", help="强制回退到 RAG"),
+    top_k: int = typer.Option(5, "--top-k", "-k", help="结果数量"),
 ):
-    """Query the wiki with confidence-based routing."""
+    """基于置信度路由查询 wiki。"""
     service = _get_wiki_service()
     result = service.query(
         question=question,
@@ -117,10 +117,10 @@ def wiki_query(
 
 @wiki_app.command("lint")
 def wiki_lint(
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
-    enqueue: bool = typer.Option(True, "--enqueue/--no-enqueue", help="Add items to review queue"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
+    enqueue: bool = typer.Option(True, "--enqueue/--no-enqueue", help="将检查项加入审查队列"),
 ):
-    """Run wiki health checks (consistency, drift, coverage)."""
+    """运行 wiki 健康检查（一致性、漂移、覆盖率）。"""
     service = _get_wiki_service()
     items = service.run_lint(source_namespace=namespace)
 
@@ -142,10 +142,10 @@ def wiki_lint(
 
 @review_app.command("list")
 def review_list(
-    status: str = typer.Option("pending", "--status", "-s", help="Filter by status: pending|resolved|auto_degraded"),
-    limit: int = typer.Option(20, "--limit", "-l", help="Max items to show"),
+    status: str = typer.Option("pending", "--status", "-s", help="按状态过滤：pending|resolved|auto_degraded"),
+    limit: int = typer.Option(20, "--limit", "-l", help="最多显示的条目数"),
 ):
-    """List review queue items."""
+    """列出审查队列条目。"""
     from agentnexus.wiki.store import get_wiki_store
 
     store = get_wiki_store()
@@ -178,9 +178,9 @@ def review_list(
 
 @review_app.command("resolve")
 def review_resolve(
-    item_id: str = typer.Argument(..., help="Review item ID to resolve"),
+    item_id: str = typer.Argument(..., help="要解决的审查条目 ID"),
 ):
-    """Resolve a review item."""
+    """解决一个审查条目。"""
     from agentnexus.wiki.store import get_wiki_store
 
     store = get_wiki_store()
@@ -190,7 +190,7 @@ def review_resolve(
 
 @review_app.command("process")
 def review_process():
-    """Process overdue review items (auto-degradation)."""
+    """处理逾期的审查条目（自动降级）。"""
     service = _get_wiki_service()
     actions = service.process_overdue_reviews()
 
@@ -207,9 +207,9 @@ def review_process():
 
 @wiki_app.command("stats")
 def wiki_stats(
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
 ):
-    """Show wiki health statistics."""
+    """显示 wiki 健康统计。"""
     service = _get_wiki_service()
     stats = service.get_stats(namespace)
 
@@ -230,9 +230,9 @@ def wiki_stats(
 
 @wiki_app.command("calibrate")
 def wiki_calibrate(
-    sample_file: str = typer.Argument(..., help="Path to calibration samples JSON file"),
+    sample_file: str = typer.Argument(..., help="校准样本 JSON 文件路径"),
 ):
-    """Run threshold calibration with human-labeled samples.
+    """用人工标注样本运行阈值校准。
 
     Sample file format:
     [
@@ -280,9 +280,9 @@ def wiki_calibrate(
 
 @wiki_app.command("backfill")
 def wiki_backfill(
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
 ):
-    """Rebuild wiki from scratch: delete all existing pages, then regenerate from RAG."""
+    """从零重建 wiki：删除所有现有页面，再从 RAG 重新生成。"""
     from agentnexus.rag.store import get_knowledge_base_catalog
     from agentnexus.wiki.store import get_wiki_store
 
@@ -333,9 +333,9 @@ def wiki_backfill(
 
 @wiki_app.command("full-check")
 def wiki_full_check(
-    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG namespace"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
 ):
-    """Run full wiki health check (stats + lint)."""
+    """运行完整 wiki 健康检查（stats + lint）。"""
     wiki_stats(namespace)
     console.print()
     wiki_lint(namespace, enqueue=True)

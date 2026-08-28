@@ -10,10 +10,10 @@ from agentnexus.core.config import get_settings
 
 @eval_app.command("trajectory")
 def eval_trajectory(
-    trace_id: str = typer.Option("", "--trace-id", "-t", help="Trace ID to evaluate (omit for all)"),
-    days: int = typer.Option(7, "--days", "-d", help="Look back N days"),
+    trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
+    days: int = typer.Option(7, "--days", "-d", help="回溯最近 N 天"),
 ):
-    """Run trajectory quality evaluation (deterministic rules, no LLM-as-Judge)."""
+    """运行轨迹质量评估（确定性规则，不使用 LLM-as-Judge）。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.trajectory import TrajectoryEvaluator
 
@@ -63,9 +63,9 @@ def eval_trajectory(
 
 @eval_app.command("ci")
 def eval_ci(
-    days: int = typer.Option(1, "--days", "-d", help="Look back N days"),
+    days: int = typer.Option(1, "--days", "-d", help="回溯最近 N 天"),
 ):
-    """CI mode: single-agent quality evaluation, exit(1) on failure."""
+    """CI 模式：单智能体质量评估，失败时 exit(1)。"""
     from agentnexus.evaluation.agent_eval import AgentEvaluator
 
     evaluator = AgentEvaluator()
@@ -84,7 +84,7 @@ def eval_ci(
 
 @eval_app.command("component")
 def eval_component():
-    """Run component-level evaluation (Coder/Researcher/Executor/Analyst)."""
+    """运行组件级评估（Coder/Researcher/Executor/Analyst）。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.component import ComponentEvaluator
 
@@ -125,9 +125,9 @@ def eval_component():
 
 @eval_app.command("hallucination")
 def eval_hallucination(
-    trace_id: str = typer.Option("", "--trace-id", "-t", help="Trace ID to evaluate (omit for all)"),
+    trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
 ):
-    """Hallucination detection: extract claims from answers and verify against context."""
+    """幻觉检测：从答案中提取声明并对照上下文验证。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.hallucination import HallucinationDetector
 
@@ -176,7 +176,7 @@ def eval_hallucination(
 
 @eval_app.command("tool-selection")
 def eval_tool_selection():
-    """Tool selection accuracy: compare actual vs expected tool choices."""
+    """工具选择准确率：对比实际与预期的工具选择。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.tool_selection import ToolSelectionEvaluator
 
@@ -209,9 +209,9 @@ def eval_tool_selection():
 
 @eval_app.command("coherence")
 def eval_coherence(
-    trace_id: str = typer.Option("", "--trace-id", "-t", help="Trace ID to evaluate (omit for all)"),
+    trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
 ):
-    """Multi-step reasoning coherence evaluation (uses an independent Judge model)."""
+    """多步推理连贯性评估（使用独立的 Judge 模型）。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.coherence import CoherenceEvaluator
 

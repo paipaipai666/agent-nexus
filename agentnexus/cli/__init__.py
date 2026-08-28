@@ -8,29 +8,29 @@ from rich.console import Console
 
 app = typer.Typer(
     name="nexus",
-    help="AgentNexus CLI",
+    help="AgentNexus 命令行工具",
 )
 console = Console()
 
-kb_app = typer.Typer(help="Knowledge base management")
+kb_app = typer.Typer(help="知识库管理")
 app.add_typer(kb_app, name="kb")
 
-wiki_app = typer.Typer(help="Hybrid Wiki + RAG knowledge system")
+wiki_app = typer.Typer(help="混合 Wiki + RAG 知识系统")
 app.add_typer(wiki_app, name="wiki")
 
-memory_app = typer.Typer(help="Memory management")
+memory_app = typer.Typer(help="记忆管理")
 app.add_typer(memory_app, name="memory")
 
-logs_app = typer.Typer(help="Trace log viewer")
+logs_app = typer.Typer(help="Trace 日志查看器")
 app.add_typer(logs_app, name="logs")
 
-eval_app = typer.Typer(help="RAG evaluation")
+eval_app = typer.Typer(help="评估系统")
 app.add_typer(eval_app, name="eval")
 
-skill_app = typer.Typer(help="Skill / workflow management")
+skill_app = typer.Typer(help="技能 / 工作流管理")
 app.add_typer(skill_app, name="skill")
 
-codegraph_app = typer.Typer(help="Code knowledge graph management")
+codegraph_app = typer.Typer(help="代码知识图谱管理")
 app.add_typer(codegraph_app, name="codegraph")
 
 # Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
@@ -111,5 +111,5 @@ def main(argv: list[str] | None = None) -> None:
 
 @app.command()
 def version():
-    """Show version."""
+    """显示版本。"""
     console.print("[bold]AgentNexus[/bold] v0.1.0")

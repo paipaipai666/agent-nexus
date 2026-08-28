@@ -132,8 +132,8 @@ def _finish_ingestion_run(
 
 
 @kb_app.command("add")
-def kb_add(path: str = typer.Argument(..., help="Document path or directory")):
-    """Add documents to the knowledge base."""
+def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
+    """添加文档到知识库。"""
     settings = get_settings()
     namespace = settings.rag_default_namespace
     llm_client = None
@@ -198,7 +198,7 @@ def kb_add(path: str = typer.Argument(..., help="Document path or directory")):
 
 @kb_app.command("list")
 def kb_list():
-    """View knowledge base status."""
+    """查看知识库状态。"""
     settings = get_settings()
     catalog = get_knowledge_base_catalog()
     kb = catalog.get_knowledge_base(settings.rag_default_namespace)
@@ -217,19 +217,19 @@ def kb_list():
 
 @kb_app.command("search")
 def kb_search_command(
-    query: str = typer.Argument(..., help="Search query"),
-    top_k: int = typer.Option(5, "--top-k", min=1, max=20, help="Number of results"),
-    view: str = typer.Option("section", "--view", help="Result view: section or chunk"),
-    source: str = typer.Option("", "--source", "-s", help="Filter by source_uri"),
-    file_format: str = typer.Option("", "--format", help="Filter by format"),
-    section_title: str = typer.Option("", "--section", "-S", help="Filter by section_title"),
-    page_number: int | None = typer.Option(None, "--page", help="Filter by page number"),
-    block_type: str = typer.Option("", "--block-type", help="Filter by block type: paragraph/list/heading/code"),
-    has_code: bool | None = typer.Option(None, "--has-code/--no-code", help="Filter by code presence"),
-    has_list: bool | None = typer.Option(None, "--has-list/--no-list", help="Filter by list presence"),
-    heading_depth: int | None = typer.Option(None, "--heading-depth", min=1, help="Filter by heading depth"),
+    query: str = typer.Argument(..., help="搜索关键词"),
+    top_k: int = typer.Option(5, "--top-k", min=1, max=20, help="结果数量"),
+    view: str = typer.Option("section", "--view", help="结果视图：section 或 chunk"),
+    source: str = typer.Option("", "--source", "-s", help="按 source_uri 过滤"),
+    file_format: str = typer.Option("", "--format", help="按格式过滤"),
+    section_title: str = typer.Option("", "--section", "-S", help="按 section_title 过滤"),
+    page_number: int | None = typer.Option(None, "--page", help="按页码过滤"),
+    block_type: str = typer.Option("", "--block-type", help="按块类型过滤：paragraph/list/heading/code"),
+    has_code: bool | None = typer.Option(None, "--has-code/--no-code", help="按是否包含代码过滤"),
+    has_list: bool | None = typer.Option(None, "--has-list/--no-list", help="按是否包含列表过滤"),
+    heading_depth: int | None = typer.Option(None, "--heading-depth", min=1, help="按标题层级过滤"),
 ):
-    """Search the knowledge base."""
+    """搜索知识库。"""
     settings = get_settings()
     namespace = settings.rag_default_namespace
     retriever = HybridRetriever(namespace=namespace)
