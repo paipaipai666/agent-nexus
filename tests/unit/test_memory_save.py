@@ -16,7 +16,6 @@ class TestMemorySave:
         assert "已保存" in result
         assert "preference" in result
         mock_get_ltm.return_value.save.assert_called_once()
-
     def test_content_too_short(self):
         result = memory_save("hi")
         assert "至少需要5个字符" in result
@@ -80,3 +79,40 @@ class TestMemorySave:
             result = memory_save(f"A memory with category {cat}", category=cat)
             assert "已保存" in result
             assert cat in result
+
+    @patch("agentnexus.tools.memory_save.get_long_term_memory")
+    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    def test_context_passthrough_and_concat_embedding(self, mock_get_emb, mock_get_ltm):
+        mock_model = MagicMock()
+        mock_model.encode.return_value.tolist.return_value = [0.1]
+        mock_get_emb.return_value = mock_model
+
+        memory_save(
+            "用户喜欢周杰伦",
+            category="preference",
+            importance=0.9,
+            context="推荐歌曲时用户否定了莫文蔚、选择周杰伦",
+        )
+
+        # D: embedding input is content + context concatenated
+        assert mock_model.encode.call_args[0][0] == (
+            "用户喜欢周杰伦\n推荐歌曲时用户否定了莫文蔚、选择周杰伦"
+        )
+        # A: context lands in metadata
+        _, kwargs = mock_get_ltm.return_value.save.call_args
+        assert kwargs["metadata"] == {"context": "推荐歌曲时用户否定了莫文蔚、选择周杰伦"}
+
+    @patch("agentnexus.tools.memory_save.get_long_term_memory")
+    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    def test_no_context_omits_metadata(self, mock_get_emb, mock_get_ltm):
+        mock_model = MagicMock()
+        mock_model.encode.return_value.tolist.return_value = [0.1]
+        mock_get_emb.return_value = mock_model
+
+        memory_save("A fact without context", category="fact", importance=0.7)
+
+        _, kwargs = mock_get_ltm.return_value.save.call_args
+        # metadata kwarg must be absent to keep existing precise assertions stable
+        assert "metadata" not in kwargs
+        # D: embedding input is content only
+        assert mock_model.encode.call_args[0][0] == "A fact without context"

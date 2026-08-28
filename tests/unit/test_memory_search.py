@@ -1,5 +1,6 @@
 """Tests for agentnexus.tools.memory_search."""
 
+import json
 from unittest.mock import patch
 
 from agentnexus.tools.memory_search import _rewrite_query, _score_stars, memory_search
@@ -107,3 +108,57 @@ class TestMemorySearch:
         memory_search("query")
         _, kwargs = mock_ltm.return_value.search.call_args
         assert kwargs["category"] is None
+
+    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.tools.memory_search.get_long_term_memory")
+    @patch("agentnexus.tools.memory_search.AgentLLM")
+    def test_context_rendered_when_present(self, MockLLM, mock_ltm, mock_embed):
+        MockLLM.return_value.think.return_value = "周杰伦 推荐"
+        mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
+        mock_ltm.return_value.search.return_value = [
+            {
+                "_score": 0.85,
+                "category": "preference",
+                "content": "用户喜欢周杰伦",
+                "metadata_json": json.dumps(
+                    {"context": "推荐歌曲时用户否定了莫文蔚、选择周杰伦"},
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        result = memory_search("推荐一首歌")
+        assert "用户喜欢周杰伦" in result
+        # B: context source line injected
+        assert "推荐歌曲时用户否定了莫文蔚、选择周杰伦" in result
+
+    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.tools.memory_search.get_long_term_memory")
+    @patch("agentnexus.tools.memory_search.AgentLLM")
+    def test_no_context_output_unchanged(self, MockLLM, mock_ltm, mock_embed):
+        MockLLM.return_value.think.return_value = "python preference"
+        mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
+        mock_ltm.return_value.search.return_value = [
+            {"_score": 0.85, "category": "user_preference", "content": "User likes Python"},
+        ]
+        result = memory_search("What does user like?")
+        assert "User likes Python" in result
+        # no metadata_json → no source line, output stays as before
+        assert "来源" not in result
+
+    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.tools.memory_search.get_long_term_memory")
+    @patch("agentnexus.tools.memory_search.AgentLLM")
+    def test_empty_context_metadata_no_source_line(self, MockLLM, mock_ltm, mock_embed):
+        MockLLM.return_value.think.return_value = "keywords"
+        mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
+        mock_ltm.return_value.search.return_value = [
+            {
+                "_score": 0.85,
+                "category": "fact",
+                "content": "uses VSCode",
+                "metadata_json": "{}",
+            },
+        ]
+        result = memory_search("editor")
+        assert "uses VSCode" in result
+        assert "来源" not in result

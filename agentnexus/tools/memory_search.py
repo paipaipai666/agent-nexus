@@ -1,6 +1,7 @@
 """memory_search tool — allows agents to actively query long-term memory."""
 
 from agentnexus.core.llm import AgentLLM
+from agentnexus.memory.extraction import _parse_context
 from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.rag.embeddings import get_embedding_model
 
@@ -25,6 +26,7 @@ _CATEGORY_MIGRATION = {
 }
 
 _MAX_CONTENT_TOKENS = 200  # ~800 chars for Chinese text
+_MAX_CONTEXT_TOKENS = 80   # tighter budget — context is a one-sentence rationale
 
 
 def _is_entity_query(query: str) -> bool:
@@ -137,6 +139,13 @@ def memory_search(query: str, category: str = "") -> str:
         cat_display = _CATEGORY_MIGRATION.get(r['category'], r['category'])
         content = _truncate_content(r['content'])
         lines.append(f"- {star} [{cat_display}] {content}")
+        # B: inject the one-sentence rationale only when present, so the agent
+        # can tell a general preference from a scene-specific one. Absent
+        # context produces no extra line — output stays byte-identical to
+        # before. (init_session does NOT inject context, by design.)
+        ctx = _parse_context(r.get("metadata_json"))
+        if ctx:
+            lines.append(f"    └ 来源: {_truncate_content(ctx, _MAX_CONTEXT_TOKENS)}")
     return "\n".join(lines)
 
 

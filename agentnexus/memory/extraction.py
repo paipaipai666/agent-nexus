@@ -50,6 +50,20 @@ def migrate_category(cat: str) -> str:
     return _CATEGORY_MIGRATION.get(cat, cat)
 
 
+def _embed_text(content: str, context: str | None) -> str:
+    """Build the text used for embedding a memory.
+
+    When a context (one-sentence rationale) is present, concatenate it so the
+    vector captures the scene/evidence behind the conclusion — this broadens
+    recall (a query about the scene can match a short conclusion). Without
+    context, embed the conclusion alone (preserves behavior for legacy rows
+    and context-free memories).
+    """
+    if context:
+        return f"{content}\n{context}"
+    return content
+
+
 def extract_xml_tag(text: str, tag: str) -> str | None:
     pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
@@ -68,31 +82,87 @@ def parse_memory_payload(response: str) -> dict:
 
 
 def iter_memory_items(data: dict):
+    """Yield (category, importance, content, context) tuples from parsed payload.
+
+    Items may be plain strings (legacy format, context="") or dicts with
+    "content"/"text" and an optional "context" (one-sentence rationale).
+    """
     for category, importance in MEMORY_CATEGORIES.items():
         for item in data.get(category, []):
+            context = ""
             if isinstance(item, dict):
-                item = item.get("content") or item.get("text") or ""
-            if not isinstance(item, str) or len(item.strip()) < 5:
+                content = item.get("content") or item.get("text") or ""
+                context = (item.get("context") or "").strip()
+            else:
+                content = item
+            if not isinstance(content, str) or len(content.strip()) < 5:
                 continue
-            yield category, importance, item.strip()
+            yield category, importance, content.strip(), context
 
 
 _CONFLICT_PROMPT = """判断以下两条记忆是否矛盾（信息冲突、互相排斥）。只回答 "矛盾" 或 "不矛盾"。
 
+判断要点：
+- 如果两条记忆的结论互相排斥，且属于同一场景/同一维度，回答 "矛盾"。
+- 如果结论看似相反，但 context 表明它们来自不同场景（例如不同任务、不同上下文下的偏好），它们可以并存，回答 "不矛盾"。
+- context 缺失时，仅依据结论判断。
+
 已有记忆: {old}
+已有记忆来源: {old_context}
 新记忆: {new}
+新记忆来源: {new_context}
 判断:"""
 
 
-def _check_conflict(llm: Any, old_content: str, new_content: str) -> bool:
-    """Use LLM to check if two memories contradict each other."""
+def _check_conflict(
+    llm: Any,
+    old_content: str,
+    new_content: str,
+    old_context: str = "",
+    new_context: str = "",
+) -> bool:
+    """Use LLM to check if two memories contradict each other.
+
+    Contexts (one-sentence rationales) are included so the model can tell
+    "same-scene contradiction" (real conflict → supersede) from
+    "different-scene coexisting preferences" (not conflict → keep both).
+    Returns True only on a genuine conflict; LLM failure assumes no conflict.
+    """
     try:
-        prompt = _CONFLICT_PROMPT.format(old=old_content, new=new_content)
-        result = llm.think([{"role": "user", "content": prompt}], silent=True)
-        return "矛盾" in (result or "")
+        prompt = _CONFLICT_PROMPT.format(
+            old=old_content,
+            old_context=old_context or "（无）",
+            new=new_content,
+            new_context=new_context or "（无）",
+        )
+        result = llm.think([{"role": "user", "content": prompt}], silent=True) or ""
+        # Exact match, not substring: "不矛盾" contains "矛盾", so a substring
+        # check would treat every non-conflict answer as a conflict.
+        return result.strip() == "矛盾"
     except Exception:
         logger.debug("Conflict check failed, assuming no conflict", exc_info=True)
         return False
+
+
+def _parse_context(metadata_json: Any) -> str:
+    """Extract the context string from a memory row's metadata_json field.
+
+    metadata_json is a JSON string (or None / already-parsed dict in tests).
+    Returns "" when absent or malformed — never raises.
+    """
+    if not metadata_json:
+        return ""
+    if isinstance(metadata_json, dict):
+        ctx = metadata_json.get("context")
+        return ctx.strip() if isinstance(ctx, str) else ""
+    try:
+        data = json.loads(metadata_json)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    ctx = data.get("context")
+    return ctx.strip() if isinstance(ctx, str) else ""
 
 
 # ── module-level lock for the extraction pipeline ───────────────────
@@ -117,20 +187,27 @@ def extract_and_save_memories(
     data = parse_memory_payload(response)
     saved_count = 0
 
-    for category, importance, item in iter_memory_items(data):
+    for category, importance, item, context in iter_memory_items(data):
         if not item:
             continue
 
         # ── PII fallback: regex scan after LLM extraction ───────────
         # Prompt tells LLM not to extract PII, but LLM is non-deterministic.
         # This catches phone numbers, emails, IDs that slipped through.
+        # Context is masked too — it gets embedded and fed into the conflict
+        # prompt, so it must not carry PII either.
         if contains_pii(item):
             item = mask_pii(item)
             metrics.incr("pii_masked_count")
             logger.warning("PII detected in extracted memory (source control bypassed), masked: %s", item[:60])
+        if context and contains_pii(context):
+            context = mask_pii(context)
+            metrics.incr("pii_masked_count")
+            logger.warning("PII detected in extracted memory context, masked: %s", context[:60])
 
         # ── Segment 1.5: Embedding generation (unlocked — slow compute/API) ──
-        vec = embedding_to_list(embed_model.encode(item, normalize_embeddings=True))
+        # D: embed content + context so the scene/evidence broadens recall.
+        vec = embedding_to_list(embed_model.encode(_embed_text(item, context), normalize_embeddings=True))
 
         # ── Segment 2: Dedup query (locked — fast DB read) ──────────
         with _extraction_lock:
@@ -151,13 +228,31 @@ def extract_and_save_memories(
                 limit=3, min_similarity=threshold,
             ) if vec else []
         # LLM conflict check outside lock
+        # C: pass both contexts so same-scene contradictions supersede while
+        # different-scene coexisting preferences are kept.
         for c in candidates:
             if c.get("_score", 0) >= 0.90:
                 continue  # already handled by dedup
-            if _check_conflict(llm, c["content"], item):
+            if _check_conflict(
+                llm,
+                c["content"], item,
+                old_context=_parse_context(c.get("metadata_json")),
+                new_context=context,
+            ):
                 conflict_ids.append(c["id"])
 
         # ── Segment 4: Double-check + save (locked — fast DB write) ─
+        # metadata is omitted entirely when context is empty, so callers
+        # relying on the historical save() kwargs are unaffected.
+        save_kwargs: dict[str, Any] = {
+            "session_id": session_id,
+            "content": item,
+            "category": category,
+            "importance": importance,
+            "embedding": vec,
+        }
+        if context:
+            save_kwargs["metadata"] = {"context": context}
         with _extraction_lock:
             # Double-check: another thread may have written a duplicate
             if vec:
@@ -166,13 +261,7 @@ def extract_and_save_memories(
                     metrics.incr("writes_skipped_dedup")
                     continue
 
-            new_id = long_term.save(
-                session_id=session_id,
-                content=item,
-                category=category,
-                importance=importance,
-                embedding=vec,
-            )
+            new_id = long_term.save(**save_kwargs)
             # Supersede all conflicting old memories (idempotent)
             for cid in conflict_ids:
                 long_term.mark_superseded(cid, new_id)

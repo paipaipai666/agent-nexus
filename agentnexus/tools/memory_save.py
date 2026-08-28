@@ -1,5 +1,6 @@
 """memory_save tool — allows agents to proactively save facts to long-term memory."""
 
+from agentnexus.memory.extraction import _embed_text
 from agentnexus.memory.long_term import get_long_term_memory
 from agentnexus.rag.embeddings import get_embedding_model
 
@@ -22,7 +23,8 @@ _CATEGORY_MIGRATION = {
 }
 
 
-def memory_save(content: str, category: str = "fact", importance: float = 0.85) -> str:
+def memory_save(content: str, category: str = "fact", importance: float = 0.85,
+                context: str = "") -> str:
     """Save a fact, preference, or conclusion to long-term memory for future recall.
 
     Use this when the user explicitly shares personal info (name, preferences, background),
@@ -32,6 +34,10 @@ def memory_save(content: str, category: str = "fact", importance: float = 0.85) 
         content: The fact to remember, written as a clear standalone sentence.
         category: Type of memory. One of: fact, preference, note.
         importance: How important this memory is (0.0-1.0). Default 0.85.
+        context: Optional one-sentence rationale describing the scene or evidence
+            that produced this conclusion (e.g. "推荐歌曲时用户否定了莫文蔚、选择周杰伦").
+            Broadens recall and helps distinguish same-scene conflicts from
+            different-scene coexisting preferences. Do not include personal info.
 
     Returns:
         Confirmation message.
@@ -45,22 +51,26 @@ def memory_save(content: str, category: str = "fact", importance: float = 0.85) 
     # Migrate legacy category names
     category = _CATEGORY_MIGRATION.get(category, category)
     importance = max(0.0, min(1.0, importance))
+    context = (context or "").strip()
 
     ltm = get_long_term_memory()
     model = get_embedding_model()
 
     try:
-        raw = model.encode(content, normalize_embeddings=True)
+        raw = model.encode(_embed_text(content, context), normalize_embeddings=True)
         embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
     except Exception:
         # Save without embedding — will be re-embedded on next search
         embedding = []
 
-    ltm.save(
-        session_id="agent_written",
-        content=content.strip(),
-        category=category,
-        importance=importance,
-        embedding=embedding,
-    )
+    save_kwargs: dict = {
+        "session_id": "agent_written",
+        "content": content.strip(),
+        "category": category,
+        "importance": importance,
+        "embedding": embedding,
+    }
+    if context:
+        save_kwargs["metadata"] = {"context": context}
+    ltm.save(**save_kwargs)
     return f"[memory_save] 已保存 [{category}] {content.strip()[:100]}"
