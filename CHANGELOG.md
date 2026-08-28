@@ -2,6 +2,190 @@
 
 All notable changes to AgentNexus will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **Context-aware memory extraction and recall** — memory items carry an optional one-sentence context (scene/evidence); embeddings concatenate content+context; conflict check distinguishes same-scene contradictions from different-scene coexisting preferences; `memory_save` accepts `context`, `memory_search` renders it when present
+- **Tool-selection keyword ordering** — more specific keywords match first (first-match-wins)
+
+### Bug Fixes
+
+- Fixed memory conflict detection — substring matching treated every "不矛盾" answer as a conflict, incorrectly superseding memories; now uses exact match
+- Fixed stale security fragment assertions after prompt localization (`Security Fragment` → `安全原则`)
+
+### Refactoring
+
+- Split `ReActAgentRunner`/`TranscriptCollector` out of `graders.py` into `evaluation/runner.py`
+- Modernized typing annotations (`Optional[X]` → `X | None`) across fsm, react_types, tracer, runtime routes, eval CLI
+- Removed pass-through `BM25Index` wrapper in `rag/retriever.py` — callers use `rag.ranking.BM25Index` directly
+
+## [0.2.14] - 2026-06-21
+
+### New Features
+
+- **会话统计信息持久化** — session statistics persisted to database
+- **会话级别运行时状态统计** — session-level runtime state stats support
+
+### Bug Fixes
+
+- Fixed missing `TOOL_DONE` events in batch tool execution (react_runtime)
+- Fixed `_lookup_registry` mutating the static capabilities registry
+
+### CI/CD
+
+- Hardened CI/CD pipeline: caching, security audit, release safety, concurrency control, release version validation
+- Removed pip-audit dependency audit job; skip editable installs in pip-audit; suppress chromadb CVE (no trust_remote_code)
+- Fixed smoke test to use `version` command; UTF-8 encoding for pyproject.toml read on Windows
+
+## [0.2.13] - 2026-06-20
+
+### New Features
+
+- **Tool system hardening** — structured errors, concurrent dispatch, and description boundaries
+
+### Refactoring
+
+- P2 structural improvements — split God Objects, extracted subpackages
+
+### Bug Fixes
+
+- Addressed 7 CRITICAL, 15 HIGH, 18 MEDIUM issues from code review, plus all LOW issues with added observability test coverage
+- CORS now allows localhost on any port via regex
+
+### Tests
+
+- Added 160 tests for wiki and skills/router modules
+- Adapted 7 integration/security tests to review fixes; mocked `_call_via_litellm` in stream fallback test
+
+## [0.2.12] - 2026-06-18
+
+### Refactoring
+
+- 会话隔离的短时记忆管理 — session-isolated STM management in chat
+
+### Bug Fixes
+
+- Fixed tool cards stuck at "running" by bypassing journal parsing
+- Fixed thinking content order — reset reasoning message ID on tool call
+
+## [0.2.11] - 2026-06-18
+
+### Bug Fixes
+
+- Fixed TypeScript errors in desktop test files
+
+## [0.2.10] - 2026-06-18
+
+### New Features
+
+- **Multi-session parallel execution** — concurrent agent runs across sessions
+- **ChatService session isolation** — constructor supports per-session isolation
+
+### Bug Fixes
+
+- Embeddings prefer local cache to avoid HuggingFace timeouts
+- Fixed history messages lost after session switch
+- Fixed streaming output lost when switching sessions during an agent answer
+- Fixed empty "New session" card appearing in sidebar on every startup
+- Fixed streaming content loss after page navigation and sidebar not refreshing for new sessions
+- Mocked `_recursive_split` in chunking tests to avoid langchain import timeout in CI
+
+## [0.2.9] - 2026-06-15
+
+### Performance
+
+- **GPU embedding FP16 half-precision** — 2x throughput for RAG embedding
+
+### New Features
+
+- **STM 会话隔离与多会话并发支持** — session-isolated short-term memory
+- **会话预览功能** — session preview with database migration
+- **Per-session version manager** — independent conversation version manager per session
+- **WebSocket 连接管理改进** — chat WebSocket connection management with acknowledgment bridging
+- **`display_only` metadata** — agent display-only metadata support and final answer handling
+- **Memory thread safety** — locks and atomic commits in memory system
+
+### Bug Fixes
+
+- Fixed thought content lost after session switch (GUI)
+- Fixed streaming content lost on page switch (session)
+- Fixed infinite repeated API refresh on new chat page
+- Sidebar session card timestamp now only updates on user questions
+- Fixed tool execution argument mapping in ReAct agent
+- Fixed import order in memory version manager; fixed reranker loading in RAG retriever tests
+
+### Refactoring
+
+- Reworked `kb_search` tool to optimize retriever initialization
+
+## [0.2.8] - 2026-06-11
+
+### New Features
+
+- **Wiki 回填命令** — CLI wiki backfill command
+
+### Security
+
+- Hardened path traversal defense: restored symlink detection, reliable normpath-based detection, consistent `resolve(strict=False)` for Windows 8.3 name compatibility, type-safe `Path.home` mock; skipped symlink test on Windows
+
+### Tests
+
+- Fixed all 149 pre-existing unit test failures
+- Fixed integration and security test failures, async tests, trace_manager isolation, DoS test timeout, HuggingFace timeout
+- Made cwd resilient across all modules and tests; fixed cwd isolation and Windows path normalization
+
+### CI/CD
+
+- Install rag/server/tui optional dependencies for test collection; fixed ruff lint and import sorting
+
+### Documentation
+
+- Updated README documentation links and test statistics
+
+## [0.2.7] - 2026-06-09
+
+### CI/CD
+
+- Use glob pattern for chmod on renamed backend binaries
+
+## [0.2.6] - 2026-06-09
+
+### CI/CD
+
+- Rename backend binaries with platform suffix to avoid release upload conflict
+
+## [0.2.5] - 2026-06-09
+
+### Bug Fixes
+
+- Added homepage, author, description to desktop package for deb packaging
+
+## [0.2.4] - 2026-06-09
+
+### CI/CD
+
+- Split build steps, per-platform electron-builder, chmod staged binary
+
+## [0.2.3] - 2026-06-09
+
+### CI/CD
+
+- Stage backend binary to `desktop/backend/` before electron-builder
+- Split build steps with diagnostics and fail-fast disabled
+
+## [0.2.2] - 2026-06-09
+
+### CI/CD
+
+- Use bash shell for ls command on Windows runner
+
+## [0.2.1] - 2026-06-09
+
+### CI/CD
+
+- Moved extraResources to platform blocks; fixed .github gitignore
+
 ## [0.2.0] - 2026-06-04
 
 ### 🧪 Evaluation Framework Overhaul — Anthropic Methodology Compliance
