@@ -187,7 +187,7 @@ class TestReActAgentConversationMode:
         messages = agent._build_messages("tools", "question", "", "", "")
         all_content = "\n".join(m["content"] for m in messages)
 
-        assert "Security Fragment" in all_content
+        assert "安全原则" in all_content
         assert "Skill Workflow" in all_content
         assert "Review diff" in all_content
         assert "Inspect diff." in all_content
@@ -286,7 +286,7 @@ class TestReActAgentConversationMode:
         messages = mock_llm.think.call_args.kwargs["messages"]
         # Profile content is in messages[2], tools in messages[1]
         context_content = messages[2]["content"]
-        assert "Security Fragment" in context_content
+        assert "安全原则" in context_content
         assert "Skill Workflow" in context_content
         tools_content = messages[1]["content"]
         assert "shell_exec" not in tools_content
@@ -315,7 +315,7 @@ class TestReActAgentConversationMode:
         assert agent.session_profile is None
         assert agent.compiled_session_profile is None
         prompt = agent._build_prompt("tools", "question", "", "", "")
-        assert "Security Fragment" not in prompt
+        assert "安全原则" not in prompt
         assert "Skill Workflow" not in prompt
 
     def test_conversation_mode_false_creates_new_local_history(self):
