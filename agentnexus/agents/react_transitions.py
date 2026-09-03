@@ -32,6 +32,9 @@ TRANSFER_TABLE: list[Transition] = [
     # ── EXECUTE_TOOL ──
     Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
     Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+    # Fast path: bookkeeping-only batch (todo_*) with terminal answer text —
+    # skip the extra LLM round and emit the stashed answer directly.
+    Transition(S.EXECUTE_TOOL, E.ANSWER_READY, S.EMIT_ANSWER, "_on_answer_ready"),
 
     # ── CHECK_EMPTY ──
     Transition(S.CHECK_EMPTY, E.EMPTY_RESPONSE, S.RETRY_GATE, "_on_empty_response"),

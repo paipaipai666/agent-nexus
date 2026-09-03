@@ -70,6 +70,7 @@ class ReActEventType(Enum):
     NO_TOOLS_NO_TEXT = auto()  # NATIVE: no tool_calls, no text → degrade
     TOOL_DONE = auto()         # single tool execution completed
     ALL_TOOLS_DONE = auto()    # all tools in batch executed
+    ANSWER_READY = auto()      # bookkeeping-only batch carried terminal answer text
     EMPTY_RESPONSE = auto()    # non-NATIVE: response_text is empty
     HAS_CONTENT = auto()       # non-NATIVE: response_text has content
     PARSE_SUCCESS = auto()     # _robust_json_parse returned valid data
@@ -129,6 +130,9 @@ class RunState:
     thinking_enabled: bool = False
     cancel_checker: Any = None
     _current_step_span: Any = None  # TraceSpan for current plan_node (avoid circular import)
+    # Fast-path stash: visible text accompanying a bookkeeping-only tool batch
+    # (todo_add/todo_update), used as the final answer without another LLM round.
+    terminal_answer: str | None = None
 
 
 @dataclass

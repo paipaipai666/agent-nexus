@@ -47,6 +47,14 @@ REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
 
 MAX_JSON_RETRIES = 2
+# Tools whose results are pure side effects — their observations can never
+# change the final answer, so a batch containing ONLY these can fast-path
+# to EMIT_ANSWER when the response already carries substantive text.
+_BOOKKEEPING_TOOLS = frozenset({"todo_add", "todo_update"})
+
+# Minimum visible-text length for the terminal fast path. Short notes like
+# "我先更新下待办" stay on the normal loop; only answer-grade text qualifies.
+_TERMINAL_TEXT_MIN_CHARS = 30
 
 # Re-export for backward compatibility
 __all__ = ["ReActAgent", "CallingStrategy", "AgentStep"]
@@ -227,6 +235,7 @@ class ReActAgent:
             "_on_no_tools_degrade": self._on_no_tools_degrade,
             "_on_tool_done": self._on_tool_done,
             "_on_all_tools_done": self._on_all_tools_done,
+            "_on_answer_ready": self._on_answer_ready,
             "_on_empty_response": self._on_empty_response,
             "_on_has_content": self._on_has_content,
             "_on_parse_success": self._on_parse_success,
@@ -410,6 +419,20 @@ class ReActAgent:
                      "content": "你必须先用 Thought 分析当前情况、说明意图，然后才能调用工具。"})
                 return [ReActEvent(ReActEventType.THOUGHT_MISSING,
                                    {"reason": "missing_thought"})]
+            # Fast path: a bookkeeping-only batch (todo_add/todo_update — pure
+            # side effects, observations cannot change the answer) carrying a
+            # substantive visible text. Stash the text as the terminal answer;
+            # _on_all_tools_done will emit it instead of paying one more LLM
+            # round-trip that would just re-write the same answer.
+            # Only last_response_text counts (reasoning content is never an
+            # answer); the length floor keeps interim progress notes eligible
+            # for the normal loop.
+            terminal_text = (ctx.last_response_text or "").strip()
+            if (
+                len(terminal_text) >= _TERMINAL_TEXT_MIN_CHARS
+                and all(tc.get("name") in _BOOKKEEPING_TOOLS for tc in ctx.pending_tool_calls)
+            ):
+                ctx.run_state.terminal_answer = terminal_text
             self._on_native_tool_calls(ctx, thought)
             evt = ReActEvent(ReActEventType.TOOLS_FOUND,
                              {"tool_calls": list(ctx.pending_tool_calls),
@@ -531,12 +554,21 @@ class ReActAgent:
     # ── CLASSIFY ──
 
     def _on_all_tools_done(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """EXECUTE_TOOL + ALL_TOOLS_DONE -> inject observation analysis then continue."""
+        """EXECUTE_TOOL + ALL_TOOLS_DONE -> emit stashed answer or continue the loop."""
+        terminal = ctx.run_state.terminal_answer
+        if terminal:
+            ctx.run_state.terminal_answer = None
+            ctx.last_answer = terminal
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
         if ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
             ctx.messages.append(
                 {"role": "user",
                  "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
         return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
+
+    def _on_answer_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """EXECUTE_TOOL + ANSWER_READY -> terminal answer already in ctx.last_answer."""
+        return []  # EMIT_ANSWER handler will read ctx.last_answer
 
     def _on_classified_tool(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """CLASSIFY + CLASSIFIED_TOOL -> execute tool from JSON-parsed data."""
