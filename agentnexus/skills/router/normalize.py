@@ -20,8 +20,8 @@ def tokenize(text: str) -> list[str]:
     )
 
     try:
-        import jieba
-        for token in jieba.cut(normalized):
+        from agentnexus.core.jieba_loader import load_jieba
+        for token in load_jieba().cut(normalized):
             token = token.strip()
             if len(token) < 1 or token in _STOPWORDS:
                 continue

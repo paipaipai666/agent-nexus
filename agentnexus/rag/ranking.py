@@ -8,8 +8,8 @@ from .models import ChunkRecord
 
 
 def tokenize(text: str) -> list[str]:
-    import jieba
-    return list(jieba.cut(text))
+    from agentnexus.core.jieba_loader import load_jieba
+    return list(load_jieba().cut(text))
 
 
 def matches_metadata_filters(
