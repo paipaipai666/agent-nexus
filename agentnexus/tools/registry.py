@@ -91,6 +91,7 @@ class ToolMeta:
     recoverable: bool = False            # result can be cleaned during STM compaction
     max_retention: int = 5               # keep last N results when compacting
     concurrency_safe: bool = False       # True = read-only, safe to run in parallel
+    lane: str = ""                     # named parallel lane (e.g. "subagent"); overrides concurrency_safe grouping
 
 
 @dataclass
@@ -120,6 +121,12 @@ class ToolRegistry:
         self._output_validators: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._rate_lock = threading.Lock()
+        # Session-scoped lane pools for long-running parallel tools (e.g. subagents).
+        # Lazily created per lane name; intentionally never shut down (same lifetime
+        # as the registry, mirroring self._executor above).
+        self._lane_pools: dict[str, ThreadPoolExecutor] = {}
+        from agentnexus.tools.confirm_bridge import CancelBridge
+        self.cancel_bridge = CancelBridge()
         if jsonschema is None:
             logger.warning("jsonschema package not installed — tool parameter validation is disabled")
 
@@ -145,6 +152,7 @@ class ToolRegistry:
         recoverable: bool = False,
         max_retention: int = 5,
         concurrency_safe: bool = False,
+        lane: str = "",
     ) -> None:
         """Register a tool with flat parameters (convenience wrapper)."""
         risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
@@ -166,6 +174,7 @@ class ToolRegistry:
             recoverable=recoverable,
             max_retention=max_retention,
             concurrency_safe=concurrency_safe,
+            lane=lane,
         )
         self.register(meta, func)
 
@@ -196,6 +205,24 @@ class ToolRegistry:
         """Return ToolMeta for a registered tool, or None if not found."""
         entry = self._tools.get(name)
         return entry[0] if entry else None
+    def get_lane_pool(self, lane: str) -> ThreadPoolExecutor:
+        """Return the session-scoped pool for a named execution lane.
+
+        The "subagent" lane is sized by settings.subagent_max_concurrent
+        (default 3, so local-LLM users can dial it down to 1); other lanes
+        default to 2 workers. Pool size IS the concurrency cap — excess
+        submissions queue instead of erroring.
+        """
+        pool = self._lane_pools.get(lane)
+        if pool is None:
+            if lane == "subagent":
+                from agentnexus.core.config import get_settings
+                workers = max(1, get_settings().subagent_max_concurrent)
+            else:
+                workers = 2
+            pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"lane-{lane}")
+            self._lane_pools[lane] = pool
+        return pool
 
     def unregister_source(self, source_id: str, source_type: str | None = None) -> list[str]:
         removed: list[str] = []

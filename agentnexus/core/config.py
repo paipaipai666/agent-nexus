@@ -285,6 +285,7 @@ class Settings(BaseSettings):
 
     # ── Agent Runtime ─────────────────────────────────────────────────────
     max_agent_steps: int = Field(default=50, ge=1, le=200)
+    subagent_max_concurrent: int = Field(default=3, ge=1, le=8)
 
     # ── RAG / Retrieval ──────────────────────────────────────────────────
     enable_contextual_retrieval: bool = Field(default=False)

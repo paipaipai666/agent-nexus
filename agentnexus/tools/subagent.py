@@ -139,7 +139,8 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                           task: str, role: str, tool_names: list[str], max_steps: int,
                           retry_reason: str | None = None,
                           subagent_confirm: Callable[[str], bool] | None = None,
-                          mcp_manager: "MCPToolManager | None" = None) -> tuple[dict | None, Exception | None]:
+                          mcp_manager: "MCPToolManager | None" = None,
+                          cancel_bridge=None) -> tuple[dict | None, Exception | None]:
     from agentnexus.core.hooks import HookType, get_hook_manager
 
     hook_mgr = get_hook_manager()
@@ -167,6 +168,10 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
         conversation_mode=False,
         agent_id=f"subagent_{role}",
     )
+    if cancel_bridge is not None:
+        # Cooperative cancellation: parent run cancelled → child loop stops
+        # at the next step boundary instead of running to max_steps.
+        child_agent.set_cancel_checker(cancel_bridge.check)
 
     try:
         with trace_manager.span("subagent_attempt", {
@@ -175,6 +180,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
             "max_steps": max_steps,
             "retry_reason": retry_reason or "",
             "task_preview": task[:200],
+            "parent_trace_id": trace_manager.get_inherited_trace() or "",
         }) as span:
             result = child_agent.run(_build_subagent_prompt(task, role, retry_reason), memory_manager=None)
             answer = (result.answer or "").strip()
@@ -222,7 +228,8 @@ def _build_payload(status: str, role: str, answer: str, summary: str,
 
 def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False,
                       subagent_confirm: Callable[[str], bool] | None = None,
-                      mcp_manager: "MCPToolManager | None" = None):
+                      mcp_manager: "MCPToolManager | None" = None,
+                      cancel_bridge=None):
     def subagent_run(task: str, role: str = "explorer",
                      allowed_tools: list[str] | None = None,
                      max_steps: int = 4) -> str:
@@ -258,6 +265,7 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 max_steps,
                 subagent_confirm=subagent_confirm,
                 mcp_manager=mcp_manager,
+                cancel_bridge=cancel_bridge,
             )
             recovery = {
                 "attempted": False,
@@ -314,6 +322,7 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 retry_reason=fallback_reason,
                 subagent_confirm=subagent_confirm,
                 mcp_manager=mcp_manager,
+                cancel_bridge=cancel_bridge,
             )
 
             if fallback_error is None and fallback_attempt is not None:

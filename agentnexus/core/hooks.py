@@ -45,6 +45,9 @@ class HookType(str, Enum):
     AFTER_MCP_CONNECT = "after_mcp_connect"
     BEFORE_MCP_CALL_TOOL = "before_mcp_call_tool"
     AFTER_MCP_CALL_TOOL = "after_mcp_call_tool"
+    # Subagent hooks fire on dispatcher lane-pool worker threads when
+    # subagents run in parallel — callbacks must be thread-safe and must
+    # never touch UI directly (TUI: use call_from_thread).
     BEFORE_SUBAGENT_RUN = "before_subagent_run"
     AFTER_SUBAGENT_RUN = "after_subagent_run"
     BEFORE_RAG_SEARCH = "before_rag_search"

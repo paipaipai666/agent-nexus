@@ -120,6 +120,18 @@ class TraceManager:
     @property
     def active(self) -> TraceContext | None:
         return getattr(self._local, "trace", None)
+    def set_inherited_trace(self, trace_id: str | None) -> None:
+        """Record the dispatching thread's trace id on a worker thread.
+
+        Worker threads have no active TraceContext (``_local`` is thread-local),
+        so spans created there flush as orphans. Stamping the parent's trace id
+        into span metadata keeps parallel tool/subagent spans joinable to the
+        originating trace without sharing the non-thread-safe span stack.
+        """
+        self._local.inherited_trace_id = trace_id
+
+    def get_inherited_trace(self) -> str | None:
+        return getattr(self._local, "inherited_trace_id", None)
 
     def start_trace(self, task: str, metadata: dict[str, Any] | None = None) -> TraceContext:
         """开始一次新 trace，可选传入任务级元数据"""

@@ -159,6 +159,14 @@ class ReActAgent:
             max_steps=self.max_steps,
         )
 
+        # Publish the cancel checker so subagent tool closures (running on
+        # dispatcher lane threads) stop at their next step boundary when the
+        # parent run is cancelled. Note: sessions sharing one executor share
+        # this bridge — the last run to start wins.
+        cancel_bridge = getattr(self.tool_executor, "cancel_bridge", None)
+        if cancel_bridge is not None:
+            cancel_bridge.set_checker(self._cancel_checker)
+
         try:
             ctx = ExecutionContext(
                 question=question,
@@ -197,6 +205,9 @@ class ReActAgent:
             "steps": len(steps),
             "agent_id": self.agent_id,
         })
+
+        if cancel_bridge is not None:
+            cancel_bridge.set_checker(None)
 
         return ReActResult(answer=answer, steps=steps)
 

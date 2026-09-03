@@ -32,6 +32,7 @@ class SubagentToolProvider:
                 non_interactive=context.non_interactive,
                 subagent_confirm=context.subagent_confirm,
                 mcp_manager=context.mcp_manager,
+                cancel_bridge=executor.cancel_bridge,
             ),
             param_schema={
                 "type": "object",
@@ -49,5 +50,10 @@ class SubagentToolProvider:
             },
             risk_level="low",
             rate_limit_per_min=10,
+            # Subagents run on the session-scoped "subagent" lane pool whose
+            # size (settings.subagent_max_concurrent) caps their parallelism;
+            # child agents share nothing mutable with the parent run.
+            concurrency_safe=True,
+            lane="subagent",
         )
         context.mark_registered(executor, before)
