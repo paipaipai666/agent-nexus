@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
+from tests.isolated_fs import isolated_filesystem
 
 runner = CliRunner()
 
@@ -36,7 +37,7 @@ def setup_sessions(temp_agentnexus_home):
 
 def test_sessions_command_no_sessions():
     """Test sessions command when no sessions exist."""
-    with runner.isolated_filesystem():
+    with isolated_filesystem():
         result = runner.invoke(app, ["sessions"])
         assert result.exit_code == 0
         assert "No previous sessions found" in result.output

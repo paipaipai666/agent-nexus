@@ -12,6 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
+from tests.isolated_fs import isolated_filesystem
 
 runner = CliRunner()
 
@@ -56,7 +57,7 @@ class TestCliBasicCommands:
 class TestCliWithEnvironment:
 
     def test_config_show_uses_env_home(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             import agentnexus.core.config as cfg
             cfg._settings_cache = None
@@ -68,7 +69,7 @@ class TestCliWithEnvironment:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_stats_without_data(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             import agentnexus.core.config as cfg
@@ -81,7 +82,7 @@ class TestCliWithEnvironment:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_memory_list_empty(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             import agentnexus.core.config as cfg
             from agentnexus.memory.long_term import _reset_long_term_memory
@@ -115,7 +116,7 @@ class TestCliContinueFlag:
     """
 
     def test_continue_without_session_through_main(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             import agentnexus.core.config as cfg
             cfg._settings_cache = None
@@ -129,7 +130,7 @@ class TestCliContinueFlag:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_continue_with_extra_args_through_main(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             import agentnexus.core.config as cfg
             cfg._settings_cache = None

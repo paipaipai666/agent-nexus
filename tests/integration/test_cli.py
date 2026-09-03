@@ -6,6 +6,7 @@ import agentnexus.cli.kb as kb_cli
 import agentnexus.core.config as cfg
 import agentnexus.rag.store as rag_store
 from agentnexus.cli import app
+from tests.isolated_fs import isolated_filesystem
 
 runner = CliRunner()
 
@@ -22,7 +23,7 @@ class TestCliStats:
     def test_stats_no_data(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
@@ -39,7 +40,7 @@ class TestCliStats:
         import os
         import time
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             trace_dir = os.path.join(os.getcwd(), "traces")
             now = time.time()
@@ -80,7 +81,7 @@ class TestCliConfig:
     def test_config_view(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             try:
                 result = runner.invoke(app, ["config"])
@@ -92,7 +93,7 @@ class TestCliConfig:
     def test_config_set_invalid_key(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             try:
                 result = runner.invoke(app, ["config", "--set", "invalid_key", "--value", "x"])
@@ -103,7 +104,7 @@ class TestCliConfig:
     def test_config_set_without_value(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             try:
                 result = runner.invoke(app, ["config", "--set", "llm_model_id"])
@@ -116,7 +117,7 @@ class TestCliLogs:
     def test_logs_list_no_data(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             try:
@@ -184,7 +185,7 @@ class TestCliEvaluation:
         import agentnexus.cli.eval_cmd as eval_cmd
         monkeypatch.setattr(eval_cmd, "RAGEvaluator", FakeEvaluator, raising=False)
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:
@@ -220,7 +221,7 @@ class TestCliKnowledgeBase:
         monkeypatch.setattr(kb_cli, "upsert_documents", fake_write_documents)
         monkeypatch.setattr(kb_cli, "get_collection", lambda *args, **kwargs: fake_collection)
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             cfg._settings_cache = None
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             rag_store._reset_knowledge_base_catalog()
@@ -314,7 +315,7 @@ class TestCliEvalRun:
 
         monkeypatch.setattr(eval_cmd, "RAGEvaluator", FakeEvaluator, raising=False)
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:
@@ -378,7 +379,7 @@ class TestCliEvalRun:
 
         monkeypatch.setattr(eval_cmd, "RAGEvaluator", FakeEvaluator, raising=False)
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:
@@ -391,7 +392,7 @@ class TestCliEvalRun:
 
 class TestCliEvalHistory:
     def test_eval_history_no_data(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:
@@ -406,7 +407,7 @@ class TestCliEvalHistory:
         import json
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             traces_dir = os.path.join(os.getcwd(), "traces")
             evals_dir = os.path.join(traces_dir, "evals")
             os.makedirs(evals_dir, exist_ok=True)
@@ -441,7 +442,7 @@ class TestCliEvalHistory:
 
 class TestCliEvalCompare:
     def test_eval_compare_with_missing_baseline(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:
@@ -460,7 +461,7 @@ class TestCliEvalCompare:
         import json
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             baseline = os.path.join(os.getcwd(), "baseline.json")
             with open(baseline, "w", encoding="utf-8") as f:
                 json.dump({"configs": []}, f)
@@ -483,7 +484,7 @@ class TestCliEvalCompare:
         import json
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             baseline = os.path.join(os.getcwd(), "baseline.json")
             candidate = os.path.join(os.getcwd(), "candidate.json")
             report_data = {
@@ -529,7 +530,7 @@ class TestCliLogsView:
         import os
         import time
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             trace_dir = os.path.join(os.getcwd(), "traces")
             now = time.time()
@@ -589,7 +590,7 @@ class TestCliLogsView:
     def test_logs_view_with_invalid_trace(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
@@ -604,7 +605,7 @@ class TestCliLogsView:
     def test_logs_view_no_traces_dir(self):
         import os
 
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
             try:

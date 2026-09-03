@@ -7,13 +7,14 @@ from typer.testing import CliRunner
 
 import agentnexus.core.config as cfg
 from agentnexus.cli import app
+from tests.isolated_fs import isolated_filesystem
 
 runner = CliRunner()
 
 
 class TestStatsCmd:
     def test_no_data(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
@@ -26,7 +27,7 @@ class TestStatsCmd:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_with_data(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             now = time.time()
             record = {
@@ -64,7 +65,7 @@ class TestStatsCmd:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_custom_days(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             os.environ["AGENTNEXUS_HOME"] = os.getcwd()
             cfg._settings_cache = None
@@ -77,7 +78,7 @@ class TestStatsCmd:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_cache_hit_stats_displayed(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             now = time.time()
             # Need a "task" span for total_tasks > 0
@@ -119,7 +120,7 @@ class TestStatsCmd:
                 del os.environ["AGENTNEXUS_HOME"]
 
     def test_no_cache_data_no_cache_section(self):
-        with runner.isolated_filesystem():
+        with isolated_filesystem():
             os.makedirs("traces")
             now = time.time()
             record = {
