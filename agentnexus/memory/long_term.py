@@ -30,6 +30,26 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     version INTEGER NOT NULL,
     applied_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Quarantine: curator-proposed memories awaiting user approval.
+-- Approved user-scope rows are saved into long_term_memories (superseding
+-- source_ids); approved project-scope rows are written to that workspace's
+-- .agentnexus/ files. Rejected rows are kept for audit.
+CREATE TABLE IF NOT EXISTS pending_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL DEFAULT 'user',
+    workspace_path TEXT DEFAULT '',
+    kind TEXT DEFAULT '',
+    category TEXT DEFAULT 'fact',
+    content TEXT NOT NULL,
+    context TEXT DEFAULT '',
+    importance REAL DEFAULT 0.8,
+    source TEXT DEFAULT 'curator',
+    source_ids TEXT DEFAULT '[]',
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_memories(status);
 """
 
 LTM_COLLECTION = "long_term_memories"
@@ -657,6 +677,135 @@ class LongTermMemory:
             self._conn.commit()
             self._write_counter = 0
             logger.info("Cleared all long-term memories")
+
+    # ── Pending (quarantine) area for curator-proposed memories ─────
+
+    def add_pending(self, content: str, scope: str = "user", category: str = "fact",
+                    kind: str = "", workspace_path: str = "", context: str = "",
+                    importance: float = 0.8, source: str = "curator",
+                    source_ids: list[int] | None = None) -> int | None:
+        """Add a curator-proposed memory to the quarantine area.
+
+        Returns the new row id, or None if an identical pending row exists.
+        """
+        with self._lock:
+            dup = self._conn.execute(
+                "SELECT id FROM pending_memories WHERE content = ? AND status = 'pending'",
+                (content,),
+            ).fetchone()
+            if dup:
+                return None
+            cur = self._conn.execute(
+                "INSERT INTO pending_memories "
+                "(scope, workspace_path, kind, category, content, context, importance, source, source_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (scope, workspace_path, kind, category, content, context,
+                 importance, source, json.dumps(source_ids or [])),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def list_pending(self, status: str = "pending", limit: int = 50) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM pending_memories WHERE status = ? ORDER BY id DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending(self, pending_id: int) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM pending_memories WHERE id = ?", (pending_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_pending_status(self, pending_id: int, status: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE pending_memories SET status = ? WHERE id = ?",
+                (status, pending_id),
+            )
+            self._conn.commit()
+
+    def approve_pending(self, pending_id: int, embed_model=None) -> dict:
+        """Commit a pending memory: user-scope → LTM, project-scope → .agentnexus/.
+
+        Returns {"status": "approved", ...} or an error dict. Never raises.
+        """
+        row = self.get_pending(pending_id)
+        if row is None:
+            return {"status": "error", "error": f"pending id {pending_id} not found"}
+        if row["status"] != "pending":
+            return {"status": "error", "error": f"already {row['status']}"}
+
+        if row["scope"] == "project":
+            workspace = row["workspace_path"]
+            if not workspace:
+                return {"status": "error", "error": "project-scope pending row has no workspace_path"}
+            try:
+                from agentnexus.memory.project import ProjectMemory
+                pm = ProjectMemory(workspace)
+                pm.add_entry(row["kind"] or "memo", row["content"])
+            except Exception as e:
+                return {"status": "error", "error": f"project write failed: {e}"}
+            self.set_pending_status(pending_id, "approved")
+            return {"status": "approved", "scope": "project", "target": str(pm.root)}
+
+        # user scope → LTM (with source supersession)
+        vec: list[float] = []
+        if embed_model is not None:
+            try:
+                from agentnexus.rag.embeddings import embedding_to_list
+                vec = embedding_to_list(
+                    embed_model.encode(row["content"], normalize_embeddings=True)
+                )
+            except Exception:
+                vec = []
+        new_id = self.save(
+            session_id="curator",
+            content=row["content"],
+            category=row["category"] or "fact",
+            importance=row["importance"] or 0.8,
+            metadata={"context": row["context"]} if row["context"] else None,
+            embedding=vec or None,
+        )
+        try:
+            for sid in json.loads(row["source_ids"] or "[]"):
+                self.mark_superseded(int(sid), new_id)
+        except (ValueError, TypeError):
+            pass
+        self.set_pending_status(pending_id, "approved")
+        return {"status": "approved", "scope": "user", "memory_id": new_id}
+
+    def stats(self) -> dict:
+        """Store health metrics: volume, freshness, retrieval usage, quarantine."""
+        total = self._conn.execute(
+            "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NULL"
+        ).fetchone()["c"]
+        by_category = {
+            r["category"]: r["c"]
+            for r in self._conn.execute(
+                "SELECT category, COUNT(*) c FROM long_term_memories "
+                "WHERE superseded_by IS NULL GROUP BY category"
+            ).fetchall()
+        }
+        never_accessed = self._conn.execute(
+            "SELECT COUNT(*) c FROM long_term_memories "
+            "WHERE superseded_by IS NULL AND COALESCE(access_count, 0) = 0"
+        ).fetchone()["c"]
+        superseded = self._conn.execute(
+            "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NOT NULL"
+        ).fetchone()["c"]
+        pending = self._conn.execute(
+            "SELECT COUNT(*) c FROM pending_memories WHERE status = 'pending'"
+        ).fetchone()["c"]
+        return {
+            "total": total,
+            "by_category": by_category,
+            "never_accessed": never_accessed,
+            "never_accessed_rate": round(never_accessed / total, 3) if total else 0.0,
+            "superseded": superseded,
+            "pending": pending,
+        }
 
     def sync_unembedded(self, embed_model) -> int:
         """Repair: re-embed memories where embedding_synced=0.

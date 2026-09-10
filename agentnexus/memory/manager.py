@@ -45,6 +45,7 @@ class MemoryManager:
     # through __setattr__ — both lazily create the sub-component so
     # __new__-constructed test instances work without __init__.
     _FORWARD_TO_ENGINE = {
+        "_history_dir": "history_dir",
         "_compact_circuit": "circuit",
         "_microcompacts_since_open": "microcompacts_since_open",
         "_compacting": "compacting",
@@ -61,10 +62,18 @@ class MemoryManager:
         "_gate_circuit": "gate_circuit",
     }
 
-    def __init__(self, session_id: str, llm=None, enable_long_term: bool = True):
+    def __init__(self, session_id: str, llm=None, enable_long_term: bool = True,
+                 workspace_path: str | None = None):
         self.session_id = session_id
         self.short_term = ShortTermMemory()
         self.long_term = get_long_term_memory() if enable_long_term else None
+        self.project = None
+        if workspace_path:
+            try:
+                from agentnexus.memory.project import ProjectMemory
+                self.project = ProjectMemory(workspace_path)
+            except Exception as e:
+                logger.warning("Project memory init failed (non-fatal): %s", e)
         self._llm = llm or AgentLLM()
         self._embed_model = None
         self._embed_ready = threading.Event()
@@ -79,12 +88,26 @@ class MemoryManager:
         self._settings = settings
         self._engine = CompactionEngine(self)
         self._engine.transcript_dir = f"{base}/transcripts"
+        self._engine.history_dir = f"{base}/history"
         self._pipeline = MemoryExtractionPipeline(self)
-        ctx_max = self._resolve_ctx_max()
-        if ctx_max:
-            self._engine.ctx_max = ctx_max
-            self._engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
         self._last_write_count: int = 0
+        # Resolve ctx_max off the main thread — it imports litellm (~2s),
+        # which would otherwise stall server startup. Compaction simply runs
+        # without a threshold until resolution lands (same as the None path).
+        threading.Thread(target=self._resolve_ctx_max_async, daemon=True, name="mem-ctx-resolve").start()
+
+    def _resolve_ctx_max_async(self) -> None:
+        """Background thread: fill in compaction thresholds once litellm is up."""
+        try:
+            ctx_max = self._resolve_ctx_max()
+        except Exception as exc:
+            logger.debug("ctx_max resolution failed: %s", exc)
+            return
+        if ctx_max:
+            engine = self.__dict__.get("_engine")
+            if engine is not None:
+                engine.ctx_max = ctx_max
+                engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
 
     # ── Sub-component access + attribute forwarding ──────────────────
 
@@ -171,6 +194,22 @@ class MemoryManager:
     # ── LTM context retrieval ────────────────────────────────────────
 
     def init_session(self, question: str) -> str:
+        """Build session-start memory context: project index/state + LTM recall."""
+        parts: list[str] = []
+        project = getattr(self, "project", None)
+        if project is not None:
+            try:
+                ctx = project.format_context()
+                if ctx:
+                    parts.append(ctx)
+            except Exception as e:
+                logger.debug("Project memory read failed: %s", e)
+        ltm_block = self._ltm_context_block(question)
+        if ltm_block:
+            parts.append(ltm_block)
+        return "\n".join(parts)
+
+    def _ltm_context_block(self, question: str) -> str:
         if not self.long_term:
             return ""
         ltm_limit = 5
@@ -204,7 +243,7 @@ class MemoryManager:
         if not parts:
             return ""
         header = "相关历史记忆 (★越多越相关):\n" if any("★★★" in p for p in parts) else "相关历史记忆:\n"
-        return header + "\n".join(parts) + "\n[提示] 用户分享个人信息时，请主动使用 memory_save 保存]\n"
+        return header + "\n".join(parts) + "\n"
 
     def _update_ltm_snapshot(self):
         """Record the current LTM write counter as baseline for change detection."""
@@ -264,7 +303,17 @@ class MemoryManager:
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
                       is_auto: bool = True) -> int:
-        return self._get_engine().maybe_compact(threshold, custom_instructions, is_auto)
+        saved = self._get_engine().maybe_compact(threshold, custom_instructions, is_auto)
+        project = getattr(self, "project", None)
+        if saved > 0 and project is not None:
+            try:
+                summary = self.short_term.get_summary()
+                if summary:
+                    project.update_state(summary)
+                project.log_work("上下文压缩", f"释放约 {saved} tokens")
+            except Exception as e:
+                logger.debug("Project memory compaction hook failed: %s", e)
+        return saved
 
     def snip(self, keep_recent: int = 10) -> int:
         return self._get_engine().snip(keep_recent)
@@ -300,6 +349,12 @@ class MemoryManager:
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
         self._get_pipeline().run(question, answer, allow_memory)
+        project = getattr(self, "project", None)
+        if allow_memory and project is not None:
+            try:
+                project.log_work("完成任务", question.strip()[:80])
+            except Exception as e:
+                logger.debug("Project memory worklog failed: %s", e)
 
     def _should_extract_rules(self, question: str, answer: str) -> str:
         return self._get_pipeline().should_extract_rules(question, answer)

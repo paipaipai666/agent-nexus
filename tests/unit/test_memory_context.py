@@ -93,8 +93,7 @@ class TestInitSessionWithContext:
             assert "喜欢Python" in result
             assert "使用VSCode" in result
             assert "★" in result
-            assert "[提示]" in result
-            assert "相关历史记忆" in result
+            assert "相关历史记忆" in result  # 注：诱导性 [提示] 行已在准入收紧中移除
 
     def test_init_session_returns_empty_when_no_relevant_results(self, temp_agentnexus_home):
         mock_embed = MagicMock()
@@ -1177,12 +1176,14 @@ class TestConclude:
         return mgr
 
     def test_calls_llm_with_extract_prompt(self):
+        # Note: statement-form input — pure questions are rejected by the
+        # whitelist rule before reaching the gate.
         mgr = self._make_mgr()
         mgr._llm.think.return_value = '{"user_preference": ["likes Python"]}'
-        mgr.conclude("What language?", "Python")
+        mgr.conclude("编程语言讨论", "Python")
         mgr._llm.think.assert_called_once()
         prompt_arg = mgr._llm.think.call_args[0][0][0]["content"]
-        assert "What language?" in prompt_arg
+        assert "编程语言讨论" in prompt_arg
         assert "Python" in prompt_arg
 
     def test_parses_llm_response_and_saves_memories(self):

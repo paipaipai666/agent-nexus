@@ -1,10 +1,13 @@
-"""Periodic Reflection — distill higher-level patterns from recent memories.
+"""Periodic Curator — batch-distill durable memories off the hot path.
 
-Runs periodically (or on-demand) to review recent note-category memories,
-identify recurring patterns, and save distilled insights as fact/preference memories.
+Reviews recent note-category memories on demand (or on a schedule), uses one
+LLM call over the whole batch to propose higher-level patterns, and writes the
+proposals to the ``pending_memories`` quarantine table — nothing enters LTM or
+project files without explicit user approval (POST /memory/pending/{id}/approve
+or ``memory approve`` CLI).
 
-Original note memories are marked as reflected (superseded_by → new pattern memory)
-so they aren't re-processed.
+Originals are NOT superseded at proposal time; the pending row carries
+``source_ids`` and approval performs the supersession.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _REFLECTION_PROMPT = """\
-你是记忆反思助手。请分析以下近期记忆条目，从中归纳出高阶模式、反复出现的偏好、或重要的跨对话结论。
+你是记忆整理助手。请分析以下近期记忆条目，归纳出值得长期保留的模式、反复出现的偏好、或重要结论。
 
 记忆条目（按时间顺序）:
 {memories}
@@ -24,14 +27,20 @@ _REFLECTION_PROMPT = """\
 请输出 JSON，格式如下:
 {{
   "patterns": [
-    {{"content": "归纳出的模式或偏好描述", "category": "fact 或 preference", "importance": 0.0-1.0}}
+    {{
+      "content": "归纳出的模式或结论（独立完整的陈述句）",
+      "scope": "user 或 project",
+      "category": "fact 或 preference（scope=user 时填写）",
+      "kind": "memo、decision 或 lesson（scope=project 时填写）",
+      "importance": 0.0-1.0
+    }}
   ]
 }}
 
 要求:
 - 只归纳确实反复出现或有明确证据的模式，不要猜测
 - 如果没有值得归纳的模式，返回空数组
-- category 只能是 "fact" 或 "preference"
+- scope 判断：用户画像、跨项目通用的偏好/事实 → user；只与某个代码库/项目相关的知识 → project
 - 每条 pattern 应该是独立、完整的陈述句
 - importance 根据模式的显著程度打分（0.7-0.95）"""
 
@@ -105,52 +114,80 @@ def run_reflection(
     if not patterns:
         return {"patterns_found": 0, "patterns_saved": 0, "memories_reviewed": len(memories)}
 
-    # Save each pattern as a new memory and mark originals as reflected
-    saved_count = 0
+    # Quarantine: proposals go to pending_memories, never directly to LTM.
+    proposed_count = 0
     memory_ids = [m["id"] for m in memories]
 
     for p in patterns:
         content = p.get("content", "").strip()
         if not content or len(content) < 10:
             continue
+        scope = p.get("scope", "user")
+        if scope not in ("user", "project"):
+            scope = "user"
         category = p.get("category", "fact")
         if category not in ("fact", "preference"):
             category = "fact"
+        kind = p.get("kind", "")
+        if kind not in ("memo", "decision", "lesson"):
+            kind = "memo"
         importance = max(0.7, min(0.95, float(p.get("importance", 0.8))))
 
-        # Embed the pattern
+        # Semantic dedup against LTM: skip if the pattern is already stored
         try:
             raw = embed_model.encode(content, normalize_embeddings=True)
             vec = raw.tolist() if hasattr(raw, "tolist") else list(raw)
         except Exception:
             vec = []
-
-        # Semantic dedup: skip if pattern already exists
         if vec:
             existing = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
             if existing and existing[0].get("_score", 0) >= 0.90:
                 logger.debug("Skipping duplicate pattern (sim=%.2f): %s", existing[0]["_score"], content[:60])
                 continue
 
-        # Save pattern
-        new_id = long_term.save(
-            session_id=session_id,
-            content=f"[Reflection] {content}",
-            category=category,
-            importance=importance,
-            embedding=vec,
-        )
-        saved_count += 1
+        # Project-scope proposals need a workspace: take it from the source notes' sessions
+        workspace_path = ""
+        if scope == "project":
+            workspace_path = _workspace_for_memories(long_term, memories) or ""
+            if not workspace_path:
+                scope = "user"  # can't place it — fall back to user review
 
-        # Mark original note memories as reflected (superseded_by → new pattern)
-        if new_id:
-            for mid in memory_ids:
-                long_term.mark_superseded(mid, new_id)
+        pending_id = long_term.add_pending(
+            content,
+            scope=scope,
+            category=category,
+            kind=kind,
+            workspace_path=workspace_path,
+            importance=importance,
+            source="curator",
+            source_ids=memory_ids,
+        )
+        if pending_id is not None:
+            proposed_count += 1
 
     result = {
         "patterns_found": len(patterns),
-        "patterns_saved": saved_count,
+        "patterns_saved": 0,
+        "patterns_proposed": proposed_count,
         "memories_reviewed": len(memories),
     }
-    logger.info("Reflection complete: %d patterns saved from %d memories", saved_count, len(memories))
+    logger.info("Curator complete: %d patterns proposed from %d memories", proposed_count, len(memories))
     return result
+
+
+def _workspace_for_memories(long_term: Any, memories: list[dict]) -> str | None:
+    """Resolve the workspace owning the source memories (same SQLite db)."""
+    session_ids = [m.get("session_id") for m in memories if m.get("session_id")]
+    if not session_ids:
+        return None
+    placeholders = ",".join("?" for _ in session_ids)
+    try:
+        row = long_term._conn.execute(
+            f"SELECT workspace_path, MAX(updated_at) AS latest "
+            f"FROM conversation_sessions WHERE session_id IN ({placeholders}) "
+            f"AND workspace_path != '' GROUP BY workspace_path ORDER BY latest DESC LIMIT 1",
+            session_ids,
+        ).fetchone()
+    except Exception:
+        return None
+    return row["workspace_path"] if row else None

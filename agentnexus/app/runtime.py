@@ -107,7 +107,7 @@ class AppRuntime:
             logger.debug("Audit log binding failed: %s", e)
 
         workspace_path = workspace_path or str(Path.cwd())
-        memory = MemoryManager(session_id, llm=llm)
+        memory = MemoryManager(session_id, llm=llm, workspace_path=workspace_path)
         version = ConversationVersionManager(
             session_id,
             settings.memory_db_path,
@@ -136,12 +136,23 @@ class AppRuntime:
                 a._todo_list = SessionTodoList(session_id=session_id, db_path=settings.memory_db_path)
             return a
 
-        def make_memory_factory(stm_store: dict, session_id: str):
-            """R7: Closure-based factory — absorbs STM on first call, then gone."""
+        def make_memory_factory(stm_store: dict, session_id: str, workspace_resolver=None):
+            """R7: Closure-based factory — absorbs STM on first call, then gone.
+
+            workspace_resolver: optional callable(session_id) -> str | None, used
+            to bind project memory to the session's workspace (falls back to the
+            build-time workspace).
+            """
             _restore = cls._restore_memory_from_version if restore_session else None
             _version_for_restore = version
             def factory() -> MemoryManager:
-                mm = MemoryManager(session_id, llm=llm)
+                ws = workspace_path
+                if workspace_resolver is not None:
+                    try:
+                        ws = workspace_resolver(session_id) or workspace_path
+                    except Exception:
+                        pass
+                mm = MemoryManager(session_id, llm=llm, workspace_path=ws)
                 # One-time STM migration from legacy _stms dict
                 if session_id in stm_store:
                     from agentnexus.memory.short_term import ShortTermMemory
@@ -206,10 +217,18 @@ class AppRuntime:
         # ChatService will be created with factories; _stms is populated lazily
         _stm_store: dict = {}
 
+        def _resolve_session_workspace(sid: str) -> str | None:
+            """Late-binding lookup of a session's workspace (services assigned below)."""
+            try:
+                handle = services.chat._sessions.get(sid)
+                return handle.workspace if handle else None
+            except Exception:
+                return None
+
         services = AppServices(
             chat=ChatService(
                 agent_factory=agent_factory,
-                memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid),
+                memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid, workspace_resolver=_resolve_session_workspace),
                 version_manager=version,
                 skill_service=skill_service,
                 tool_executor=executor,
@@ -227,14 +246,15 @@ class AppRuntime:
             from agentnexus.memory.versioned import ConversationVersionManager
             from agentnexus.services.chat import SessionHandle
             recent = ConversationVersionManager.find_recent_sessions(
-                settings.memory_db_path, workspace_path, limit=50
+                settings.memory_db_path, None, limit=50
             )
             restored_count = 0
             for s in recent:
                 sid = s.get("session_id")
                 if sid and sid not in services.chat._sessions:
                     services.chat._sessions[sid] = SessionHandle(
-                        id=sid, skill=None, profile=s.get("profile")
+                        id=sid, skill=None, profile=s.get("profile"),
+                        workspace=s.get("workspace_path") or None,
                     )
                     restored_count += 1
             print(f"[SessionRestore] Restored {restored_count} sessions from DB (total {len(recent)} found, workspace={ConversationVersionManager.normalize_workspace_path(workspace_path)})")

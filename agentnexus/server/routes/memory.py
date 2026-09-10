@@ -160,10 +160,11 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
 
 @router.post("/reflect")
 def run_reflection(days: int = 7, max_memories: int = 50):
-    """Trigger periodic reflection: distill higher-level patterns from recent memories.
+    """Curator: batch-distill patterns from recent note memories into quarantine.
 
     Reviews note-category memories from the last N days, identifies recurring patterns,
-    and saves distilled insights as fact/preference memories.
+    and writes proposals to pending_memories. Nothing enters LTM or project files
+    until a pending proposal is explicitly approved.
     """
     from agentnexus.core.llm import AgentLLM
     from agentnexus.memory.long_term import get_long_term_memory
@@ -186,3 +187,51 @@ def run_reflection(days: int = 7, max_memories: int = 50):
         max_memories=max_memories,
     )
     return result
+
+
+@router.get("/pending")
+def list_pending_memories(limit: int = 50):
+    """List curator-proposed memories awaiting approval."""
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    rows = ltm.list_pending(limit=limit)
+    return {"pending": rows, "count": len(rows)}
+
+
+@router.post("/pending/{pending_id}/approve")
+def approve_pending_memory(pending_id: int):
+    """Approve a pending memory: user-scope → LTM, project-scope → .agentnexus/."""
+    from agentnexus.memory.long_term import get_long_term_memory
+    from agentnexus.rag.embeddings import get_embedding_model
+
+    ltm = get_long_term_memory()
+    try:
+        embed_model = get_embedding_model()
+    except Exception:
+        embed_model = None
+    result = ltm.approve_pending(pending_id, embed_model=embed_model)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("error"))
+    return result
+
+
+@router.post("/pending/{pending_id}/reject")
+def reject_pending_memory(pending_id: int):
+    """Reject a pending memory (kept for audit)."""
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    if ltm.get_pending(pending_id) is None:
+        raise HTTPException(status_code=404, detail=f"pending id {pending_id} not found")
+    ltm.set_pending_status(pending_id, "rejected")
+    return {"status": "rejected", "pending_id": pending_id}
+
+
+@router.get("/stats")
+def memory_stats():
+    """Store health: volume, never-retrieved rate, superseded count, pending count."""
+    from agentnexus.memory.long_term import get_long_term_memory
+
+    ltm = get_long_term_memory()
+    return ltm.stats()

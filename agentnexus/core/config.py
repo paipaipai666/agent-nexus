@@ -7,6 +7,11 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Skip litellm's remote model-cost-map fetch at import time — it stalls startup
+# for seconds on unreachable networks and falls back to the bundled copy anyway.
+# config.py is the earliest shared dependency, so this runs before any litellm import.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 
 class MCPServerConfig(BaseModel):
     name: str
@@ -114,6 +119,8 @@ class MemorySettings(BaseModel):
     max_memories: int
     ttl_days: int
     autocompact_buffer_tokens: int
+    memory_index_segment_size: int = 20
+    memory_index_max_tokens: int = 4000
     large_result_threshold: int
     offload_enabled: bool
     snip_enabled: bool
@@ -311,6 +318,9 @@ class Settings(BaseSettings):
     # ── Memory System ─────────────────────────────────────────────────────
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
+    # Whitelist gate: only strong-signal content is extracted. When False,
+    # borderline cases are dropped (0 token); when True, an LLM gate judges them.
+    memory_llm_gate: bool = Field(default=False)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
 
     # ── MCP (Model Context Protocol) ──────────────────────────────────────
@@ -319,6 +329,10 @@ class Settings(BaseSettings):
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     # Compaction tuning
     autocompact_buffer_tokens: int = Field(default=8000, ge=1000, le=100000)
+    # 分段索引压缩：每段消息数（越小索引越细，成本越高）
+    memory_index_segment_size: int = Field(default=20, ge=5, le=100)
+    # 索引总 token 预算：超过后最老条目折叠为归档目录，细节靠 history_search 检索
+    memory_index_max_tokens: int = Field(default=4000, ge=500, le=100000)
     large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)
     offload_enabled: bool = Field(default=True)
     # Snip & time-based microcompact
@@ -495,6 +509,8 @@ class Settings(BaseSettings):
             max_memories=self.max_memories,
             ttl_days=self.memory_ttl_days,
             autocompact_buffer_tokens=self.autocompact_buffer_tokens,
+            memory_index_segment_size=self.memory_index_segment_size,
+            memory_index_max_tokens=self.memory_index_max_tokens,
             large_result_threshold=self.large_result_threshold,
             offload_enabled=self.offload_enabled,
             snip_enabled=self.snip_enabled,

@@ -20,8 +20,9 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.compaction import is_recoverable_tool
@@ -36,7 +37,66 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SUMMARIZE_PROMPT = load_prompt("memory_summarize")
+SEGMENT_PROMPT = load_prompt("memory_segment_summarize")
+
+
+@dataclass
+class SegmentIndexResult:
+    """分段索引结果：条目 + 被移出 STM 的原文（带全局序号，供归档）。"""
+    entries: list[tuple[int, int, str]]   # (seg_start, seg_end, summary)
+    archived: list[tuple[int, dict]]       # (global_idx, message)
+
+
+def segment_summarize(
+    messages: list[dict],
+    llm: Any,
+    *,
+    keep_recent: int,
+    seg_size: int,
+    custom_instructions: str = "",
+) -> SegmentIndexResult | None:
+    """把未索引消息分段总结为索引条目。
+
+    - 已有索引条目（memory_index，含归档目录）不参与——序号从既有最大 seg_end 续排
+    - 单段失败降级为截断原文条目（信息不凭空消失）
+    - 全部失败返回 None（调用方应中止压缩，不得破坏现有上下文）
+    - archived 列出将被移出 STM 的原文消息及其全局序号，供写 history 归档
+    """
+    raw = [m for m in messages if not m.get("metadata", {}).get("memory_index")]
+    indexed_upto = 0
+    for m in messages:
+        md = m.get("metadata") or {}
+        if md.get("memory_index"):
+            indexed_upto = max(indexed_upto, int(md.get("seg_end", 0)))
+    to_index = raw[:-keep_recent] if keep_recent > 0 else raw
+    if not to_index:
+        return SegmentIndexResult([], [])
+    entries: list[tuple[int, int, str]] = []
+    failures = 0
+    for offset in range(0, len(to_index), seg_size):
+        seg = to_index[offset:offset + seg_size]
+        seg_start = indexed_upto + offset
+        seg_end = seg_start + len(seg)
+        history = "\n".join(f"{m['role']}: {m['content']}" for m in seg)
+        prompt_text = SEGMENT_PROMPT.format(history=history)
+        if custom_instructions:
+            prompt_text = f"[压缩指令] {custom_instructions}\n\n{prompt_text}"
+        resp = ""
+        try:
+            resp = (llm.think([{"role": "user", "content": prompt_text}],
+                              silent=True) or "").strip()
+        except Exception as e:
+            logger.debug("Segment summarize failed at %d: %s", seg_start, e)
+        if resp:
+            entries.append((seg_start, seg_end, resp))
+        else:
+            failures += 1
+            excerpt = "\n".join(f"{m['role']}: {m['content'][:200]}" for m in seg)
+            entries.append((seg_start, seg_end, f"[未压缩原文]\n{excerpt}"))
+    if failures == len(entries):
+        return None
+    archived = [(indexed_upto + i, m) for i, m in enumerate(to_index)]
+    return SegmentIndexResult(entries, archived)
 
 
 def _extract_xml_tag(text: str, tag: str) -> str | None:
@@ -63,6 +123,7 @@ class CompactionEngine:
         self.ctx_max: int = 128000
         self.compact_threshold: int = 120000
         self.transcript_dir: str = ""
+        self.history_dir: str = ""
 
     def _fire_compact(self, event_type: str, **kwargs):
         """Fire compact event callback if set."""
@@ -103,6 +164,29 @@ class CompactionEngine:
             restored += 1
         if restored:
             self._fire_compact("file_restore", restored=restored, files=[fp for fp, _ in recent[:restored]])
+
+    def _archive_history(self, archived: list[tuple[int, dict]]) -> None:
+        """把被移出 STM 的原文消息追加到会话历史归档（append-only JSONL）。
+
+        行序号与索引条目的消息区间一致，history_search 按此定位原文。
+        """
+        if not archived or not self.history_dir:
+            return
+        try:
+            path = Path(self.history_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            fpath = path / f"{self._mgr.session_id}.jsonl"
+            with fpath.open("a", encoding="utf-8") as f:
+                for idx, msg in archived:
+                    f.write(json.dumps({
+                        "i": idx,
+                        "role": msg.get("role", ""),
+                        "content": msg.get("content", ""),
+                        "ts": msg.get("ts", 0),
+                    }, ensure_ascii=False) + "\n")
+            self._fire_compact("history_archived", path=str(fpath), count=len(archived))
+        except Exception as e:
+            logger.debug("History archive failed: %s", e)
 
     def _write_transcript(self):
         if not self._mgr._settings.transcript_enabled:
@@ -314,28 +398,38 @@ class CompactionEngine:
         # Layer 5b: Drain high-importance messages to LTM before summarization
         self._drain_to_ltm(all_msgs_after)
 
-        augmented = history_text
-        if custom_instructions:
-            augmented = f"[压缩指令] {custom_instructions}\n\n{augmented}"
-
         self._fire_compact("start", tokens_before=tokens_before)
 
         self.compacting = True
         try:
             with trace_mgr.span("memory_compact", {"is_auto": is_auto}):
-                prompt = SUMMARIZE_PROMPT.format(history=augmented)
-                response = mgr._llm.think([{"role": "user", "content": prompt}], silent=True) or ""
-                if not response:
+                # 分段索引压缩：每段独立小结、跨轮 append-only，无复利丢失
+                seg_size = getattr(mgr._settings, "memory_index_segment_size", 20)
+                if not isinstance(seg_size, int):
+                    seg_size = 20
+                result = segment_summarize(
+                    all_msgs_after, mgr._llm,
+                    keep_recent=6,
+                    seg_size=seg_size,
+                    custom_instructions=custom_instructions,
+                )
+                if result is None:
                     circuit.record_failure()
                     if half_open_probe:
                         logger.warning("Half-open probe got empty response, re-opening circuit")
                     self._fire_compact("circuit_open")
                     return 0
 
-                summary_content = _extract_xml_tag(response, "summary")
-                final_summary = (summary_content or response).strip()
-                stm.compact_full(final_summary, message_count=len(all_msgs_after),
-                                 is_auto=is_auto, keep_recent=6)
+                # 原文先入归档，再移出 STM——任何时刻内容都在某处完整存在
+                self._archive_history(result.archived)
+                stm.compact_indexed(result.entries, keep_recent=6)
+                # 索引超预算时折叠最老条目为归档目录（召回靠 history_search 兜底）
+                index_budget = getattr(mgr._settings, "memory_index_max_tokens", 4000)
+                if not isinstance(index_budget, int):
+                    index_budget = 4000
+                folded = stm.fold_index(index_budget)
+                if folded:
+                    self._fire_compact("index_folded", folded=folded)
                 # Close circuit on success
                 if half_open_probe:
                     logger.info("Circuit breaker closed after successful half-open probe")

@@ -285,8 +285,12 @@ class ConversationVersionManager:
         return normalized.casefold() if Path(normalized).drive else normalized
 
     @classmethod
-    def find_latest_session(cls, db_path: str, workspace_path: str) -> str | None:
-        """Return the most recently updated session for a workspace, if any."""
+    def find_latest_session(cls, db_path: str, workspace_path: str | None) -> str | None:
+        """Return the most recently updated session, if any.
+
+        ``workspace_path=None`` searches across all workspaces (desktop
+        per-session workspace model).
+        """
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -294,17 +298,21 @@ class ConversationVersionManager:
                 conn.executescript(SCHEMA)
             except sqlite3.OperationalError:
                 return None
-            normalized = cls.normalize_workspace_path(workspace_path)
+            params: tuple = ()
+            if workspace_path is not None:
+                where_sql = "WHERE s.workspace_path = ? AND EXISTS ("
+                params = (cls.normalize_workspace_path(workspace_path),)
+            else:
+                where_sql = "WHERE EXISTS ("
             row = conn.execute(
                 "SELECT s.session_id FROM conversation_sessions s "
-                "WHERE s.workspace_path = ? "
-                "AND EXISTS ("
-                "  SELECT 1 FROM conversation_checkpoints c "
+                + where_sql
+                + "  SELECT 1 FROM conversation_checkpoints c "
                 "  WHERE c.session_id = s.session_id"
                 ") "
                 "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
                 "LIMIT 1",
-                (normalized,),
+                params,
             ).fetchone()
             return row["session_id"] if row else None
         finally:
@@ -312,9 +320,14 @@ class ConversationVersionManager:
 
     @classmethod
     def find_recent_sessions(
-        cls, db_path: str, workspace_path: str, limit: int = 5
+        cls, db_path: str, workspace_path: str | None, limit: int = 5
     ) -> list[dict]:
-        """Return recent sessions for a workspace with preview info."""
+        """Return recent sessions with preview info.
+
+        ``workspace_path=None`` lists sessions across all workspaces (the
+        desktop per-session workspace model); pass a path to scope the list
+        to one workspace (CLI/TUI behavior).
+        """
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -322,14 +335,28 @@ class ConversationVersionManager:
                 conn.executescript(SCHEMA)
             except sqlite3.OperationalError:
                 return []
-            normalized = cls.normalize_workspace_path(workspace_path)
+            # Skip content-less rows (e.g. the server build session registered
+            # on every `nexus serve` launch); sessions with a checkpoint,
+            # message, or persisted preview all count as having content.
+            content_filter = (
+                "(EXISTS ("
+                "  SELECT 1 FROM conversation_checkpoints c WHERE c.session_id = s.session_id"
+                ") OR EXISTS ("
+                "  SELECT 1 FROM conversation_messages m WHERE m.session_id = s.session_id"
+                ") OR (s.preview IS NOT NULL AND s.preview != ''))"
+            )
+            if workspace_path is not None:
+                where_sql = "WHERE s.workspace_path = ? AND " + content_filter
+                params: tuple = (cls.normalize_workspace_path(workspace_path), limit)
+            else:
+                where_sql = "WHERE " + content_filter
+                params = (limit,)
             rows = conn.execute(
-                "SELECT s.session_id, s.created_at, s.updated_at, s.profile, s.preview "
-                "FROM conversation_sessions s "
-                "WHERE s.workspace_path = ? "
+                "SELECT s.session_id, s.created_at, s.updated_at, s.profile, s.preview, s.workspace_path "
+                "FROM conversation_sessions s " + where_sql + " "
                 "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
                 "LIMIT ?",
-                (normalized, limit),
+                params,
             ).fetchall()
 
             sessions = []
@@ -380,8 +407,44 @@ class ConversationVersionManager:
                     "last_message_at": last_message_at,
                     "preview": preview,
                     "profile": row["profile"],
+                    "workspace_path": row["workspace_path"],
                 })
             return sessions
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_session_workspace(cls, db_path: str, session_id: str) -> str | None:
+        """Return the workspace a session is registered under, if any."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            row = conn.execute(
+                "SELECT workspace_path FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row["workspace_path"] if row else None
+        finally:
+            conn.close()
+
+    @classmethod
+    def update_session_workspace(cls, db_path: str, session_id: str, workspace_path: str) -> None:
+        """Rebind a session row to a different workspace folder (no-op if absent)."""
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return
+            conn.execute(
+                "UPDATE conversation_sessions SET workspace_path = ? WHERE session_id = ?",
+                (cls.normalize_workspace_path(workspace_path), session_id),
+            )
+            conn.commit()
         finally:
             conn.close()
 

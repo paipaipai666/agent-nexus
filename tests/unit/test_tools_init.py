@@ -11,14 +11,14 @@ class TestRegisterCount:
         executor = ToolRegistry()
         register_all_tools(executor)
         names = executor.list_tools()
-        assert len(names) == 39
+        assert len(names) == 41
 
     def test_registers_correct_tool_names(self):
         executor = ToolRegistry()
         register_all_tools(executor)
         names = executor.list_tools()
         expected = {
-            "memory_search", "memory_save", "grep_search", "web_search",
+            "memory_search", "memory_save", "memory_project_status", "history_search", "grep_search", "web_search",
             "web_fetch", "kb_search", "file_read", "file_list", "file_write",
             "python_execute", "shell_exec", "subagent_run",
             "codegraph_search", "codegraph_relations", "codegraph_context",

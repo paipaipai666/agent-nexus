@@ -218,28 +218,9 @@ def extract_and_save_memories(
                     logger.debug("Skipping duplicate memory: %s", item[:80])
                     continue
 
-        # ── Segment 3: Conflict detection (unlocked — LLM call) ─────
-        conflict_ids: list[int] = []
-        # All categories get conflict detection (note threshold is slightly higher)
-        threshold = 0.75 if category == "note" else 0.70
-        with _extraction_lock:
-            candidates = long_term.search(
-                query_embedding=vec, category=category,
-                limit=3, min_similarity=threshold,
-            ) if vec else []
-        # LLM conflict check outside lock
-        # C: pass both contexts so same-scene contradictions supersede while
-        # different-scene coexisting preferences are kept.
-        for c in candidates:
-            if c.get("_score", 0) >= 0.90:
-                continue  # already handled by dedup
-            if _check_conflict(
-                llm,
-                c["content"], item,
-                old_context=_parse_context(c.get("metadata_json")),
-                new_context=context,
-            ):
-                conflict_ids.append(c["id"])
+        # ADD-only: no inline conflict resolution (0 LLM calls on the hot
+        # path). Near-duplicates below the dedup threshold coexist; the
+        # background curator reconciles contradictions with full context.
 
         # ── Segment 4: Double-check + save (locked — fast DB write) ─
         # metadata is omitted entirely when context is empty, so callers
@@ -261,16 +242,8 @@ def extract_and_save_memories(
                     metrics.incr("writes_skipped_dedup")
                     continue
 
-            new_id = long_term.save(**save_kwargs)
-            # Supersede all conflicting old memories (idempotent)
-            for cid in conflict_ids:
-                long_term.mark_superseded(cid, new_id)
-
+            long_term.save(**save_kwargs)
             metrics.incr("writes_total")
-            if conflict_ids:
-                metrics.incr("conflicts_detected", len(conflict_ids))
-                metrics.incr("superseded_count", len(conflict_ids))
-                logger.info("Conflict detected: '%s' superseded %d old memories", item[:40], len(conflict_ids))
             saved_count += 1
 
     if saved_count:

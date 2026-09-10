@@ -18,7 +18,7 @@ class TestAllPromptTemplatesExist:
         "contextual_generation",
         "contextual_retrieval",
         "memory_extract",
-        "memory_summarize",
+        "memory_segment_summarize",
         "eval_generate",
         "eval_answer_relevancy",
         "eval_correctness",
@@ -54,9 +54,9 @@ class TestFormatPromptVariableInjection:
         assert "Q" in result
         assert "A" in result
 
-    def test_memory_summarize_injects_history(self):
+    def test_memory_segment_summarize_injects_history(self):
         with patch("agentnexus.prompts.load_prompt", return_value="Summary: {history}"):
-            result = prompts.format_prompt("memory_summarize", history="turn1\nturn2")
+            result = prompts.format_prompt("memory_segment_summarize", history="turn1\nturn2")
         assert "turn1" in result
 
     def test_eval_generate_injects_context_question(self):
