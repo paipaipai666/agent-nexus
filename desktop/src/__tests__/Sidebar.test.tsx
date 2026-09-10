@@ -16,6 +16,7 @@ vi.mock('../components/session/SessionProvider', () => ({
 vi.mock('../services/api', () => ({
   api: {
     getRecentSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    getConfig: vi.fn().mockResolvedValue({ cwd: '/test' }),
   },
 }))
 

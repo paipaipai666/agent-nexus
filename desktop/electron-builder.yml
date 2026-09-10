@@ -15,6 +15,8 @@ win:
   extraResources:
     - from: "backend/agentnexus.exe"
       to: "backend/agentnexus.exe"
+    - from: "backend/_internal"
+      to: "backend/_internal"
 
 mac:
   target:
@@ -25,6 +27,8 @@ mac:
   extraResources:
     - from: "backend/agentnexus"
       to: "backend/agentnexus"
+    - from: "backend/_internal"
+      to: "backend/_internal"
 
 linux:
   target:
@@ -34,6 +38,8 @@ linux:
   extraResources:
     - from: "backend/agentnexus"
       to: "backend/agentnexus"
+    - from: "backend/_internal"
+      to: "backend/_internal"
 
 nsis:
   oneClick: false

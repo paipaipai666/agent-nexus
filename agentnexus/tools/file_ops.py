@@ -6,7 +6,6 @@ import difflib
 import fnmatch
 import hashlib
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,11 +23,8 @@ LARGE_FILE_PREVIEW_LINES = 20
 
 def _get_allowed_roots() -> list[Path]:
     """Build the set of allowed root directories (recomputed each call)."""
-    try:
-        workspace = Path(os.getcwd()).resolve(strict=False)
-    except (FileNotFoundError, OSError):
-        workspace = Path(tempfile.gettempdir()).resolve(strict=False)
-    roots = [workspace]
+    from agentnexus.tools.workspace import get_effective_workspace
+    roots = [get_effective_workspace()]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
     agentnexus_home = Path(Path.home().resolve(strict=False)) / ".agentnexus"
@@ -57,10 +53,8 @@ def _resolve_safe(path: str) -> Path:
     1. normpath — catches ".." traversal on non-existent paths
     2. resolve  — catches symlink escapes (link -> ../../outside)
     """
-    try:
-        workspace = Path(os.getcwd()).resolve(strict=False)
-    except (FileNotFoundError, OSError):
-        workspace = Path(tempfile.gettempdir()).resolve(strict=False)
+    from agentnexus.tools.workspace import get_effective_workspace
+    workspace = get_effective_workspace()
     roots = _get_allowed_roots()
 
     # If the path is absolute and already under an allowed root, use it directly.
@@ -205,7 +199,8 @@ def _truncate_diff_preview(diff_text: str) -> dict[str, Any]:
 
 
 def _write_patch_artifact(diff_text: str) -> str:
-    artifact_dir = Path(os.getcwd()) / ".agentnexus" / "tool_results"
+    from agentnexus.tools.workspace import get_effective_workspace
+    artifact_dir = get_effective_workspace() / ".agentnexus" / "tool_results"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     timestamp = int(datetime.now().timestamp() * 1000)
     patch_path = artifact_dir / f"patch_{timestamp}.diff"

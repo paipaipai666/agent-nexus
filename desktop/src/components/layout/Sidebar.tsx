@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, Settings, Plus } from 'lucide-react'
+import { MessageSquare, Settings, Plus, FolderOpen } from 'lucide-react'
 import { api } from '../../services/api'
 import { useSession } from '../session/SessionProvider'
 
@@ -11,6 +11,7 @@ interface RecentSession {
   last_message_at: string
   preview: string
   profile: string | null
+  workspace_path: string
 }
 
 export default function Sidebar() {
@@ -19,6 +20,14 @@ export default function Sidebar() {
   const { isSessionRunning, activateSession, sessions } = useSession()
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(false)
+  const [workspace, setWorkspace] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      const cwd = c?.cwd
+      if (typeof cwd === 'string' && cwd) setWorkspace(cwd)
+    }).catch(() => {})
+  }, [])
 
   const isChatActive = location.pathname === '/' || location.pathname.startsWith('/chat/')
   const isSettingsActive = location.pathname.startsWith('/settings')
@@ -56,6 +65,26 @@ export default function Sidebar() {
     // Dispatch event so ChatPage can reset session state even when already on '/'
     window.dispatchEvent(new Event('new-chat'))
     navigate('/')
+  }
+  const handleWorkspaceClick = async () => {
+    const picked = window.electronAPI
+      ? await window.electronAPI.pickDirectory()
+      : window.prompt('工作区文件夹路径：', workspace ?? '')
+    if (!picked) return
+    try {
+      const res = await api.setWorkspace(picked)
+      setWorkspace(res.cwd)
+      // Persist for the next launch (Electron spawns the backend with this cwd).
+      window.electronAPI?.setWorkspace(res.cwd)
+      // Sessions belong to the old workspace — reset to the new-chat state
+      // and reload the list against the new workspace.
+      window.dispatchEvent(new Event('new-chat'))
+      navigate('/')
+      loadRecentSessions()
+    } catch (err) {
+      console.error('Failed to set workspace:', err)
+      window.alert(`无法切换到该文件夹：${err instanceof Error ? err.message : err}`)
+    }
   }
   const handleSessionClick = (sessionId: string) => {
     activateSession(sessionId)
@@ -103,6 +132,18 @@ export default function Sidebar() {
           <Plus size={14} />
           <span className="text-[13px] font-medium">New Chat</span>
         </button>
+        {/* Workspace picker */}
+        <button
+          onClick={handleWorkspaceClick}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-150 text-left mb-1"
+          style={{ color: 'var(--fg-muted)' }}
+          title={workspace ? `默认工作区：${workspace}\n新会话的默认文件夹，点击切换` : '设置默认工作区（新会话的默认文件夹）'}
+        >
+          <FolderOpen size={14} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+          <span className="text-[12px] truncate flex-1" style={{ fontFamily: 'var(--font-mono)' }}>
+            {workspace ? (workspace.split(/[\\/]/).filter(Boolean).pop() ?? workspace) : 'Default workspace…'}
+          </span>
+        </button>
 
         {/* Recent Sessions */}
         <div className="mb-2 mt-2">
@@ -133,6 +174,15 @@ export default function Sidebar() {
                   <span className="text-[12px] truncate flex-1" title={session.preview || 'New session'}>
                     {session.preview || 'New session'}
                   </span>
+                  {session.workspace_path && (
+                    <span
+                      className="text-[9px] shrink-0 px-1 rounded"
+                      style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}
+                      title={session.workspace_path}
+                    >
+                      {session.workspace_path.split(/[\\/]/).filter(Boolean).pop()}
+                    </span>
+                  )}
                   {isSessionRunning(session.session_id) && (
                     <span
                       className="w-2 h-2 rounded-full shrink-0 animate-pulse"

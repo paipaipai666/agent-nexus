@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
@@ -9,6 +9,10 @@ import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
 
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
+// Once per app launch: reopen the most recent session instead of landing on a
+// session-less "disconnected" state. Consumed by whichever branch of the init
+// effect runs first, so "New Chat" navigations never trigger a re-restore.
+let didAutoRestoreLastSession = false
 
 const COMMAND_DEFS = [
   { cmd: '/help', desc: 'Show command help', category: 'system' },
@@ -179,9 +183,13 @@ export default function ChatPage() {
   const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
+  // Per-session workspace: pending value for a not-yet-created chat, plus the
+  // server default shown on the new-chat screen.
+  const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null)
+  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null)
 
   const {
-    sessionId, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
+    sessionId, cwd, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
     sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveSessionState,
   } = useSession()
@@ -344,8 +352,12 @@ export default function ChatPage() {
     // is still the OLD session, so this would clear the old session's messages.
     // The new session already starts with empty messages in SessionManager's Map.
     api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
+    // Session's own workspace wins; server default cwd is the chip fallback.
+    api.getSession(sid).then((s) => {
+      setCwd(s.workspace ?? null)
+    }).catch(() => {})
     api.getConfig().then((config: any) => {
-      if (config.cwd) setCwd(config.cwd)
+      if (config.cwd) setDefaultWorkspace(config.cwd)
     }).catch(() => {})
     Promise.all([
       api.listMcpTools().catch(() => ({ tools: [] })),
@@ -357,7 +369,18 @@ export default function ChatPage() {
     fetchDynamicCommands()
   }, [fetchDynamicCommands])
 
+  // Server default workspace — shown on the new-chat screen before the user
+  // picks a per-session folder.
   useEffect(() => {
+    api.getConfig().then((c) => {
+      const cfgCwd = c?.cwd
+      if (typeof cfgCwd === 'string' && cfgCwd) setDefaultWorkspace(cfgCwd)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const isFirstMount = !didAutoRestoreLastSession
+    didAutoRestoreLastSession = true
     const initRestore = (sid: string) => {
       console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
@@ -369,8 +392,12 @@ export default function ChatPage() {
       api.getVersionStatus().then(setVersionStatus).catch(() => {})
       api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
+      // Session's own workspace wins; server default cwd is the chip fallback.
+      api.getSession(sid).then((s) => {
+        setCwd(s.workspace ?? null)
+      }).catch(() => {})
       api.getConfig().then((config: any) => {
-        if (config.cwd) setCwd(config.cwd)
+        if (config.cwd) setDefaultWorkspace(config.cwd)
       }).catch(() => {})
       Promise.all([
         api.listMcpTools().catch(() => ({ tools: [] })),
@@ -410,6 +437,18 @@ export default function ChatPage() {
       api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => { if (config.cwd) setCwd(config.cwd) }).catch(() => {})
       fetchDynamicCommands()
+      if (isFirstMount) {
+        api.getRecentSessions(5).then((d) => {
+          // Skip empty sessions (e.g. the internal server-build session):
+          // the backend generates a preview from the last checkpoint/message,
+          // so a session with any content always has one.
+          const last = d.sessions?.find((s) => s.preview)
+          // Bail if the user already started a new chat while we were fetching.
+          if (last && !currentSessionIdRef.current) {
+            navigate(`/chat/${last.session_id}`, { replace: true })
+          }
+        }).catch(() => {})
+      }
     }
     // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -444,14 +483,19 @@ export default function ChatPage() {
   // Handle first message — create session lazily if needed, then send.
   const handleSendMessage = useCallback((text: string) => {
     if (!currentSessionIdRef.current) {
-      // No session yet (first message from route '/') — create lazily.
+      // No session yet (first message from route '/') — create lazily, bound to
+      // the pending per-session workspace if the user picked one.
       // Defer the actual send to a useEffect that fires after activeSessionId
       // is set and the WS connection is established by SessionManager.
       pendingFirstMessageRef.current = text
-      api.createSession().then(({ session_id }) => {
+      api.createSession(undefined, pendingWorkspace).then(({ session_id }) => {
         currentSessionIdRef.current = session_id
         initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
         navigate(`/chat/${session_id}`, { replace: true })
+      }).catch((err) => {
+        pendingFirstMessageRef.current = null
+        setInput(text) // restore the unsent message
+        window.alert(`创建会话失败：${err instanceof Error ? err.message : err}`)
       })
     } else {
       sendMessage(text)
@@ -459,7 +503,28 @@ export default function ChatPage() {
         navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
       }
     }
-  }, [sendMessage, location.pathname, navigate, initNew])
+  }, [sendMessage, location.pathname, navigate, initNew, pendingWorkspace])
+
+  // Per-session workspace chip — pick the folder this chat runs in.
+  const chipWorkspace = cwd ?? pendingWorkspace ?? defaultWorkspace
+  const handleWorkspacePick = async () => {
+    const picked = window.electronAPI
+      ? await window.electronAPI.pickDirectory()
+      : window.prompt('该会话的工作区文件夹：', chipWorkspace ?? '')
+    if (!picked) return
+    const sid = currentSessionIdRef.current
+    if (sid) {
+      try {
+        const res = await api.setSessionWorkspace(sid, picked)
+        setCwd(res.cwd)
+      } catch (err) {
+        window.alert(`切换工作区失败：${err instanceof Error ? err.message : err}`)
+      }
+    } else {
+      // No session yet — applied when the first message creates one.
+      setPendingWorkspace(picked)
+    }
+  }
 
   const handleSend = () => {
     const text = input.trim(); if (!text) return
@@ -751,7 +816,22 @@ export default function ChatPage() {
           className="max-w-3xl mx-auto"
           style={{ background: 'var(--surface-1)', border: '2px solid var(--border-strong)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-hard)' }}
         >
-          <div className="flex items-end gap-2.5 p-3">
+          {/* Workspace chip — this chat's folder */}
+          <div className="flex items-center px-3 pt-2">
+            <button
+              onClick={handleWorkspacePick}
+              className="flex items-center gap-1.5 px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--surface-2)]"
+              style={{ color: 'var(--fg-muted)' }}
+              title={chipWorkspace ? `工作区：${chipWorkspace}\n点击切换` : '选择该会话的工作区文件夹'}
+            >
+              <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+              <span className="text-[10px] font-mono truncate max-w-[320px]">
+                {chipWorkspace ?? '选择工作区…'}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-end gap-2.5 p-3 pt-1.5">
             <textarea
               ref={inputRef}
               value={input}

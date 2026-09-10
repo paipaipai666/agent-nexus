@@ -110,6 +110,11 @@ router = APIRouter(tags=["chat"])
 class CreateSessionRequest(BaseModel):
     skill: str | None = None
     profile: str | None = None
+    workspace: str | None = None  # per-session workspace folder; default = server cwd
+
+
+class SessionWorkspaceUpdateRequest(BaseModel):
+    path: str
 
 
 class SendMessageRequest(BaseModel):
@@ -127,6 +132,19 @@ class ConfirmRequest(BaseModel):
     approved: bool
 
 
+def _resolve_workspace_dir(raw: str) -> str:
+    """Validate a workspace folder and return its resolved path."""
+    from pathlib import Path as _Path
+
+    try:
+        resolved = _Path(raw).expanduser().resolve(strict=True)
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"Directory not found: {raw}")
+    if not resolved.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {raw}")
+    return str(resolved)
+
+
 @router.post("/session")
 def create_session(req: CreateSessionRequest | None = None):
     from agentnexus.server.app import _get_runtime
@@ -134,8 +152,29 @@ def create_session(req: CreateSessionRequest | None = None):
     runtime = _get_runtime()
     skill = req.skill if req else None
     profile = req.profile if req else None
-    handle = runtime.services.chat.start_session(skill=skill, profile=profile)
-    return {"session_id": handle.id, "skill": handle.skill, "profile": handle.profile}
+    workspace = _resolve_workspace_dir(req.workspace) if req and req.workspace else None
+    handle = runtime.services.chat.start_session(skill=skill, profile=profile, workspace=workspace)
+    return {
+        "session_id": handle.id, "skill": handle.skill, "profile": handle.profile,
+        "workspace": handle.workspace,
+    }
+
+
+@router.put("/session/{session_id}/workspace")
+def set_session_workspace(session_id: str, req: SessionWorkspaceUpdateRequest):
+    """Bind a chat session to its own workspace folder."""
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    raw = (req.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="path is required")
+    resolved = _resolve_workspace_dir(raw)
+    try:
+        cwd = runtime.services.chat.set_session_workspace(session_id, resolved)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return {"status": "updated", "session_id": session_id, "cwd": cwd}
 
 
 @router.post("/chat")
@@ -245,9 +284,9 @@ def list_recent_sessions(limit: int = 5):
     from agentnexus.memory.versioned import ConversationVersionManager
 
     settings = get_settings()
-    workspace = str(Path.cwd())
+    # Sessions carry their own workspace folders — list across all of them.
     sessions = ConversationVersionManager.find_recent_sessions(
-        settings.memory_db_path, workspace, limit=limit
+        settings.memory_db_path, None, limit=limit
     )
     return {"sessions": sessions, "count": len(sessions)}
 
@@ -260,11 +299,12 @@ def restore_session(req: CreateSessionRequest):
     settings = get_settings()
     workspace = str(Path.cwd())
 
-    # Find the latest session if no session_id provided
+    # Find the latest session if no session_id provided (across all workspaces —
+    # sessions carry their own workspace folders)
     session_id = req.skill  # Reuse skill field for session_id
     if not session_id:
         session_id = ConversationVersionManager.find_latest_session(
-            settings.memory_db_path, workspace
+            settings.memory_db_path, None
         )
 
     from agentnexus.server.app import _get_runtime
@@ -277,17 +317,20 @@ def restore_session(req: CreateSessionRequest):
     if session_id and session_id in chat._sessions:
         return {"session_id": session_id, "restored": True}
 
-    # Try to restore from database
-    if session_id and ConversationVersionManager.session_belongs_to_workspace(
-        settings.memory_db_path, session_id, workspace
-    ):
-        handle = SessionHandle(id=session_id, skill=None, profile=req.profile)
+    # Try to restore from database — sessions live in their own workspace
+    # folders, so adopt the stored workspace instead of matching the server cwd.
+    stored_workspace = (
+        ConversationVersionManager.get_session_workspace(settings.memory_db_path, session_id)
+        if session_id else None
+    )
+    if session_id and stored_workspace:
+        handle = SessionHandle(id=session_id, skill=None, profile=req.profile, workspace=stored_workspace)
         chat._sessions[session_id] = handle
 
         # Restore memory from version manager
         version = ConversationVersionManager(
             session_id, settings.memory_db_path,
-            workspace_path=workspace, profile=req.profile or ""
+            workspace_path=stored_workspace, profile=req.profile or ""
         )
         snapshot = version.get_head_stm()
         if snapshot:
@@ -348,6 +391,7 @@ def get_session(session_id: str):
             "session_id": session.id,
             "skill": session.skill,
             "profile": session.profile,
+            "workspace": session.workspace,
         }
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
@@ -378,13 +422,14 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
             from agentnexus.memory.versioned import ConversationVersionManager
             from agentnexus.services.chat import SessionHandle
             settings = get_settings()
-            workspace = str(Path.cwd())
-            if ConversationVersionManager.session_belongs_to_workspace(
-                settings.memory_db_path, session_id, workspace
-            ):
-                chat._sessions[session_id] = SessionHandle(id=session_id)
+            # Sessions live in their own workspace folders — adopt the stored one.
+            stored_workspace = ConversationVersionManager.get_session_workspace(
+                settings.memory_db_path, session_id
+            )
+            if stored_workspace:
+                chat._sessions[session_id] = SessionHandle(id=session_id, workspace=stored_workspace)
                 # Restore STM
-                version = ConversationVersionManager(session_id, settings.memory_db_path, workspace_path=workspace)
+                version = ConversationVersionManager(session_id, settings.memory_db_path, workspace_path=stored_workspace)
                 snapshot = version.get_head_stm()
                 if snapshot:
                     chat.set_session_stm_snapshot(session_id, snapshot)

@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import path from 'path'
+import os from 'os'
 import { spawn, ChildProcess } from 'child_process'
 import http from 'http'
 import fs from 'fs'
@@ -15,6 +16,26 @@ const HEALTH_CHECK_TIMEOUT_MS = 120_000
 
 function isDev(): boolean {
   return !!process.env.VITE_DEV_SERVER_URL
+}
+// ── Workspace (backend process cwd = session/tool workspace) ──────
+
+function workspaceFile(): string {
+  return path.join(app.getPath('userData'), 'workspace.json')
+}
+
+function loadSavedWorkspace(): string | null {
+  try {
+    const data = JSON.parse(fs.readFileSync(workspaceFile(), 'utf-8'))
+    const saved = typeof data.workspace === 'string' ? data.workspace : null
+    if (saved && fs.existsSync(saved)) return saved
+  } catch { /* no saved workspace yet */ }
+  return null
+}
+
+function getWorkspace(): string {
+  // Default to the user's home dir — a packaged app's inherited cwd would
+  // otherwise be the install dir, which can be read-only.
+  return loadSavedWorkspace() ?? os.homedir()
 }
 // PyInstaller onefile 的 bootloader 会派生子进程；只 kill 父进程会把真正的后端
 // 留在 %TEMP%\_MEI 里继续占端口。Windows 下用 taskkill /T 终止整棵进程树。
@@ -67,10 +88,12 @@ function startBackend(): Promise<boolean> {
       return
     }
 
-    console.log(`Starting backend: ${binaryPath}`)
+    const workspace = getWorkspace()
+    console.log(`Starting backend: ${binaryPath} (cwd: ${workspace})`)
     backendProcess = spawn(binaryPath, ['serve', '--port', String(BACKEND_PORT), '--no-auth'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
+      cwd: workspace,
     })
 
     backendProcess.stdout?.on('data', (data: Buffer) => {
@@ -200,6 +223,28 @@ ipcMain.handle('get-backend-status', () => ({
   ready: backendReady,
   port: BACKEND_PORT,
 }))
+// Workspace IPC
+ipcMain.handle('pick-directory', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择工作区文件夹',
+    defaultPath: getWorkspace(),
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  return result.canceled ? null : (result.filePaths[0] ?? null)
+})
+
+ipcMain.handle('get-workspace', () => getWorkspace())
+
+ipcMain.handle('set-workspace', (_, workspace: string) => {
+  if (typeof workspace !== 'string' || !workspace) return false
+  try {
+    fs.writeFileSync(workspaceFile(), JSON.stringify({ workspace }))
+    return true
+  } catch {
+    return false
+  }
+})
 
 // Open external links in browser (http/https only)
 ipcMain.on('open-external', (_, url: string) => {

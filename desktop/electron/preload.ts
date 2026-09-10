@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   close: () => ipcRenderer.send('window-close'),
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
+  // Workspace (backend cwd) selection
+  pickDirectory: () => ipcRenderer.invoke('pick-directory'),
+  getWorkspace: () => ipcRenderer.invoke('get-workspace'),
+  setWorkspace: (workspace: string) => ipcRenderer.invoke('set-workspace', workspace),
 
   // Backend status
   getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),

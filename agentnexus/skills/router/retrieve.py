@@ -84,14 +84,20 @@ def build_index(
     entries: list[SkillEntry],
     *,
     compute_embeddings: bool = True,
+    embeddings: list[tuple[float, ...]] | None = None,
 ) -> SkillRouterIndex:
-    """Build a SkillRouterIndex from skill entries."""
+    """Build a SkillRouterIndex from skill entries.
+
+    Pass precomputed ``embeddings`` to reuse vectors computed elsewhere
+    (e.g. a background warm-up thread) instead of recomputing inline.
+    """
     items: list[IndexedSkillMetadata] = []
     doc_freq: dict[str, int] = {}
 
-    embeddings: list[tuple[float, ...]] = []
-    if compute_embeddings and entries:
-        embeddings = compute_skill_embeddings(entries)
+    if embeddings is None:
+        embeddings = compute_skill_embeddings(entries) if compute_embeddings and entries else []
+    else:
+        embeddings = list(embeddings)
 
     for i, entry in enumerate(entries):
         id_terms = frozenset(tokenize(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from collections.abc import Callable
 from hashlib import blake2b
 from typing import Any
@@ -40,6 +41,10 @@ _EMBED_TORCH_THREADS_CAP = 12
 _model = None
 _model_name: str | None = None
 _model_device: str | None = None
+# Serializes model loading — MemoryManager's preload thread and the skill
+# router's background rebuild both call get_embedding_model() at startup;
+# without the lock both see _model is None and load the model twice.
+_model_lock = threading.Lock()
 
 
 class _FallbackEmbeddingModel:
@@ -139,8 +144,13 @@ def get_embedding_model(
 
     settings = settings_provider()
     resolved_device = (device_resolver or _resolve_embedding_device)()
-    (runtime_configurer or _configure_embedding_runtime)(resolved_device)
-    if _model is None or _model_name != settings.embedding_model or _model_device != resolved_device:
+    if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
+        return _model
+    with _model_lock:
+        # Re-check under the lock — a concurrent loader may have finished by now.
+        if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
+            return _model
+        (runtime_configurer or _configure_embedding_runtime)(resolved_device)
         try:
             from sentence_transformers import SentenceTransformer
 

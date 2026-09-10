@@ -95,12 +95,16 @@ a = Analysis(
     optimize=0,
 )
 pyz = PYZ(a.pure)
+# Onedir, not onefile: a single-file build forces the bootloader to extract
+# ~2GB (torch DLLs etc.) into %TEMP%\_MEI on EVERY launch — measured ~11.5s
+# of a 12.7s cold start — and leaked _MEI dirs orphan the backend process.
+# Onedir loads DLLs in place: cold start drops to ~2-3s.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    [],
+    exclude_binaries=True,
     name='agentnexus',
     debug=False,
     bootloader_ignore_signals=False,
@@ -114,4 +118,13 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='agentnexus',
 )

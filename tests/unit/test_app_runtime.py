@@ -74,7 +74,7 @@ def test_runtime_build_uses_supplied_session_id_and_restores_stm():
         runtime = AppRuntime.build(profile="tui", session_id="tui_existing", restore_session=True)
 
     assert runtime.session_id == "tui_existing"
-    mock_memory_cls.assert_called_once_with("tui_existing", llm=ANY)
+    mock_memory_cls.assert_called_once_with("tui_existing", llm=ANY, workspace_path=ANY)
     mock_version_cls.assert_called_once_with(
         "tui_existing",
         "/tmp/memory.db",

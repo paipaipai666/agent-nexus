@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 from agentnexus.skills import SkillEntry, SkillRegistry, WorkflowRunResult, WorkflowRuntime, validate_session_profile
 from agentnexus.skills.router import SkillRoute, SkillRouter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,9 @@ class SkillService:
         self.last_route: SkillRoute | None = None
         self.selection_source = "none"
         self.enabled_skills: dict[str, bool] = {}
+        # Generation counter guarding the background embedding rebuild —
+        # a stale worker must not overwrite a newer index.
+        self._embed_rebuild_gen = 0
         self._rebuild_router_index()
 
     def refresh(self) -> list[SkillEntry]:
@@ -174,7 +181,30 @@ class SkillService:
 
     def _rebuild_router_index(self) -> None:
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
-        self.router.rebuild(entries)
+        if not self.router.use_embeddings or not entries:
+            self.router.rebuild(entries)
+            return
+        # Keyword-only index immediately; semantic embeddings load in a
+        # background thread so startup doesn't block on the
+        # torch/sentence-transformers import (~10s+ on first load).
+        self.router.rebuild(entries, compute_embeddings=False)
+        self._rebuild_embeddings_async(entries)
+
+    def _rebuild_embeddings_async(self, entries: list[SkillEntry]) -> None:
+        self._embed_rebuild_gen += 1
+        gen = self._embed_rebuild_gen
+
+        def worker() -> None:
+            try:
+                from agentnexus.skills.router.retrieve import compute_skill_embeddings
+                embeddings = compute_skill_embeddings(entries)
+                if gen != self._embed_rebuild_gen:
+                    return  # superseded by a newer rebuild
+                self.router.rebuild(entries, embeddings=embeddings)
+            except Exception as exc:
+                logger.warning("Background skill embedding rebuild failed: %s", exc)
+
+        threading.Thread(target=worker, daemon=True, name="skill-embed-rebuild").start()
 
     def prepare_message(
         self,

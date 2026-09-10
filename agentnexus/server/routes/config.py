@@ -14,6 +14,9 @@ class ConfigUpdateRequest(BaseModel):
     key: str
     value: str
 
+class WorkspaceUpdateRequest(BaseModel):
+    path: str
+
 
 class PersonaProjectUpdate(BaseModel):
     name: str
@@ -109,7 +112,46 @@ def get_config():
         "tone": persona.tone,
         "projects": [{"name": p.name, "focus": p.focus} for p in persona.projects],
     }
+    # Workspace is the process cwd, not a Settings field — expose it so the
+    # desktop status bar / workspace picker can display the real value.
+    from pathlib import Path
+    config["cwd"] = str(Path.cwd())
     return config
+
+@router.put("/workspace")
+def update_workspace(req: WorkspaceUpdateRequest):
+    """Switch the server workspace (process cwd) to a user-picked directory.
+
+    All session/version routes resolve ``Path.cwd()`` per request, so
+    ``os.chdir`` switches them live; new chat sessions additionally inherit the
+    workspace from the runtime's build-time version manager, updated here.
+    """
+    import os
+    from pathlib import Path
+
+    from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.server.app import _get_runtime
+
+    raw = (req.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="path is required")
+    try:
+        resolved = Path(raw).expanduser().resolve(strict=True)
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"Directory not found: {raw}")
+    if not resolved.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {raw}")
+
+    os.chdir(resolved)
+
+    normalized = ConversationVersionManager.normalize_workspace_path(str(resolved))
+    runtime = _get_runtime()
+    chat_vm = getattr(runtime.services.chat, "_version", None)
+    for vm in (runtime.version_manager, chat_vm):
+        if vm is not None:
+            vm._workspace_path = normalized
+
+    return {"status": "updated", "cwd": str(resolved)}
 
 
 @router.put("")

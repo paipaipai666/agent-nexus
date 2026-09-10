@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 vi.mock('../services/api', () => ({
   api: {
     getRecentSessions: vi.fn(),
+    getConfig: vi.fn().mockResolvedValue({ cwd: '/test' }),
   },
 }))
 
@@ -49,6 +50,7 @@ describe('Sidebar session-updated event', () => {
         last_message_at: '2026-01-01T00:00:00Z',
         preview: 'Hello world',
         profile: null,
+        workspace_path: '/test',
       },
     ]
 
@@ -99,6 +101,7 @@ describe('Sidebar session-updated event', () => {
         last_message_at: '2026-01-01T00:00:00Z',
         preview: 'Should appear on event',
         profile: null,
+        workspace_path: '/test',
       }],
       count: 1,
     })

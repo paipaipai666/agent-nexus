@@ -11,6 +11,7 @@ class _FakeChatService:
         id = "fake-session-id"
         skill = None
         profile = None
+        workspace = None
 
     def start_session(self, **kw):
         return self._Handle()

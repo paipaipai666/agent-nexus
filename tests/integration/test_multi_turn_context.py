@@ -34,6 +34,9 @@ class TestMultiTurnContext:
             mgr._enable_long_term = True
             mgr._ctx_max = 8000
             mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+            # Opt into the LLM gate: these tests exercise the gate+extraction path.
+            # MagicMock attribute access yields a truthy memory_llm_gate.
+            mgr._settings = MagicMock()
             return mgr
 
     def test_earlier_context_available_in_later_turn(self, temp_agentnexus_home):

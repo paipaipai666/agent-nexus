@@ -40,15 +40,15 @@ jobs:
       - name: List dist contents
         shell: bash
         run: ls -la dist/
-      - name: Rename backend binary with platform suffix
+      - name: Rename backend directory with platform suffix
         shell: bash
         run: |
           cd dist
-          if [ -f agentnexus.exe ]; then
-            mv agentnexus.exe agentnexus-windows-x64.exe
-          fi
-          if [ -f agentnexus ]; then
-            if [ "${{ runner.os }}" = "macOS" ]; then
+          # Onedir build: dist/agentnexus/ contains the binary plus _internal/.
+          if [ -d agentnexus ]; then
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              mv agentnexus agentnexus-windows-x64
+            elif [ "${{ runner.os }}" = "macOS" ]; then
               mv agentnexus agentnexus-macos-x64
             else
               mv agentnexus agentnexus-linux-x64
@@ -85,32 +85,35 @@ jobs:
           path: dist/
       - name: Make backend executable (Linux/macOS)
         if: runner.os != 'Windows'
-        run: chmod +x dist/agentnexus-*
+        run: chmod +x dist/agentnexus-*/agentnexus
       - name: Verify backend binary
         shell: bash
         run: |
           echo "=== dist/ contents ==="
           ls -lh dist/
           echo "=== file type ==="
-          file dist/agentnexus* || true
+          file dist/agentnexus-*/agentnexus* || true
           echo "=== size ==="
           du -sh dist/agentnexus* || true
-      - name: Stage backend binary for electron-builder
+      - name: Stage backend directory for electron-builder
         shell: bash
         run: |
+          # Onedir layout: electron-builder maps backend/agentnexus(.exe) and
+          # backend/_internal/ into resources; electron main spawns
+          # resources/backend/agentnexus(.exe), which finds _internal/ beside it.
           mkdir -p desktop/backend
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp dist/agentnexus-windows-x64.exe desktop/backend/agentnexus.exe
+            cp -r dist/agentnexus-windows-x64/. desktop/backend/
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            cp dist/agentnexus-macos-x64 desktop/backend/agentnexus
+            cp -r dist/agentnexus-macos-x64/. desktop/backend/
             chmod +x desktop/backend/agentnexus
           else
-            cp dist/agentnexus-linux-x64 desktop/backend/agentnexus
+            cp -r dist/agentnexus-linux-x64/. desktop/backend/
             chmod +x desktop/backend/agentnexus
           fi
           echo "=== staged backend ==="
           ls -lh desktop/backend/
-          file desktop/backend/*
+          file desktop/backend/agentnexus* || true
       - name: TypeScript compile
         working-directory: desktop
         run: npx tsc --noEmit
@@ -174,11 +177,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/agentnexus-windows-x64.exe version
+            ./dist/agentnexus-windows-x64/agentnexus.exe version
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            ./dist/agentnexus-macos-x64 version
+            ./dist/agentnexus-macos-x64/agentnexus version
           else
-            ./dist/agentnexus-linux-x64 version
+            ./dist/agentnexus-linux-x64/agentnexus version
           fi
 
   release:

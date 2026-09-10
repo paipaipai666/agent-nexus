@@ -9,6 +9,10 @@ interface ElectronAPI {
   close: () => void
   isMaximized: () => Promise<boolean>
   openExternal: (url: string) => void
+  // Workspace (backend cwd) selection
+  pickDirectory: () => Promise<string | null>
+  getWorkspace: () => Promise<string>
+  setWorkspace: (workspace: string) => Promise<boolean>
 
   // Backend status
   getBackendStatus: () => Promise<BackendStatus>

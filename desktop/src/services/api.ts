@@ -61,17 +61,28 @@ async function uploadRequest<T>(path: string, file: File): Promise<T> {
 
 export const api = {
   // Session
-  createSession: (skill?: string) =>
-    request<{ session_id: string }>('/api/session', {
+  createSession: (skill?: string, workspace?: string | null) =>
+    request<{ session_id: string; workspace: string | null }>('/api/session', {
       method: 'POST',
-      body: JSON.stringify({ skill }),
+      body: JSON.stringify({ skill, workspace: workspace ?? null }),
+    }),
+
+  getSession: (sessionId: string) =>
+    request<{ session_id: string; skill: string | null; profile: string | null; workspace: string | null }>(
+      `/api/session/${sessionId}`
+    ),
+
+  setSessionWorkspace: (sessionId: string, path: string) =>
+    request<{ status: string; session_id: string; cwd: string }>(`/api/session/${sessionId}/workspace`, {
+      method: 'PUT',
+      body: JSON.stringify({ path }),
     }),
 
   getSessions: () =>
     request<{ sessions: Array<{ session_id: string; skill: string | null }> }>('/api/sessions'),
 
   getRecentSessions: (limit = 5) =>
-    request<{ sessions: Array<{ session_id: string; created_at: string; updated_at: string; last_message_at: string; preview: string; profile: string | null }>; count: number }>(
+    request<{ sessions: Array<{ session_id: string; created_at: string; updated_at: string; last_message_at: string; preview: string; profile: string | null; workspace_path: string }>; count: number }>(
       `/api/sessions/recent?limit=${limit}`
     ),
 
@@ -79,6 +90,11 @@ export const api = {
     request<{ session_id: string; restored: boolean }>('/api/session/restore', {
       method: 'POST',
       body: JSON.stringify({ skill: sessionId }),  // backend reuses skill field for session_id
+    }),
+  setWorkspace: (path: string) =>
+    request<{ status: string; cwd: string }>('/api/config/workspace', {
+      method: 'PUT',
+      body: JSON.stringify({ path }),
     }),
 
   // Chat
