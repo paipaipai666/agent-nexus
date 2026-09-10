@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to AgentNexus will be documented in this file.
+## [0.2.16] - 2026-09-10
+
+### Changed
+
+- **Desktop: Codex-style per-session projects** — the sidebar now groups chat sessions under project folders; a project is chosen when a chat is created and stays fixed for that chat's lifetime. Removed the global workspace switcher (`PUT /api/config/workspace` + `os.chdir`, `PUT /api/session/{id}/workspace` rebind) — sessions carry their own workspace folders, so switching projects never disturbs other sessions. Electron persists `{ projects, lastProject }` in `userData/workspace.json` (legacy single-workspace format is migrated).
+### New Features
+
+- **Desktop: multi-provider model switching** — configure multiple named LLM providers (name/model_id/base_url/api_key/timeout) in Settings → Model Providers, then switch the active model live from a picker in the chat input's HUD row. Switching hot-reconfigures the shared `AgentLLM` (no restart); the flat `llm_*` settings remain the default/fallback profile. New endpoints: `GET/PUT /api/config/llm/providers`, `POST /api/config/llm/active`. The model display moved from the status bar into the chat input area.
+
+### Bug Fixes
+
+- Fixed `/api/memory/short/history` resolving sessions against the process cwd — it now looks up the latest session across workspaces and adopts the session's stored workspace instead of re-registering it under the server cwd
 
 ## [0.2.15] - 2026-08-28
 

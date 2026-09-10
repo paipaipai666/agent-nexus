@@ -2,6 +2,10 @@ interface BackendStatus {
   ready: boolean
   port: number
 }
+interface ElectronProjectStore {
+  projects: string[]
+  lastProject: string | null
+}
 
 interface ElectronAPI {
   minimize: () => void
@@ -9,10 +13,12 @@ interface ElectronAPI {
   close: () => void
   isMaximized: () => Promise<boolean>
   openExternal: (url: string) => void
-  // Workspace (backend cwd) selection
+  // Projects (per-session workspace folders)
   pickDirectory: () => Promise<string | null>
-  getWorkspace: () => Promise<string>
-  setWorkspace: (workspace: string) => Promise<boolean>
+  getProjects: () => Promise<ElectronProjectStore>
+  addProject: (path: string) => Promise<ElectronProjectStore>
+  removeProject: (path: string) => Promise<ElectronProjectStore>
+  setLastProject: (path: string) => Promise<ElectronProjectStore>
 
   // Backend status
   getBackendStatus: () => Promise<BackendStatus>

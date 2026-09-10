@@ -4,9 +4,11 @@ import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderO
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
+import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
 import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
+import ModelPicker from '../components/chat/ModelPicker'
 
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
 // Once per app launch: reopen the most recent session instead of landing on a
@@ -187,6 +189,7 @@ export default function ChatPage() {
   // server default shown on the new-chat screen.
   const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null)
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null)
+  const { selected: selectedProject } = useProjects()
 
   const {
     sessionId, cwd, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
@@ -435,7 +438,7 @@ export default function ChatPage() {
       currentSessionIdRef.current = null
       setGlobalSessionId(null)
       api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
-      api.getConfig().then((config: any) => { if (config.cwd) setCwd(config.cwd) }).catch(() => {})
+      api.getConfig().then((config: any) => { if (config.cwd) setDefaultWorkspace(config.cwd) }).catch(() => {})
       fetchDynamicCommands()
       if (isFirstMount) {
         api.getRecentSessions(5).then((d) => {
@@ -463,6 +466,7 @@ export default function ChatPage() {
       currentSessionIdRef.current = null
       pendingFirstMessageRef.current = null
       setGlobalSessionId(null)
+      setPendingWorkspace(null) // fall back to the selected project
     }
     window.addEventListener('new-chat', handleNewChat)
     return () => window.removeEventListener('new-chat', handleNewChat)
@@ -488,9 +492,10 @@ export default function ChatPage() {
       // Defer the actual send to a useEffect that fires after activeSessionId
       // is set and the WS connection is established by SessionManager.
       pendingFirstMessageRef.current = text
-      api.createSession(undefined, pendingWorkspace).then(({ session_id }) => {
+      api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(({ session_id }) => {
         currentSessionIdRef.current = session_id
         initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
+        setPendingWorkspace(null) // the session carries its folder now
         navigate(`/chat/${session_id}`, { replace: true })
       }).catch((err) => {
         pendingFirstMessageRef.current = null
@@ -503,27 +508,15 @@ export default function ChatPage() {
         navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
       }
     }
-  }, [sendMessage, location.pathname, navigate, initNew, pendingWorkspace])
+  }, [sendMessage, location.pathname, navigate, initNew, pendingWorkspace, selectedProject])
 
-  // Per-session workspace chip — pick the folder this chat runs in.
-  const chipWorkspace = cwd ?? pendingWorkspace ?? defaultWorkspace
+  // Workspace chip — the folder this chat runs in. Fixed once the session
+  // exists; before the first message it defaults to the selected project.
+  const chipWorkspace = cwd ?? pendingWorkspace ?? (sessionId ? null : selectedProject) ?? defaultWorkspace
   const handleWorkspacePick = async () => {
-    const picked = window.electronAPI
-      ? await window.electronAPI.pickDirectory()
-      : window.prompt('该会话的工作区文件夹：', chipWorkspace ?? '')
-    if (!picked) return
-    const sid = currentSessionIdRef.current
-    if (sid) {
-      try {
-        const res = await api.setSessionWorkspace(sid, picked)
-        setCwd(res.cwd)
-      } catch (err) {
-        window.alert(`切换工作区失败：${err instanceof Error ? err.message : err}`)
-      }
-    } else {
-      // No session yet — applied when the first message creates one.
-      setPendingWorkspace(picked)
-    }
+    if (sessionId) return // locked after creation
+    const picked = await pickAndAddProject(chipWorkspace)
+    if (picked) setPendingWorkspace(picked)
   }
 
   const handleSend = () => {
@@ -816,19 +809,32 @@ export default function ChatPage() {
           className="max-w-3xl mx-auto"
           style={{ background: 'var(--surface-1)', border: '2px solid var(--border-strong)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-hard)' }}
         >
-          {/* Workspace chip — this chat's folder */}
+          {/* Workspace chip — this chat's folder; locked once created */}
           <div className="flex items-center px-3 pt-2">
-            <button
-              onClick={handleWorkspacePick}
-              className="flex items-center gap-1.5 px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--surface-2)]"
-              style={{ color: 'var(--fg-muted)' }}
-              title={chipWorkspace ? `工作区：${chipWorkspace}\n点击切换` : '选择该会话的工作区文件夹'}
-            >
-              <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
-              <span className="text-[10px] font-mono truncate max-w-[320px]">
-                {chipWorkspace ?? '选择工作区…'}
-              </span>
-            </button>
+            {sessionId ? (
+              <div
+                className="flex items-center gap-1.5 px-1.5 py-0.5"
+                style={{ color: 'var(--fg-muted)' }}
+                title={chipWorkspace ? `工作区：${chipWorkspace}（创建后不可更改）` : undefined}
+              >
+                <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+                <span className="text-[10px] font-mono truncate max-w-[320px]">
+                  {chipWorkspace ?? '默认工作区'}
+                </span>
+              </div>
+            ) : (
+              <button
+                onClick={handleWorkspacePick}
+                className="flex items-center gap-1.5 px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--surface-2)]"
+                style={{ color: 'var(--fg-muted)' }}
+                title={chipWorkspace ? `工作区：${chipWorkspace}\n发送第一条消息前可更改` : '选择该会话的工作区文件夹'}
+              >
+                <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+                <span className="text-[10px] font-mono truncate max-w-[320px]">
+                  {chipWorkspace ?? '选择工作区…'}
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-end gap-2.5 p-3 pt-1.5">
@@ -859,8 +865,12 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* HUD row — session actions only */}
+          {/* HUD row — model switcher + session actions */}
           <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
+            <ModelPicker
+              currentModel={runtimeStatus?.model_id ?? null}
+              onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}
+            />
             {versionStatus?.head && (
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)' }} />

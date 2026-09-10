@@ -138,14 +138,20 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
 
     if not session_id:
         session_id = ConversationVersionManager.find_latest_session(
-            settings.memory_db_path, workspace
+            settings.memory_db_path, None  # sessions live across workspaces
         )
     if not session_id:
         return {"messages": [], "count": 0}
 
     version = ConversationVersionManager(
         session_id, settings.memory_db_path,
-        workspace_path=workspace,
+        workspace_path=(
+            # Adopt the session's stored workspace — re-registering under the
+            # process cwd would corrupt its conversation_sessions row.
+            ConversationVersionManager.get_session_workspace(
+                settings.memory_db_path, session_id
+            ) or workspace
+        ),
     )
     messages = version.get_messages(limit=limit)
     result = []

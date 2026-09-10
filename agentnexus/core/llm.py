@@ -57,11 +57,12 @@ class AgentLLM:
     ):
         from agentnexus.core.capabilities import _normalize_model_id
         settings = get_settings()
-        self.base_url = base_url or baseUrl or settings.llm_base_url
-        raw_model = (model or settings.llm_model_id).strip()
+        profile = settings.get_active_llm_profile()
+        self.base_url = base_url or baseUrl or profile[1]
+        raw_model = (model or profile[0]).strip()
         self.model = _normalize_model_id(raw_model, self.base_url) if "/" not in raw_model else raw_model
-        self.api_key = api_key or apiKey or settings.llm_api_key.get_secret_value()
-        self.timeout = timeout or settings.llm_timeout
+        self.api_key = api_key or apiKey or profile[2].get_secret_value()
+        self.timeout = timeout or profile[3]
         self.last_error: str = ""
         self.last_truncated: bool = False
         self.last_usage: dict = {}
@@ -72,6 +73,21 @@ class AgentLLM:
         self._session_tracker: SessionCapabilityTracker | None = None
         self.last_reasoning_content: str = ""
         self._non_transient = False
+    def configure(self, *, model: str, base_url: str, api_key: str, timeout: int | None = None) -> None:
+        """Hot-switch the underlying model/provider (shared instance — every
+        agent holding this client picks the change up on its next call)."""
+        from agentnexus.core.capabilities import _normalize_model_id
+
+        self.base_url = base_url
+        raw = model.strip()
+        self.model = _normalize_model_id(raw, base_url) if "/" not in raw else raw
+        self.api_key = api_key
+        if timeout:
+            self.timeout = timeout
+        # Cached capability state is model-specific — force re-detection.
+        self._capabilities = None
+        self._session_tracker = None
+        self.last_error = ""
 
     @property
     def capabilities(self) -> ModelCapabilities:

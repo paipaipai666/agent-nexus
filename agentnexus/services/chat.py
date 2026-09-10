@@ -12,7 +12,7 @@ import logging
 import queue
 import threading
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from agentnexus.core.text_utils import collapse_and_truncate
@@ -112,36 +112,6 @@ class ChatService:
         """Return the session's explicit workspace, or None for the default."""
         handle = self._sessions.get(session_id)
         return handle.workspace if handle else None
-
-    def set_session_workspace(self, session_id: str, workspace: str) -> str:
-        """Bind a session to a workspace folder. Returns the normalized path."""
-        from agentnexus.memory.versioned import ConversationVersionManager
-
-        handle = self._sessions.get(session_id)
-        if handle is None:
-            raise KeyError(f"Unknown session_id: {session_id}")
-        normalized = ConversationVersionManager.normalize_workspace_path(workspace)
-        self._sessions[session_id] = replace(handle, workspace=normalized)
-        # Existing version manager: re-register its row under the new workspace.
-        vm = self._version_managers.get(session_id)
-        if vm is not None:
-            vm.register_session(normalized, getattr(vm, "_profile", ""))
-        else:
-            # No version manager yet (no messages this run) — persist directly so
-            # the binding survives a server restart.
-            from agentnexus.core.config import get_settings
-            ConversationVersionManager.update_session_workspace(
-                get_settings().memory_db_path, session_id, normalized
-            )
-        # Rebind project memory to the new workspace (STM/LTM stay untouched).
-        mm = self._memory_managers.get(session_id)
-        if mm is not None:
-            try:
-                from agentnexus.memory.project import ProjectMemory
-                mm.project = ProjectMemory(normalized)
-            except Exception:
-                logger.debug("Project memory rebind failed for %s", session_id)
-        return normalized
 
     # ── Per-Session Lock & Instance Management (Phase 1) ──────────
 

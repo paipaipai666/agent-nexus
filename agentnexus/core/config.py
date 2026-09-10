@@ -95,6 +95,22 @@ class LLMSettings(BaseModel):
     judge_api_key: SecretStr
     judge_base_url: str
 
+class LLMProvider(BaseModel):
+    """A named, switchable LLM endpoint (Codex-style provider profile)."""
+
+    name: str
+    model_id: str
+    base_url: str
+    api_key: SecretStr = Field(default=SecretStr(""))
+    timeout: int = Field(default=60, ge=1)
+
+    @field_validator("base_url")
+    @classmethod
+    def provider_base_url_must_have_scheme(cls, v: str) -> str:
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("base_url 必须以 http:// 或 https:// 开头")
+        return v
+
 
 class RAGSettings(BaseModel):
     enable_contextual_retrieval: bool
@@ -285,6 +301,10 @@ class Settings(BaseSettings):
     judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
     judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
+    # Switchable provider profiles. When active_provider matches an entry here,
+    # it overrides the flat llm_* fields (which remain the default/fallback).
+    llm_providers: list[LLMProvider] = Field(default_factory=list)
+    active_provider: str = Field(default="")  # "" = legacy flat llm_* config
 
     # ── External Service Keys ─────────────────────────────────────────────
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
@@ -468,11 +488,12 @@ class Settings(BaseSettings):
 
     @property
     def llm(self) -> LLMSettings:
+        model_id, base_url, api_key, timeout = self.get_active_llm_profile()
         return LLMSettings(
-            api_key=self.llm_api_key,
-            model_id=self.llm_model_id,
-            base_url=self.llm_base_url,
-            timeout=self.llm_timeout,
+            api_key=api_key,
+            model_id=model_id,
+            base_url=base_url,
+            timeout=timeout,
             model_tool_calling=self.model_tool_calling,
             model_json_mode=self.model_json_mode,
             model_thinking=self.model_thinking,
@@ -481,6 +502,17 @@ class Settings(BaseSettings):
             judge_api_key=self.judge_api_key,
             judge_base_url=self.judge_base_url,
         )
+    def get_active_llm_profile(self) -> tuple[str, str, SecretStr, int]:
+        """Resolve (model_id, base_url, api_key, timeout) of the active provider.
+
+        Falls back to the flat ``llm_*`` fields when no provider is active or the
+        active name no longer exists in ``llm_providers``.
+        """
+        if self.active_provider:
+            for p in self.llm_providers:
+                if p.name == self.active_provider:
+                    return p.model_id, p.base_url, p.api_key, p.timeout
+        return self.llm_model_id, self.llm_base_url, self.llm_api_key, self.llm_timeout
 
     @property
     def rag(self) -> RAGSettings:

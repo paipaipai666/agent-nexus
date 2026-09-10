@@ -67,6 +67,20 @@ const GROUPS: Record<string, string[]> = {
 }
 
 const EMPTY_PERSONA: PersonaData = { agent_name: '', identity: '', tone: '', projects: [] }
+interface ProviderDraft {
+  name: string
+  model_id: string
+  base_url: string
+  api_key: string   // '' = keep the stored key
+  timeout: string   // string for the input; parsed on save
+}
+interface ProviderInfo {
+  name: string
+  model_id: string
+  base_url: string
+  api_key: string   // '****' when set, '' when empty
+  timeout: number
+}
 
 export default function SettingsPage() {
   const [config, setConfig] = useState<Record<string, any>>({})
@@ -79,6 +93,12 @@ export default function SettingsPage() {
   const [personaDraft, setPersonaDraft] = useState<PersonaData>(EMPTY_PERSONA)
   const [personaSaving, setPersonaSaving] = useState(false)
   const personaEdited = JSON.stringify(persona) !== JSON.stringify(personaDraft)
+  // Model providers state (switchable LLM endpoints)
+  const [savedProviders, setSavedProviders] = useState<ProviderInfo[]>([])
+  const [providersDraft, setProvidersDraft] = useState<ProviderDraft[]>([])
+  const [providersDirty, setProvidersDirty] = useState(false)
+  const [providersSaving, setProvidersSaving] = useState(false)
+  const [activeProvider, setActiveProvider] = useState('')
 
   useEffect(() => {
     api.getConfig().then((cfg) => {
@@ -94,6 +114,14 @@ export default function SettingsPage() {
         setPersonaDraft(p)
       }
     }).catch(console.error)
+    api.getLlmProviders().then((d) => {
+      const rows: ProviderDraft[] = (d.providers || []).map(p => ({
+        name: p.name, model_id: p.model_id, base_url: p.base_url, api_key: '', timeout: String(p.timeout ?? 60),
+      }))
+      setSavedProviders(d.providers || [])
+      setProvidersDraft(rows)
+      setActiveProvider(d.active || '')
+    }).catch(() => {})
   }, [])
 
   const handlePersonaField = useCallback((field: keyof Omit<PersonaData, 'projects'>, value: string) => {
@@ -137,6 +165,56 @@ export default function SettingsPage() {
   const handlePersonaReset = useCallback(() => {
     setPersonaDraft(persona)
   }, [persona])
+  const handleProviderField = (index: number, field: keyof ProviderDraft, value: string) => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
+  const addProviderRow = () => {
+    setProvidersDraft(prev => [...prev, { name: '', model_id: '', base_url: '', api_key: '', timeout: '60' }])
+    setProvidersDirty(true)
+  }
+
+  const removeProviderRow = (index: number) => {
+    setProvidersDraft(prev => prev.filter((_, i) => i !== index))
+    setProvidersDirty(true)
+  }
+
+  const handleProvidersSave = async () => {
+    setProvidersSaving(true); setError(null)
+    try {
+      await api.updateLlmProviders(providersDraft.map(r => ({
+        name: r.name, model_id: r.model_id, base_url: r.base_url,
+        ...(r.api_key ? { api_key: r.api_key } : {}),
+        timeout: parseInt(r.timeout, 10) || 60,
+      })))
+      setProvidersDirty(false)
+      // Reload so key masking + normalized values come from the server
+      const d = await api.getLlmProviders()
+      setSavedProviders(d.providers || [])
+      setProvidersDraft((d.providers || []).map(p => ({
+        name: p.name, model_id: p.model_id, base_url: p.base_url, api_key: '', timeout: String(p.timeout ?? 60),
+      })))
+    } catch (e) {
+      setError(`Failed to save providers: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setProvidersSaving(false)
+    }
+  }
+
+  const handleUseProvider = async (name: string) => {
+    setError(null)
+    try {
+      await api.setActiveLlmProvider(name)
+      setActiveProvider(name)
+    } catch (e) {
+      setError(`切换模型失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   const handleChange = (key: string, value: string) => { setEdited(prev => ({ ...prev, [key]: value })); setError(null) }
   const handleSave = async (key: string) => {
@@ -266,6 +344,79 @@ export default function SettingsPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ── Model Providers ───────────────────────────────── */}
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Model Providers</h2>
+            <button
+              onClick={addProviderRow}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
+              style={{ background: 'var(--surface-3)', color: 'var(--fg)' }}
+            >
+              <Plus size={12} /> Add
+            </button>
+          </div>
+          <p className="text-[11px] mb-3" style={{ color: 'var(--fg-faint)' }}>
+            可切换的模型端点；在聊天输入框左下角随时切换。未选择时使用下方 LLM 组的 llm_* 默认配置。
+          </p>
+          {providersDraft.length === 0 && (
+            <p className="text-xs italic" style={{ color: 'var(--fg-faint)' }}>No providers configured</p>
+          )}
+          {providersDraft.map((p, idx) => (
+            <div key={idx} className="flex items-center gap-2 mb-1.5">
+              {activeProvider === p.name && p.name ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 text-center" style={{ background: 'var(--green-muted)', color: 'var(--green)' }}>Active</span>
+              ) : (
+                <button
+                  onClick={() => handleUseProvider(p.name)}
+                  disabled={providersDirty || !p.name.trim()}
+                  className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 transition-colors disabled:opacity-40"
+                  style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}
+                  title={providersDirty ? '先保存再切换' : '切换为该模型'}
+                >
+                  Use
+                </button>
+              )}
+              <input type="text" value={p.name} onChange={e => handleProviderField(idx, 'name', e.target.value)} className="input-field w-24 shrink-0 font-mono text-xs" placeholder="名称" />
+              <input type="text" value={p.model_id} onChange={e => handleProviderField(idx, 'model_id', e.target.value)} className="input-field w-44 shrink-0 font-mono text-xs" placeholder="model_id（如 openai/gpt-4o）" />
+              <input type="text" value={p.base_url} onChange={e => handleProviderField(idx, 'base_url', e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="base_url" />
+              <input
+                type="password"
+                value={p.api_key}
+                onChange={e => handleProviderField(idx, 'api_key', e.target.value)}
+                className="input-field w-28 shrink-0 font-mono text-xs"
+                placeholder={savedProviders.find(s => s.name === p.name)?.api_key === '****' ? '****（留空保持不变）' : 'api_key'}
+              />
+              <input type="text" value={p.timeout} onChange={e => handleProviderField(idx, 'timeout', e.target.value)} className="input-field w-14 shrink-0 font-mono text-xs" placeholder="超时" title="timeout（秒）" />
+              <button
+                onClick={() => removeProviderRow(idx)}
+                className="p-1.5 rounded-md transition-colors shrink-0"
+                style={{ color: 'var(--fg-faint)' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            {providersDirty && (
+              <button
+                onClick={handleProvidersSave}
+                disabled={providersSaving}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                style={{ background: 'var(--accent)', color: 'white' }}
+              >
+                {providersSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                Save Providers
+              </button>
+            )}
+            <span className="text-[10px] ml-auto" style={{ color: 'var(--fg-faint)' }}>
+              当前生效：{activeProvider || '默认（llm_* 配置）'}
+            </span>
           </div>
         </div>
 

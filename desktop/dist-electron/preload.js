@@ -1,1 +1,31 @@
-"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("electronAPI",{minimize:()=>e.ipcRenderer.send("window-minimize"),maximize:()=>e.ipcRenderer.send("window-maximize"),close:()=>e.ipcRenderer.send("window-close"),isMaximized:()=>e.ipcRenderer.invoke("window-is-maximized"),openExternal:r=>e.ipcRenderer.send("open-external",r),pickDirectory:()=>e.ipcRenderer.invoke("pick-directory"),getWorkspace:()=>e.ipcRenderer.invoke("get-workspace"),setWorkspace:r=>e.ipcRenderer.invoke("set-workspace",r),getBackendStatus:()=>e.ipcRenderer.invoke("get-backend-status"),onBackendReady:r=>{const n=()=>r();return e.ipcRenderer.on("backend-ready",n),()=>{e.ipcRenderer.removeListener("backend-ready",n)}},onBackendError:r=>{const n=(d,i)=>r(i);return e.ipcRenderer.on("backend-error",n),()=>{e.ipcRenderer.removeListener("backend-error",n)}}});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("electronAPI", {
+  minimize: () => electron.ipcRenderer.send("window-minimize"),
+  maximize: () => electron.ipcRenderer.send("window-maximize"),
+  close: () => electron.ipcRenderer.send("window-close"),
+  isMaximized: () => electron.ipcRenderer.invoke("window-is-maximized"),
+  openExternal: (url) => electron.ipcRenderer.send("open-external", url),
+  // Projects (per-session workspace folders)
+  pickDirectory: () => electron.ipcRenderer.invoke("pick-directory"),
+  getProjects: () => electron.ipcRenderer.invoke("get-projects"),
+  addProject: (path) => electron.ipcRenderer.invoke("add-project", path),
+  removeProject: (path) => electron.ipcRenderer.invoke("remove-project", path),
+  setLastProject: (path) => electron.ipcRenderer.invoke("set-last-project", path),
+  // Backend status
+  getBackendStatus: () => electron.ipcRenderer.invoke("get-backend-status"),
+  onBackendReady: (callback) => {
+    const handler = () => callback();
+    electron.ipcRenderer.on("backend-ready", handler);
+    return () => {
+      electron.ipcRenderer.removeListener("backend-ready", handler);
+    };
+  },
+  onBackendError: (callback) => {
+    const handler = (_, message) => callback(message);
+    electron.ipcRenderer.on("backend-error", handler);
+    return () => {
+      electron.ipcRenderer.removeListener("backend-error", handler);
+    };
+  }
+});

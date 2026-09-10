@@ -113,10 +113,6 @@ class CreateSessionRequest(BaseModel):
     workspace: str | None = None  # per-session workspace folder; default = server cwd
 
 
-class SessionWorkspaceUpdateRequest(BaseModel):
-    path: str
-
-
 class SendMessageRequest(BaseModel):
     session_id: str
     content: str
@@ -158,23 +154,6 @@ def create_session(req: CreateSessionRequest | None = None):
         "session_id": handle.id, "skill": handle.skill, "profile": handle.profile,
         "workspace": handle.workspace,
     }
-
-
-@router.put("/session/{session_id}/workspace")
-def set_session_workspace(session_id: str, req: SessionWorkspaceUpdateRequest):
-    """Bind a chat session to its own workspace folder."""
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
-    raw = (req.path or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="path is required")
-    resolved = _resolve_workspace_dir(raw)
-    try:
-        cwd = runtime.services.chat.set_session_workspace(session_id, resolved)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return {"status": "updated", "session_id": session_id, "cwd": cwd}
 
 
 @router.post("/chat")

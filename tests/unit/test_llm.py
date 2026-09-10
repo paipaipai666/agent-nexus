@@ -1,6 +1,7 @@
 """Tests for agentnexus.core.llm."""
 
 from unittest.mock import patch
+from pydantic import SecretStr
 
 from agentnexus.core.llm import AgentLLM, _preview, get_default_llm
 from agentnexus.core.providers.base import StreamResult
@@ -55,6 +56,10 @@ class TestAgentLLMInit:
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://default.url"
         mock_settings.return_value.llm_timeout = 60
+        # AgentLLM resolves the active provider profile (flat fields are the fallback)
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "default-model", "https://default.url", SecretStr("key"), 60,
+        )
 
         llm = AgentLLM()
         assert llm.model == "openai/default-model"  # normalized with default provider
@@ -83,6 +88,9 @@ class TestThinkNoApiKey:
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = ""
         mock_settings.return_value.llm_base_url = ""
         mock_settings.return_value.llm_timeout = 60
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "model", "", SecretStr(""), 60,
+        )
 
         llm = AgentLLM()
         assert llm.api_key == ""

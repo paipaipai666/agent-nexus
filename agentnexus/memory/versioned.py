@@ -432,23 +432,6 @@ class ConversationVersionManager:
             conn.close()
 
     @classmethod
-    def update_session_workspace(cls, db_path: str, session_id: str, workspace_path: str) -> None:
-        """Rebind a session row to a different workspace folder (no-op if absent)."""
-        conn = sqlite3.connect(db_path)
-        try:
-            try:
-                conn.executescript(SCHEMA)
-            except sqlite3.OperationalError:
-                return
-            conn.execute(
-                "UPDATE conversation_sessions SET workspace_path = ? WHERE session_id = ?",
-                (cls.normalize_workspace_path(workspace_path), session_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    @classmethod
     def update_session_preview(cls, db_path: str, session_id: str, preview: str) -> None:
         """Update the preview text for a session. Typically called on first user message."""
         conn = sqlite3.connect(db_path)

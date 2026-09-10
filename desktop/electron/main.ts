@@ -17,25 +17,55 @@ const HEALTH_CHECK_TIMEOUT_MS = 120_000
 function isDev(): boolean {
   return !!process.env.VITE_DEV_SERVER_URL
 }
-// ── Workspace (backend process cwd = session/tool workspace) ──────
+// ── Projects (per-session workspace folders, Codex-style) ──────────
+// Each chat session binds to a project folder at creation; there is no
+// global workspace switch. Persisted in userData/workspace.json.
+
+interface ProjectStore {
+  projects: string[]
+  lastProject: string | null
+}
 
 function workspaceFile(): string {
   return path.join(app.getPath('userData'), 'workspace.json')
 }
 
-function loadSavedWorkspace(): string | null {
-  try {
-    const data = JSON.parse(fs.readFileSync(workspaceFile(), 'utf-8'))
-    const saved = typeof data.workspace === 'string' ? data.workspace : null
-    if (saved && fs.existsSync(saved)) return saved
-  } catch { /* no saved workspace yet */ }
-  return null
+function projectKey(p: string): string {
+  // Match the backend's workspace normalization: casefold the drive letter
+  // on Windows so dedupe/compare is stable.
+  const resolved = path.resolve(p)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 
-function getWorkspace(): string {
-  // Default to the user's home dir — a packaged app's inherited cwd would
-  // otherwise be the install dir, which can be read-only.
-  return loadSavedWorkspace() ?? os.homedir()
+function loadStore(): ProjectStore {
+  try {
+    const data = JSON.parse(fs.readFileSync(workspaceFile(), 'utf-8'))
+    if (Array.isArray(data.projects)) {
+      return {
+        projects: data.projects.filter((p: unknown): p is string => typeof p === 'string' && !!p),
+        lastProject: typeof data.lastProject === 'string' ? data.lastProject : null,
+      }
+    }
+    // Migrate the legacy { workspace } single-global-workspace format.
+    if (typeof data.workspace === 'string' && data.workspace) {
+      return { projects: [data.workspace], lastProject: data.workspace }
+    }
+  } catch { /* no saved store yet */ }
+  return { projects: [], lastProject: null }
+}
+
+function saveStore(store: ProjectStore): void {
+  try {
+    fs.writeFileSync(workspaceFile(), JSON.stringify(store))
+  } catch { /* read-only userData — non-fatal */ }
+}
+
+function getProcessCwd(): string {
+  // The backend process still needs a cwd (fallback for sessions without an
+  // explicit workspace). Default to the user's home dir — a packaged app's
+  // inherited cwd would otherwise be the install dir, which can be read-only.
+  const { lastProject } = loadStore()
+  return lastProject && fs.existsSync(lastProject) ? lastProject : os.homedir()
 }
 // PyInstaller onefile 的 bootloader 会派生子进程；只 kill 父进程会把真正的后端
 // 留在 %TEMP%\_MEI 里继续占端口。Windows 下用 taskkill /T 终止整棵进程树。
@@ -88,7 +118,7 @@ function startBackend(): Promise<boolean> {
       return
     }
 
-    const workspace = getWorkspace()
+    const workspace = getProcessCwd()
     console.log(`Starting backend: ${binaryPath} (cwd: ${workspace})`)
     backendProcess = spawn(binaryPath, ['serve', '--port', String(BACKEND_PORT), '--no-auth'], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -228,22 +258,43 @@ ipcMain.handle('pick-directory', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '选择工作区文件夹',
-    defaultPath: getWorkspace(),
+    defaultPath: getProcessCwd(),
     properties: ['openDirectory', 'createDirectory'],
   })
   return result.canceled ? null : (result.filePaths[0] ?? null)
 })
 
-ipcMain.handle('get-workspace', () => getWorkspace())
+ipcMain.handle('get-projects', () => loadStore())
 
-ipcMain.handle('set-workspace', (_, workspace: string) => {
-  if (typeof workspace !== 'string' || !workspace) return false
-  try {
-    fs.writeFileSync(workspaceFile(), JSON.stringify({ workspace }))
-    return true
-  } catch {
-    return false
+ipcMain.handle('add-project', (_, projectPath: string) => {
+  const store = loadStore()
+  if (typeof projectPath !== 'string' || !projectPath.trim()) return store
+  const resolved = path.resolve(projectPath.trim())
+  const key = projectKey(resolved)
+  store.projects = [resolved, ...store.projects.filter((p) => projectKey(p) !== key)]
+  store.lastProject = resolved
+  saveStore(store)
+  return store
+})
+
+ipcMain.handle('remove-project', (_, projectPath: string) => {
+  const store = loadStore()
+  if (typeof projectPath !== 'string' || !projectPath) return store
+  const key = projectKey(projectPath)
+  store.projects = store.projects.filter((p) => projectKey(p) !== key)
+  if (store.lastProject && projectKey(store.lastProject) === key) {
+    store.lastProject = store.projects[0] ?? null
   }
+  saveStore(store)
+  return store
+})
+
+ipcMain.handle('set-last-project', (_, projectPath: string) => {
+  const store = loadStore()
+  if (typeof projectPath !== 'string' || !projectPath) return store
+  store.lastProject = projectPath
+  saveStore(store)
+  return store
 })
 
 // Open external links in browser (http/https only)

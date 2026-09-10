@@ -2,7 +2,7 @@ import { useSession } from '../session/SessionProvider'
 import { Folder, Wrench, ListTodo } from 'lucide-react'
 
 export default function StatusBar() {
-  const { sessionId, modelName, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd, toolCount, todoCount } = useSession()
+  const { sessionId, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd, toolCount, todoCount } = useSession()
 
   return (
     <div
@@ -47,12 +47,6 @@ export default function StatusBar() {
             <ListTodo size={10} />
             {todoCount} todos
           </StatusItem>
-          <Sep />
-        </>
-      )}
-      {modelName && (
-        <>
-          <StatusItem>{modelName}</StatusItem>
           <Sep />
         </>
       )}

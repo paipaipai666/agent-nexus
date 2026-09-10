@@ -56,7 +56,7 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
     agent, mm = _resolve_session_refs(runtime, session_id)
 
     # Model info
-    model_id = getattr(agent, "model_id", None) or getattr(settings, "llm_model_id", "unknown")
+    model_id = getattr(agent, "model_id", None) or settings.get_active_llm_profile()[0]
 
     # Token usage — prefer in-memory agent stats; fall back to DB for historical sessions
     usage = {}

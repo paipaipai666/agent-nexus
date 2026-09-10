@@ -172,7 +172,7 @@ class MemoryManager:
         """Query LiteLLM for the current model's max input tokens."""
         try:
             from litellm import get_model_info
-            model_id = get_settings().llm_model_id
+            model_id = get_settings().get_active_llm_profile()[0]
             info = get_model_info(model_id)
             return info.get("max_input_tokens") or None
         except Exception as e:

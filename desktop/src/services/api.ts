@@ -72,12 +72,6 @@ export const api = {
       `/api/session/${sessionId}`
     ),
 
-  setSessionWorkspace: (sessionId: string, path: string) =>
-    request<{ status: string; session_id: string; cwd: string }>(`/api/session/${sessionId}/workspace`, {
-      method: 'PUT',
-      body: JSON.stringify({ path }),
-    }),
-
   getSessions: () =>
     request<{ sessions: Array<{ session_id: string; skill: string | null }> }>('/api/sessions'),
 
@@ -91,12 +85,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ skill: sessionId }),  // backend reuses skill field for session_id
     }),
-  setWorkspace: (path: string) =>
-    request<{ status: string; cwd: string }>('/api/config/workspace', {
-      method: 'PUT',
-      body: JSON.stringify({ path }),
-    }),
-
   // Chat
   sendMessage: (sessionId: string, content: string) =>
     request<{ run_id: string; answer: string; status: string }>('/api/chat', {
@@ -223,6 +211,25 @@ export const api = {
     request<{ status: string }>('/api/config/persona', {
       method: 'PUT',
       body: JSON.stringify(persona),
+    }),
+  // LLM providers (multi-provider switchable profiles)
+  getLlmProviders: () =>
+    request<{
+      providers: Array<{ name: string; model_id: string; base_url: string; api_key: string; timeout: number }>
+      active: string
+      legacy: { model_id: string; base_url: string; has_api_key: boolean }
+    }>('/api/config/llm/providers'),
+
+  updateLlmProviders: (providers: Array<{ name: string; model_id: string; base_url: string; api_key?: string; timeout?: number }>) =>
+    request<{ status: string; count: number }>('/api/config/llm/providers', {
+      method: 'PUT',
+      body: JSON.stringify({ providers }),
+    }),
+
+  setActiveLlmProvider: (name: string) =>
+    request<{ status: string; active: string; model_id: string }>('/api/config/llm/active', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
     }),
 
   // Stats
