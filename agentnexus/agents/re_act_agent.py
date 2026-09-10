@@ -308,9 +308,6 @@ class ReActAgent:
                 ctx.messages[:len(new_messages)] = new_messages
             memory_manager._on_after_compact = rebuild
 
-        if run_state.current_step >= run_state.max_steps:
-            return [ReActEvent(ReActEventType.ABORT)]
-
         return [ReActEvent(ReActEventType.STRATEGY_READY,
                            {"strategy": run_state.strategy.name})]
 
@@ -320,6 +317,9 @@ class ReActAgent:
 
     def _on_llm_params_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """PREPARE_LLM_CALL + LLM_PARAMS_READY -> set params, call LLM."""
+        # 步数上限必须在递增处检查——此前只在 _on_init（step=0）检查，是死代码
+        if ctx.run_state.current_step >= ctx.run_state.max_steps:
+            return [ReActEvent(ReActEventType.ABORT)]
         # 关闭上一步的 plan_node span（如果存在）
         prev_span = ctx.run_state._current_step_span
         if prev_span is not None:
@@ -441,12 +441,44 @@ class ReActAgent:
 
         text = ctx.last_response_text or ctx.last_reasoning
         if text:
+            recovered = self._recover_protocol_json(ctx)
+            if recovered is not None:
+                return recovered
             self._emit_answer_thought(ctx)
             ctx.last_answer = text
             return [ReActEvent(ReActEventType.NO_TOOLS,
                                {"text": text})]
 
         return [ReActEvent(ReActEventType.NO_TOOLS_NO_TEXT)]
+
+    def _recover_protocol_json(self, ctx: ExecutionContext) -> list[ReActEvent] | None:
+        """模型把 ReAct 协议 JSON 写进正文（native 通道漏接）时还原语义。
+
+        - {"tool": ..., "params": ...} 且工具存在 → 还原为真实工具调用继续执行
+        - 显式 {"answer": ...} → 提取答案文本
+        返回 None 表示正文不是协议 JSON（含普通 JSON 数据），按原样作答。
+        """
+        text = ctx.last_response_text
+        if not text or "{" not in text:
+            return None
+        parsed = json_helpers.robust_json_parse(text)
+        ptype = parsed.get("type")
+        if ptype == "tool_call" and self.tool_executor.get_tool(parsed["tool"]) is not None:
+            ctx.tool_state.pending_tool_calls = [{
+                "id": f"recovered_{ctx.run_state.current_step}",
+                "name": parsed["tool"],
+                "arguments": parsed["params"],
+            }]
+            self._on_native_tool_calls(ctx, "")
+            return [ReActEvent(ReActEventType.TOOLS_FOUND,
+                               {"tool_calls": list(ctx.tool_state.pending_tool_calls),
+                                "thought": ""})]
+        # 仅接受显式 "answer" 键——单键/多键数据 JSON（如 {"温度": "26°C"}）原样保留
+        if ptype == "answer" and '"answer"' in text:
+            self._emit_answer_thought(ctx)
+            ctx.last_answer = parsed["text"]
+            return [ReActEvent(ReActEventType.NO_TOOLS, {"text": parsed["text"]})]
+        return None
 
     def _on_native_tool_calls(self, ctx: ExecutionContext, thought: str = None):
         """Record tool_calls into step, append assistant message."""
@@ -659,8 +691,10 @@ class ReActAgent:
     # ── Terminal states ──
 
     def _on_max_steps_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """MAX_STEPS + ABORT -> output warning, terminate."""
+        """达到步数上限 -> 提示并给出诚实的兜底答案， terminate."""
         self._output("已达到最大步数，流程终止。")
+        if not ctx.last_answer:
+            ctx.last_answer = "（已达到最大步数限制，任务未完成。请缩小问题范围或分步提问。）"
         return []
 
     def _on_error_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:

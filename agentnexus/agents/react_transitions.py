@@ -7,13 +7,14 @@ from agentnexus.agents.react_types import Transition
 TRANSFER_TABLE: list[Transition] = [
     # ── INIT ──
     Transition(S.INIT, E.START, S.SELECT_STRATEGY, "_on_init"),
-    # (step >= max is checked inside _on_init; it emits ABORT directly)
 
     # ── SELECT_STRATEGY ──
     Transition(S.SELECT_STRATEGY, E.STRATEGY_READY, S.PREPARE_LLM_CALL, "_on_strategy_ready"),
 
     # ── PREPARE_LLM_CALL ──
     Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.CALL_LLM, "_on_llm_params_ready"),
+    # 步数上限在 _on_llm_params_ready 递增处检查，超限直接发 ABORT
+    Transition(S.PREPARE_LLM_CALL, E.ABORT, S.DONE, "_on_max_steps_abort"),
 
     # ── CALL_LLM ──
     Transition(S.CALL_LLM, E.LLM_RESPONSE, S.RECEIVE_RESPONSE, "_on_llm_response"),

@@ -37,6 +37,40 @@ def format_reason(entry: SkillEntry, matched: list[str], score: float) -> str:
     return f"{entry.qualified_id} matched metadata terms: {terms} (score={score:.1f})"
 
 
+def _clean_matched_terms(route: SkillRoute) -> set[str]:
+    """Query-side terms a candidate matched (unwrap fuzzy markers, drop semantic)."""
+    terms: set[str] = set()
+    for term in route.matched_terms:
+        if term.startswith("semantic_match("):
+            continue
+        if term.startswith("fuzzy("):
+            term = term[len("fuzzy("):].split("→")[0]
+        terms.add(term)
+    return terms
+
+
+def _select_distinct_intent_candidates(
+    text: str, candidates: list[SkillRoute],
+) -> list[SkillRoute]:
+    """Pick candidates covering disjoint query terms, ordered by first mention.
+
+    Disjointness prevents one intent with overlapping vocabulary from being
+    split into two; position ordering makes the first-mentioned intent primary.
+    """
+    selected: list[tuple[int, SkillRoute]] = []
+    used_terms: set[str] = set()
+    for cand in candidates:
+        terms = _clean_matched_terms(cand)
+        if not terms or not terms.isdisjoint(used_terms):
+            continue
+        positions = [text.find(t) for t in terms if text.find(t) >= 0]
+        earliest = min(positions) if positions else len(text)
+        selected.append((earliest, cand))
+        used_terms |= terms
+    selected.sort(key=lambda x: x[0])
+    return [cand for _, cand in selected]
+
+
 class SkillRecommender:
     """Rank skills by relevance to a user query.
 
@@ -65,10 +99,17 @@ class SkillRecommender:
         self.index = SkillRouterIndex.build([], compute_embeddings=False)
         self._query_cache: dict[str, list[float]] = {}
 
-    def rebuild(self, entries: list[SkillEntry]) -> None:
+    def rebuild(
+        self,
+        entries: list[SkillEntry],
+        *,
+        compute_embeddings: bool | None = None,
+        embeddings: list[tuple[float, ...]] | None = None,
+    ) -> None:
         self.index = build_index(
             entries,
-            compute_embeddings=self.use_embeddings,
+            compute_embeddings=self.use_embeddings if compute_embeddings is None else compute_embeddings,
+            embeddings=embeddings,
         )
         self._query_cache.clear()
 
@@ -236,6 +277,16 @@ class SkillRecommender:
         best = candidates[0]
         intent = extract_intent_signals(text, set(tokenize(text)))
         confidence = self._compute_confidence(candidates, intent)
+        # Multi-intent: parallel connector + ≥2 candidates with disjoint matched
+        # terms → user asked for several things; order by first mention in text.
+        if intent.priority_mode == "parallel" and len(candidates) > 1:
+            selected = _select_distinct_intent_candidates(text, candidates)
+            if len(selected) > 1:
+                return SkillRouteDecision(
+                    selected[0], tuple(candidates), False, selected[0].reason,
+                    mode="multi_intent", confidence=confidence,
+                    secondary_skills=tuple(c.entry.qualified_id for c in selected[1:]),
+                )
         # Detect ambiguity: top candidates too close
         if len(candidates) > 1 and best.score - candidates[1].score < self.min_score * 0.375:
             # Use intent to disambiguate

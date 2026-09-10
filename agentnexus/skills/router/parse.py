@@ -31,7 +31,7 @@ def extract_intent_signals(
 
     # Detect parallel connectors
     if not connectors:
-        for sep in ["并", "同时", "以及", " and "]:
+        for sep in ["并", "同时", "以及", " and ", "顺便", "另外"]:
             idx = text_lower.find(sep)
             if idx >= 0:
                 connectors.append((sep, idx))
