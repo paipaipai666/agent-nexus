@@ -215,6 +215,28 @@ def kb_list():
         )
 
 
+@kb_app.command("reconcile")
+def kb_reconcile(
+    dry_run: bool = typer.Option(False, "--dry-run", help="只报告不一致数量，不修复"),
+):
+    """对账 catalog 与向量库：补删孤儿向量，补嵌缺失向量。"""
+    from agentnexus.rag.kb_service import reconcile_kb
+
+    settings = get_settings()
+    namespace = settings.rag_default_namespace
+    stats = reconcile_kb(namespace, repair=not dry_run)
+    if dry_run:
+        console.print(
+            f"[yellow]待修复:[/yellow] 孤儿向量 {stats['orphans_deleted']} 个, "
+            f"缺失向量 {stats['vectors_reembedded']} 个（未做修改）"
+        )
+    else:
+        console.print(
+            f"[green]对账完成:[/green] 补删孤儿向量 {stats['orphans_deleted']} 个, "
+            f"补嵌缺失向量 {stats['vectors_reembedded']} 个"
+        )
+
+
 @kb_app.command("search")
 def kb_search_command(
     query: str = typer.Argument(..., help="搜索关键词"),

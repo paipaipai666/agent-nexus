@@ -95,6 +95,169 @@ class TestDeleteDocumentAndVectors:
         assert catalog.get_document("doc_v1") is None
 
 
+class TestDeleteFailureModes:
+    """双写一致性：Chroma-first 顺序在各失败点下的实际终态。
+
+    设计现实（代码核实）：删除顺序是 先 Chroma 后 catalog，
+    无 embedding_synced 式补偿标记、无对账任务——一致性依赖
+    「异常可见 + 重试幂等收敛」。
+    """
+
+    def test_chroma_failure_aborts_before_catalog_touch(self, catalog):
+        """Chroma 删除抛错 → catalog 不动 → 两侧都在 → 可安全重试。"""
+        _seed(catalog, "doc1", n_chunks=2)
+        with patch("agentnexus.rag.kb_service.delete_documents",
+                   side_effect=RuntimeError("chroma down")):
+            from agentnexus.rag.kb_service import delete_document_and_vectors
+            with pytest.raises(RuntimeError, match="chroma down"):
+                delete_document_and_vectors("default", "doc1")
+        assert catalog.get_document("doc1") is not None
+        assert catalog.count_chunks("doc1") == 2, "Chroma 失败时 catalog 必须原样保留"
+
+    def test_catalog_failure_after_chroma_success_then_retry_heals(self, catalog):
+        """Chroma 成功 + catalog 抛错 → 中间态（向量已删/目录还在）→ 重试幂等收敛。"""
+        _seed(catalog, "doc1", n_chunks=2)
+        chroma_calls: list[list[str]] = []
+
+        def fake_chroma_delete(ids=None, where=None, namespace=None, **kw):
+            chroma_calls.append(list(ids or []))
+
+        with patch("agentnexus.rag.kb_service.delete_documents",
+                   side_effect=fake_chroma_delete):
+            with patch.object(catalog, "delete_document",
+                              side_effect=RuntimeError("db locked")):
+                from agentnexus.rag.kb_service import delete_document_and_vectors
+                with pytest.raises(RuntimeError, match="db locked"):
+                    delete_document_and_vectors("default", "doc1")
+
+        # 中间态确认：向量已删，catalog 还在（文档仍列出，但 dense 路已搜不到）
+        assert chroma_calls == [["doc1_ch0", "doc1_ch1"]]
+        assert catalog.get_document("doc1") is not None
+
+        # 重试同一操作：Chroma 幂等重删无副作用，catalog 这次成功 → 终态一致
+        with patch("agentnexus.rag.kb_service.delete_documents",
+                   side_effect=fake_chroma_delete):
+            deleted = delete_document_and_vectors("default", "doc1")
+        assert deleted == 2
+        assert catalog.get_document("doc1") is None
+        assert catalog.count_chunks("doc1") == 0
+
+    def test_reingest_path_chroma_failure_keeps_old_version(self, catalog):
+        """重摄入路径：旧版本 Chroma 删除失败 → 旧版本 catalog 不动，新版本未写入。"""
+        _seed(catalog, "doc_v1", n_chunks=2)
+        with patch("agentnexus.rag.kb_service.delete_documents",
+                   side_effect=RuntimeError("chroma down")):
+            from agentnexus.rag.kb_service import delete_existing_source_versions
+            with pytest.raises(RuntimeError, match="chroma down"):
+                delete_existing_source_versions("default", "src_doc_v1")
+        assert catalog.get_document("doc_v1") is not None
+        assert catalog.count_chunks("doc_v1") == 2
+
+
+class TestReconcileKb:
+    """对账：孤儿向量补删 + 缺失向量补嵌，双向修复。"""
+
+    def _fake_collection(self, ids: list[str]):
+        col = MagicMock()
+        col.get.return_value = {"ids": ids}
+        return col
+
+    def test_orphans_deleted_missing_reembedded(self, catalog):
+        _seed(catalog, "doc1", n_chunks=2)  # catalog: doc1_ch0, doc1_ch1
+        # Chroma 侧：doc1_ch0（正常）+ ghost_ch（孤儿）；doc1_ch1 缺失
+        fake_col = self._fake_collection(["doc1_ch0", "ghost_ch"])
+        with patch("agentnexus.rag.kb_service.get_collection", return_value=fake_col), \
+             patch("agentnexus.rag.kb_service.delete_documents") as mock_del, \
+             patch("agentnexus.rag.kb_service.upsert_documents") as mock_upsert:
+            from agentnexus.rag.kb_service import reconcile_kb
+            stats = reconcile_kb("default")
+        assert stats == {"orphans_deleted": 1, "vectors_reembedded": 1}
+        mock_del.assert_called_once_with(ids=["ghost_ch"], namespace="default")
+        upsert_kwargs = mock_upsert.call_args.kwargs
+        assert upsert_kwargs["ids"] == ["doc1_ch1"]
+        assert upsert_kwargs["namespace"] == "default"
+
+    def test_dry_run_reports_without_repair(self, catalog):
+        _seed(catalog, "doc1", n_chunks=1)
+        fake_col = self._fake_collection(["ghost_ch"])
+        with patch("agentnexus.rag.kb_service.get_collection", return_value=fake_col), \
+             patch("agentnexus.rag.kb_service.delete_documents") as mock_del, \
+             patch("agentnexus.rag.kb_service.upsert_documents") as mock_upsert:
+            from agentnexus.rag.kb_service import reconcile_kb
+            stats = reconcile_kb("default", repair=False)
+        assert stats == {"orphans_deleted": 1, "vectors_reembedded": 1}
+        mock_del.assert_not_called()
+        mock_upsert.assert_not_called()
+
+    def test_consistent_state_is_noop(self, catalog):
+        _seed(catalog, "doc1", n_chunks=2)
+        fake_col = self._fake_collection(["doc1_ch0", "doc1_ch1"])
+        with patch("agentnexus.rag.kb_service.get_collection", return_value=fake_col), \
+             patch("agentnexus.rag.kb_service.delete_documents") as mock_del, \
+             patch("agentnexus.rag.kb_service.upsert_documents") as mock_upsert:
+            from agentnexus.rag.kb_service import reconcile_kb
+            stats = reconcile_kb("default")
+        assert stats == {"orphans_deleted": 0, "vectors_reembedded": 0}
+        mock_del.assert_not_called()
+        mock_upsert.assert_not_called()
+
+
+class TestMidStateSearchLeak:
+    """泄露实证：中间态（向量已删、catalog 还在）下，"已删除"文档仍可被检索到。
+
+    检索是双路的（dense=Chroma + sparse=catalog BM25）。dense 路已查不到，
+    但 sparse 路从 catalog 重建，照常命中——删除动作对外表现为没删干净。
+    """
+
+    def test_midstate_document_still_searchable_via_sparse(self, catalog, monkeypatch):
+        # 语料要有多个文档，BM25 的 idf 才不退化（单文档语料所有词 idf≤0）
+        for i in range(4):
+            _seed(catalog, f"doc_noise{i}", n_chunks=1)
+        _seed(catalog, "doc_secret", n_chunks=1)
+        # 给 secret chunk 换上独特内容
+        from agentnexus.rag.models import ChunkRecord
+        from agentnexus.storage.chroma import resolve_collection_name
+        kb_id = resolve_collection_name(namespace="default")
+        catalog.upsert_chunks([ChunkRecord(
+            chunk_id="doc_secret_ch0", kb_id=kb_id, document_id="doc_secret",
+            document_version=1, chunk_index=0,
+            text="内部机密配方 X-42 的完整工艺流程")])
+        # 模拟中间态：catalog 完整，Chroma 向量已删（dense 候选为空）
+        monkeypatch.setattr(
+            "agentnexus.rag.retriever.get_knowledge_base_catalog", lambda: catalog)
+        from agentnexus.rag.retriever import HybridRetriever
+        retriever = HybridRetriever(namespace="default")
+        retriever.rebuild_from_catalog()
+        # dense 为空 = Chroma 侧已删；仅 sparse 路工作
+        results = retriever.search("机密配方", dense_results=[], min_score=0.0)
+        leaked = [r for r in results if r.id.startswith("doc_secret")]
+        assert leaked, "中间态下 sparse 路仍能搜到『已删』文档——这就是泄露"
+        assert "机密配方" in leaked[0].text
+
+    def test_fully_deleted_document_not_searchable(self, catalog, monkeypatch):
+        """对照组：双清后任何路都搜不到。"""
+        for i in range(4):
+            _seed(catalog, f"doc_noise{i}", n_chunks=1)
+        _seed(catalog, "doc_secret", n_chunks=1)
+        from agentnexus.rag.models import ChunkRecord
+        from agentnexus.storage.chroma import resolve_collection_name
+        kb_id = resolve_collection_name(namespace="default")
+        catalog.upsert_chunks([ChunkRecord(
+            chunk_id="doc_secret_ch0", kb_id=kb_id, document_id="doc_secret",
+            document_version=1, chunk_index=0,
+            text="内部机密配方 X-42 的完整工艺流程")])
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import delete_document_and_vectors
+            delete_document_and_vectors("default", "doc_secret")
+        monkeypatch.setattr(
+            "agentnexus.rag.retriever.get_knowledge_base_catalog", lambda: catalog)
+        from agentnexus.rag.retriever import HybridRetriever
+        retriever = HybridRetriever(namespace="default")
+        retriever.rebuild_from_catalog()
+        results = retriever.search("机密配方", dense_results=[], min_score=0.0)
+        assert all(not r.id.startswith("doc_secret") for r in results)
+
+
 class TestDeleteRoute:
     """路由层：走完整删除并返回向量删除数。"""
 
