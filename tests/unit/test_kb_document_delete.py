@@ -114,9 +114,10 @@ class TestDeleteFailureModes:
         assert catalog.get_document("doc1") is not None
         assert catalog.count_chunks("doc1") == 2, "Chroma 失败时 catalog 必须原样保留"
 
-    def test_catalog_failure_after_chroma_success_then_retry_heals(self, catalog):
+    def test_catalog_failure_after_chroma_success_then_retry_heals(self, catalog, monkeypatch):
         """Chroma 成功 + catalog 抛错 → 中间态（向量已删/目录还在）→ 重试幂等收敛。"""
         _seed(catalog, "doc1", n_chunks=2)
+        monkeypatch.setattr("agentnexus.rag.kb_service.time.sleep", lambda s: None)
         chroma_calls: list[list[str]] = []
 
         def fake_chroma_delete(ids=None, where=None, namespace=None, **kw):
@@ -126,8 +127,11 @@ class TestDeleteFailureModes:
                    side_effect=fake_chroma_delete):
             with patch.object(catalog, "delete_document",
                               side_effect=RuntimeError("db locked")):
-                from agentnexus.rag.kb_service import delete_document_and_vectors
-                with pytest.raises(RuntimeError, match="db locked"):
+                from agentnexus.rag.kb_service import (
+                    DeleteIncompleteError,
+                    delete_document_and_vectors,
+                )
+                with pytest.raises(DeleteIncompleteError):
                     delete_document_and_vectors("default", "doc1")
 
         # 中间态确认：向量已删，catalog 还在（文档仍列出，但 dense 路已搜不到）
@@ -152,6 +156,110 @@ class TestDeleteFailureModes:
                 delete_existing_source_versions("default", "src_doc_v1")
         assert catalog.get_document("doc_v1") is not None
         assert catalog.count_chunks("doc_v1") == 2
+
+
+class TestDeleteRetryAndRecovery:
+    """自动重试 + 删除日志 + 手动 retry/rollback 恢复链。"""
+
+    def test_catalog_retry_succeeds_on_third_attempt(self, catalog, monkeypatch):
+        _seed(catalog, "doc1", n_chunks=2)
+        monkeypatch.setattr("agentnexus.rag.kb_service.time.sleep", lambda s: None)
+        attempts = {"n": 0}
+        real_delete = catalog.delete_document
+
+        def flaky(document_id):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise RuntimeError("db locked")
+            real_delete(document_id)
+
+        monkeypatch.setattr(catalog, "delete_document", flaky)
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import delete_document_and_vectors
+            deleted = delete_document_and_vectors("default", "doc1")
+        assert deleted == 2
+        assert attempts["n"] == 3, "前两次失败后第三次应成功"
+        assert catalog.get_document("doc1") is None
+        assert catalog.list_deletion_logs(status="failed") == [], "成功路径不写失败日志"
+
+    def test_three_failures_raise_with_journal_and_options(self, catalog, monkeypatch):
+        _seed(catalog, "doc1", n_chunks=2)
+        monkeypatch.setattr("agentnexus.rag.kb_service.time.sleep", lambda s: None)
+        monkeypatch.setattr(
+            catalog, "delete_document",
+            MagicMock(side_effect=RuntimeError("db locked")))
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import (
+                DeleteIncompleteError,
+                delete_document_and_vectors,
+            )
+            with pytest.raises(DeleteIncompleteError) as exc_info:
+                delete_document_and_vectors("default", "doc1")
+        assert catalog.delete_document.call_count == 3, "默认重试 3 次"
+        err = exc_info.value
+        assert err.deleted_vectors == 2
+        logs = catalog.list_deletion_logs(status="failed")
+        assert len(logs) == 1 and logs[0]["document_id"] == "doc1"
+        assert logs[0]["chunk_ids"] == ["doc1_ch0", "doc1_ch1"]
+        assert err.log_id == logs[0]["id"]
+
+    def test_retry_completes_deletion(self, catalog, monkeypatch):
+        _seed(catalog, "doc1", n_chunks=2)
+        monkeypatch.setattr("agentnexus.rag.kb_service.time.sleep", lambda s: None)
+        monkeypatch.setattr(
+            catalog, "delete_document",
+            MagicMock(side_effect=RuntimeError("db locked")))
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import (
+                DeleteIncompleteError,
+                delete_document_and_vectors,
+            )
+            with pytest.raises(DeleteIncompleteError) as exc_info:
+                delete_document_and_vectors("default", "doc1")
+        log_id = exc_info.value.log_id
+        # 故障恢复后手动 retry（catalog 删除恢复正常）
+        from agentnexus.rag.store import KnowledgeBaseCatalog
+        monkeypatch.setattr(catalog, "delete_document",
+                            lambda doc_id: KnowledgeBaseCatalog.delete_document(catalog, doc_id))
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import retry_failed_deletion
+            result = retry_failed_deletion(log_id)
+        assert result["status"] == "completed" and result["changed"] is True
+        assert catalog.get_document("doc1") is None, "retry 必须补完 catalog 删除"
+        assert catalog.get_deletion_log(log_id)["status"] == "completed"
+
+    def test_rollback_restores_vectors(self, catalog, monkeypatch):
+        _seed(catalog, "doc1", n_chunks=2)
+        monkeypatch.setattr("agentnexus.rag.kb_service.time.sleep", lambda s: None)
+        monkeypatch.setattr(
+            catalog, "delete_document",
+            MagicMock(side_effect=RuntimeError("db locked")))
+        with patch("agentnexus.rag.kb_service.delete_documents"):
+            from agentnexus.rag.kb_service import (
+                DeleteIncompleteError,
+                delete_document_and_vectors,
+            )
+            with pytest.raises(DeleteIncompleteError) as exc_info:
+                delete_document_and_vectors("default", "doc1")
+        log_id = exc_info.value.log_id
+        with patch("agentnexus.rag.kb_service.upsert_documents") as mock_upsert:
+            from agentnexus.rag.kb_service import rollback_failed_deletion
+            result = rollback_failed_deletion(log_id)
+        assert result["status"] == "rolled_back" and result["restored_vectors"] == 2
+        assert mock_upsert.call_args.kwargs["ids"] == ["doc1_ch0", "doc1_ch1"]
+        assert catalog.get_document("doc1") is not None, "撤回后文档仍在"
+        assert catalog.get_deletion_log(log_id)["status"] == "rolled_back"
+
+    def test_rollback_impossible_when_catalog_text_gone(self, catalog):
+        log_id = catalog.log_deletion_failure("default", "ghost_doc", ["ghost_ch"], "x")
+        from agentnexus.rag.kb_service import rollback_failed_deletion
+        with pytest.raises(RuntimeError, match="无法撤回"):
+            rollback_failed_deletion(log_id)
+
+    def test_recovery_rejects_unknown_log(self, catalog):
+        from agentnexus.rag.kb_service import retry_failed_deletion
+        with pytest.raises(KeyError):
+            retry_failed_deletion(9999)
 
 
 class TestReconcileKb:

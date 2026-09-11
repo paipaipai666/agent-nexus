@@ -162,14 +162,60 @@ def get_ingestion_run(run_id: str):
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: str):
     from agentnexus.core.config import get_settings
-    from agentnexus.rag.kb_service import delete_document_and_vectors
+    from agentnexus.rag.kb_service import DeleteIncompleteError, delete_document_and_vectors
 
     settings = get_settings()
     try:
         deleted_vectors = delete_document_and_vectors(settings.rag_default_namespace, doc_id)
         return {"status": "deleted", "doc_id": doc_id, "deleted_vectors": deleted_vectors}
+    except DeleteIncompleteError as e:
+        raise HTTPException(status_code=500, detail={
+            "error": "delete_incomplete",
+            "message": (
+                f"向量已删除（{e.deleted_vectors} 个），但目录删除重试 3 次均失败。"
+                "文档当前仍可通过关键词检索到（泄露状态）。"
+                "请调用 retry 补完删除，或 rollback 撤回删除（恢复向量）。"
+            ),
+            "doc_id": e.document_id,
+            "log_id": e.log_id,
+            "retry": f"/knowledge/documents/deletions/{e.log_id}/retry",
+            "rollback": f"/knowledge/documents/deletions/{e.log_id}/rollback",
+            "cause": str(e.cause),
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/deletions")
+def list_failed_deletions():
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    catalog = get_knowledge_base_catalog()
+    return {"deletions": catalog.list_deletion_logs(status="failed")}
+
+
+@router.post("/documents/deletions/{log_id}/retry")
+def retry_deletion(log_id: int):
+    from agentnexus.rag.kb_service import retry_failed_deletion
+
+    try:
+        return retry_failed_deletion(log_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/documents/deletions/{log_id}/rollback")
+def rollback_deletion(log_id: int):
+    from agentnexus.rag.kb_service import rollback_failed_deletion
+
+    try:
+        return rollback_failed_deletion(log_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.get("/documents/runs")

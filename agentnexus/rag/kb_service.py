@@ -70,11 +70,44 @@ def reconcile_kb(namespace: str, *, repair: bool = True) -> dict[str, int]:
     return stats
 
 
+class DeleteIncompleteError(Exception):
+    """Chroma 已删、catalog 重试 3 次仍失败：文档处于泄露中间态。
+
+    携带 log_id——用户可凭它 retry（补完删除）或 rollback（重嵌向量撤回）。
+    """
+
+    def __init__(self, log_id: int, document_id: str, deleted_vectors: int,
+                 cause: Exception):
+        super().__init__(
+            f"删除未完成: {document_id}（向量已删 {deleted_vectors} 个，目录删除失败）: {cause}")
+        self.log_id = log_id
+        self.document_id = document_id
+        self.deleted_vectors = deleted_vectors
+        self.cause = cause
+
+
+def _delete_catalog_with_retry(catalog, document_id: str,
+                               attempts: int = 3, base_delay: float = 0.1) -> None:
+    """catalog 删除失败默认重试（指数退避），3 次无果抛最后一次异常。"""
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            catalog.delete_document(document_id)
+            return
+        except Exception as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(base_delay * (2 ** i))
+    raise last  # type: ignore[misc]
+
+
 def delete_document_and_vectors(namespace: str, document_id: str) -> int:
     """完整删除一个文档：Chroma 向量 + catalog 文档（chunks 由 FK 级联清理）。
 
-    返回删除的向量数。此前 API 删除只清 catalog，向量成为孤儿留在
-    Chroma 里（存储泄漏 + dense 候选窗口污染）。文档不存在时安全返回 0。
+    顺序保证失败安全：先 Chroma 后 catalog——Chroma 失败则两侧都在（可安全
+    重试）；catalog 失败则自动重试 3 次，仍失败则写入删除日志并抛
+    DeleteIncompleteError，用户可 retry 补完或 rollback 撤回（重嵌向量）。
+    文档不存在时安全返回 0。
     """
     catalog = get_knowledge_base_catalog()
     document = catalog.get_document(document_id)
@@ -86,8 +119,58 @@ def delete_document_and_vectors(namespace: str, document_id: str) -> int:
     if chunk_ids:
         delete_documents(ids=chunk_ids, namespace=namespace)
         deleted = len(chunk_ids)
-    catalog.delete_document(document_id)
+    try:
+        _delete_catalog_with_retry(catalog, document_id)
+    except Exception as e:
+        try:
+            log_id = catalog.log_deletion_failure(namespace, document_id, chunk_ids, str(e))
+        except Exception:
+            log_id = -1  # 日志都写不进时，异常信息里仍带全上下文
+        raise DeleteIncompleteError(log_id, document_id, deleted, e) from e
     return deleted
+
+
+def retry_failed_deletion(log_id: int) -> dict:
+    """补完一次失败的删除：重试 catalog 删除（Chroma 侧幂等重删兜底）。"""
+    catalog = get_knowledge_base_catalog()
+    entry = catalog.get_deletion_log(log_id)
+    if entry is None:
+        raise KeyError(f"deletion log not found: {log_id}")
+    if entry["status"] != "failed":
+        return {"log_id": log_id, "status": entry["status"], "changed": False}
+    try:
+        _delete_catalog_with_retry(catalog, entry["document_id"])
+    except Exception as e:
+        catalog.update_deletion_log_status(log_id, "failed", str(e))
+        raise
+    # 幂等兜底：若中间态期间有人重嵌过，确保向量也被清掉
+    if entry["chunk_ids"]:
+        delete_documents(ids=entry["chunk_ids"], namespace=entry["namespace"])
+    catalog.update_deletion_log_status(log_id, "completed")
+    return {"log_id": log_id, "status": "completed", "changed": True}
+
+
+def rollback_failed_deletion(log_id: int) -> dict:
+    """撤回一次失败的删除：用 catalog 留存的 indexed_text 重嵌向量。"""
+    catalog = get_knowledge_base_catalog()
+    entry = catalog.get_deletion_log(log_id)
+    if entry is None:
+        raise KeyError(f"deletion log not found: {log_id}")
+    if entry["status"] != "failed":
+        return {"log_id": log_id, "status": entry["status"], "changed": False}
+    chunks = catalog.list_chunks(entry["document_id"])
+    if not chunks:
+        raise RuntimeError(
+            f"无法撤回: 目录中已无 {entry['document_id']} 的原文（可能已被后续操作删除）")
+    upsert_documents(
+        [chunk.indexed_text or chunk.text for chunk in chunks],
+        metadatas=[chunk_metadata_to_chroma(chunk) for chunk in chunks],
+        ids=[chunk.chunk_id for chunk in chunks],
+        namespace=entry["namespace"],
+    )
+    catalog.update_deletion_log_status(log_id, "rolled_back")
+    return {"log_id": log_id, "status": "rolled_back",
+            "restored_vectors": len(chunks), "changed": True}
 
 
 def delete_existing_source_versions(namespace: str, source_id: str) -> int:

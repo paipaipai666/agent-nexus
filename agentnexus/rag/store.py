@@ -95,6 +95,18 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_kb_id ON ingestion_runs(kb_id);
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_status ON ingestion_runs(status);
 
+CREATE TABLE IF NOT EXISTS kb_deletion_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    chunk_ids_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'failed',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_deletion_log_status ON kb_deletion_log(status);
+
 CREATE TABLE IF NOT EXISTS schema_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     version INTEGER NOT NULL,
@@ -215,10 +227,9 @@ class KnowledgeBaseCatalog:
             self._migrate_v1()
             self._set_schema_version(1)
 
-        # Add future migrations here:
-        # if current < 2:
-        #     self._migrate_v2()
-        #     self._set_schema_version(2)
+        if current < 2:
+            self._migrate_v2()
+            self._set_schema_version(2)
 
     def _migrate_v1(self) -> None:
         """Migration v1: Ensure all current columns exist."""
@@ -248,6 +259,91 @@ class KnowledgeBaseCatalog:
         for column, sql in chunk_migrations.items():
             if column not in chunk_columns:
                 self._conn.execute(sql)
+
+    def _migrate_v2(self) -> None:
+        """Migration v2: kb_deletion_log table (idempotent via CREATE IF NOT EXISTS)."""
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS kb_deletion_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                document_id TEXT NOT NULL,
+                chunk_ids_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'failed',
+                error_message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kb_deletion_log_status ON kb_deletion_log(status)"
+        )
+        self._conn.commit()
+
+    # ── deletion journal ───────────────────────────────────────────
+
+    def log_deletion_failure(self, namespace: str, document_id: str,
+                             chunk_ids: list[str], error: str) -> int:
+        with self._lock:
+            now = _utc_now()
+            cur = self._conn.execute(
+                "INSERT INTO kb_deletion_log (namespace, document_id, chunk_ids_json, status, "
+                "error_message, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?, ?, ?)",
+                (namespace, document_id, json.dumps(chunk_ids), error, now, now),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def get_deletion_log(self, log_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM kb_deletion_log WHERE id = ?", (log_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "id": row["id"], "namespace": row["namespace"],
+                "document_id": row["document_id"],
+                "chunk_ids": json.loads(row["chunk_ids_json"]),
+                "status": row["status"], "error_message": row["error_message"],
+                "created_at": row["created_at"], "updated_at": row["updated_at"],
+            }
+
+    def update_deletion_log_status(self, log_id: int, status: str,
+                                   error_message: str | None = None) -> None:
+        with self._lock:
+            if error_message is None:
+                self._conn.execute(
+                    "UPDATE kb_deletion_log SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, _utc_now(), log_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE kb_deletion_log SET status = ?, error_message = ?, updated_at = ? WHERE id = ?",
+                    (status, error_message, _utc_now(), log_id),
+                )
+            self._conn.commit()
+
+    def list_deletion_logs(self, status: str | None = None) -> list[dict]:
+        with self._lock:
+            if status:
+                rows = self._conn.execute(
+                    "SELECT * FROM kb_deletion_log WHERE status = ? ORDER BY id DESC",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM kb_deletion_log ORDER BY id DESC"
+                ).fetchall()
+            return [
+                {
+                    "id": row["id"], "namespace": row["namespace"],
+                    "document_id": row["document_id"],
+                    "chunk_ids": json.loads(row["chunk_ids_json"]),
+                    "status": row["status"], "error_message": row["error_message"],
+                    "created_at": row["created_at"], "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
 
     def close(self):
         self._conn.close()
