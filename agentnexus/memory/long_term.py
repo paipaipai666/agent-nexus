@@ -482,7 +482,8 @@ class LongTermMemory:
                     params.append(category)
                 sql += " ORDER BY created_at DESC LIMIT ?"
                 params.append(limit)
-                rows = self._conn.execute(sql, params).fetchall()
+                with self._lock:
+                    rows = self._conn.execute(sql, params).fetchall()
                 results = [dict(r) for r in rows]
                 if results:
                     self._update_last_accessed([r["id"] for r in results])
@@ -511,10 +512,11 @@ class LongTermMemory:
             id_sim_map = {cid: 1.0 - dist for cid, dist in zip(chroma_ids, chroma_distances)}
 
             placeholders = ",".join("?" for _ in chroma_ids)
-            rows = self._conn.execute(
-                f"SELECT * FROM long_term_memories WHERE chroma_id IN ({placeholders})",
-                chroma_ids,
-            ).fetchall()
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT * FROM long_term_memories WHERE chroma_id IN ({placeholders})",
+                    chroma_ids,
+                ).fetchall()
 
             row_map = {r["chroma_id"]: r for r in rows}
             scored = []
@@ -560,7 +562,8 @@ class LongTermMemory:
         if category:
             sql += " AND category = ?"
             params.append(category)
-        rows = [dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        with self._lock:
+            rows = [dict(r) for r in self._conn.execute(sql, params).fetchall()]
         if not rows:
             return []
 
@@ -621,11 +624,12 @@ class LongTermMemory:
         return results
 
     def list_recent(self, limit: int = 10) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT id, category, content, importance, access_count, created_at, last_accessed_at "
-            "FROM long_term_memories ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, category, content, importance, access_count, created_at, last_accessed_at "
+                "FROM long_term_memories ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [
             {
                 "id": r["id"],
@@ -706,16 +710,18 @@ class LongTermMemory:
             return cur.lastrowid
 
     def list_pending(self, status: str = "pending", limit: int = 50) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM pending_memories WHERE status = ? ORDER BY id DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM pending_memories WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def get_pending(self, pending_id: int) -> dict | None:
-        row = self._conn.execute(
-            "SELECT * FROM pending_memories WHERE id = ?", (pending_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM pending_memories WHERE id = ?", (pending_id,)
+            ).fetchone()
         return dict(row) if row else None
 
     def set_pending_status(self, pending_id: int, status: str) -> None:
@@ -778,26 +784,27 @@ class LongTermMemory:
 
     def stats(self) -> dict:
         """Store health metrics: volume, freshness, retrieval usage, quarantine."""
-        total = self._conn.execute(
-            "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NULL"
-        ).fetchone()["c"]
-        by_category = {
-            r["category"]: r["c"]
-            for r in self._conn.execute(
-                "SELECT category, COUNT(*) c FROM long_term_memories "
-                "WHERE superseded_by IS NULL GROUP BY category"
-            ).fetchall()
-        }
-        never_accessed = self._conn.execute(
-            "SELECT COUNT(*) c FROM long_term_memories "
-            "WHERE superseded_by IS NULL AND COALESCE(access_count, 0) = 0"
-        ).fetchone()["c"]
-        superseded = self._conn.execute(
-            "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NOT NULL"
-        ).fetchone()["c"]
-        pending = self._conn.execute(
-            "SELECT COUNT(*) c FROM pending_memories WHERE status = 'pending'"
-        ).fetchone()["c"]
+        with self._lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NULL"
+            ).fetchone()["c"]
+            by_category = {
+                r["category"]: r["c"]
+                for r in self._conn.execute(
+                    "SELECT category, COUNT(*) c FROM long_term_memories "
+                    "WHERE superseded_by IS NULL GROUP BY category"
+                ).fetchall()
+            }
+            never_accessed = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories "
+                "WHERE superseded_by IS NULL AND COALESCE(access_count, 0) = 0"
+            ).fetchone()["c"]
+            superseded = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NOT NULL"
+            ).fetchone()["c"]
+            pending = self._conn.execute(
+                "SELECT COUNT(*) c FROM pending_memories WHERE status = 'pending'"
+            ).fetchone()["c"]
         return {
             "total": total,
             "by_category": by_category,
@@ -812,10 +819,11 @@ class LongTermMemory:
 
         Returns the number of memories successfully re-synced.
         """
-        rows = self._conn.execute(
-            "SELECT id, chroma_id, content, category, importance "
-            "FROM long_term_memories WHERE embedding_synced = 0"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, chroma_id, content, category, importance "
+                "FROM long_term_memories WHERE embedding_synced = 0"
+            ).fetchall()
         if not rows:
             return 0
 
@@ -833,11 +841,12 @@ class LongTermMemory:
                     documents=[r["content"]],
                     metadatas=[{"category": r["category"], "importance": r["importance"]}],
                 )
-                self._conn.execute(
-                    "UPDATE long_term_memories SET embedding_synced = 1 WHERE id = ?",
-                    (r["id"],),
-                )
-                self._conn.commit()
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE long_term_memories SET embedding_synced = 1 WHERE id = ?",
+                        (r["id"],),
+                    )
+                    self._conn.commit()
                 synced += 1
             except Exception as e:
                 logger.warning("Re-sync failed for memory %d: %s", r["id"], e)
