@@ -22,6 +22,7 @@ def catalog(tmp_path, monkeypatch):
     import agentnexus.rag.kb_service as kbs
     from agentnexus.rag.store import KnowledgeBaseCatalog
     from agentnexus.storage.chroma import reset_storage_client, resolve_collection_name
+    reset_storage_client()  # 清掉模块级 _collections 缓存，避免跨测试串目录
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
     monkeypatch.setattr(kbs, "get_knowledge_base_catalog", lambda: cat)
     kb_id = resolve_collection_name(namespace="default")
