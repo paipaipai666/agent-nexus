@@ -193,12 +193,27 @@ def delete_existing_source_versions(namespace: str, source_id: str) -> int:
     return deleted_chunks
 
 
-def persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict[str, int]:
+def persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict:
+    """持久化摄入产物。内容未变更时整体跳过（增量第一层）。
+
+    document_version 是内容寻址哈希（sha256(source_id+content+metadata)），
+    同 source 已存在且版本一致 → 索引必然一致，跳过重嵌/重写（业界标准：
+    LlamaIndex docstore、LangChain RecordManager、TypeGraph 增量重索引）。
+    """
     kb_record = default_kb_record(namespace)
     catalog = get_knowledge_base_catalog()
     catalog.upsert_knowledge_base(kb_record)
 
     artifacts.document.kb_id = kb_record.kb_id
+
+    # 跳过条件要求：恰好一个同来源文档、版本一致、且确实带 chunks
+    # （多版本共存是历史异常态，走替换路径自愈；空 chunks 视为不完整写入）
+    existing = catalog.list_documents_by_source(kb_record.kb_id, artifacts.document.source_id)
+    if (len(existing) == 1
+            and existing[0].document_version == artifacts.document.document_version
+            and catalog.count_chunks(existing[0].document_id) > 0):
+        return {"replaced_chunks": 0, "written_chunks": 0, "skipped": True}
+
     replaced_chunks = delete_existing_source_versions(namespace, artifacts.document.source_id)
     catalog.upsert_document(artifacts.document)
 
