@@ -29,6 +29,26 @@ def default_kb_record(namespace: str) -> KnowledgeBaseRecord:
     )
 
 
+def delete_document_and_vectors(namespace: str, document_id: str) -> int:
+    """完整删除一个文档：Chroma 向量 + catalog 文档（chunks 由 FK 级联清理）。
+
+    返回删除的向量数。此前 API 删除只清 catalog，向量成为孤儿留在
+    Chroma 里（存储泄漏 + dense 候选窗口污染）。文档不存在时安全返回 0。
+    """
+    catalog = get_knowledge_base_catalog()
+    document = catalog.get_document(document_id)
+    if document is None:
+        return 0
+    chunks = catalog.list_chunks(document_id)
+    chunk_ids = [chunk.chunk_id for chunk in chunks]
+    deleted = 0
+    if chunk_ids:
+        delete_documents(ids=chunk_ids, namespace=namespace)
+        deleted = len(chunk_ids)
+    catalog.delete_document(document_id)
+    return deleted
+
+
 def delete_existing_source_versions(namespace: str, source_id: str) -> int:
     catalog = get_knowledge_base_catalog()
     kb_record = default_kb_record(namespace)

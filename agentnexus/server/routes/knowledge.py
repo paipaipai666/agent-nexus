@@ -161,12 +161,13 @@ def get_ingestion_run(run_id: str):
 
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: str):
-    from agentnexus.rag.store import get_knowledge_base_catalog
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.kb_service import delete_document_and_vectors
 
-    catalog = get_knowledge_base_catalog()
+    settings = get_settings()
     try:
-        catalog.delete_document(doc_id)
-        return {"status": "deleted", "doc_id": doc_id}
+        deleted_vectors = delete_document_and_vectors(settings.rag_default_namespace, doc_id)
+        return {"status": "deleted", "doc_id": doc_id, "deleted_vectors": deleted_vectors}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
