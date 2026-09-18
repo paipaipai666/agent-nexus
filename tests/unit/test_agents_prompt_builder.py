@@ -1,9 +1,12 @@
 from unittest.mock import MagicMock
 
 from agentnexus.agents.prompt_builder import (
+    assemble_react_messages,
     build_conversation_context,
     build_react_messages,
     build_react_prompt,
+    build_react_sections,
+    diff_sections,
 )
 
 
@@ -199,9 +202,9 @@ class TestBuildReactMessages:
             question="q",
             memory_context="remember this fact",
         )
-        # Should have: system_rules, tools, memory+context, user
+        # Groups: system_rules, memory, tools, user
         assert len(messages) == 4
-        assert "remember this fact" in messages[2]["content"]
+        assert messages[1]["content"] == "remember this fact"
 
     def test_conversation_context_included(self):
         messages = build_react_messages(
@@ -210,8 +213,9 @@ class TestBuildReactMessages:
             question="q",
             conversation_context="recent chat history",
         )
+        # Groups: system_rules, conversation, tools, user
         assert len(messages) == 4
-        assert "recent chat history" in messages[2]["content"]
+        assert messages[1]["content"] == "recent chat history"
 
     def test_empty_contexts_skipped(self):
         """Empty context blocks should not create extra messages."""
@@ -341,3 +345,102 @@ class TestDisplayOnlyAndFinalAnswerContext:
         assert len(messages) == 3
         assert messages[1]["metadata"] == {"display_only": True}
         assert messages[1]["content"] == "I can answer now."
+
+
+class TestSectionModel:
+    """Named-section assembly, diffing, and byte-stable rebuilds."""
+
+    def _sections_v1(self) -> dict[str, str]:
+        return build_react_sections(
+            memory_context="MEMORY",
+            conversation_context="CONVERSATION",
+            available_skill_context="SKILLS",
+            todo_context="TODO_V1",
+            environment_context="ENV",
+            project_instructions="PROJECT",
+            append_system_prompt="APPENDIX",
+        )
+
+    def test_sections_drop_empty_blocks(self):
+        sections = build_react_sections(memory_context="M", conversation_context="")
+        assert sections == {"memory": "M"}
+
+    def test_diff_first_build_marks_everything_changed(self):
+        changed = diff_sections(None, self._sections_v1())
+        assert changed == set(self._sections_v1())
+
+    def test_diff_detects_modified_added_removed(self):
+        previous = self._sections_v1()
+        current = dict(previous)
+        current["todo"] = "TODO_V2"                      # modified
+        current["mcp"] = "MCP"                           # added
+        del current["project_instructions"]              # removed
+        changed = diff_sections(previous, current)
+        assert changed == {"todo", "mcp", "project_instructions"}
+
+    def test_diff_unchanged_is_empty(self):
+        previous = self._sections_v1()
+        assert diff_sections(previous, dict(previous)) == set()
+
+    def test_groups_render_in_stable_to_volatile_order(self):
+        sections = self._sections_v1()
+        messages = assemble_react_messages(
+            system_rules="RULES",
+            tools_desc="TOOLS",
+            sections=sections,
+            question="Q",
+        )
+        contents = [m["content"] for m in messages]
+        assert contents[0] == "RULES"
+        assert contents[1] == "MEMORY"
+        assert contents[2] == "CONVERSATION"
+        # static group: one message, salience order skills < project < appendix
+        static = contents[3]
+        assert "SKILLS" in static and "PROJECT" in static and "APPENDIX" in static
+        assert static.index("SKILLS") < static.index("PROJECT") < static.index("APPENDIX")
+        # tools between static and volatile; volatile env before todo
+        assert contents[4] == "== 可用工具 ==\nTOOLS"
+        volatile = contents[5]
+        assert volatile.index("ENV") < volatile.index("TODO_V1")
+        assert messages[-1]["role"] == "user"
+
+    def test_unchanged_groups_byte_identical_across_rebuilds(self):
+        """Only groups containing a changed section may differ between rebuilds."""
+        v1 = self._sections_v1()
+        first = assemble_react_messages(
+            system_rules="RULES", tools_desc="TOOLS", sections=v1, question="Q"
+        )
+        v2 = dict(v1)
+        v2["todo"] = "TODO_V2"
+        second = assemble_react_messages(
+            system_rules="RULES", tools_desc="TOOLS", sections=v2, question="Q"
+        )
+        assert len(first) == len(second)
+        changed_indexes = {
+            i for i, (a, b) in enumerate(zip(first, second)) if a["content"] != b["content"]
+        }
+        # rules, memory, conversation, static, tools all byte-identical;
+        # only the volatile group (todo lives there) may change.
+        assert changed_indexes == {5}
+        assert first[5]["content"] == "ENV\n\nTODO_V1"
+        assert second[5]["content"] == "ENV\n\nTODO_V2"
+
+    def test_compaction_like_change_isolates_to_memory_and_conversation(self):
+        """A compaction-style rebuild (memory + conversation change) keeps
+        static/tools/volatile groups byte-identical below the change point
+        is impossible — prefix invalidation is positional — but groups
+        ABOVE it (rules) stay identical, and unchanged groups re-render
+        byte-identical regardless of position."""
+        v1 = self._sections_v1()
+        first = assemble_react_messages(
+            system_rules="RULES", tools_desc="TOOLS", sections=v1, question="Q"
+        )
+        v2 = dict(v1)
+        v2["memory"] = "MEMORY_AFTER_COMPACT"
+        v2["conversation"] = "CONVERSATION_AFTER_COMPACT"
+        second = assemble_react_messages(
+            system_rules="RULES", tools_desc="TOOLS", sections=v2, question="Q"
+        )
+        assert second[0]["content"] == first[0]["content"]
+        assert second[3]["content"] == first[3]["content"]  # static identical
+        assert second[4]["content"] == first[4]["content"]  # tools identical

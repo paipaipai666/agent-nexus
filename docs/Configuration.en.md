@@ -41,11 +41,12 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 | `judge_api_key` | — | |
 | `judge_base_url` | `https://open.bigmodel.cn/api/paas/v4/` | |
 
-### Agent (1 item)
+### Agent (2 items)
 
 | Field | Default | Description |
 |------|--------|------|
 | `max_agent_steps` | `5` | Max ReAct loop steps |
+| `append_system_prompt` | `""` | User-defined appendix injected at the end of the system context (outranks platform defaults, never overrides safety constraints) |
 
 ### External Services (2 items)
 

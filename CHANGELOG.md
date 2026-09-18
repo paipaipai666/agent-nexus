@@ -4,6 +4,12 @@ All notable changes to AgentNexus will be documented in this file.
 
 ## [Unreleased]
 
+### New Features
+
+- **提示词系统五件套** — ① AGENTS.md 层级发现（Codex 语义：`~/.agentnexus/AGENTS.md` + 根→cwd 链，深层覆盖浅层，单文件 8k/总量 20k 预算，不读 CLAUDE.md）；② 系统上下文注入 `== 运行环境 ==` 块（OS/工作目录(会话 workspace 感知)/终端/本地时间精确到分钟带时区）；③ 消除工具描述双轨——NATIVE_TOOLS 策略只发 native schema，JSON 类策略保留文本清单作为唯一工具面，策略降级时自动重建消息块补回清单；④ 用户定制面 `append_system_prompt`（config.yaml，注入系统上下文末尾，高于平台默认准则、低于安全约束）；⑤ `react.txt`/`react_think.txt` 新增 `== 身份 ==` 与 `== 输出契约 ==` 段（Persona 未配置时的默认身份；语言跟随用户、简洁优先、最终答案自包含）
+- **提示词 section 化与增量重建** — 上下文块改为命名 section 字典（`build_react_sections`/`diff_sections`/`assemble_react_messages`），消息按稳定→易变分组（rules/memory/conversation/static/tools/volatile）；重建时只重渲染含变更 section 的组，未变更组字节级一致，provider 前缀缓存命中到第一个变更点；每次重建记录 `prompt sections rebuilt: <变更名>` 调试日志
+- 新增 `agentnexus/agents/runtime_context.py`（环境块 + AGENTS.md 发现）与 `tests/unit/test_runtime_context.py`（13 个行为测试）
+
 ### Changed
 
 - **Desktop: v2 UI 全面重设计（Linear 式精致暗色）** — 桌面端前端按 `designs/mockups/v2-ui.yaml` 规范重构。新应用外壳：36px 自定义 titlebar（breadcrumb / 搜索触发 / 主题切换 / 窗口控制）+ VS Code 式 48px Activity Bar（Chat、Skills、MCP、Memory、Knowledge、Wiki、Plugins、Stats、Health、Alerts、Audit、Eval、Settings 全部提升为一级导航）+ 随路由切换的 232px Context Sidebar（仅 Chat 区显示项目/会话）+ 24px mono 状态栏（含上下文用量条）。新增 Ctrl+K 全局命令面板（分组 Recent/Navigation/Actions、实时过滤、全键盘操作）与 Ctrl+B 侧边栏折叠（250ms 宽度动画）。双主题 token 体系重写（暗色近黑四级明度阶梯 #0a0b0d→#1e2127、1px 半透明边框、暗色卡片 inset 顶部高光、accent 微渐变主按钮；亮色完整对照；默认改为暗色，切换 200ms 动画）。圆角体系 8/12/999。字体：Anton 移除，Inter + Geist Mono，基础字号 13px 紧凑密度。旧 /settings/* 子路由全部提升为顶级路由（/stats、/skills 等），SettingsLayout 删除。Chat 页用户消息改为右对齐弱化气泡、工具卡/输入框/空状态按 v2 组件规格重制；Stats 页改 segmented 时间范围 + v2 KPI 卡；其余页面卡片统一切到 surface-2 + card-highlight。

@@ -41,6 +41,152 @@ def build_react_prompt(
     )
 
 
+# ── Section model ────────────────────────────────────────────────
+# Context blocks are named sections in a dict, not anonymous text
+# concatenated into one message. Naming makes rebuilds diffable:
+# rendering is deterministic, so a group whose sections all stayed
+# the same re-renders byte-identical and the provider's prefix cache
+# keeps hitting up to the first changed group.
+#
+# Groups are ordered stable → volatile: memory and conversation
+# change only on compaction; the static group is fixed for the run;
+# tools text appears only on JSON strategies (degrade can add it
+# mid-run); the volatile group (env timestamp, todo) churns most.
+
+SECTION_MEMORY = "memory"
+SECTION_CONVERSATION = "conversation"
+SECTION_SKILLS = "skills"
+SECTION_MCP = "mcp"
+SECTION_PROFILE_FRAGMENTS = "profile_fragments"
+SECTION_PROFILE_GUIDANCE = "profile_guidance"
+SECTION_PROJECT = "project_instructions"
+SECTION_APPENDIX = "append_system_prompt"
+SECTION_ENVIRONMENT = "environment"
+SECTION_TODO = "todo"
+
+# Section order within the static group — user-authored content last
+# (salience), mirroring the previous combined-message layout.
+_STATIC_SECTIONS = (
+    SECTION_SKILLS,
+    SECTION_MCP,
+    SECTION_PROFILE_FRAGMENTS,
+    SECTION_PROFILE_GUIDANCE,
+    SECTION_PROJECT,
+    SECTION_APPENDIX,
+)
+# Volatile group: minute-precision env timestamp + todo churn.
+_VOLATILE_SECTIONS = (SECTION_ENVIRONMENT, SECTION_TODO)
+
+
+def build_react_sections(
+    *,
+    memory_context: str = "",
+    conversation_context: str = "",
+    available_skill_context: str = "",
+    mcp_context: str = "",
+    compiled_profile: Any = None,
+    todo_context: str = "",
+    environment_context: str = "",
+    project_instructions: str = "",
+    append_system_prompt: str = "",
+) -> dict[str, str]:
+    """Assemble named context sections; empty blocks are dropped."""
+    sections: dict[str, str] = {}
+    if memory_context:
+        sections[SECTION_MEMORY] = memory_context
+    if conversation_context:
+        sections[SECTION_CONVERSATION] = conversation_context
+    if available_skill_context:
+        sections[SECTION_SKILLS] = available_skill_context
+    if mcp_context:
+        sections[SECTION_MCP] = mcp_context
+    if compiled_profile is not None:
+        if compiled_profile.fragments_text:
+            sections[SECTION_PROFILE_FRAGMENTS] = compiled_profile.fragments_text
+        if compiled_profile.workflow_guidance:
+            sections[SECTION_PROFILE_GUIDANCE] = compiled_profile.workflow_guidance
+    if project_instructions:
+        sections[SECTION_PROJECT] = project_instructions
+    if append_system_prompt:
+        sections[SECTION_APPENDIX] = append_system_prompt
+    if environment_context:
+        sections[SECTION_ENVIRONMENT] = environment_context
+    if todo_context:
+        sections[SECTION_TODO] = todo_context
+    return sections
+
+
+def diff_sections(
+    previous: dict[str, str] | None,
+    current: dict[str, str],
+) -> set[str]:
+    """Names of sections added, removed, or modified since `previous`.
+
+    `previous=None` (first build) counts every section as changed.
+    """
+    if previous is None:
+        return set(current)
+    changed = {name for name, text in current.items() if previous.get(name) != text}
+    changed.update(name for name in previous if name not in current)
+    return changed
+
+
+def _join_group(sections: dict[str, str], names: tuple[str, ...]) -> str:
+    return "\n\n".join(sections[name] for name in names if sections.get(name))
+
+
+def assemble_react_messages(
+    *,
+    system_rules: str,
+    tools_desc: str,
+    sections: dict[str, str],
+    question: str,
+    workflow_context: str = "",
+    include_tools_desc: bool = True,
+) -> list[dict[str, str]]:
+    """Render sections into messages, one message per group.
+
+    Layout (later groups invalidate only themselves and what follows,
+    so volatile content sits at the end of the system prefix):
+        [0] system: fixed rules (stable, cacheable prefix)
+        [1] system: memory (own message; changes on compaction)
+        [2] system: conversation + persona + behavior fragments
+        [3] system: static group (skills, mcp, profile, project
+             instructions, user appendix)
+        [4] system: tools text (JSON strategies only; native schemas
+             already carry tool info)
+        [5] system: volatile group (environment, todo)
+        [6] system: workflow runtime context (when active)
+        [7] user: question
+    """
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_rules},
+    ]
+    if sections.get(SECTION_MEMORY):
+        messages.append({"role": "system", "content": sections[SECTION_MEMORY]})
+    if sections.get(SECTION_CONVERSATION):
+        messages.append({"role": "system", "content": sections[SECTION_CONVERSATION]})
+
+    static_text = _join_group(sections, _STATIC_SECTIONS)
+    if static_text:
+        messages.append({"role": "system", "content": static_text})
+
+    # JSON strategies have no native schemas — the text list is their
+    # only tool surface. NATIVE_TOOLS skips it to avoid double-describing.
+    if include_tools_desc and tools_desc:
+        messages.append({"role": "system", "content": f"== 可用工具 ==\n{tools_desc}"})
+
+    volatile_text = _join_group(sections, _VOLATILE_SECTIONS)
+    if volatile_text:
+        messages.append({"role": "system", "content": volatile_text})
+
+    if workflow_context:
+        messages.append({"role": "system", "content": workflow_context})
+
+    messages.append({"role": "user", "content": f"== 当前任务 ==\nQuestion: {question}"})
+    return messages
+
+
 def build_react_messages(
     *,
     system_rules: str,
@@ -53,57 +199,36 @@ def build_react_messages(
     compiled_profile: Any = None,
     todo_context: str = "",
     workflow_context: str = "",
+    environment_context: str = "",
+    project_instructions: str = "",
+    append_system_prompt: str = "",
+    include_tools_desc: bool = True,
 ) -> list[dict[str, str]]:
-    """Build messages array with stable prefix for prompt caching.
+    """One-shot convenience wrapper: sections + assembly in one call.
 
-    Structure:
-        [0] system: fixed rules (stable, cacheable prefix)
-        [1] system: tools description (relatively stable)
-        [2] system: memory + conversation context (variable)
-        [3] system: workflow runtime context (when active)
-        [4] user: question (variable)
-
-    This structure maximizes prompt cache hit rate by keeping
-    the longest possible stable prefix at the beginning.
+    Callers that rebuild prompts repeatedly should prefer
+    build_react_sections + diff_sections + assemble_react_messages so
+    unchanged groups stay byte-identical across rebuilds.
     """
-    messages: list[dict[str, str]] = []
-
-    # 1. Fixed system rules — always identical, best cache target
-    messages.append({"role": "system", "content": system_rules})
-
-    # 2. Tools description — changes only when tools change
-    if tools_desc:
-        messages.append({"role": "system", "content": f"== 可用工具 ==\n{tools_desc}"})
-
-    # 3. Variable context blocks — combined into one message
-    context_blocks: list[str] = []
-    if memory_context:
-        context_blocks.append(memory_context)
-    if conversation_context:
-        context_blocks.append(conversation_context)
-    if available_skill_context:
-        context_blocks.append(available_skill_context)
-    if mcp_context:
-        context_blocks.append(mcp_context)
-    if compiled_profile:
-        context_blocks.append(compiled_profile.fragments_text)
-        context_blocks.append(compiled_profile.workflow_guidance)
-    if todo_context:
-        context_blocks.append(todo_context)
-
-    if context_blocks:
-        combined = "\n\n".join(block for block in context_blocks if block)
-        if combined:
-            messages.append({"role": "system", "content": combined})
-
-    # 4. Workflow runtime context — as a system message, not baked into user question
-    if workflow_context:
-        messages.append({"role": "system", "content": workflow_context})
-
-    # 5. User question — always variable, raw user question only
-    messages.append({"role": "user", "content": f"== 当前任务 ==\nQuestion: {question}"})
-
-    return messages
+    sections = build_react_sections(
+        memory_context=memory_context,
+        conversation_context=conversation_context,
+        available_skill_context=available_skill_context,
+        mcp_context=mcp_context,
+        compiled_profile=compiled_profile,
+        todo_context=todo_context,
+        environment_context=environment_context,
+        project_instructions=project_instructions,
+        append_system_prompt=append_system_prompt,
+    )
+    return assemble_react_messages(
+        system_rules=system_rules,
+        tools_desc=tools_desc,
+        sections=sections,
+        question=question,
+        workflow_context=workflow_context,
+        include_tools_desc=include_tools_desc,
+    )
 
 
 def build_conversation_context(memory_manager) -> str:

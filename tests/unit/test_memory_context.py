@@ -283,13 +283,18 @@ class TestReActAgentConversationMode:
 
         assert result.answer == "done"
         messages = mock_llm.think.call_args.kwargs["messages"]
-        # Profile content is in messages[2], tools in messages[1]
-        context_content = messages[2]["content"]
+        # Profile fragments + workflow guidance reach the LLM in a system
+        # context message — located by content, not by fixed index.
+        system_texts = [m["content"] for m in messages if m["role"] == "system"]
+        context_content = next(c for c in system_texts if "Skill Workflow" in c)
         assert "安全原则" in context_content
-        assert "Skill Workflow" in context_content
-        tools_content = messages[1]["content"]
-        assert "shell_exec" not in tools_content
-        assert "file_read" in tools_content
+        # Tool policy filters the schema list sent to the model. With the
+        # mock's session tracker the strategy is NATIVE_TOOLS, so the
+        # allowed tool surfaces in the native tools payload, not a text block.
+        tools_payload = mock_llm.think.call_args.kwargs["tools"]
+        names = [t["function"]["name"] for t in tools_payload]
+        assert names == ["file_read"]
+        assert "shell_exec" not in str(messages)
 
     def test_reset_profile_restores_default_prompt(self):
         from agentnexus.agents.re_act_agent import ReActAgent

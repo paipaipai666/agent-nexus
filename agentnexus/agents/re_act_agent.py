@@ -14,7 +14,13 @@ from agentnexus.agents import json_helpers, react_runtime
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
-from agentnexus.agents.prompt_builder import build_conversation_context, build_react_messages, build_react_prompt
+from agentnexus.agents.prompt_builder import (
+    assemble_react_messages,
+    build_conversation_context,
+    build_react_prompt,
+    build_react_sections,
+    diff_sections,
+)
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
     AgentStep,
@@ -25,6 +31,7 @@ from agentnexus.agents.react_types import (
     ReActResult,
     RetryReason,
 )
+from agentnexus.agents.runtime_context import build_environment_block, load_project_instructions
 from agentnexus.agents.tool_runner import execute_tool
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
@@ -138,6 +145,14 @@ class ReActAgent:
         settings = get_settings()
         self._persona_text: str = compile_persona_fragment(settings.persona)
         self._behavior_fragments_text: str = load_core_fragments()
+        # User-defined appendix injected at the very end of the system
+        # context — highest-priority user instruction surface, still
+        # subordinate to the safety rules in the fixed rules prefix.
+        self._append_system_prompt: str = (settings.append_system_prompt or "").strip()
+        # Last-rendered prompt sections, for diff-based rebuilds: groups
+        # whose sections all stayed unchanged re-render byte-identical,
+        # keeping the provider's prefix cache valid up to the first change.
+        self._last_sections: dict[str, str] | None = None
 
     # ================================================================
     # Public API (unchanged)
@@ -329,6 +344,7 @@ class ReActAgent:
             memory_state.memory_context,
             memory_state.conv_ctx,
             workflow_context=self._workflow_context,
+            native_tools=(run_state.strategy == CallingStrategy.NATIVE_TOOLS),
         )
         ctx.initial_count = len(ctx.messages)
 
@@ -348,6 +364,7 @@ class ReActAgent:
                     memory_state.memory_context,
                     new_conv,
                     workflow_context=self._workflow_context,
+                    native_tools=(run_state.strategy == CallingStrategy.NATIVE_TOOLS),
                 )
                 # Replace exactly the initial block; keep accumulated messages after it
                 ctx.messages[:ctx.initial_count] = new_messages
@@ -808,6 +825,20 @@ class ReActAgent:
         ctx.run_state.strategy = self._select_strategy(ctx.memory_state.session_caps)
         new_strategy = ctx.run_state.strategy.name
         self._output(f"[策略降级] → {new_strategy}")
+        if ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
+            # The initial block was built without the text tool list (native
+            # schemas carried it). JSON strategies read tool names/params from
+            # that list, so rebuild the initial block to inject it.
+            new_messages = self._build_messages(
+                ctx.tool_state.tools_desc,
+                ctx.run_state.question,
+                ctx.memory_state.memory_context,
+                ctx.memory_state.conv_ctx,
+                workflow_context=self._workflow_context,
+                native_tools=False,
+            )
+            ctx.messages[:ctx.initial_count] = new_messages
+            ctx.initial_count = len(new_messages)
         return [ReActEvent(ReActEventType.LLM_PARAMS_READY,
                            {"strategy": new_strategy})]
 
@@ -986,7 +1017,8 @@ class ReActAgent:
 
     def _build_messages(self, tools_desc: str, question: str,
                          memory_context: str, conversation_context: str,
-                         workflow_context: str = "") -> list[dict[str, str]]:
+                         workflow_context: str = "",
+                         native_tools: bool = False) -> list[dict[str, str]]:
         """Build messages array with stable prefix for prompt caching."""
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
@@ -1002,17 +1034,28 @@ class ReActAgent:
             merged_conversation = (
                 conversation_context + "\n\n" + suffix if conversation_context else suffix
             )
-        return build_react_messages(
-            system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
-            tools_desc=tools_desc,
-            question=question,
+        sections = build_react_sections(
             memory_context=memory_context,
             conversation_context=merged_conversation,
             available_skill_context=self._available_skill_context,
             mcp_context=self._mcp_context,
             compiled_profile=compiled,
             todo_context=todo_context,
+            environment_context=build_environment_block(),
+            project_instructions=load_project_instructions(),
+            append_system_prompt=self._append_system_prompt,
+        )
+        changed = diff_sections(self._last_sections, sections)
+        self._last_sections = sections
+        if changed:
+            logger.debug("prompt sections rebuilt: %s", ",".join(sorted(changed)))
+        return assemble_react_messages(
+            system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
+            tools_desc=tools_desc,
+            sections=sections,
+            question=question,
             workflow_context=workflow_context,
+            include_tools_desc=not native_tools,
         )
 
     def _build_conversation_context(self, memory_manager) -> str:

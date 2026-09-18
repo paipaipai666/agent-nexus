@@ -41,11 +41,12 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 | `judge_api_key` | — | |
 | `judge_base_url` | `https://open.bigmodel.cn/api/paas/v4/` | |
 
-### Agent（1 项）
+### Agent（2 项）
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `max_agent_steps` | `5` | 最大 ReAct 循环步数 |
+| `append_system_prompt` | `""` | 用户自定义追加指令，注入系统上下文末尾（优先级高于平台默认准则，不覆盖安全约束） |
 
 ### 外部服务（2 项）
 
