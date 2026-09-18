@@ -8,6 +8,9 @@ interface UIState {
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
   togglePalette: () => void
+  /** floating session info card on the chat page */
+  infoPanelCollapsed: boolean
+  toggleInfoPanel: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -21,4 +24,11 @@ export const useUIStore = create<UIState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
+  infoPanelCollapsed: localStorage.getItem('agentnexus-infopanel') === 'collapsed',
+  toggleInfoPanel: () =>
+    set((s) => {
+      const next = !s.infoPanelCollapsed
+      localStorage.setItem('agentnexus-infopanel', next ? 'collapsed' : 'expanded')
+      return { infoPanelCollapsed: next }
+    }),
 }))

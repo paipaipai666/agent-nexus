@@ -710,7 +710,7 @@ export default function ChatPage() {
   })
 
   return (
-    <div className="flex-1 flex overflow-hidden" style={{ background: 'var(--surface-0)' }}>
+    <div className="flex-1 flex overflow-hidden relative" style={{ background: 'var(--surface-0)' }}>
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
       {/* Messages */}
