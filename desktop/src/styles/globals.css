@@ -512,4 +512,28 @@ html.theme-anim * {
     box-shadow: var(--shadow-card-hover), var(--card-highlight);
     transform: translateY(-1px);
   }
+
+  /* 3D stage — parent needs perspective for tilt children (v2.1) */
+  .perspective-3d {
+    perspective: 900px;
+  }
+
+  /* Physical button press — compresses into the surface */
+  .btn-primary:active,
+  .btn-ghost:active,
+  .send-btn:active {
+    transform: translateY(1px) scale(0.98);
+    box-shadow: none;
+  }
+
+  /* 3D pop-in for overlays (command palette, dialogs) */
+  @keyframes pop-in-3d {
+    from { opacity: 0; transform: translateX(-50%) translateY(14px) rotateX(-6deg) scale(0.97); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0) rotateX(0) scale(1); }
+  }
+
+  /* Activity bar icon hover — lifts off the rail */
+  .ab-item:not(.active):hover {
+    transform: translateY(-1px);
+  }
 }

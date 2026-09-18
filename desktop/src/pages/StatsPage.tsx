@@ -1,7 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { BarChart3, Activity, DollarSign, Clock, CheckCircle, AlertTriangle, Layers, ChevronDown, ChevronRight } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../services/api'
+import { useTilt } from '../utils/useTilt'
+
+/** KPI tile with pointer-follow 3D tilt (parent grid supplies perspective). */
+function KpiCard({ children }: { children: ReactNode }) {
+  const tiltRef = useTilt<HTMLDivElement>()
+  return (
+    <div ref={tiltRef} className="p-3.5 rounded-xl depth-lift" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', transformStyle: 'preserve-3d' }}>
+      {children}
+    </div>
+  )
+}
 
 export default function StatsPage() {
   const [stats, setStats] = useState<Record<string, any>>({})
@@ -107,7 +118,7 @@ export default function StatsPage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {/* Stats Cards */}
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-5 gap-3 perspective-3d">
           {[
             { label: 'Total Tasks', value: stats.total_tasks ?? '-', icon: BarChart3, color: 'var(--accent)' },
             { label: 'Input Tokens', value: stats.total_input_tokens?.toLocaleString() ?? '-', icon: Activity, color: 'var(--blue)' },
@@ -115,18 +126,18 @@ export default function StatsPage() {
             { label: 'Avg Latency', value: stats.avg_latency_ms ? `${Math.round(stats.avg_latency_ms)}ms` : '-', icon: Clock, color: 'var(--amber)' },
             { label: 'Total Cost', value: totalCost != null ? `¥${Number(totalCost).toFixed(4)}` : '-', icon: DollarSign, color: 'var(--green)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-xl depth-lift" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <KpiCard key={label}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
                 <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
               </div>
               <p className="text-xl font-semibold font-mono" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>{value}</p>
-            </div>
+            </KpiCard>
           ))}
         </div>
 
         {/* Stats Cards row 2 */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-4 gap-3 perspective-3d">
           {[
             {
               label: 'Task Success Rate',
@@ -157,14 +168,14 @@ export default function StatsPage() {
               color: 'var(--blue)',
             },
           ].map(({ label, value, sub, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-xl depth-lift" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <KpiCard key={label}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
                 <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
               </div>
               <p className="text-xl font-semibold font-mono" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>{value}</p>
               {sub && <p className="text-[11px] mt-0.5 font-mono" style={{ color: 'var(--fg-faint)' }}>{sub}</p>}
-            </div>
+            </KpiCard>
           ))}
         </div>
 

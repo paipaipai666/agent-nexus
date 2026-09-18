@@ -133,7 +133,8 @@ export default function CommandPalette() {
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-elevated)',
-          animation: 'rise-in 0.2s var(--ease)',
+          transformOrigin: 'top center',
+          animation: 'pop-in-3d 0.25s var(--ease)',
         }}
       >
         <div
