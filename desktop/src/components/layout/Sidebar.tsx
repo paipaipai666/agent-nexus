@@ -133,7 +133,7 @@ export default function Sidebar() {
   return (
     <div className="w-[232px] flex flex-col h-full shrink-0" role="complementary" aria-label="Chat sessions">
       {/* New Chat + search */}
-      <div className="px-2.5 pt-2.5 pb-1.5 shrink-0">
+      <div className="px-3 pt-3 pb-2 shrink-0">
         <button
           onClick={handleNewChat}
           className="btn-primary w-full flex items-center justify-center gap-1.5"
@@ -143,7 +143,7 @@ export default function Sidebar() {
           New Chat
         </button>
         <div
-          className="mt-2 flex items-center gap-1.5 h-7 px-2.5 rounded-lg transition-all"
+          className="mt-2.5 flex items-center gap-1.5 h-8 px-2.5 rounded-lg transition-all"
           style={{
             background: 'var(--surface-2)',
             border: '1px solid var(--border-subtle)',
@@ -171,8 +171,8 @@ export default function Sidebar() {
       </div>
 
       {/* Projects */}
-      <div className="flex-1 overflow-y-auto px-2.5 pb-2.5">
-        <div className="flex items-center justify-between pr-1 pt-2 pb-0.5">
+      <div className="flex-1 overflow-y-auto px-3 pb-3">
+        <div className="flex items-center justify-between pr-1 pt-3 pb-1.5">
           <span
             className="px-1 text-[11px] font-medium uppercase"
             style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
@@ -207,7 +207,7 @@ export default function Sidebar() {
             <span className="text-[12px]">Add a project folder…</span>
           </button>
         ) : (
-          <div className="space-y-0.5">
+          <div className="space-y-1.5">
             {groups.map((group) => {
               const isSelected = selectedKey === group.key
               const isCollapsed = !!collapsed[group.key]
@@ -215,7 +215,7 @@ export default function Sidebar() {
                 <div key={group.key}>
                   {/* Project header */}
                   <div
-                    className="group/proj flex items-center gap-0.5 px-1 py-1 rounded-lg transition-colors"
+                    className="group/proj flex items-center gap-1 px-1.5 py-1.5 rounded-lg transition-colors"
                     style={{ background: isSelected ? 'var(--surface-3)' : 'transparent', transitionDuration: '150ms' }}
                   >
                     <button
@@ -262,7 +262,7 @@ export default function Sidebar() {
 
                   {/* Sessions under this project */}
                   {!isCollapsed && (
-                    <div className="ml-3.5 space-y-0.5">
+                    <div className="ml-4 space-y-1">
                       {group.sessions.length === 0 ? (
                         <div className="px-3 py-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>No chats yet</div>
                       ) : group.sessions.map((session) => {
@@ -271,7 +271,7 @@ export default function Sidebar() {
                           <button
                             key={session.session_id}
                             onClick={() => handleSessionClick(session.session_id)}
-                            className="relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all text-left"
+                            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg transition-all text-left"
                             style={{
                               color: active ? 'var(--fg)' : 'var(--fg-secondary)',
                               background: active ? 'var(--accent-muted)' : 'transparent',
@@ -332,10 +332,10 @@ export default function Sidebar() {
       </div>
 
       {/* Settings — pinned to the bottom, styled like a session row */}
-      <div className="shrink-0 px-2.5 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+      <div className="shrink-0 px-3 py-2.5" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <button
           onClick={() => navigate('/settings')}
-          className="relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all text-left"
+          className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg transition-all text-left"
           style={{
             color: isSettingsActive ? 'var(--fg)' : 'var(--fg-secondary)',
             background: isSettingsActive ? 'var(--accent-muted)' : 'transparent',
