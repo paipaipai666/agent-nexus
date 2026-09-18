@@ -1,0 +1,356 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AgentNexus ReAct 循环 FSM 状态机",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-rail",
+        "label": "主循环路径",
+        "focus": [
+          "init",
+          "prepare",
+          "call-llm",
+          "receive",
+          "execute-tool",
+          "emit-answer",
+          "done"
+        ],
+        "note": "INIT → PREPARE → CALL_LLM → RECEIVE 分路 → EXECUTE_TOOL → EMIT_ANSWER → DONE。"
+      },
+      {
+        "id": "json-path",
+        "label": "JSON 容错路径",
+        "focus": [
+          "receive",
+          "parse-classify",
+          "retry-gate",
+          "degrade"
+        ],
+        "note": "非 NATIVE 策略：容错解析 + 分类，错误进 RETRY_GATE。"
+      },
+      {
+        "id": "recovery",
+        "label": "重试与降级",
+        "focus": [
+          "retry-gate",
+          "degrade",
+          "prepare",
+          "error-abort"
+        ],
+        "note": "RETRY_GATE 三出口：重试 / 降级 / 兜底；DEGRADE 可恢复。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "主循环"
+    },
+    {
+      "id": "paths",
+      "label": "策略分路"
+    },
+    {
+      "id": "recovery",
+      "label": "容错与降级",
+      "variant": "exception"
+    },
+    {
+      "id": "exits",
+      "label": "出口"
+    }
+  ],
+  "phases": [
+    {
+      "id": "setup",
+      "label": "准备 + 调用",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "route",
+      "label": "分路 + 执行",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "finish",
+      "label": "出口",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "init",
+    "prepare",
+    "call-llm",
+    "receive",
+    "check-tools",
+    "execute-tool",
+    "emit-answer",
+    "done"
+  ],
+  "nodes": [
+    {
+      "id": "init",
+      "lane": "main",
+      "col": 0,
+      "type": "external",
+      "label": "INIT",
+      "sublabel": "构建 prompt / 消息 / 记忆",
+      "width": 150
+    },
+    {
+      "id": "prepare",
+      "lane": "main",
+      "col": 1,
+      "type": "backend",
+      "label": "PREPARE_LLM_CALL",
+      "sublabel": "选策略 · 组参数 · 注入提示",
+      "width": 150
+    },
+    {
+      "id": "call-llm",
+      "lane": "main",
+      "col": 2,
+      "type": "backend",
+      "label": "CALL_LLM",
+      "sublabel": "think() 阻塞调用",
+      "width": 150
+    },
+    {
+      "id": "receive",
+      "lane": "main",
+      "col": 3,
+      "type": "security",
+      "label": "RECEIVE_RESPONSE",
+      "sublabel": "按 CallingStrategy 分路",
+      "width": 150
+    },
+    {
+      "id": "execute-tool",
+      "lane": "main",
+      "col": 4,
+      "type": "backend",
+      "label": "EXECUTE_TOOL",
+      "sublabel": "批量执行 · 逐工具自循环",
+      "width": 150
+    },
+    {
+      "id": "parse-classify",
+      "lane": "paths",
+      "col": 2,
+      "type": "security",
+      "label": "JSON_PARSE + CLASSIFY",
+      "sublabel": "容错解析 → tool / answer / error",
+      "width": 150
+    },
+    {
+      "id": "check-tools",
+      "lane": "paths",
+      "col": 3,
+      "type": "security",
+      "label": "CHECK_TOOL_CALLS",
+      "sublabel": "NATIVE 路线",
+      "width": 150
+    },
+    {
+      "id": "retry-gate",
+      "lane": "recovery",
+      "col": 2,
+      "type": "security",
+      "label": "RETRY_GATE",
+      "sublabel": "THOUGHT_MISSING · PARSE_ERROR →",
+      "width": 150
+    },
+    {
+      "id": "degrade",
+      "lane": "recovery",
+      "col": 4,
+      "type": "security",
+      "label": "DEGRADE",
+      "sublabel": "NO_RETRIES · 重选策略",
+      "width": 150
+    },
+    {
+      "id": "error-abort",
+      "lane": "recovery",
+      "col": 5,
+      "type": "security",
+      "label": "ERROR_ABORT",
+      "sublabel": "LLM_ERROR · 步数超限",
+      "width": 150
+    },
+    {
+      "id": "emit-answer",
+      "lane": "exits",
+      "col": 5,
+      "type": "backend",
+      "label": "EMIT_ANSWER",
+      "sublabel": "输出答案 · 存记忆",
+      "width": 150
+    },
+    {
+      "id": "done",
+      "lane": "exits",
+      "col": 5,
+      "type": "database",
+      "label": "DONE",
+      "sublabel": "终止态",
+      "yOffset": 120,
+      "width": 150
+    }
+  ],
+  "edges": [
+    {
+      "id": "t-init",
+      "from": "init",
+      "to": "prepare",
+      "label": "START",
+      "role": "main"
+    },
+    {
+      "id": "t-params",
+      "from": "prepare",
+      "to": "call-llm",
+      "label": "PARAMS_READY",
+      "role": "main"
+    },
+    {
+      "id": "t-response",
+      "from": "call-llm",
+      "to": "receive",
+      "label": "LLM_RESPONSE",
+      "role": "main"
+    },
+    {
+      "id": "t-native",
+      "from": "receive",
+      "to": "check-tools",
+      "label": "ROUTE_NATIVE",
+      "role": "branch"
+    },
+    {
+      "id": "t-json",
+      "from": "receive",
+      "to": "parse-classify",
+      "label": "ROUTE_JSON",
+      "role": "branch"
+    },
+    {
+      "id": "t-tools-found",
+      "from": "check-tools",
+      "to": "execute-tool",
+      "label": "TOOLS_FOUND",
+      "role": "main"
+    },
+    {
+      "id": "t-class-tool",
+      "from": "parse-classify",
+      "to": "execute-tool",
+      "label": "CLASSIFIED_TOOL",
+      "role": "main"
+    },
+    {
+      "id": "t-thought-missing",
+      "from": "check-tools",
+      "to": "retry-gate",
+      "label": "THOUGHT_MISSING",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "t-class-err",
+      "from": "parse-classify",
+      "to": "retry-gate",
+      "label": "PARSE/CLASSIFY_ERROR",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "t-all-done",
+      "from": "execute-tool",
+      "to": "prepare",
+      "label": "ALL_TOOLS_DONE 下一轮",
+      "variant": "emphasis",
+      "role": "return"
+    },
+    {
+      "id": "t-answer-ready",
+      "from": "execute-tool",
+      "to": "emit-answer",
+      "label": "NO_TOOLS / ANSWER_READY",
+      "role": "main"
+    },
+    {
+      "id": "t-retry",
+      "from": "retry-gate",
+      "to": "prepare",
+      "label": "RETRIES_LEFT 重试",
+      "variant": "emphasis",
+      "role": "return"
+    },
+    {
+      "id": "t-fallback",
+      "from": "retry-gate",
+      "to": "emit-answer",
+      "label": "FALLBACK_TEXT 兜底",
+      "role": "branch"
+    },
+    {
+      "id": "t-no-retries",
+      "from": "retry-gate",
+      "to": "degrade",
+      "label": "NO_RETRIES",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "t-degraded",
+      "from": "degrade",
+      "to": "prepare",
+      "label": "DEGRADED 重选策略",
+      "variant": "emphasis",
+      "role": "return"
+    },
+    {
+      "id": "t-llm-error",
+      "from": "call-llm",
+      "to": "error-abort",
+      "label": "LLM_ERROR / ABORT",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "t-emit",
+      "from": "emit-answer",
+      "to": "done",
+      "label": "无条件",
+      "variant": "emphasis",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主干与分路",
+      "items": [
+        "RECEIVE_RESPONSE 按 CallingStrategy 分路：NATIVE → CHECK_TOOL_CALLS；其余 → JSON_PARSE + CLASSIFY",
+        "EXECUTE_TOOL 以 TOOL_DONE 自循环逐工具执行；ALL_TOOLS_DONE 回到 PREPARE_LLM_CALL 开始下一轮"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "容错语义",
+      "items": [
+        "RETRY_GATE 三出口：RETRIES_LEFT 重试 · NO_RETRIES 降级 · FALLBACK_TEXT 原文兜底",
+        "DEGRADE 失败但真实返回 PREPARE（可恢复）；ERROR_ABORT 终止",
+        "完整 16 态 / 29 转换见 agents/react_transitions.py"
+      ]
+    }
+  ]
+}

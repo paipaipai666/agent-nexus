@@ -1,0 +1,339 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AgentNexus 工具治理与可观测机制",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "gates",
+        "label": "七步调用流水线",
+        "focus": [
+          "rbac",
+          "schema",
+          "ratelimit",
+          "hitl",
+          "exec",
+          "output",
+          "audit"
+        ],
+        "note": "registry.invoke() 的默认拒绝式流水线。"
+      },
+      {
+        "id": "evidence",
+        "label": "证据链",
+        "focus": [
+          "exec",
+          "tracer",
+          "audit-node",
+          "drift",
+          "fault"
+        ],
+        "note": "span 即时落盘、审计留痕、漂移与归因分析。"
+      },
+      {
+        "id": "response",
+        "label": "响应",
+        "focus": [
+          "drift",
+          "fault",
+          "alert",
+          "health"
+        ],
+        "note": "分级告警与健康巡检。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "callchain",
+      "label": "调用链（invoke 七步）"
+    },
+    {
+      "id": "evidence",
+      "label": "证据"
+    },
+    {
+      "id": "analysis",
+      "label": "分析",
+      "variant": "exception"
+    },
+    {
+      "id": "response",
+      "label": "响应"
+    }
+  ],
+  "phases": [
+    {
+      "id": "precheck",
+      "label": "准入四道",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "security"
+    },
+    {
+      "id": "run",
+      "label": "执行 + 校验",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "rbac",
+    "schema",
+    "ratelimit",
+    "hitl",
+    "exec",
+    "output",
+    "audit"
+  ],
+  "nodes": [
+    {
+      "id": "rbac",
+      "lane": "callchain",
+      "col": 0,
+      "type": "security",
+      "label": "① RBAC",
+      "sublabel": "白名单 · skill 策略",
+      "width": 126
+    },
+    {
+      "id": "schema",
+      "lane": "callchain",
+      "col": 1,
+      "type": "security",
+      "label": "② 参数校验",
+      "sublabel": "jsonschema · 缓存校验器",
+      "width": 126
+    },
+    {
+      "id": "ratelimit",
+      "lane": "callchain",
+      "col": 2,
+      "type": "security",
+      "label": "③ 限流",
+      "sublabel": "滑动窗口 per_min",
+      "width": 126
+    },
+    {
+      "id": "hitl",
+      "lane": "callchain",
+      "col": 3,
+      "type": "security",
+      "label": "④ HITL",
+      "sublabel": "风险操作人工放行",
+      "width": 126
+    },
+    {
+      "id": "exec",
+      "lane": "callchain",
+      "col": 4,
+      "type": "backend",
+      "label": "⑤ 超时执行",
+      "sublabel": "ThreadPool + span 包裹",
+      "width": 126
+    },
+    {
+      "id": "output",
+      "lane": "callchain",
+      "col": 5,
+      "type": "security",
+      "label": "⑥ 输出校验",
+      "sublabel": "output_schema",
+      "width": 126
+    },
+    {
+      "id": "audit",
+      "lane": "callchain",
+      "col": 5,
+      "type": "database",
+      "label": "⑦ 审计",
+      "sublabel": "finally 块 · AuditEntry",
+      "yOffset": 130,
+      "width": 126
+    },
+    {
+      "id": "tracer",
+      "lane": "evidence",
+      "col": 1,
+      "type": "database",
+      "label": "Tracer",
+      "sublabel": "JSONL span · 即时落盘",
+      "width": 126
+    },
+    {
+      "id": "audit-node",
+      "lane": "evidence",
+      "col": 2,
+      "type": "database",
+      "label": "审计日志",
+      "sublabel": "audit_*.jsonl",
+      "width": 126
+    },
+    {
+      "id": "drift",
+      "lane": "analysis",
+      "col": 3,
+      "type": "security",
+      "label": "漂移检测",
+      "sublabel": "5 信号 · 双阈值",
+      "width": 126
+    },
+    {
+      "id": "fault",
+      "lane": "analysis",
+      "col": 4,
+      "type": "security",
+      "label": "故障归因",
+      "sublabel": "5 类 · 关键词规则",
+      "width": 126
+    },
+    {
+      "id": "alert",
+      "lane": "response",
+      "col": 5,
+      "type": "messagebus",
+      "label": "分级告警",
+      "sublabel": "成本/失败率/成功率/漂移",
+      "width": 126
+    },
+    {
+      "id": "health",
+      "lane": "response",
+      "col": 5,
+      "type": "backend",
+      "label": "健康检查",
+      "sublabel": "LLM·MCP·内存·磁盘·trace",
+      "yOffset": 130,
+      "width": 126
+    }
+  ],
+  "edges": [
+    {
+      "id": "g1",
+      "from": "rbac",
+      "to": "schema",
+      "label": "通过",
+      "role": "main"
+    },
+    {
+      "id": "g2",
+      "from": "schema",
+      "to": "ratelimit",
+      "label": "合法参数",
+      "role": "main"
+    },
+    {
+      "id": "g3",
+      "from": "ratelimit",
+      "to": "hitl",
+      "label": "窗口内",
+      "role": "main"
+    },
+    {
+      "id": "g4",
+      "from": "hitl",
+      "to": "exec",
+      "label": "放行 / 免确认",
+      "role": "main"
+    },
+    {
+      "id": "g5",
+      "from": "exec",
+      "to": "output",
+      "label": "结果",
+      "role": "main"
+    },
+    {
+      "id": "g6",
+      "from": "output",
+      "to": "audit",
+      "label": "finally 记录",
+      "role": "main"
+    },
+    {
+      "id": "g-hitl-block",
+      "from": "hitl",
+      "to": "audit",
+      "label": "拒绝也留痕",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "g-span",
+      "from": "exec",
+      "to": "tracer",
+      "label": "tool span",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "g-audit-entry",
+      "from": "audit",
+      "to": "audit-node",
+      "label": "AuditEntry ×N",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "g-drift-in",
+      "from": "tracer",
+      "to": "drift",
+      "label": "trace 读取",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "g-fault-in",
+      "from": "exec",
+      "to": "fault",
+      "label": "错误分类",
+      "variant": "dashed",
+      "role": "error"
+    },
+    {
+      "id": "g-drift-alert",
+      "from": "drift",
+      "to": "alert",
+      "label": "critical 信号",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "g-fault-alert",
+      "from": "fault",
+      "to": "alert",
+      "label": "fault_rate ≥ 30%",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "g-health",
+      "from": "alert",
+      "to": "health",
+      "label": "nexus health 巡检",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "默认拒绝",
+      "items": [
+        "任一门失败即拦截：RBAC 白名单 / jsonschema 校验 / 滑动窗口限流 / HITL 风险确认",
+        "脱敏参数（api_key·token·password 等 12 类）才进确认框、审计与 span"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "证据闭环",
+      "items": [
+        "span 结束即落盘（崩溃安全），worker 线程经 inherited_trace_id 并回父 trace",
+        "4 条默认告警：成本>10¥ · 工具失败率>30% · 成功率<70%(critical) · 漂移 critical"
+      ]
+    }
+  ]
+}

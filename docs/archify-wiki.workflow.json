@@ -1,0 +1,342 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AgentNexus Wiki 引擎机制",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "ingest",
+        "label": "编译流水线",
+        "focus": [
+          "source",
+          "llm-gen",
+          "verify",
+          "confidence",
+          "store",
+          "index"
+        ],
+        "note": "源文档 → LLM 生成 → 机械校验 → 置信评级 → 存储索引。"
+      },
+      {
+        "id": "query",
+        "label": "置信路由查询",
+        "focus": [
+          "question",
+          "wiki-search",
+          "route",
+          "answer",
+          "rag"
+        ],
+        "note": "按页面置信度决定直答 / 附来源 / 免责声明 / RAG 兜底。"
+      },
+      {
+        "id": "governance",
+        "label": "治理机制",
+        "focus": [
+          "verify",
+          "calibrate",
+          "propagate",
+          "lint",
+          "store"
+        ],
+        "note": "阈值校准、信任传播、lint 复审三类机制。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "ingest",
+      "label": "编译（ingest）"
+    },
+    {
+      "id": "query",
+      "label": "查询（query）"
+    },
+    {
+      "id": "gov",
+      "label": "治理",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "compile",
+      "label": "编译",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "rate",
+      "label": "评级 + 存储",
+      "fromCol": 3,
+      "toCol": 4
+    },
+    {
+      "id": "serve",
+      "label": "服务",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "source",
+    "llm-gen",
+    "verify",
+    "confidence",
+    "store",
+    "index"
+  ],
+  "nodes": [
+    {
+      "id": "source",
+      "lane": "ingest",
+      "col": 0,
+      "type": "external",
+      "label": "源文档",
+      "sublabel": "markdown / pdf / 8 种格式",
+      "width": 126
+    },
+    {
+      "id": "llm-gen",
+      "lane": "ingest",
+      "col": 1,
+      "type": "backend",
+      "label": "LLM 生成",
+      "sublabel": "statements + 术语表",
+      "width": 126
+    },
+    {
+      "id": "verify",
+      "lane": "ingest",
+      "col": 2,
+      "type": "security",
+      "label": "机械校验",
+      "sublabel": "Jaccard + cosine",
+      "width": 126
+    },
+    {
+      "id": "confidence",
+      "lane": "ingest",
+      "col": 3,
+      "type": "backend",
+      "label": "置信评级",
+      "sublabel": "规则树 非公式",
+      "width": 126
+    },
+    {
+      "id": "store",
+      "lane": "ingest",
+      "col": 4,
+      "type": "database",
+      "label": "WikiStore",
+      "sublabel": "SQLite 页面/依赖",
+      "width": 126
+    },
+    {
+      "id": "index",
+      "lane": "ingest",
+      "col": 5,
+      "type": "database",
+      "label": "ChromaDB 索引",
+      "sublabel": "wiki_namespace",
+      "width": 126
+    },
+    {
+      "id": "question",
+      "lane": "query",
+      "col": 2,
+      "type": "external",
+      "label": "用户提问",
+      "sublabel": "nexus wiki query",
+      "width": 126
+    },
+    {
+      "id": "wiki-search",
+      "lane": "query",
+      "col": 3,
+      "type": "backend",
+      "label": "Wiki 检索",
+      "sublabel": "语义相似 top-N",
+      "width": 126
+    },
+    {
+      "id": "route",
+      "lane": "query",
+      "col": 4,
+      "type": "security",
+      "label": "置信路由",
+      "sublabel": "规则树 · 4 档路由",
+      "width": 126
+    },
+    {
+      "id": "answer",
+      "lane": "query",
+      "col": 5,
+      "type": "backend",
+      "label": "回答",
+      "sublabel": "直答 · 附来源 · 免责",
+      "width": 126
+    },
+    {
+      "id": "rag",
+      "lane": "query",
+      "col": 5,
+      "type": "database",
+      "label": "RAG 兜底",
+      "sublabel": "kb_search 混合检索",
+      "yOffset": 130,
+      "width": 126
+    },
+    {
+      "id": "calibrate",
+      "lane": "gov",
+      "col": 1,
+      "type": "backend",
+      "label": "阈值校准",
+      "sublabel": "人工标注样本",
+      "width": 126
+    },
+    {
+      "id": "propagate",
+      "lane": "gov",
+      "col": 2,
+      "type": "security",
+      "label": "信任传播",
+      "sublabel": "min 继承 · 深度 3",
+      "width": 126
+    },
+    {
+      "id": "lint",
+      "lane": "gov",
+      "col": 5,
+      "type": "security",
+      "label": "Lint 复审",
+      "sublabel": "P1/2/3 复审",
+      "width": 126
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-src",
+      "from": "source",
+      "to": "llm-gen",
+      "label": "原文",
+      "role": "main"
+    },
+    {
+      "id": "e-gen",
+      "from": "llm-gen",
+      "to": "verify",
+      "label": "LLM 自判等级",
+      "role": "main"
+    },
+    {
+      "id": "e-verify",
+      "from": "verify",
+      "to": "confidence",
+      "label": "修正后等级",
+      "role": "main"
+    },
+    {
+      "id": "e-conf",
+      "from": "confidence",
+      "to": "store",
+      "label": "页面置信",
+      "role": "main"
+    },
+    {
+      "id": "e-store",
+      "from": "store",
+      "to": "index",
+      "label": "向量索引",
+      "role": "main"
+    },
+    {
+      "id": "e-ask",
+      "from": "question",
+      "to": "wiki-search",
+      "label": "问题",
+      "role": "main"
+    },
+    {
+      "id": "e-search",
+      "from": "wiki-search",
+      "to": "route",
+      "label": "最佳页面",
+      "role": "main"
+    },
+    {
+      "id": "e-high",
+      "from": "route",
+      "to": "answer",
+      "label": "high / medium",
+      "role": "main"
+    },
+    {
+      "id": "e-low",
+      "from": "route",
+      "to": "answer",
+      "label": "low + 免责声明",
+      "role": "branch"
+    },
+    {
+      "id": "e-fallback",
+      "from": "route",
+      "to": "rag",
+      "label": "untrusted / 无页面",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-rag-back",
+      "from": "rag",
+      "to": "answer",
+      "label": "检索结果",
+      "role": "return"
+    },
+    {
+      "id": "e-calibrate",
+      "from": "calibrate",
+      "to": "verify",
+      "label": "热更新阈值",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-propagate",
+      "from": "propagate",
+      "to": "store",
+      "label": "降级级联",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-lint",
+      "from": "lint",
+      "to": "store",
+      "label": "复审项 / 超期降级",
+      "variant": "dashed",
+      "role": "async"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "机械校验（无 LLM）",
+      "items": [
+        "Jaccard 词集相似初筛，cosine 语义确认；无来源 chunk 强制 synthesis",
+        "四级合成等级：direct_quote → paraphrase → cross_reference → synthesis，逐级降级"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "置信规则树",
+      "items": [
+        "任一条 untrusted → 整页 untrusted → RAG 兜底；≥80% 高信任 → high；≥50% → medium；含 synthesis → low",
+        "阈值针对 BAAI/bge-small-zh-v1.5 校准，换模型须 nexus wiki calibrate"
+      ]
+    }
+  ]
+}

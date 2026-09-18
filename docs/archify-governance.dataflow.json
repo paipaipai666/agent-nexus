@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "AgentNexus 工具治理与可观测机制",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "gates",
+        "label": "invoke 流水线",
+        "focus": [
+          "admit",
+          "ratelimit",
+          "hitl",
+          "exec",
+          "audit"
+        ],
+        "note": "registry.invoke() 默认拒绝式流水线。"
+      },
+      {
+        "id": "observe",
+        "label": "证据 → 分析 → 响应",
+        "focus": [
+          "audit",
+          "analyze",
+          "respond"
+        ],
+        "note": "trace/审计驱动漂移检测、故障归因、分级告警与健康巡检。"
+      }
+    ],
+    "viewBox": [
+      1080,
+      560
+    ]
+  },
+  "stages": [
+    {
+      "label": "①② 准入"
+    },
+    {
+      "label": "③ 限流"
+    },
+    {
+      "label": "④ HITL"
+    },
+    {
+      "label": "⑤⑥ 执行 + 校验"
+    },
+    {
+      "label": "⑦ 审计 → 响应"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "admit",
+      "type": "security",
+      "label": "RBAC + 参数校验",
+      "sublabel": "白名单 · jsonschema",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "ratelimit",
+      "type": "security",
+      "label": "限流",
+      "sublabel": "滑动窗口 per_min",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "hitl",
+      "type": "security",
+      "label": "HITL",
+      "sublabel": "风险人工放行",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "exec",
+      "type": "backend",
+      "label": "超时执行",
+      "sublabel": "ThreadPool · span",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "audit",
+      "type": "database",
+      "label": "审计 + Tracer",
+      "sublabel": "AuditEntry → JSONL",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "analyze",
+      "type": "security",
+      "label": "漂移 · 归因",
+      "sublabel": "5 信号 · 5 类规则",
+      "stage": 4,
+      "row": 1
+    },
+    {
+      "id": "respond",
+      "type": "messagebus",
+      "label": "告警 · 健康",
+      "sublabel": "4 规则 · 5 项巡检",
+      "stage": 4,
+      "row": 2
+    }
+  ],
+  "flows": [
+    {
+      "from": "admit",
+      "to": "ratelimit",
+      "label": "白名单 + 参数合法",
+      "variant": "default"
+    },
+    {
+      "from": "ratelimit",
+      "to": "hitl",
+      "label": "窗口内",
+      "variant": "default"
+    },
+    {
+      "from": "hitl",
+      "to": "exec",
+      "label": "放行 / 免确认",
+      "variant": "emphasis"
+    },
+    {
+      "from": "exec",
+      "to": "audit",
+      "label": "span + 结果",
+      "variant": "default"
+    },
+    {
+      "from": "audit",
+      "to": "analyze",
+      "label": "trace 读取",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "from": "analyze",
+      "to": "respond",
+      "label": "critical / 失败率",
+      "variant": "security",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "默认拒绝",
+      "items": [
+        "任一门失败即拦截并留痕；脱敏参数（api_key·token·password 等 12 类）才进确认框 / 审计 / span"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "阈值清单",
+      "items": [
+        "漂移：目标相关度 <0.15 warning <0.05 critical；连续 3 次同调用；子任务超 50%；目标改写 <0.3",
+        "告警：成本 >10¥ · 失败率 >30% · 成功率 <70%(critical) · 漂移 critical；健康：LLM/MCP/内存/trace 探针/磁盘 <5GB degraded <1GB error"
+      ]
+    }
+  ]
+}

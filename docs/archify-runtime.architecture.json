@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AgentNexus 高层运行时架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": { "url": "https://github.com/paipaipai666/agent-nexus", "provider": "github", "revision": "8ee03c61e1533e7ffa105d1e0f720da3a36b8871" },
+    "views": [
+      { "id": "main-loop", "label": "ReAct 主循环", "focus": ["user", "interfaces", "agent-core", "llm", "gateway", "tools"], "note": "从用户请求到工具执行的 Thought→Action→Observe 主路径。" },
+      { "id": "tool-governance", "label": "工具治理与安全", "focus": ["gateway", "tools", "sandbox", "mcp"], "note": "7 道安全门、4 级沙箱降级链与 MCP 外部工具接入。" },
+      { "id": "local-data", "label": "本地数据层", "focus": ["memory", "rag", "observability"], "note": "记忆、知识库与可观测数据全部落盘本机。" }
+    ]
+  },
+  "components": [
+    { "id": "user", "type": "external", "label": "用户", "sublabel": "发起任务与对话", "pos": [40, 68], "size": [120, 64] },
+    {
+      "id": "interfaces", "type": "frontend", "label": "接入层", "sublabel": "Typer CLI · TUI · Electron Desktop · FastAPI/WS",
+      "pos": [220, 56], "size": [210, 88],
+      "sources": [{ "path": "agentnexus/server/app.py", "label": "FastAPI/WS 服务" }]
+    },
+    {
+      "id": "agent-core", "type": "backend", "label": "ReAct Agent Core", "sublabel": "FSM 16 态 / 25 转换 · 3-tier LLM · Prompt Builder",
+      "pos": [540, 36], "size": [230, 112],
+      "sources": [
+        { "path": "agentnexus/agents/fsm.py", "label": "FSM 16 态 25 转换" },
+        { "path": "agentnexus/agents/llm_strategy.py", "label": "3-tier LLM 策略" },
+        { "path": "agentnexus/agents/re_act_agent.py", "label": "ReAct 主循环" }
+      ]
+    },
+    {
+      "id": "llm", "type": "external", "label": "LLM 提供方", "sublabel": "litellm · 本地模型 / API",
+      "pos": [845, 56], "size": [180, 88],
+      "sources": [{ "path": "agentnexus/core/llm.py", "label": "litellm 接入" }]
+    },
+    {
+      "id": "gateway", "type": "security", "label": "Tool Gateway", "sublabel": "RBAC · Schema · 限流 · 超时 · 风险 · HITL · 审计",
+      "pos": [540, 172], "size": [230, 88],
+      "sources": [
+        { "path": "agentnexus/tools/dispatcher.py", "label": "工具派发" },
+        { "path": "agentnexus/tools/confirm_bridge.py", "label": "HITL 确认桥" },
+        { "path": "agentnexus/observability/audit_log.py", "label": "审计日志" }
+      ]
+    },
+    {
+      "id": "mcp", "type": "external", "label": "MCP 外部工具", "sublabel": "stdio / HTTP 接入",
+      "pos": [845, 172], "size": [180, 88],
+      "sources": [{ "path": "agentnexus/tools/mcp_adapter.py", "label": "MCP 适配器" }]
+    },
+    {
+      "id": "tools", "type": "backend", "label": "内置工具 ×18", "sublabel": "code·shell·file·web·browser·computer·subagent·wiki·codegraph",
+      "pos": [540, 284], "size": [290, 96],
+      "sources": [{ "path": "agentnexus/tools/registry.py", "label": "18 个内置工具" }]
+    },
+    {
+      "id": "sandbox", "type": "security", "label": "Code Sandbox", "sublabel": "E2B → bwrap/Seatbelt → Docker → 本地",
+      "pos": [220, 284], "size": [200, 80],
+      "sources": [{ "path": "agentnexus/tools/code_executor.py", "label": "4 级沙箱降级" }]
+    },
+    {
+      "id": "memory", "type": "database", "label": "Memory", "sublabel": "STM 压缩 + LTM 淘汰 · SQLite/ChromaDB",
+      "pos": [40, 408], "size": [190, 80],
+      "sources": [{ "path": "agentnexus/memory/manager.py", "label": "STM/LTM 管理" }]
+    },
+    {
+      "id": "rag", "type": "database", "label": "RAG / Wiki 知识库", "sublabel": "dense+sparse · RRF 重排 · ChromaDB",
+      "pos": [40, 500], "size": [190, 80],
+      "sources": [
+        { "path": "agentnexus/rag/retriever.py", "label": "混合检索" },
+        { "path": "agentnexus/rag/store.py", "label": "ChromaDB 存储" }
+      ]
+    },
+    {
+      "id": "observability", "type": "backend", "label": "Observability", "sublabel": "JSONL Trace · 漂移检测 · 告警 · 健康检查",
+      "pos": [600, 408], "size": [220, 80],
+      "sources": [
+        { "path": "agentnexus/observability/tracer.py", "label": "Tracer" },
+        { "path": "agentnexus/observability/drift_detector.py", "label": "漂移检测" }
+      ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "AgentNexus 运行时（本地进程）", "wraps": ["interfaces", "agent-core", "gateway", "tools", "sandbox", "memory", "rag", "observability"] }
+  ],
+  "connections": [
+    { "id": "user-to-interfaces", "from": "user", "to": "interfaces" },
+    { "id": "interfaces-to-core", "from": "interfaces", "to": "agent-core", "label": "请求 / 响应" },
+    { "id": "core-to-llm", "from": "agent-core", "to": "llm", "label": "litellm" },
+    { "id": "core-to-gateway", "from": "agent-core", "to": "gateway", "label": "Action 工具调用", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelAt": [700, 160] },
+    { "id": "gateway-to-tools", "from": "gateway", "to": "tools", "label": "7 门通过 · 派发", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelAt": [700, 272] },
+    { "id": "gateway-to-mcp", "from": "gateway", "to": "mcp", "label": "MCP 调用" },
+    { "id": "tools-to-sandbox", "from": "tools", "to": "sandbox", "label": "沙箱降级链", "labelAt": [480, 320] },
+    { "id": "tools-to-memory", "from": "tools", "to": "memory", "label": "memory_save / search", "fromSide": "left", "toSide": "right", "via": [[470, 332], [470, 448], [230, 448]], "labelAt": [500, 390] },
+    { "id": "tools-to-rag", "from": "tools", "to": "rag", "label": "kb_search / wiki 查询", "fromSide": "right", "toSide": "right", "via": [[838, 332], [838, 540], [230, 540]], "labelAt": [540, 540] },
+    { "id": "tools-to-obs", "from": "tools", "to": "observability", "label": "Trace / 审计", "fromSide": "bottom", "toSide": "top", "via": [[685, 394], [710, 394]], "labelAt": [723, 394] }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "本地优先 · 默认拒绝", "items": ["向量 / 记忆 / Trace 全落盘本机；工具调用经 7 道安全门 + HITL 拦截确认"] }
+  ]
+}

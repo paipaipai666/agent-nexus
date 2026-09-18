@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "AgentNexus 记忆系统数据流",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "pyramid",
+        "label": "压缩金字塔",
+        "focus": [
+          "messages",
+          "snip",
+          "microcompact",
+          "projection",
+          "summarize"
+        ],
+        "note": "L1 原始消息 → L2 剪尾 → L3 微压缩 → L5 分段摘要（L4 读时投影为旁路）。"
+      },
+      {
+        "id": "ltm",
+        "label": "长期记忆",
+        "focus": [
+          "drain",
+          "ltm-store",
+          "evict",
+          "reflect",
+          "quarantine",
+          "recall"
+        ],
+        "note": "高分下沉、双存储、评分淘汰、反思隔离区审批入库。"
+      }
+    ],
+    "viewBox": [
+      1080,
+      640
+    ]
+  },
+  "stages": [
+    {
+      "label": "会话写入"
+    },
+    {
+      "label": "L2/L3 压缩"
+    },
+    {
+      "label": "L5 摘要 / 归档"
+    },
+    {
+      "label": "长期存储"
+    },
+    {
+      "label": "召回"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "messages",
+      "type": "messagebus",
+      "label": "L1 原始消息流",
+      "sublabel": "deque · WAL 持久化",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "snip",
+      "type": "backend",
+      "label": "L2 Snip",
+      "sublabel": "留最近 10 条",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "microcompact",
+      "type": "backend",
+      "label": "L3 微压缩",
+      "sublabel": "可恢复工具结果清理",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "drain",
+      "type": "backend",
+      "label": "LTM 下沉",
+      "sublabel": "importance ≥ 0.7",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "summarize",
+      "type": "backend",
+      "label": "L5 分段摘要",
+      "sublabel": "20 条/段 · 索引续排",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "history",
+      "type": "database",
+      "label": "History 归档",
+      "sublabel": "JSONL 先写后删",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "evict",
+      "type": "security",
+      "label": "评分淘汰",
+      "sublabel": "有效分 0.6 + 时效 0.4",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "ltm-store",
+      "type": "database",
+      "label": "LTM 双存储",
+      "sublabel": "SQLite + ChromaDB",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "quarantine",
+      "type": "security",
+      "label": "pending 隔离区",
+      "sublabel": "用户批准后入库",
+      "stage": 3,
+      "row": 2
+    },
+    {
+      "id": "reflect",
+      "type": "backend",
+      "label": "反思提炼",
+      "sublabel": "≥5 条 note 批量归纳",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "recall",
+      "type": "backend",
+      "label": "memory_search",
+      "sublabel": "向量 + 评分排序",
+      "stage": 4,
+      "row": 1
+    },
+    {
+      "id": "projection",
+      "type": "backend",
+      "label": "L4 读时投影",
+      "sublabel": "90% 温和 · 95% 激进",
+      "stage": 1,
+      "row": 2
+    }
+  ],
+  "flows": [
+    {
+      "from": "messages",
+      "to": "snip",
+      "label": "超阈值 / 时间衰减",
+      "variant": "default",
+      "labelDy": -16
+    },
+    {
+      "from": "messages",
+      "to": "microcompact",
+      "label": "清理",
+      "variant": "default",
+      "labelAt": [
+        244,
+        250
+      ]
+    },
+    {
+      "from": "microcompact",
+      "to": "summarize",
+      "label": "清洗后全文",
+      "variant": "default"
+    },
+    {
+      "from": "summarize",
+      "to": "drain",
+      "label": "高分消息先沉",
+      "variant": "emphasis"
+    },
+    {
+      "from": "summarize",
+      "to": "history",
+      "label": "原文归档",
+      "variant": "emphasis",
+      "labelDy": 20
+    },
+    {
+      "from": "drain",
+      "to": "ltm-store",
+      "label": "embedding + 分数",
+      "variant": "default"
+    },
+    {
+      "from": "evict",
+      "to": "ltm-store",
+      "label": "超限淘汰 / TTL",
+      "variant": "security",
+      "labelDy": 20
+    },
+    {
+      "from": "reflect",
+      "to": "quarantine",
+      "label": "提案（不直入库）",
+      "variant": "security"
+    },
+    {
+      "from": "quarantine",
+      "to": "ltm-store",
+      "label": "批准 · 取代源条目",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ltm-store",
+      "to": "recall",
+      "label": "top-N 命中",
+      "variant": "default"
+    },
+    {
+      "from": "messages",
+      "to": "projection",
+      "label": "每次调用前 · 非破坏",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "金字塔阈值",
+      "items": [
+        "压缩阈值 120k / 上限 128k tokens；熔断器 3 次失败指数退避 + 半开探测",
+        "L4 为读时旁路：不改 STM，只压缩送往 LLM 的视图"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "记忆经济学",
+      "items": [
+        "importance = 角色 40% + 时近 30% + 关键词 30%；访问对数加成 ≤0.2",
+        "检索分 = 相似 0.55 + 有效分 0.25 + 时效 0.2；fact/preference 永不过期，note 90 天 TTL / 48h 半衰期"
+      ]
+    }
+  ]
+}

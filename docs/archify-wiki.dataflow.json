@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "AgentNexus Wiki 引擎机制",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "compile",
+        "label": "编译流水线",
+        "focus": [
+          "source",
+          "llm-gen",
+          "verify",
+          "confidence",
+          "store",
+          "index"
+        ],
+        "note": "源文档 → LLM 生成 → 机械校验 → 置信评级 → 存储索引。"
+      },
+      {
+        "id": "query",
+        "label": "置信路由查询",
+        "focus": [
+          "question",
+          "wiki-search",
+          "route",
+          "answer"
+        ],
+        "note": "按页面置信度路由：直答 / 附来源 / 免责声明 / RAG 兜底。"
+      }
+    ],
+    "viewBox": [
+      1080,
+      640
+    ]
+  },
+  "stages": [
+    {
+      "label": "输入"
+    },
+    {
+      "label": "生成 / 检索"
+    },
+    {
+      "label": "校验 / 路由"
+    },
+    {
+      "label": "评级 / 回答"
+    },
+    {
+      "label": "存储"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "source",
+      "type": "external",
+      "label": "源文档",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "question",
+      "type": "external",
+      "label": "用户提问",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "llm-gen",
+      "type": "backend",
+      "label": "LLM 生成",
+      "sublabel": "statements + 术语表",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "wiki-search",
+      "type": "backend",
+      "label": "Wiki 检索",
+      "sublabel": "语义相似 top-N",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "verify",
+      "type": "security",
+      "label": "机械校验",
+      "sublabel": "阈值经 calibrate 校准",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "route",
+      "type": "security",
+      "label": "置信路由",
+      "sublabel": "规则树 4 档",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "confidence",
+      "type": "backend",
+      "label": "置信评级",
+      "sublabel": "页面级 high→untrusted",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "answer",
+      "type": "backend",
+      "label": "回答",
+      "sublabel": "直答 · 附来源 · 免责",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "WikiStore",
+      "sublabel": "依赖图 · lint 复审",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "index",
+      "type": "database",
+      "label": "ChromaDB 索引",
+      "stage": 4,
+      "row": 1
+    }
+  ],
+  "flows": [
+    {
+      "from": "source",
+      "to": "llm-gen",
+      "label": "原文",
+      "variant": "default"
+    },
+    {
+      "from": "llm-gen",
+      "to": "verify",
+      "label": "LLM 自判等级",
+      "variant": "default"
+    },
+    {
+      "from": "verify",
+      "to": "confidence",
+      "label": "修正后等级",
+      "variant": "default"
+    },
+    {
+      "from": "confidence",
+      "to": "store",
+      "label": "页面 + 置信",
+      "variant": "emphasis"
+    },
+    {
+      "from": "store",
+      "to": "index",
+      "label": "向量索引",
+      "variant": "default",
+      "labelDy": 20
+    },
+    {
+      "from": "question",
+      "to": "wiki-search",
+      "label": "问题",
+      "variant": "default"
+    },
+    {
+      "from": "wiki-search",
+      "to": "route",
+      "label": "最佳页面",
+      "variant": "default"
+    },
+    {
+      "from": "route",
+      "to": "answer",
+      "label": "4 档路由",
+      "variant": "emphasis",
+      "labelDy": 20
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "机械校验（无 LLM）",
+      "items": [
+        "Jaccard 词集初筛 + cosine 语义确认；四级合成等级逐级降级",
+        "阈值绑定 bge-small-zh-v1.5，calibrate 人工标注重校准"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "配套治理",
+      "items": [
+        "信任传播：降级沿依赖图 min 继承（深度 3）",
+        "lint：P1 定义冲突 / P2 语义漂移 / P3 覆盖缺口，超期自动降级"
+      ]
+    }
+  ]
+}

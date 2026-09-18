@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AgentNexus 核心子系统运行时架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": { "url": "https://github.com/paipaipai666/agent-nexus", "provider": "github", "revision": "8ee03c61e1533e7ffa105d1e0f720da3a36b8871" },
+    "legend": { "mode": "hidden" },
+    "views": [
+      { "id": "react-core", "label": "ReAct 循环内核", "focus": ["react-loop", "fsm", "llm-strategy", "prompt-builder", "dispatcher"], "note": "FSM 驱动的 Thought→Action→Observe 主循环及其协作组件。" },
+      { "id": "governance-chain", "label": "工具治理链路", "focus": ["dispatcher", "registry-gates", "hitl", "tools-exec", "tracer"], "note": "每次调用的 7 道安全门、HITL 升级与审计留痕。" },
+      { "id": "data-observability", "label": "数据与可观测", "focus": ["stm", "ltm", "ingest-embed", "retriever", "wiki-engine", "tracer", "analyzers", "alert-health"], "note": "记忆金字塔、RAG/Wiki 检索与 6 层可观测的数据流。" }
+    ]
+  },
+  "components": [
+    {
+      "id": "fsm", "type": "backend", "label": "FSM 状态机", "sublabel": "16 态 · 25 转换 · 确定性迁移",
+      "pos": [70, 44], "size": [180, 68],
+      "sources": [
+        { "path": "agentnexus/agents/fsm.py", "label": "有限状态机" },
+        { "path": "agentnexus/agents/react_transitions.py", "label": "25 次转换" }
+      ]
+    },
+    {
+      "id": "llm-strategy", "type": "backend", "label": "LLM 策略", "sublabel": "3-tier 降级 · 结构化容错",
+      "pos": [330, 44], "size": [190, 68],
+      "sources": [{ "path": "agentnexus/agents/llm_strategy.py", "label": "3-tier 策略" }]
+    },
+    {
+      "id": "prompt-builder", "type": "backend", "label": "Prompt 构建", "sublabel": "模板渲染 + 变量注入",
+      "pos": [70, 168], "size": [180, 68],
+      "sources": [{ "path": "agentnexus/agents/prompt_builder.py", "label": "Prompt 构建器" }]
+    },
+    {
+      "id": "react-loop", "type": "backend", "label": "ReAct 主循环", "sublabel": "Thought→Action→Observe · tool_runner",
+      "pos": [330, 148], "size": [190, 92],
+      "sources": [
+        { "path": "agentnexus/agents/re_act_agent.py", "label": "ReAct Agent" },
+        { "path": "agentnexus/agents/react_runtime.py", "label": "运行时编排" },
+        { "path": "agentnexus/agents/tool_runner.py", "label": "工具执行" }
+      ]
+    },
+    {
+      "id": "dispatcher", "type": "security", "label": "读写派发", "sublabel": "只读并发 · 写入串行",
+      "pos": [620, 120], "size": [140, 60],
+      "sources": [{ "path": "agentnexus/tools/dispatcher.py", "label": "并发/串行分组" }]
+    },
+    {
+      "id": "registry-gates", "type": "security", "label": "注册表 · 5 道门", "sublabel": "RBAC·Schema·限流·超时·输出校验",
+      "pos": [850, 44], "size": [190, 100],
+      "sources": [{ "path": "agentnexus/tools/registry.py", "label": "invoke 七步流水线" }]
+    },
+    {
+      "id": "tools-exec", "type": "external", "label": "工具执行体", "sublabel": "11 类 provider · 18 工具 + MCP",
+      "pos": [850, 180], "size": [190, 68],
+      "sources": [{ "path": "agentnexus/tools/providers/base.py", "label": "执行 provider 层" }]
+    },
+    {
+      "id": "hitl", "type": "security", "label": "HITL 确认", "sublabel": "风险操作人工放行",
+      "pos": [640, 36], "size": [150, 60],
+      "sources": [{ "path": "agentnexus/tools/confirm_bridge.py", "label": "确认桥" }]
+    },
+    {
+      "id": "tracer", "type": "backend", "label": "Tracer · 审计", "sublabel": "JSONL span · 审计事件",
+      "pos": [850, 400], "size": [380, 64],
+      "sources": [
+        { "path": "agentnexus/observability/tracer.py", "label": "Trace 管理器" },
+        { "path": "agentnexus/observability/audit_log.py", "label": "审计日志" }
+      ]
+    },
+    {
+      "id": "analyzers", "type": "backend", "label": "漂移 · 归因", "sublabel": "漂移检测 · 故障归因",
+      "pos": [850, 488], "size": [380, 64],
+      "sources": [
+        { "path": "agentnexus/observability/drift_detector.py", "label": "漂移检测" },
+        { "path": "agentnexus/observability/fault_attribution.py", "label": "故障归因" }
+      ]
+    },
+    {
+      "id": "alert-health", "type": "backend", "label": "告警 · 健康", "sublabel": "分级告警 · 健康检查",
+      "pos": [850, 576], "size": [380, 64],
+      "sources": [
+        { "path": "agentnexus/observability/alerting.py", "label": "告警" },
+        { "path": "agentnexus/server/health_checks.py", "label": "健康检查" }
+      ]
+    },
+    {
+      "id": "stm", "type": "database", "label": "STM 短期记忆", "sublabel": "压缩金字塔 · 会话上下文",
+      "pos": [70, 320], "size": [190, 76],
+      "sources": [
+        { "path": "agentnexus/memory/short_term.py", "label": "短期记忆" },
+        { "path": "agentnexus/memory/compaction.py", "label": "压缩金字塔" }
+      ]
+    },
+    {
+      "id": "ltm", "type": "database", "label": "LTM 长期记忆", "sublabel": "评分淘汰 · 反思提炼",
+      "pos": [70, 436], "size": [190, 76],
+      "sources": [
+        { "path": "agentnexus/memory/long_term.py", "label": "长期记忆" },
+        { "path": "agentnexus/memory/reflection.py", "label": "反思提炼" }
+      ]
+    },
+    {
+      "id": "wiki-engine", "type": "backend", "label": "Wiki 引擎", "sublabel": "生成 · 机械校验 · 置信路由",
+      "pos": [350, 330], "size": [180, 76],
+      "sources": [
+        { "path": "agentnexus/wiki/wiki_service.py", "label": "Wiki 服务" },
+        { "path": "agentnexus/wiki/verifier.py", "label": "机械校验" },
+        { "path": "agentnexus/wiki/confidence.py", "label": "置信路由" }
+      ]
+    },
+    {
+      "id": "retriever", "type": "database", "label": "混合检索", "sublabel": "dense+sparse · RRF · 重排",
+      "pos": [540, 450], "size": [170, 84],
+      "sources": [
+        { "path": "agentnexus/rag/retriever.py", "label": "混合检索器" },
+        { "path": "agentnexus/rag/ranking.py", "label": "RRF+重排" }
+      ]
+    },
+    {
+      "id": "ingest-embed", "type": "backend", "label": "载入 · 分块 · 嵌入", "sublabel": "8 种格式 · 双路索引",
+      "pos": [370, 450], "size": [140, 76],
+      "sources": [
+        { "path": "agentnexus/rag/ingestion.py", "label": "文档载入" },
+        { "path": "agentnexus/rag/embeddings.py", "label": "嵌入模型" }
+      ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "ReAct Agent Core · agents/", "wraps": ["fsm", "llm-strategy", "prompt-builder", "react-loop"] },
+    { "kind": "region", "label": "Tool Gateway · tools/", "wraps": ["dispatcher", "registry-gates", "hitl", "tools-exec"] },
+    { "kind": "region", "label": "Observability · observability/", "wraps": ["tracer", "analyzers", "alert-health"] },
+    { "kind": "region", "label": "Memory · memory/", "wraps": ["stm", "ltm"] },
+    { "kind": "region", "label": "RAG / Wiki · rag/ + wiki/", "wraps": ["wiki-engine", "retriever", "ingest-embed"] }
+  ],
+  "connections": [
+    { "id": "loop-to-fsm", "from": "react-loop", "to": "fsm", "label": "状态迁移", "fromSide": "top", "toSide": "bottom", "via": [[425, 130], [160, 130]], "labelAt": [292, 130] },
+    { "id": "loop-to-llm", "from": "react-loop", "to": "llm-strategy", "label": "3-tier 调用", "fromSide": "top", "toSide": "bottom", "route": "orthogonal-v", "labelAt": [477, 130] },
+    { "id": "loop-to-prompt", "from": "react-loop", "to": "prompt-builder", "label": "组装 Prompt", "labelAt": [287, 197] },
+    { "id": "loop-to-dispatcher", "from": "react-loop", "to": "dispatcher", "label": "Action 批量调用", "fromSide": "right", "toSide": "left", "via": [[565, 194], [565, 150]], "labelAt": [612, 190] },
+    { "id": "dispatcher-to-registry", "from": "dispatcher", "to": "registry-gates" , "fromSide": "right", "toSide": "left", "via": [[800, 150], [800, 94]]},
+    { "id": "registry-to-tools", "from": "registry-gates", "to": "tools-exec", "label": "放行执行", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelAt": [986, 166] },
+    { "id": "registry-to-hilt", "from": "registry-gates", "to": "hitl", "label": "风险人工确认", "fromSide": "top", "toSide": "top", "via": [[945, 14], [715, 14]], "labelAt": [830, 14] },
+    { "id": "dispatcher-to-tracer", "from": "dispatcher", "to": "tracer", "label": "span · 审计", "fromSide": "bottom", "toSide": "left", "via": [[690, 196], [660, 196], [660, 410], [800, 410], [800, 432]], "labelAt": [700, 330] },
+    { "id": "tracer-to-analyzers", "from": "tracer", "to": "analyzers", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" },
+    { "id": "analyzers-to-alert", "from": "analyzers", "to": "alert-health", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" },
+    { "id": "loop-to-stm", "from": "react-loop", "to": "stm", "label": "STM 读写", "fromSide": "bottom", "toSide": "left", "via": [[425, 276], [20, 276], [20, 358]], "labelAt": [185, 276] },
+    { "id": "stm-to-ltm", "from": "stm", "to": "ltm", "label": "提炼归档", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelAt": [206, 416] },
+    { "id": "loop-to-retriever", "from": "react-loop", "to": "retriever", "label": "kb_search / wiki 查询", "fromSide": "bottom", "toSide": "top", "via": [[425, 296], [625, 296]], "labelAt": [525, 296] },
+    { "id": "ingest-to-wiki", "from": "ingest-embed", "to": "wiki-engine" },
+    { "id": "ingest-to-retriever", "from": "ingest-embed", "to": "retriever" }
+  ]
+}
