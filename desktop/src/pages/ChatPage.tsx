@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
@@ -29,6 +29,30 @@ const COMMAND_DEFS = [
   { cmd: '/skill', desc: 'Manage skills (list/status/use/enable/disable)', category: 'skill' },
   { cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp' },
   { cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin' },
+]
+
+/** Empty-state prompt starters — concrete openers that fill the composer. */
+const STARTERS = [
+  {
+    icon: BookOpen,
+    label: 'Explain this codebase',
+    prompt: 'Give me an overview of this codebase: architecture, main modules, and how they fit together.',
+  },
+  {
+    icon: Bug,
+    label: 'Help me fix a bug',
+    prompt: "Help me debug an issue — I'll describe the symptoms, and you ask me for logs or code as needed.",
+  },
+  {
+    icon: FlaskConical,
+    label: 'Write tests',
+    prompt: 'Write unit tests for the current module. Cover the main paths and the important edge cases.',
+  },
+  {
+    icon: Wrench,
+    label: 'Refactor for clarity',
+    prompt: 'Review the current code for readability and refactoring opportunities, and propose changes incrementally.',
+  },
 ]
 
 /* ─── Collapsible Section ─── */
@@ -729,37 +753,48 @@ export default function ChatPage() {
               </p>
             </div>
 
-            {/* Quick Actions */}
-            <div className="w-full max-w-2xl mt-4">
-              <div className="text-[11px] font-medium mb-3 uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>
-                Start a conversation
+            {/* Prompt starters — concrete one-tap openers that fill the composer */}
+            <div className="w-full max-w-md mt-2">
+              <div
+                className="text-[11px] font-medium mb-2 px-1 uppercase"
+                style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
+              >
+                Quick starts
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { icon: '🐛', label: 'Debug', desc: 'Find and fix errors' },
-                  { icon: '🔧', label: 'Refactor', desc: 'Clean up code' },
-                  { icon: '🧪', label: 'Test', desc: 'Write tests' },
-                  { icon: '🌿', label: 'Branch', desc: 'Git operations' },
-                  { icon: '📄', label: 'Document', desc: 'Write docs' },
-                  { icon: '💡', label: 'Architect', desc: 'Plan systems' },
-                ].map(action => (
-                  <button
-                    key={action.label}
-                    onClick={() => { setInput(action.desc); inputRef.current?.focus() }}
-                    className="flex items-center gap-3 p-3 rounded-xl text-left transition-all"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)', transitionDuration: '150ms', transitionTimingFunction: 'var(--ease)' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
-                  >
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base" style={{ background: 'var(--accent-muted)' }}>
-                      {action.icon}
-                    </div>
-                    <div>
-                      <div className="text-[13px] font-medium" style={{ color: 'var(--fg)' }}>{action.label}</div>
-                      <div className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>{action.desc}</div>
-                    </div>
-                  </button>
-                ))}
+              <div className="flex flex-col gap-1.5">
+                {STARTERS.map(action => {
+                  const Icon = action.icon
+                  return (
+                    <button
+                      key={action.label}
+                      onClick={() => { setInput(action.prompt); inputRef.current?.focus() }}
+                      className="group/starter flex items-center gap-3 px-3 rounded-xl text-left transition-all"
+                      style={{
+                        height: 44,
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border)',
+                        boxShadow: 'var(--shadow-card), var(--card-highlight)',
+                        transitionDuration: '150ms',
+                        transitionTimingFunction: 'var(--ease)',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.background = 'var(--surface-3)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface-2)' }}
+                    >
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+                      >
+                        <Icon size={14} />
+                      </div>
+                      <span className="text-[13px] font-medium flex-1" style={{ color: 'var(--fg)' }}>{action.label}</span>
+                      <ArrowRight
+                        size={13}
+                        className="opacity-0 group-hover/starter:opacity-100 transition-opacity"
+                        style={{ color: 'var(--fg-faint)' }}
+                      />
+                    </button>
+                  )
+                })}
               </div>
             </div>
           </div>
