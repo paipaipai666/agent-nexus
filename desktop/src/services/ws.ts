@@ -4,15 +4,19 @@ type EventHandler = (data: any) => void
 
 class SessionConnection {
   ws: WebSocket | null = null
-  handlers = new Map<string, Set<EventHandler>>()
   reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  lastCursor: number = 0  // R8: track cursor for reconnect
+  lastCursor: number = 0  // R8: track token cursor for reconnect
+  lastEventSeq: number = 0  // structural-event cursor for reconnect resume
 }
 
 // ── WebSocket Pool (Phase 3: multi-session) ─────────────────────
 
 class WebSocketPool {
   private connections = new Map<string, SessionConnection>()
+  // Handlers live at pool level (not on the connection) so they survive
+  // reconnects — connect() swaps the SessionConnection but must never
+  // drop subscribers.
+  private handlers = new Map<string, Map<string, Set<EventHandler>>>()
   private baseUrl = 'ws://127.0.0.1:18765'
 
   connect(sessionId: string, options?: { resumeFrom?: number }): void {
@@ -20,18 +24,30 @@ class WebSocketPool {
     const existing = this.connections.get(sessionId)
     if (existing?.ws?.readyState === WebSocket.OPEN) return
 
+    // Carry the event cursor across reconnect so the server can resume the
+    // run's event stream where it left off (thinking/tool/answer/done).
+    const prevEventSeq = existing?.lastEventSeq ?? 0
+
     // Clean up stale connection
     if (existing) {
       this.cleanupConnection(existing)
     }
 
     const conn = new SessionConnection()
+    conn.lastEventSeq = prevEventSeq
     this.connections.set(sessionId, conn)
 
-    // R8: Pass resumeFrom as query parameter for cursor-based reconnect
+    // R8: Pass resume cursors as query parameters for reconnect
     let url = `${this.baseUrl}/api/ws/agent/${sessionId}`
+    const params: string[] = []
     if (options?.resumeFrom != null && options.resumeFrom > 0) {
-      url += `?resumeFrom=${options.resumeFrom}`
+      params.push(`resumeFrom=${options.resumeFrom}`)
+    }
+    if (prevEventSeq > 0) {
+      params.push(`resumeEventsFrom=${prevEventSeq}`)
+    }
+    if (params.length > 0) {
+      url += `?${params.join('&')}`
     }
     conn.ws = new WebSocket(url)
 
@@ -42,6 +58,9 @@ class WebSocketPool {
     conn.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        if (typeof data.seq === 'number' && data.seq > conn.lastEventSeq) {
+          conn.lastEventSeq = data.seq
+        }
         this.emit(sessionId, data.type, data)
         this.emit(sessionId, '*', data)
       } catch (e) {
@@ -65,6 +84,9 @@ class WebSocketPool {
       this.cleanupConnection(conn)
       this.connections.delete(sessionId)
     }
+    // Full cleanup: explicit disconnect drops subscribers too. (A passive
+    // reconnect keeps them — handlers are only cleared here.)
+    this.handlers.delete(sessionId)
   }
 
   disconnectAll(): void {
@@ -72,6 +94,7 @@ class WebSocketPool {
       this.cleanupConnection(conn)
     }
     this.connections.clear()
+    this.handlers.clear()
   }
 
   send(sessionId: string, data: any): void {
@@ -94,15 +117,15 @@ class WebSocketPool {
   }
 
   on(sessionId: string, event: string, handler: EventHandler): () => void {
-    const conn = this.connections.get(sessionId)
-    if (!conn) return () => {}
-    if (!conn.handlers.has(event)) conn.handlers.set(event, new Set())
-    conn.handlers.get(event)!.add(handler)
+    if (!this.handlers.has(sessionId)) this.handlers.set(sessionId, new Map())
+    const byEvent = this.handlers.get(sessionId)!
+    if (!byEvent.has(event)) byEvent.set(event, new Set())
+    byEvent.get(event)!.add(handler)
     return () => this.off(sessionId, event, handler)
   }
 
   off(sessionId: string, event: string, handler: EventHandler): void {
-    this.connections.get(sessionId)?.handlers.get(event)?.delete(handler)
+    this.handlers.get(sessionId)?.get(event)?.delete(handler)
   }
 
   isConnected(sessionId: string): boolean {
@@ -118,9 +141,9 @@ class WebSocketPool {
   }
 
   private emit(sessionId: string, event: string, data: any): void {
-    const conn = this.connections.get(sessionId)
-    conn?.handlers.get(event)?.forEach(h => h(data))
-    conn?.handlers.get('*')?.forEach(h => h(data))
+    const byEvent = this.handlers.get(sessionId)
+    byEvent?.get(event)?.forEach(h => h(data))
+    byEvent?.get('*')?.forEach(h => h(data))
   }
 
   private cleanupConnection(conn: SessionConnection): void {

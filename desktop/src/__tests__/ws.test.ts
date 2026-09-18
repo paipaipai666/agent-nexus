@@ -249,6 +249,25 @@ describe('AgentWebSocket', () => {
       // After disconnect, sessionId is null, so no reconnect should happen
       expect(agentWs.sessionId).toBeNull()
     })
+
+    it('keeps handlers across reconnect (bug4: pool-level handlers)', () => {
+      const handler = vi.fn()
+      agentWs.connect('session-123')
+      agentWs.on('thinking', handler)
+
+      // Simulate a dropped connection: close schedules a reconnect; the new
+      // SessionConnection must not wipe subscribers.
+      const ws1 = getWs('session-123')
+      ws1.readyState = MockWebSocket.CLOSED
+      ws1._close()
+      vi.runAllTimers()
+
+      const ws2 = getWs('session-123')
+      expect(ws2).not.toBe(ws1)
+      ws2._receive({ type: 'thinking', content: 'hi' })
+
+      expect(handler).toHaveBeenCalledWith({ type: 'thinking', content: 'hi' })
+    })
   })
 
   describe('error event', () => {

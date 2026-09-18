@@ -382,19 +382,18 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     }
   }, [updateSession])
 
-  // ── Per-session WS event handlers (Phase 2, Step 15) ─────────
-  // This effect ONLY depends on activeSessionId. All state access goes
-  // through refs to avoid re-subscribing on every token update.
+  // ── Per-session WS event handlers ─────────────────────────────
+  // Handlers are subscribed for EVERY session in the Map — not only the
+  // active one — so background runs keep streaming while the user looks
+  // at another conversation. Subscriptions live for the session's
+  // lifetime (no unsubscription on switch); ws.ts keeps handlers at pool
+  // level so reconnects don't wipe them either.
 
-  useEffect(() => {
-    if (!activeSessionId) return
-    const sid = activeSessionId
+  const subscribedSessionsRef = useRef(new Set<string>())
+  const processQueueRef = useRef(processQueue)
+  processQueueRef.current = processQueue
 
-    // Ensure session exists in the Map (read from ref, write via setState)
-    if (!sessionsRef.current.has(sid)) {
-      setSessions(prev => new Map(prev).set(sid, createEmptySession(sid)))
-    }
-
+  const subscribeSession = useCallback((sid: string) => {
     // Connect WS + subscribe handlers atomically — no event loss window.
     if (!wsPool.hasConnection(sid)) {
       wsPool.connect(sid)
@@ -402,14 +401,35 @@ export default function SessionManager({ children }: { children: ReactNode }) {
 
     const unsubs = [
       wsPool.on(sid, 'thinking', (data) => {
-        currentAssistantIds.current.set(sid, null)
+        // 注意:不重置 currentAssistantIds —— tool_call 需要该引用移除
+        // 与思考卡重复的流式原文草稿。
         currentReasoningIds.current.set(sid, null)
-        updateSession(sid, prev => ({
-          ...prev,
-          messages: [...prev.messages, { id: `t-${getSessionCounter(sid)}`, role: 'system', content: data.content || 'Thinking...', timestamp: new Date() }],
-        }))
+        // 思考在时间上先于其后的答案草稿，插入草稿之前而非追加到末尾，
+        // 保证"思考 → 答案"的阅读顺序。
+        const draftId = currentAssistantIds.current.get(sid)
+        updateSession(sid, prev => {
+          const card = { id: `t-${getSessionCounter(sid)}`, role: 'system' as const, content: data.content || 'Thinking...', timestamp: new Date() }
+          if (draftId) {
+            const idx = prev.messages.findIndex(m => m.id === draftId)
+            if (idx !== -1) {
+              const messages = [...prev.messages]
+              messages.splice(idx, 0, card)
+              return { ...prev, messages }
+            }
+          }
+          return { ...prev, messages: [...prev.messages, card] }
+        })
       }),
       wsPool.on(sid, 'tool_call', (data) => {
+        // 本轮可见文本已经作为思考卡展示（thinking 事件先于 tool_call 到达），
+        // 流式累积的原文 assistant 草稿（通常带 "Thought:" 前缀）是重复内容，移除。
+        const pendingId = currentAssistantIds.current.get(sid)
+        if (pendingId) {
+          updateSession(sid, prev => ({ ...prev, messages: prev.messages.filter(m => m.id !== pendingId) }))
+          tokenBuffers.current.delete(sid)
+          const flushRef = tokenFlushRefs.current.get(sid)
+          if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
+        }
         currentAssistantIds.current.set(sid, null)
         currentReasoningIds.current.set(sid, null)  // Next LLM call gets its own reasoning message
         updateSession(sid, prev => ({
@@ -477,39 +497,55 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
         tokenBuffers.current.delete(sid)
 
-        const tid = currentAssistantIds.current.get(sid)
-        if (tid) {
+        // 空答案但带错误（模型限流/配额耗尽等）：显示错误而非留空消息
+        if (data.error && !(data.content || '').trim()) {
           updateSession(sid, prev => ({
             ...prev,
-            messages: prev.messages.map(m => m.id === tid ? { ...m, content: data.content } : m),
+            messages: [...prev.messages, {
+              id: `e-${getSessionCounter(sid)}`, role: 'system' as const,
+              content: `Error: ${String(data.error).slice(0, 300)}`, timestamp: new Date(),
+            }],
           }))
         } else {
-          updateSession(sid, prev => {
-            const li = [...prev.messages].reverse().findIndex(m => m.role === 'assistant')
-            if (li !== -1) {
-              const idx = prev.messages.length - 1 - li
-              return {
-                ...prev,
-                messages: prev.messages.map((m, i) => i === idx ? { ...m, content: data.content } : m),
-              }
-            }
+        // Replace the streamed draft with the final answer. The tracked id may
+        // be stale after session navigation (history reload) — fall back to
+        // the last assistant message so raw draft text never stays visible.
+        const tid = currentAssistantIds.current.get(sid)
+        const finalContent = data.content || (data.error ? `⚠️ ${data.error}` : data.content)
+        updateSession(sid, prev => {
+          if (tid && prev.messages.some(m => m.id === tid)) {
             return {
               ...prev,
-              messages: [...prev.messages, { id: `a-${getSessionCounter(sid)}`, role: 'assistant' as const, content: data.content, timestamp: new Date() }],
+              messages: prev.messages.map(m => m.id === tid ? { ...m, content: finalContent } : m),
             }
-          })
-        }
+          }
+          const idx = [...prev.messages].map((m, i) => m.role === 'assistant' ? i : -1).filter(i => i >= 0).pop()
+          if (idx !== undefined) {
+            return {
+              ...prev,
+              messages: prev.messages.map((m, i) => i === idx ? { ...m, content: finalContent } : m),
+            }
+          }
+          return {
+            ...prev,
+            messages: [...prev.messages, { id: `a-${getSessionCounter(sid)}`, role: 'assistant' as const, content: finalContent, timestamp: new Date() }],
+          }
+        })
         updateSession(sid, prev => ({
           ...prev,
           messages: prev.messages.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m),
           isRunning: false,
           currentRunId: null,
+          unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
         }))
         currentAssistantIds.current.set(sid, null)
-        processQueue()
+        processQueueRef.current()
+        }
       }),
       wsPool.on(sid, 'error', (data) => {
-        const isCancelled = data.message === 'cancelled' || data.run_id
+        // 仅明确的消息为 cancelled 才算取消；带 run_id 的普通错误
+        // （如内部服务器错误）必须显示真实错误信息。
+        const isCancelled = data.message === 'cancelled'
         const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
         updateSession(sid, prev => ({
           ...prev,
@@ -519,8 +555,9 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           ],
           isRunning: false,
           currentRunId: null,
+          unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
         }))
-        processQueue()
+        processQueueRef.current()
       }),
       wsPool.on(sid, 'done', () => {
         updateSession(sid, prev => ({
@@ -528,8 +565,9 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           messages: prev.messages.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m),
           isRunning: false,
           currentRunId: null,
+          unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
         }))
-        processQueue()
+        processQueueRef.current()
       }),
       wsPool.on(sid, 'run_started', (data) => {
         if (data.run_id) {
@@ -583,44 +621,20 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       }),
     ]
 
-    // Don't disconnect on cleanup — keep WS alive for background streaming.
-    // Flush the token buffer NOW so buffered tokens are written to the Map
-    // before we unsubscribe. This ensures loadAndDisplayMessages sees the
-    // latest content when the user navigates back to this session.
     return () => {
       unsubs.forEach(u => u())
-      flushTokenBuffer(sid)
-      const flushRef = tokenFlushRefs.current.get(sid)
-      if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
     }
-  }, [activeSessionId]) // Stable: updateSession, getSessionCounter, processQueue, flushTokenBuffer all have empty deps
+  }, [updateSession, getSessionCounter]) // processQueue/activeSessionId read via refs
 
-  // ── Background session completion tracking (Phase 6, Step 25) ─
-  // Subscribe to completion events for ALL running sessions via wsPool.
-  // Uses a single '*' handler on each connection to avoid per-session deps.
+  // Subscribe every session in the Map — background sessions must keep
+  // receiving events while the user views another conversation.
   useEffect(() => {
-    const unsubs: (() => void)[] = []
-
-    // Subscribe to completion events for all non-active connections
-    for (const [sid] of (wsPool as any).connections) {
-      if (sid === activeSessionId) continue
-
-      const handleCompletion = () => {
-        updateSession(sid, prev => ({
-          ...prev,
-          isRunning: false,
-          currentRunId: null,
-          unreadCount: prev.unreadCount + 1,
-        }))
-      }
-
-      unsubs.push(wsPool.on(sid, 'answer', handleCompletion))
-      unsubs.push(wsPool.on(sid, 'done', handleCompletion))
-      unsubs.push(wsPool.on(sid, 'error', handleCompletion))
+    for (const sid of sessions.keys()) {
+      if (subscribedSessionsRef.current.has(sid)) continue
+      subscribedSessionsRef.current.add(sid)
+      subscribeSession(sid)
     }
-
-    return () => { unsubs.forEach(u => u()) }
-  }, [activeSessionId, updateSession])
+  }, [sessions, subscribeSession])
 
   // ── Memoized setters ─────────────────────────────────────────
 
