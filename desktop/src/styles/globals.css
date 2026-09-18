@@ -103,8 +103,90 @@
 }
 
 /* ═══════════════════════════════════════════
-   DARK THEME (default)
+   ACCENT PRESETS (v2.3) — data-accent on <html>
+   overrides the accent token family per theme.
    ═══════════════════════════════════════════ */
+[data-theme="dark"][data-accent="rose"] {
+  --accent: #f43f5e; --accent-hover: #fb7185; --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent-muted: rgba(244,63,94,0.12); --accent-subtle: rgba(244,63,94,0.08); --accent-glow: rgba(244,63,94,0.14);
+  --accent-ring: rgba(244,63,94,0.30); --border-active: rgba(244,63,94,0.40);
+}
+[data-theme="dark"][data-accent="indigo"] {
+  --accent: #818cf8; --accent-hover: #a5b4fc; --accent-gradient: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
+  --accent-muted: rgba(129,140,248,0.12); --accent-subtle: rgba(129,140,248,0.08); --accent-glow: rgba(129,140,248,0.14);
+  --accent-ring: rgba(129,140,248,0.30); --border-active: rgba(129,140,248,0.40);
+}
+[data-theme="dark"][data-accent="violet"] {
+  --accent: #a78bfa; --accent-hover: #c4b5fd; --accent-gradient: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
+  --accent-muted: rgba(167,139,250,0.12); --accent-subtle: rgba(167,139,250,0.08); --accent-glow: rgba(167,139,250,0.14);
+  --accent-ring: rgba(167,139,250,0.30); --border-active: rgba(167,139,250,0.40);
+}
+[data-theme="dark"][data-accent="blue"] {
+  --accent: #60a5fa; --accent-hover: #93c5fd; --accent-gradient: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+  --accent-muted: rgba(96,165,250,0.12); --accent-subtle: rgba(96,165,250,0.08); --accent-glow: rgba(96,165,250,0.14);
+  --accent-ring: rgba(96,165,250,0.30); --border-active: rgba(96,165,250,0.40);
+}
+[data-theme="dark"][data-accent="cyan"] {
+  --accent: #22d3ee; --accent-hover: #67e8f9; --accent-gradient: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  --accent-muted: rgba(34,211,238,0.12); --accent-subtle: rgba(34,211,238,0.08); --accent-glow: rgba(34,211,238,0.14);
+  --accent-ring: rgba(34,211,238,0.30); --border-active: rgba(34,211,238,0.40);
+}
+[data-theme="dark"][data-accent="emerald"] {
+  --accent: #34d399; --accent-hover: #6ee7b7; --accent-gradient: linear-gradient(180deg, #34d399 0%, #059669 100%);
+  --accent-muted: rgba(52,211,153,0.12); --accent-subtle: rgba(52,211,153,0.08); --accent-glow: rgba(52,211,153,0.14);
+  --accent-ring: rgba(52,211,153,0.30); --border-active: rgba(52,211,153,0.40);
+}
+[data-theme="dark"][data-accent="amber"] {
+  --accent: #fbbf24; --accent-hover: #fcd34d; --accent-gradient: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  --accent-muted: rgba(251,191,36,0.12); --accent-subtle: rgba(251,191,36,0.08); --accent-glow: rgba(251,191,36,0.14);
+  --accent-ring: rgba(251,191,36,0.30); --border-active: rgba(251,191,36,0.40);
+}
+[data-theme="dark"][data-accent="orange"] {
+  --accent: #fb923c; --accent-hover: #fdba74; --accent-gradient: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  --accent-muted: rgba(251,146,60,0.12); --accent-subtle: rgba(251,146,60,0.08); --accent-glow: rgba(251,146,60,0.14);
+  --accent-ring: rgba(251,146,60,0.30); --border-active: rgba(251,146,60,0.40);
+}
+/* Light-theme variants */
+[data-theme="light"][data-accent="rose"] {
+  --accent: #e11d48; --accent-hover: #be123c; --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent-muted: rgba(225,29,72,0.08); --accent-subtle: rgba(225,29,72,0.05); --accent-glow: rgba(225,29,72,0.10);
+  --accent-ring: rgba(225,29,72,0.28); --border-active: rgba(225,29,72,0.35);
+}
+[data-theme="light"][data-accent="indigo"] {
+  --accent: #4f46e5; --accent-hover: #4338ca; --accent-gradient: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
+  --accent-muted: rgba(79,70,229,0.08); --accent-subtle: rgba(79,70,229,0.05); --accent-glow: rgba(79,70,229,0.10);
+  --accent-ring: rgba(79,70,229,0.28); --border-active: rgba(79,70,229,0.35);
+}
+[data-theme="light"][data-accent="violet"] {
+  --accent: #7c3aed; --accent-hover: #6d28d9; --accent-gradient: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
+  --accent-muted: rgba(124,58,237,0.08); --accent-subtle: rgba(124,58,237,0.05); --accent-glow: rgba(124,58,237,0.10);
+  --accent-ring: rgba(124,58,237,0.28); --border-active: rgba(124,58,237,0.35);
+}
+[data-theme="light"][data-accent="blue"] {
+  --accent: #2563eb; --accent-hover: #1d4ed8; --accent-gradient: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+  --accent-muted: rgba(37,99,235,0.08); --accent-subtle: rgba(37,99,235,0.05); --accent-glow: rgba(37,99,235,0.10);
+  --accent-ring: rgba(37,99,235,0.28); --border-active: rgba(37,99,235,0.35);
+}
+[data-theme="light"][data-accent="cyan"] {
+  --accent: #0891b2; --accent-hover: #0e7490; --accent-gradient: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  --accent-muted: rgba(8,145,178,0.08); --accent-subtle: rgba(8,145,178,0.05); --accent-glow: rgba(8,145,178,0.10);
+  --accent-ring: rgba(8,145,178,0.28); --border-active: rgba(8,145,178,0.35);
+}
+[data-theme="light"][data-accent="emerald"] {
+  --accent: #059669; --accent-hover: #047857; --accent-gradient: linear-gradient(180deg, #34d399 0%, #059669 100%);
+  --accent-muted: rgba(5,150,105,0.08); --accent-subtle: rgba(5,150,105,0.05); --accent-glow: rgba(5,150,105,0.10);
+  --accent-ring: rgba(5,150,105,0.28); --border-active: rgba(5,150,105,0.35);
+}
+[data-theme="light"][data-accent="amber"] {
+  --accent: #d97706; --accent-hover: #b45309; --accent-gradient: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  --accent-muted: rgba(217,119,6,0.08); --accent-subtle: rgba(217,119,6,0.05); --accent-glow: rgba(217,119,6,0.10);
+  --accent-ring: rgba(217,119,6,0.28); --border-active: rgba(217,119,6,0.35);
+}
+[data-theme="light"][data-accent="orange"] {
+  --accent: #ea580c; --accent-hover: #c2410c; --accent-gradient: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  --accent-muted: rgba(234,88,12,0.08); --accent-subtle: rgba(234,88,12,0.05); --accent-glow: rgba(234,88,12,0.10);
+  --accent-ring: rgba(234,88,12,0.28); --border-active: rgba(234,88,12,0.35);
+}
 [data-theme="dark"] {
   --surface-0: #0a0b0d;
   --surface-1: #101216;

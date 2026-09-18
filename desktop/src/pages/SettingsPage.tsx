@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Save, Loader2, RotateCcw, Plus, Trash2, RefreshCw } from 'lucide-react'
+import { Save, Loader2, RotateCcw, Plus, Trash2, RefreshCw, Check } from 'lucide-react'
 import { api, ProviderDraft, ProviderInfo, ModelOverrideDraft } from '../services/api'
+import { ACCENT_PRESETS, applyAccent } from '../services/accent'
 
 interface PersonaProject {
   name: string
@@ -93,6 +94,12 @@ export default function SettingsPage() {
   const [edited, setEdited] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [accent, setAccent] = useState(() => document.documentElement.dataset.accent ?? 'rose')
+
+  const handleAccentChange = (id: string) => {
+    applyAccent(id)
+    setAccent(id)
+  }
 
   // Persona state
   const [persona, setPersona] = useState<PersonaData>(EMPTY_PERSONA)
@@ -460,6 +467,43 @@ export default function SettingsPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ── Appearance ────────────────────────────────────── */}
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
+          <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>Appearance</h2>
+          <div className="flex items-center gap-3">
+            <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>Accent color</label>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {ACCENT_PRESETS.map((preset) => {
+                const selected = accent === preset.id
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => handleAccentChange(preset.id)}
+                    title={preset.label}
+                    className="relative rounded-full transition-all"
+                    style={{
+                      width: 26,
+                      height: 26,
+                      background: `linear-gradient(135deg, ${preset.light[0]} 50%, ${preset.dark[0]} 50%)`,
+                      boxShadow: selected ? `0 0 0 2px var(--surface-2), 0 0 0 4px ${preset.dark[0]}` : 'var(--shadow-sm)',
+                      transform: selected ? 'scale(1.1)' : 'none',
+                      transitionDuration: '150ms',
+                      transitionTimingFunction: 'var(--ease)',
+                    }}
+                  >
+                    {selected && (
+                      <Check size={13} className="absolute inset-0 m-auto" style={{ color: '#fff', filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.4))' }} />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <span className="text-xs font-mono ml-1" style={{ color: 'var(--fg-faint)' }}>
+              {ACCENT_PRESETS.find(p => p.id === accent)?.label ?? 'Rose'}
+            </span>
           </div>
         </div>
 

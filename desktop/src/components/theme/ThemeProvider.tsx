@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { initAccent } from '../../services/accent'
 
 type Theme = 'dark' | 'light'
 
@@ -27,6 +28,11 @@ export default function ThemeProvider({ children }: ThemeProviderProps) {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('agentnexus-theme', theme)
   }, [theme])
+
+  // Restore the saved accent color once at startup
+  useEffect(() => {
+    initAccent()
+  }, [])
 
   const toggleTheme = () => {
     // Animate the color transition, then clean up so hover transitions stay snappy
