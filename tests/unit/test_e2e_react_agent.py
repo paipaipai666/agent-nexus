@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.registry import ToolRegistry
 
@@ -58,7 +59,7 @@ class TestE2EReActAgent:
         agent, llm = self._make_agent()
         agent.set_cancel_checker(lambda: True)
 
-        with pytest.raises(RuntimeError, match="cancelled"):
+        with pytest.raises(AgentCancelled):
             agent.run("stop")
 
         llm.think.assert_not_called()

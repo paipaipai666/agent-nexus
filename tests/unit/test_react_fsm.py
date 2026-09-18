@@ -11,7 +11,11 @@ emits the real event for the target state.
 """
 from unittest.mock import MagicMock
 
+import pytest
+
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
+from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.agents.react_types import (
     AgentStep,
     CallingStrategy,
@@ -19,6 +23,7 @@ from agentnexus.agents.react_types import (
     ReActEvent,
     ReActEventType,
     ReActState,
+    RetryReason,
     Transition,
 )
 
@@ -74,6 +79,7 @@ class TestReActFsmLlmParamsReady:
     TABLE = [
         Transition(S.INIT, E.START, S.PREPARE_LLM_CALL, "_jump"),
         Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.CALL_LLM, "_on_llm_params_ready"),
+        Transition(S.CALL_LLM, E.LLM_RESPONSE, S.CALL_LLM, "sink"),
     ]
 
     def test_llm_params_ready_increments_step_and_calls_llm(self):
@@ -87,7 +93,8 @@ class TestReActFsmLlmParamsReady:
         answer, _ = fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
             {"_jump": MagicMock(return_value=[ReActEvent(ReActEventType.LLM_PARAMS_READY)]),
-             "_on_llm_params_ready": llm_params_handler},
+             "_on_llm_params_ready": llm_params_handler,
+             "sink": MagicMock(return_value=[])},
         )
 
         assert ctx.current_step == 1
@@ -162,6 +169,7 @@ class TestReActFsmToolDone:
         Transition(S.INIT, E.START, S.EXECUTE_TOOL, "_jump"),
         Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
         Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+        Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.PREPARE_LLM_CALL, "sink"),
     ]
 
     def test_tool_done_records_result_and_continues(self):
@@ -185,7 +193,8 @@ class TestReActFsmToolDone:
                     "name": "read", "arguments": {"path": "f.py"},
                     "result": "file content"})]),
              "_on_tool_done": tool_done_handler,
-             "_on_all_tools_done": all_tools_done},
+             "_on_all_tools_done": all_tools_done,
+             "sink": MagicMock(return_value=[])},
         )
 
         assert len(ctx.steps[-1].tool_outputs) == 1
@@ -197,6 +206,7 @@ class TestReActFsmExecNextTool:
         Transition(S.INIT, E.START, S.EXECUTE_TOOL, "_jump"),
         Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
         Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+        Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.PREPARE_LLM_CALL, "sink"),
     ]
 
     def test_exec_next_tool_queued_sequential(self):
@@ -228,7 +238,8 @@ class TestReActFsmExecNextTool:
             {"_jump": MagicMock(return_value=[
                 ReActEvent(ReActEventType.TOOL_DONE, {"name": "start", "result": ""})]),
              "_on_tool_done": tool_done_handler,
-             "_on_all_tools_done": all_tools_done_handler},
+             "_on_all_tools_done": all_tools_done_handler,
+             "sink": MagicMock(return_value=[])},
         )
 
         assert executed == ["web_search", "read"]
@@ -239,6 +250,7 @@ class TestReActFsmAllToolsDone:
     TABLE = [
         Transition(S.INIT, E.START, S.EXECUTE_TOOL, "_jump"),
         Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+        Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.PREPARE_LLM_CALL, "sink"),
     ]
 
     def test_all_tools_done_formats_results_for_llm_reentry(self):
@@ -252,7 +264,8 @@ class TestReActFsmAllToolsDone:
         fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
             {"_jump": MagicMock(return_value=[ReActEvent(ReActEventType.ALL_TOOLS_DONE)]),
-             "_on_all_tools_done": all_tools_done_hit},
+             "_on_all_tools_done": all_tools_done_hit,
+             "sink": MagicMock(return_value=[])},
         )
 
         all_tools_done_hit.assert_called_once()
@@ -309,6 +322,7 @@ class TestReActFsmToolErrorRecovery:
         Transition(S.INIT, E.START, S.EXECUTE_TOOL, "_jump"),
         Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
         Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+        Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.PREPARE_LLM_CALL, "sink"),
     ]
 
     def test_tool_execution_error_triggers_recovery_path(self):
@@ -344,9 +358,96 @@ class TestReActFsmToolErrorRecovery:
                 ReActEvent(ReActEventType.TOOL_DONE, {
                     "name": "bash", "result": "start", "arguments": {}})]),
              "_on_tool_done": tool_done_handler,
-             "_on_all_tools_done": all_tools_done_handler},
+             "_on_all_tools_done": all_tools_done_handler,
+             "sink": MagicMock(return_value=[])},
         )
 
         assert len(executed) == 1
         assert executed[0] == "bash"
         assert "error" in ctx.steps[-1].tool_outputs[-1]["output"]
+
+
+class TestReActAgentHardening:
+    """Behavior proofs for the FSM hardening changes (cancel contract, truncation)."""
+
+    def _make_agent(self, **llm_attrs):
+        llm = MagicMock()
+        for key, value in llm_attrs.items():
+            setattr(llm, key, value)
+        agent = ReActAgent(llm, MagicMock())
+        agent._output = lambda _msg: None
+        return agent
+
+    def test_run_cancel_raises_typed(self):
+        """Cancellation surfaces as AgentCancelled, not a bare RuntimeError."""
+        agent = self._make_agent()
+        agent.set_cancel_checker(lambda: True)
+
+        with pytest.raises(AgentCancelled) as exc_info:
+            agent.run("question")
+
+        assert not isinstance(exc_info.value, RuntimeError)
+
+    def test_receive_native_truncated_fails_tool_calls_without_executing(self):
+        """Truncated native response: every pending tool call is failed with an
+        error observation and NO tool executes (pi fail-all semantics)."""
+        agent = self._make_agent(last_truncated=True, last_reasoning_content="")
+        agent._execute_tool = MagicMock()
+        ctx = ExecutionContext(question="q", strategy=CallingStrategy.NATIVE_TOOLS)
+        ctx.last_response_text = "Let me read the file"
+        ctx.last_reasoning = ""
+        ctx.current_step = 1
+        ctx.steps.append(AgentStep(step_id=1))
+        ctx.pending_tool_calls = [{"id": "c1", "name": "read", "arguments": {"path": "f.py"}}]
+
+        events = agent._on_receive_native(ctx, MagicMock())
+
+        assert [e.type for e in events] == [ReActEventType.ALL_TOOLS_DONE]
+        agent._execute_tool.assert_not_called()
+        assert ctx.pending_tool_calls == []
+        tool_msgs = [m for m in ctx.messages if m.get("role") == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["tool_call_id"] == "c1"
+        assert "未执行" in tool_msgs[0]["content"]
+        assistant_msgs = [m for m in ctx.messages if m.get("role") == "assistant"]
+        assert assistant_msgs and assistant_msgs[-1].get("tool_calls"), \
+            "assistant message must carry the failed tool_calls for a valid message sequence"
+
+    def test_truncated_response_routes_through_retry_gate(self):
+        """Native truncation without tool_calls hits RETRY_GATE with TRUNCATED reason."""
+        agent = self._make_agent()
+        ctx = ExecutionContext(question="q", strategy=CallingStrategy.NATIVE_TOOLS)
+
+        events = agent._on_truncated_response(ctx, MagicMock())
+
+        assert events[0].type == ReActEventType.RETRIES_LEFT
+        assert events[0].payload["reason"] == RetryReason.TRUNCATED
+
+    def test_truncated_response_reaches_retry_gate_via_real_transition(self):
+        """The production table wires CHECK_TOOL_CALLS + TRUNCATED_RESPONSE -> RETRY_GATE."""
+        table = [
+            Transition(S.INIT, E.START, S.CHECK_TOOL_CALLS, "_jump"),
+            Transition(S.CHECK_TOOL_CALLS, E.TRUNCATED_RESPONSE, S.RETRY_GATE, "_on_truncated_response"),
+            Transition(S.RETRY_GATE, E.RETRIES_LEFT, S.RETRY_GATE, "gate_sink"),
+        ]
+        agent = self._make_agent()
+        ctx = ExecutionContext(question="q", strategy=CallingStrategy.NATIVE_TOOLS)
+        fsm = StateMachine(table)
+        fsm.run_loop(
+            ReActEvent(ReActEventType.START), ctx,
+            {"_jump": MagicMock(return_value=[ReActEvent(ReActEventType.TRUNCATED_RESPONSE)]),
+             "_on_truncated_response": agent._on_truncated_response,
+             "gate_sink": MagicMock(return_value=[])},
+        )
+        assert fsm.current_state == ReActState.RETRY_GATE
+
+    def test_has_content_truncated_returns_parse_error_for_retry(self):
+        """JSON-path truncation is a retry signal, not a success path."""
+        agent = self._make_agent(last_truncated=True)
+        ctx = ExecutionContext(question="q")
+        ctx.last_response_text = '{"answer": "partial'
+
+        events = agent._on_has_content(ctx, MagicMock())
+
+        assert events[0].type == ReActEventType.PARSE_ERROR
+        assert events[0].payload["reason"] == RetryReason.TRUNCATED

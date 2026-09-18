@@ -4,9 +4,11 @@ import logging
 from collections import deque
 from typing import Callable
 
+from agentnexus.agents.exceptions import AgentCancelled, FSMError
 from agentnexus.agents.react_types import (
     ExecutionContext,
     ReActEvent,
+    ReActEventType,
     ReActState,
     Transition,
 )
@@ -25,6 +27,14 @@ class StateMachine:
 
     def __init__(self, table: list[Transition]):
         self._table = table
+        # Indexed lookup — exact (state, event) first, then the state's
+        # unconditional (event=None) transition. Table order no longer matters.
+        self._by_key: dict[tuple[ReActState, ReActEventType | None], Transition] = {}
+        for t in table:
+            key = (t.state, t.event)
+            if key in self._by_key:
+                raise FSMError(f"duplicate transition for {t.state.name}+{t.event}")
+            self._by_key[key] = t
         self._queue: deque[ReActEvent] = deque()
         self._observers: list[Callable[[ReActEvent, ReActState, ReActState], None]] = []
         self._state = ReActState.INIT
@@ -45,11 +55,10 @@ class StateMachine:
                 logger.debug("Observer error in FSM transition %s -> %s: %s", from_state, to_state, e)
 
     def _lookup(self, event: ReActEvent) -> Transition | None:
-        """Find the first matching transition for (current_state, event_type)."""
-        for t in self._table:
-            if t.state == self._state and (t.event is None or t.event == event.type):
-                return t
-        return None
+        """Find the transition for (current_state, event.type), falling back to
+        the state's unconditional transition (event=None) if one exists."""
+        return (self._by_key.get((self._state, event.type))
+                or self._by_key.get((self._state, None)))
 
     def run_loop(self, initial_event: ReActEvent, ctx: ExecutionContext,
                  handlers: dict) -> tuple[str | None, list]:
@@ -57,8 +66,13 @@ class StateMachine:
 
         Returns (last_answer, steps) — the same contract as ReActAgent.run().
         """
+        missing = {t.handler for t in self._table} - set(handlers)
+        if missing:
+            raise FSMError(f"missing handlers: {sorted(missing)}")
+
         self._state = ReActState.INIT
         self._queue.clear()
+        initial_event.seq = ctx.next_seq()
         self._queue.append(initial_event)
 
         while True:
@@ -72,7 +86,7 @@ class StateMachine:
 
             t = self._lookup(event)
             if t is None:
-                continue
+                raise FSMError(f"no transition for {self._state.name}+{event.type.name}")
 
             from_state = self._state
             self._state = t.next_state
@@ -87,13 +101,14 @@ class StateMachine:
                 if new_events:
                     for ne in new_events:
                         ne.step_id = ctx.current_step
+                        ne.seq = ctx.next_seq()
                         self._queue.append(ne)
 
             if t.next_state == ReActState.DONE:
                 return (ctx.last_answer, ctx.steps)
 
         if self._state != ReActState.DONE:
-            logger.warning("FSM exited in non-terminal state: %s", self._state)
+            logger.error("FSM exited in non-terminal state: %s", self._state)
             if not ctx.last_answer:
                 ctx.last_answer = f"[Agent exited in state {self._state.name}]"
 
@@ -105,29 +120,29 @@ class StateMachine:
         Returns True if an unconditional transition was found and fired.
         """
         self._raise_if_cancelled(ctx)
-        for t in self._table:
-            if t.state == self._state and t.event is None:
-                from_state = self._state
-                self._state = t.next_state
-                self._notify(None, from_state, t.next_state)
+        t = self._by_key.get((self._state, None))
+        if t is None:
+            return False
 
-                handler_fn = handlers.get(t.handler)
-                if handler_fn:
-                    self._raise_if_cancelled(ctx)
-                    new_events = handler_fn(ctx, None)
-                    self._raise_if_cancelled(ctx)
-                    if new_events:
-                        for ne in new_events:
-                            ne.step_id = ctx.current_step
-                            self._queue.append(ne)
+        from_state = self._state
+        self._state = t.next_state
+        self._notify(None, from_state, t.next_state)
 
-                if t.next_state == ReActState.DONE:
-                    return True  # will be caught by outer loop's while check
-                return True
-        return False
+        handler_fn = handlers.get(t.handler)
+        if handler_fn:
+            self._raise_if_cancelled(ctx)
+            new_events = handler_fn(ctx, None)
+            self._raise_if_cancelled(ctx)
+            if new_events:
+                for ne in new_events:
+                    ne.step_id = ctx.current_step
+                    ne.seq = ctx.next_seq()
+                    self._queue.append(ne)
+
+        return True
 
     @staticmethod
     def _raise_if_cancelled(ctx) -> None:
         checker = getattr(ctx, "cancel_checker", None)
         if checker is not None and checker():
-            raise RuntimeError("cancelled")
+            raise AgentCancelled("cancelled")

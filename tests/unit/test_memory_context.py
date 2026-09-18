@@ -656,6 +656,7 @@ class TestReActAgentConversationMode:
 
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = True
+        mock_llm.last_truncated = False
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
 

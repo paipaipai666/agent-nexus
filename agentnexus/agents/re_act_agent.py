@@ -7,9 +7,11 @@ Each decision point is an explicit state; each transition is a handler method.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Callable
 
 from agentnexus.agents import json_helpers, react_runtime
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
 from agentnexus.agents.prompt_builder import build_conversation_context, build_react_messages, build_react_prompt
@@ -21,6 +23,7 @@ from agentnexus.agents.react_types import (
     ReActEvent,
     ReActEventType,
     ReActResult,
+    RetryReason,
 )
 from agentnexus.agents.tool_runner import execute_tool
 from agentnexus.core.capabilities import SessionCapabilityTracker
@@ -42,6 +45,44 @@ from agentnexus.skills import (
 from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+# Native 模式下部分模型（如 OpenRouter stealth 系列）习惯在可见文本里写
+# "Thought: <分析> <答案>" 或 "Thought: <分析> 最终答案: <答案>"。
+_THOUGHT_MARKER_RE = re.compile(
+    r"^\s*[*_]{0,2}\s*(?:thought|thinking|分析思考|思考过程|思考|想法|分析)\s*[*_]{0,2}\s*[:：]\s*",
+    re.IGNORECASE,
+)
+_FINAL_ANSWER_RE = re.compile(
+    r"[*_]{0,2}\s*(?:最终答案|final\s*answer)\s*[*_]{0,2}\s*[:：]\s*",
+    re.IGNORECASE,
+)
+
+
+def _split_native_thought_answer(text: str) -> tuple[str, str]:
+    """把模型的可见文本拆成 (thought, answer)。
+
+    - 无 Thought 标记 → ("", 原文)，整段视为答案。
+    - 含显式答案标记（最终答案:/Final Answer:）→ 在标记处切分。
+    - 只有 Thought 标记 → 首句为思考、其余为答案；若首句后没有余文，
+      则整段都是思考、答案为空（调用方回退为去标记原文，避免重复展示）。
+    """
+    t = (text or "").strip()
+    if not t:
+        return "", ""
+    m = _THOUGHT_MARKER_RE.match(t)
+    if not m:
+        return "", t
+    body = t[m.end():]
+    am = _FINAL_ANSWER_RE.search(body)
+    if am:
+        return body[:am.start()].strip(), body[am.end():].strip()
+    sm = re.search(r"[。！？!?]", body)
+    if sm:
+        head = body[:sm.end()].strip()
+        rest = body[sm.end():].strip()
+        if rest:
+            return head, rest
+    return body, ""
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
@@ -231,6 +272,7 @@ class ReActAgent:
             "_on_receive_json": self._on_receive_json,
             "_on_tools_found": self._on_tools_found,
             "_on_thought_missing": self._on_thought_missing,
+            "_on_truncated_response": self._on_truncated_response,
             "_on_no_tools_answer": self._on_no_tools_answer,
             "_on_no_tools_degrade": self._on_no_tools_degrade,
             "_on_tool_done": self._on_tool_done,
@@ -258,7 +300,9 @@ class ReActAgent:
 
     def _on_init(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """INIT + START -> build prompts, messages, memory; select strategy."""
-        session_caps = SessionCapabilityTracker()
+        # Session-scoped capability tracker owned by the LLM client: degrade
+        # marks survive across runs and reset on model hot-switch (configure()).
+        session_caps = self.llm_client.session_tracker
         run_state = ctx.run_state
         memory_state = ctx.memory_state
         tool_state = ctx.tool_state
@@ -286,6 +330,7 @@ class ReActAgent:
             memory_state.conv_ctx,
             workflow_context=self._workflow_context,
         )
+        ctx.initial_count = len(ctx.messages)
 
         if memory_manager:
             def rebuild():
@@ -304,8 +349,9 @@ class ReActAgent:
                     new_conv,
                     workflow_context=self._workflow_context,
                 )
-                # Preserve accumulated assistant/tool/user messages after the initial messages
-                ctx.messages[:len(new_messages)] = new_messages
+                # Replace exactly the initial block; keep accumulated messages after it
+                ctx.messages[:ctx.initial_count] = new_messages
+                ctx.initial_count = len(new_messages)
             memory_manager._on_after_compact = rebuild
 
         return [ReActEvent(ReActEventType.STRATEGY_READY,
@@ -371,7 +417,7 @@ class ReActAgent:
             # 检查取消信号——流式输出期间也能响应 ESC 中断
             checker = ctx.run_state.cancel_checker
             if checker is not None and checker():
-                raise RuntimeError("cancelled")
+                raise AgentCancelled("cancelled")
             if is_reasoning:
                 ctx.emit(ReActEventType.STREAM_REASONING, token=token)
             else:
@@ -411,6 +457,11 @@ class ReActAgent:
 
     def _on_receive_native(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """RECEIVE_RESPONSE + ROUTE_NATIVE -> check tool_calls."""
+        # Truncation (finish_reason=length): never execute possibly-broken calls.
+        if self.llm_client.last_truncated:
+            if ctx.pending_tool_calls:
+                return self._fail_truncated_tool_calls(ctx)
+            return [ReActEvent(ReActEventType.TRUNCATED_RESPONSE)]
         if ctx.pending_tool_calls:
             thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
             if not thought:
@@ -444,12 +495,67 @@ class ReActAgent:
             recovered = self._recover_protocol_json(ctx)
             if recovered is not None:
                 return recovered
-            self._emit_answer_thought(ctx)
-            ctx.last_answer = text
+
+            memory_manager = ctx.memory_state.memory_manager
+            reasoning = (ctx.last_reasoning or "").strip()
+            response_text = (ctx.last_response_text or "").strip()
+            streamed = any(step.reasoning_streamed for step in ctx.steps)
+
+            if streamed:
+                # 推理已通过流式逐 token 展示；只把推理落盘以便会话恢复。
+                if reasoning and memory_manager:
+                    memory_manager.append("system", f"[思考过程] {reasoning}")
+            elif reasoning and response_text:
+                # 思考在推理通道、答案在正文（推理未流式展示过）→ 补展示思考。
+                if memory_manager:
+                    memory_manager.append("assistant", reasoning, metadata={"display_only": True})
+                ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=reasoning)
+            else:
+                thought, answer = _split_native_thought_answer(text)
+                if thought and answer:
+                    # 思考与答案拆开后两者都不同才单独展示思考；
+                    # 仅一句思考时答案即全文（去标记），避免重复显示。
+                    if memory_manager:
+                        memory_manager.append("assistant", thought, metadata={"display_only": True})
+                    ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=thought)
+
+            if reasoning and not streamed and response_text:
+                ctx.last_answer = response_text
+            else:
+                _, ans = _split_native_thought_answer(text)
+                ctx.last_answer = ans or _THOUGHT_MARKER_RE.sub("", text, count=1).strip() or text
             return [ReActEvent(ReActEventType.NO_TOOLS,
-                               {"text": text})]
+                               {"text": ctx.last_answer})]
 
         return [ReActEvent(ReActEventType.NO_TOOLS_NO_TEXT)]
+
+    def _fail_truncated_tool_calls(self, ctx: ExecutionContext) -> list[ReActEvent]:
+        """Fail every pending tool call from a truncated response (pi semantics).
+
+        The assistant message with tool_calls is recorded, each call gets an
+        error observation, and the loop re-enters the LLM so the model can
+        re-issue with complete arguments. No tool is executed.
+        """
+        thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
+        self._on_native_tool_calls(ctx, thought)
+        error_text = (
+            "工具调用未执行：模型响应达到输出长度上限，工具参数可能被截断。"
+            "请用更短、完整的参数重新发起调用。"
+        )
+        for tc in list(ctx.pending_tool_calls):
+            ctx.messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "content": error_text,
+            })
+            react_runtime.record_tool_done(ctx, {
+                "name": tc["name"],
+                "arguments": tc.get("arguments", {}),
+                "result": "<truncated>",
+                "id": tc.get("id", ""),
+            })
+        ctx.pending_tool_calls = []
+        return [ReActEvent(ReActEventType.ALL_TOOLS_DONE)]
 
     def _recover_protocol_json(self, ctx: ExecutionContext) -> list[ReActEvent] | None:
         """模型把 ReAct 协议 JSON 写进正文（native 通道漏接）时还原语义。
@@ -499,7 +605,7 @@ class ReActAgent:
         if self._thought_retries > 2:
             ctx.memory_state.session_caps.mark_failed("tool_calling")
             return [ReActEvent(ReActEventType.DEGRADED)]
-        return self._check_retry_gate(ctx, event.payload.get("reason", "missing_thought"))
+        return self._check_retry_gate(ctx, RetryReason.THOUGHT_MISSING)
 
     def _on_tool_done(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + TOOL_DONE -> execute next tool or finish."""
@@ -554,20 +660,26 @@ class ReActAgent:
 
     def _on_empty_response(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """CHECK_EMPTY + EMPTY_RESPONSE -> retry or abort."""
-        return self._check_retry_gate(ctx, "empty_response")
+        return self._check_retry_gate(ctx, RetryReason.EMPTY_RESPONSE)
+
+    def _on_truncated_response(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """CHECK_TOOL_CALLS + TRUNCATED_RESPONSE -> retry gate (native truncation, no tools)."""
+        return self._check_retry_gate(ctx, RetryReason.TRUNCATED)
 
     def _on_has_content(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """CHECK_EMPTY + HAS_CONTENT -> JSON parse the response."""
         if self.llm_client.last_truncated:
-            ctx.last_answer = json_helpers.extract_answer_from_text(ctx.last_response_text)
-            self._output("[截断检测] LLM 输出被截断，直接提取答案文本")
-            return [ReActEvent(ReActEventType.PARSE_SUCCESS, {
-                "parsed": {"type": "answer", "text": ctx.last_answer}
+            return [ReActEvent(ReActEventType.PARSE_ERROR, {
+                "reason": RetryReason.TRUNCATED,
+                "detail": "finish_reason=length",
             })]
         parsed = self._robust_json_parse(ctx.last_response_text)
         if parsed["type"] == "error":
             ctx.last_answer = None  # signal parse error for retry gate
-            return [ReActEvent(ReActEventType.PARSE_ERROR, {"reason": parsed.get("reason", "")})]
+            return [ReActEvent(ReActEventType.PARSE_ERROR, {
+                "reason": RetryReason.PARSE_ERROR,
+                "detail": parsed.get("reason", ""),
+            })]
         return [ReActEvent(ReActEventType.PARSE_SUCCESS, {"parsed": parsed})]
 
     def _on_parse_success(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
@@ -581,7 +693,11 @@ class ReActAgent:
 
     def _on_parse_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """JSON_PARSE + PARSE_ERROR -> check retry gate."""
-        return self._check_retry_gate(ctx, event.payload.get("reason", "JSON parse failed"))
+        return self._check_retry_gate(
+            ctx,
+            event.payload.get("reason", RetryReason.PARSE_ERROR),
+            event.payload.get("detail", ""),
+        )
 
     # ── CLASSIFY ──
 
@@ -623,20 +739,22 @@ class ReActAgent:
     def _on_classified_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """CLASSIFY + CLASSIFIED_ERROR -> check retry gate."""
         parsed = event.payload.get("parsed", {})
-        return self._check_retry_gate(ctx, parsed.get("reason", "unknown"))
+        return self._check_retry_gate(ctx, RetryReason.CLASSIFY_ERROR, parsed.get("reason", "unknown"))
 
     # ── RETRY_GATE ──
 
-    def _check_retry_gate(self, ctx: ExecutionContext, reason: str) -> list[ReActEvent]:
+    def _check_retry_gate(self, ctx: ExecutionContext, reason: RetryReason,
+                          detail: str = "") -> list[ReActEvent]:
         """Shared logic: decide whether to retry, degrade, or fallback."""
-        return react_runtime.retry_gate(ctx, reason)
+        return react_runtime.retry_gate(ctx, reason, detail)
 
     def _on_retries_left(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """RETRY_GATE + RETRIES_LEFT -> increment retries, add hint, retry."""
         ctx.json_retries += 1
-        reason = event.payload.get("reason", "")
+        reason = event.payload.get("reason")
+        detail = event.payload.get("detail", "")
 
-        if reason == "empty_response":
+        if reason == RetryReason.EMPTY_RESPONSE:
             err_hint = ""
             if self.llm_client.last_error:
                 err_hint = f" (LLM last_error: {self.llm_client.last_error[:200]})"
@@ -644,13 +762,18 @@ class ReActAgent:
                 f"[重试 {ctx.json_retries}/{ctx.max_json_retries}] LLM 返回空响应{err_hint}。提示给出答案...")
             ctx.messages.append(
                 {"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
+        elif reason == RetryReason.TRUNCATED:
+            self._output(
+                f"[截断重试 {ctx.json_retries}/{ctx.max_json_retries}] 上一次回复达到输出长度上限")
+            ctx.messages.append(
+                {"role": "user", "content": "你的上一次回复被输出长度上限截断。请缩短本次输出后重试。"})
         else:
-            self._output(f"[JSON 重试 {ctx.json_retries}/{ctx.max_json_retries}] {reason}")
+            self._output(f"[JSON 重试 {ctx.json_retries}/{ctx.max_json_retries}] {detail or reason}")
             raw = ctx.last_response_text
             truncated = (raw[:2000] + "\n...[响应截断]...") if len(raw) > 2000 else raw
             ctx.messages.append({"role": "assistant", "content": truncated})
             ctx.messages.append({"role": "user", "content":
-                f"你的上一次回复不是合法的 JSON。错误: {reason}。\n"
+                f"你的上一次回复不是合法的 JSON。错误: {detail or reason}。\n"
                 f"{self._build_json_format_section()}"})
             memory_manager = ctx.memory_state.memory_manager
             if memory_manager:
@@ -670,7 +793,7 @@ class ReActAgent:
     def _on_fallback_text(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """RETRY_GATE + FALLBACK_TEXT -> salvage answer text before falling back to raw output."""
         step = ctx.steps[-1]
-        step.error_message = f"JSON parse failed: {event.payload.get('reason', 'unknown')}"
+        step.error_message = f"JSON parse failed: {event.payload.get('detail') or event.payload.get('reason', 'unknown')}"
         ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
         return []  # EMIT_ANSWER reads ctx.last_answer
 
@@ -694,7 +817,10 @@ class ReActAgent:
         """达到步数上限 -> 提示并给出诚实的兜底答案， terminate."""
         self._output("已达到最大步数，流程终止。")
         if not ctx.last_answer:
-            ctx.last_answer = "（已达到最大步数限制，任务未完成。请缩小问题范围或分步提问。）"
+            ctx.last_answer = (
+                f"（已达到最大步数 {ctx.run_state.max_steps}，共执行 {ctx.run_state.current_step} 步，"
+                "任务未完成。请缩小问题范围或分步提问。）"
+            )
         return []
 
     def _on_error_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
@@ -777,9 +903,6 @@ class ReActAgent:
         return json_helpers.parse_json_response(text)
 
     def _emit_answer_thought(self, ctx: ExecutionContext) -> None:
-        if not any(step.tool_outputs for step in ctx.steps):
-            return
-
         # When reasoning was streamed, persist the reasoning_content to STM
         # so it survives session navigation (the streaming tokens are lost
         # when the user navigates away and back).
@@ -822,6 +945,13 @@ class ReActAgent:
             if "tool" in parsed or "answer" in parsed or "params" in parsed:
                 return ""
 
+        m = _THOUGHT_MARKER_RE.match(text)
+        if m:
+            body = text[m.end():]
+            am = _FINAL_ANSWER_RE.search(body)
+            if am:
+                return body[:am.start()].strip()
+            return body
         return text
 
     @staticmethod

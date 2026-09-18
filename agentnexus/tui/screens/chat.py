@@ -17,6 +17,7 @@ from textual.widget import Widget
 from textual.widgets import Input, Label, Static
 from textual.worker import get_current_worker
 
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.config import get_settings
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.memory.short_term import ShortTermMemory
@@ -1617,10 +1618,10 @@ class ChatScreen(Screen):
             try:
                 agent_question = self._prepare_agent_question(text)
                 if turn.cancel_checker():
-                    raise RuntimeError("cancelled")
+                    raise AgentCancelled("cancelled")
                 result = self._agent.run(agent_question, memory_manager=self._memory)
                 if turn.cancel_checker():
-                    raise RuntimeError("cancelled")
+                    raise AgentCancelled("cancelled")
                 return result.answer
             finally:
                 trace_manager.end_trace()
@@ -1638,7 +1639,7 @@ class ChatScreen(Screen):
                 self._chat_area.query_one("#loading-indicator").remove()
             except Exception as e2:
                 logger.debug("Failed to remove loading indicator on error: %s", e2)
-            if str(e) == "cancelled":
+            if isinstance(e, AgentCancelled):
                 reason = "用户中断或取消信号"
                 record = turn.cancel(reason)
                 answer = record.answer

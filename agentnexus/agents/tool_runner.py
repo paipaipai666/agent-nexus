@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import time
 import traceback
 from typing import Any, Callable
 
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.hooks import HookType, get_hook_manager
 from agentnexus.tools.errors import ToolError, ToolErrorCode
 
@@ -58,7 +58,7 @@ def execute_tool(
 
     try:
         if cancel_checker is not None and cancel_checker():
-            raise RuntimeError("cancelled")
+            raise AgentCancelled("cancelled")
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
                 tool_executor.invoke,
@@ -68,36 +68,19 @@ def execute_tool(
                 hitl_approver=hitl_approver,
                 tool_policy=tool_policy,
             )
-            try:
-                # Poll for completion with periodic cancel checks.
-                # future.result(timeout=60) would block the full 60s,
-                # making cancel signals invisible during tool execution.
-                deadline = time.monotonic() + 60
-                while True:
-                    if cancel_checker is not None and cancel_checker():
-                        future.cancel()
-                        raise RuntimeError("cancelled")
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        result = ToolError(
-                            error_code=ToolErrorCode.TIMEOUT,
-                            message=f"工具 {name} 执行超时 (60s)",
-                            recoverable=True,
-                            suggested_action="Retry with a longer timeout or simplify the request",
-                        )
-                        break
-                    try:
-                        result = future.result(timeout=min(remaining, 1.0))
-                        break
-                    except concurrent.futures.TimeoutError:
-                        continue
-            except concurrent.futures.TimeoutError:
-                result = ToolError(
-                    error_code=ToolErrorCode.TIMEOUT,
-                    message=f"工具 {name} 执行超时 (60s)",
-                    recoverable=True,
-                    suggested_action="Retry with a longer timeout or simplify the request",
-                )
+            # Poll with periodic cancel checks — future.result() without a
+            # timeout would make cancel signals invisible during tool
+            # execution. The actual timeout cap is the registry's
+            # ToolMeta.timeout_sec, enforced inside invoke().
+            while True:
+                if cancel_checker is not None and cancel_checker():
+                    future.cancel()
+                    raise AgentCancelled("cancelled")
+                try:
+                    result = future.result(timeout=1.0)
+                    break
+                except concurrent.futures.TimeoutError:
+                    continue
 
         # ── after hook (observer) ──────────────────────────────
         hook_mgr.fire(HookType.AFTER_TOOL_CALL, {
@@ -118,12 +101,20 @@ def execute_tool(
         })
         _log_tool_error(name, exc)
         # LOW-02: Include message for safe domain exceptions, strip for generic ones
-        if isinstance(exc, RuntimeError) and str(exc) == "cancelled":
+        if isinstance(exc, AgentCancelled):
             return ToolError(
                 error_code=ToolErrorCode.CANCELLED,
                 message=f"工具 '{name}' 调用被取消",
                 recoverable=True,
                 suggested_action="Retry if cancellation was unintended",
+            )
+        if isinstance(exc, TimeoutError):
+            # Registry-enforced ToolMeta.timeout_sec expiry.
+            return ToolError(
+                error_code=ToolErrorCode.TIMEOUT,
+                message=str(exc),
+                recoverable=True,
+                suggested_action="Retry with simpler request or increase tool timeout_sec",
             )
         if isinstance(exc, RuntimeError) and "rate limit" in str(exc).lower():
             return ToolError(

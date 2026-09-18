@@ -50,7 +50,6 @@ class ReActState(Enum):
     RETRY_GATE = auto()        # should we retry, degrade, or fallback?
     DEGRADE = auto()           # mark_failed + re-select strategy
     EMIT_ANSWER = auto()       # output final answer, save memory, conclude
-    MAX_STEPS = auto()         # step limit reached
     ERROR_ABORT = auto()       # unrecoverable error
     DONE = auto()              # terminal state
 
@@ -86,10 +85,23 @@ class ReActEventType(Enum):
     ROUTE_JSON = auto()        # internal: route to CHECK_EMPTY path
     FALLBACK_TEXT = auto()     # internal: PROMPT_JSON exhausted → use raw text as answer
     THOUGHT_MISSING = auto()   # NATIVE: model returned tool_calls without Thought text
+    TRUNCATED_RESPONSE = auto()  # NATIVE: response cut by output token limit, no tool_calls
     TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
     ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
     STREAM_TOKEN = auto()      # direct emit: LLM streaming token (real-time text)
     STREAM_REASONING = auto()  # direct emit: LLM streaming reasoning content
+
+
+# ============================================================
+# RetryReason — typed category for RETRY_GATE decisions
+# ============================================================
+
+class RetryReason(Enum):
+    EMPTY_RESPONSE = auto()    # LLM returned empty response text
+    PARSE_ERROR = auto()       # JSON parse failed (detail carries parser message)
+    CLASSIFY_ERROR = auto()    # parsed payload is neither tool_call nor answer
+    THOUGHT_MISSING = auto()   # native tool_calls without visible thought text
+    TRUNCATED = auto()         # output cut by token limit (finish_reason=length)
 
 
 # ============================================================
@@ -102,6 +114,7 @@ class ReActEvent:
     payload: dict = field(default_factory=dict)
     step_id: int = 0
     timestamp: float = field(default_factory=time.time)
+    seq: int = 0  # monotonic per-run order across FSM queue and ctx.emit side-channel
 
 
 # ============================================================
@@ -180,6 +193,12 @@ class ExecutionContext:
     last_response_text: str = ""
     last_reasoning: str = ""
     last_answer: str | None = None
+
+    # -- compaction rebuild anchor: length of the initial message block --
+    initial_count: int = 0
+
+    # -- monotonic event order (FSM queue + emit side-channel share it) --
+    _event_seq: int = 0
 
     # -- TUI event side-channel (bypasses FSM queue) --
     _on_emit: Any = None  # Callable[[ReActEvent, ReActState | None, ReActState | None], None]
@@ -260,10 +279,15 @@ class ExecutionContext:
         self.last_answer = last_answer
         self._on_emit = _on_emit
 
+    def next_seq(self) -> int:
+        """Allocate the next monotonic event sequence number for this run."""
+        self._event_seq += 1
+        return self._event_seq
+
     def emit(self, event_type: 'ReActEventType', **payload: Any) -> None:
         """Push a real-time event directly to TUI, bypassing the FSM queue."""
         if self._on_emit:
-            evt = ReActEvent(event_type, dict(payload), self.current_step)
+            evt = ReActEvent(event_type, dict(payload), self.current_step, seq=self.next_seq())
             self._on_emit(evt, None, None)
 
 

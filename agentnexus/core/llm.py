@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.capabilities import (
     ModelCapabilities,
     SessionCapabilityTracker,
@@ -246,7 +247,7 @@ class AgentLLM:
 
         except Exception as e:
             # 取消信号必须直接传播，不能被重试逻辑吞掉
-            if isinstance(e, RuntimeError) and str(e) == "cancelled":
+            if isinstance(e, AgentCancelled):
                 raise
 
             error_msg = str(e)

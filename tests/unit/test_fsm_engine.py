@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentnexus.agents.exceptions import AgentCancelled, FSMError
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.react_types import (
     ExecutionContext,
@@ -54,7 +55,8 @@ class TestStateMachineDispatch:
         assert args[0] is ctx
         assert args[1] is event
 
-    def test_non_matching_event_is_ignored(self):
+    def test_unknown_event_raises(self):
+        """An event with no matching transition is a table bug, not a silent skip."""
         handler = MagicMock(return_value=[])
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.DONE, "my_handler"),
@@ -63,10 +65,10 @@ class TestStateMachineDispatch:
         ctx = ExecutionContext(question="test")
         event = ReActEvent(ReActEventType.LLM_ERROR)
 
-        fsm.run_loop(event, ctx, {"my_handler": handler})
+        with pytest.raises(FSMError):
+            fsm.run_loop(event, ctx, {"my_handler": handler})
 
         handler.assert_not_called()
-        # No transition matched -- state stays INIT
         assert fsm.current_state == ReActState.INIT
 
     def test_unconditional_transition_always_matches(self):
@@ -84,38 +86,25 @@ class TestStateMachineDispatch:
         handler.assert_called_once()
         assert fsm.current_state == ReActState.SELECT_STRATEGY
 
-    def test_transition_without_handler_does_not_crash(self):
-        """A transition whose handler name is not in the handlers dict is a no-op."""
+    def test_missing_handler_raises(self):
+        """A transition whose handler name is absent from the handlers dict is a bug."""
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "missing"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
-        # Should not raise even though "missing" is absent from handlers
-        result = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {})
+        with pytest.raises(FSMError):
+            fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {})
 
-        assert fsm.current_state == ReActState.SELECT_STRATEGY
-        # FSM now returns an error message when exiting in non-terminal state
-        assert result[0] is not None
-        assert "exited in state" in result[0]
-
-    def test_first_matching_transition_wins(self):
-        """When multiple transitions match, the first in the table is chosen."""
+    def test_duplicate_transition_rejected(self):
+        """Duplicate (state, event) rows are a table bug — rejected at construction."""
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.INIT, "handler_a"),
             Transition(ReActState.INIT, ReActEventType.START, ReActState.ERROR_ABORT, "handler_b"),
         ]
-        fsm = StateMachine(table=table)
-        ctx = ExecutionContext(question="test")
-        handler_a = MagicMock(return_value=[])
-        handler_b = MagicMock(return_value=[])
-
-        fsm.run_loop(ReActEvent(ReActEventType.START), ctx,
-                     {"handler_a": handler_a, "handler_b": handler_b})
-
-        handler_a.assert_called_once()
-        handler_b.assert_not_called()
+        with pytest.raises(FSMError):
+            StateMachine(table=table)
 
 
 class TestStateMachineRunLoop:
@@ -149,7 +138,7 @@ class TestStateMachineRunLoop:
 
         answer, steps = fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"to_strategy": to_strategy, "to_answer": to_answer},
+            {"to_strategy": to_strategy, "to_answer": to_answer, "nop": lambda c, e: []},
         )
 
         assert calls == ["strategy", "answer"]
@@ -200,7 +189,8 @@ class TestStateMachineRunLoop:
 
         answer, _ = fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"first": first_handler, "second": second_handler, "final": final_handler},
+            {"first": first_handler, "second": second_handler, "final": final_handler,
+             "nop": lambda c, e: []},
         )
 
         # first -> second (1st SR) -> second (2nd SR) -> final (1st FT) -> DONE (2nd FT, handler skipped)
@@ -245,7 +235,7 @@ class TestStateMachineRunLoop:
 
         fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"strategy": strategy_handler, "answer": answer_handler},
+            {"strategy": strategy_handler, "answer": answer_handler, "nop": lambda c, e: []},
         )
         assert ctx.last_answer == "ok"
 
@@ -401,7 +391,97 @@ class TestStateMachineCancellation:
         ctx = ExecutionContext(question="test")
         ctx.cancel_checker = lambda: True
 
-        with pytest.raises(RuntimeError, match="cancelled"):
+        with pytest.raises(AgentCancelled):
             fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"h": handler})
 
         handler.assert_not_called()
+
+
+class TestRealTransferTable:
+    """Guard the production TRANSFER_TABLE against structural regressions.
+
+    The engine intentionally does NOT validate reachability/outgoing-edges at
+    construction (test tables are often fragments) — the production table is
+    linted here instead.
+    """
+
+    def _stub_handlers(self, **overrides):
+        from agentnexus.agents.react_transitions import TRANSFER_TABLE
+        handlers = {t.handler: MagicMock(return_value=[]) for t in TRANSFER_TABLE}
+        handlers.update(overrides)
+        return handlers
+
+    def test_real_transfer_table_is_well_formed(self):
+        from collections import deque
+
+        from agentnexus.agents.react_transitions import TRANSFER_TABLE
+
+        # (a) no duplicate (state, event) rows
+        keys = [(t.state, t.event) for t in TRANSFER_TABLE]
+        assert len(keys) == len(set(keys)), "duplicate (state, event) transitions"
+
+        states = {t.state for t in TRANSFER_TABLE} | {ReActState.INIT}
+        # (b) every non-DONE state has at least one outgoing transition
+        for s in states:
+            if s is ReActState.DONE:
+                continue
+            assert any(t.state == s for t in TRANSFER_TABLE), f"no outgoing transition from {s.name}"
+        # (d) DONE has no outgoing transitions
+        assert all(t.state != ReActState.DONE for t in TRANSFER_TABLE)
+        # (c) every state reachable from INIT via the edge graph
+        adj: dict = {}
+        for t in TRANSFER_TABLE:
+            adj.setdefault(t.state, set()).add(t.next_state)
+        seen = {ReActState.INIT}
+        queue = deque([ReActState.INIT])
+        while queue:
+            cur = queue.popleft()
+            for nxt in adj.get(cur, ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        unreachable = states - seen
+        assert not unreachable, f"unreachable states: {sorted(s.name for s in unreachable)}"
+
+    def test_real_table_max_steps_abort_reaches_done(self):
+        """Regression: ABORT emitted from CALL_LLM (max-steps) must reach DONE.
+
+        Before the CALL_LLM+ABORT transition existed, the event was silently
+        dropped and the loop exited non-terminal with a placeholder answer.
+        """
+        from agentnexus.agents.react_transitions import TRANSFER_TABLE
+
+        on_max_steps_abort = MagicMock(return_value=[])
+        handlers = self._stub_handlers(
+            _on_init=MagicMock(return_value=[ReActEvent(ReActEventType.STRATEGY_READY)]),
+            _on_strategy_ready=MagicMock(return_value=[ReActEvent(ReActEventType.LLM_PARAMS_READY)]),
+            _on_llm_params_ready=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
+            _on_max_steps_abort=on_max_steps_abort,
+        )
+        fsm = StateMachine(table=TRANSFER_TABLE)
+        ctx = ExecutionContext(question="test")
+
+        fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
+
+        assert fsm.current_state == ReActState.DONE
+        on_max_steps_abort.assert_called_once()
+
+    def test_event_seq_strictly_increasing(self):
+        """FSM-queued and emit-side-channel events share one monotonic seq."""
+        from agentnexus.agents.react_transitions import TRANSFER_TABLE
+
+        observed: list[int] = []
+        fsm = StateMachine(table=TRANSFER_TABLE)
+        fsm.subscribe(lambda event, _f, _t: event is not None and observed.append(event.seq))
+
+        ctx = ExecutionContext(question="test")
+        handlers = self._stub_handlers(
+            _on_init=MagicMock(return_value=[ReActEvent(ReActEventType.STRATEGY_READY)]),
+            _on_strategy_ready=MagicMock(return_value=[ReActEvent(ReActEventType.LLM_PARAMS_READY)]),
+            _on_llm_params_ready=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
+        )
+        fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
+
+        assert len(observed) == 4  # START, STRATEGY_READY, LLM_PARAMS_READY, ABORT
+        assert observed == sorted(observed)
+        assert len(set(observed)) == len(observed)

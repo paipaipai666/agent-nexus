@@ -6,7 +6,14 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from agentnexus.agents.react_types import AgentStep, CallingStrategy, ExecutionContext, ReActEvent, ReActEventType
+from agentnexus.agents.react_types import (
+    AgentStep,
+    CallingStrategy,
+    ExecutionContext,
+    ReActEvent,
+    ReActEventType,
+    RetryReason,
+)
 from agentnexus.tools.dispatcher import ToolDispatcher
 from agentnexus.tools.result_format import summarize_tool_result
 
@@ -274,10 +281,11 @@ def execute_json_tool_call(
     return [ReActEvent(ReActEventType.ALL_TOOLS_DONE)]
 
 
-def retry_gate(ctx: ExecutionContext, reason: str) -> list[ReActEvent]:
+def retry_gate(ctx: ExecutionContext, reason: RetryReason, detail: str = "") -> list[ReActEvent]:
     run_state = ctx.run_state
+    payload = {"reason": reason, "detail": detail}
     if run_state.json_retries < run_state.max_json_retries:
-        return [ReActEvent(ReActEventType.RETRIES_LEFT, {"reason": reason})]
+        return [ReActEvent(ReActEventType.RETRIES_LEFT, payload)]
     if run_state.strategy == CallingStrategy.JSON_MODE:
-        return [ReActEvent(ReActEventType.NO_RETRIES, {"reason": reason})]
-    return [ReActEvent(ReActEventType.FALLBACK_TEXT, {"reason": reason})]
+        return [ReActEvent(ReActEventType.NO_RETRIES, payload)]
+    return [ReActEvent(ReActEventType.FALLBACK_TEXT, payload)]

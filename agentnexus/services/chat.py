@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.services.turn import TurnRecord, TurnRuntime
 
@@ -298,7 +299,7 @@ class ChatService:
                 run_id=run.id, session_id=session_id,
             ))
         except Exception as exc:
-            if turn.cancel_checker() or str(exc) == "cancelled":
+            if turn.cancel_checker() or isinstance(exc, AgentCancelled):
                 record = turn.cancel("cancelled")
                 event_type = "run_interrupted"
             else:

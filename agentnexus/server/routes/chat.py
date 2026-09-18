@@ -560,6 +560,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                     run_started_event.set()
 
                 def run_agent():
+                    from agentnexus.agents.exceptions import AgentCancelled
                     thread_id = threading.get_ident()
                     active_thread_ids.add(thread_id)
                     confirm_bridge.set_target(ws_confirm, thread_id=thread_id)
@@ -573,6 +574,10 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                             ),
                         )
                     except Exception as e:
+                        # 用户取消是正常流程：send_message 已发出 run_interrupted
+                        # 事件，这里只需安静退出，不得报错误。
+                        if isinstance(e, AgentCancelled):
+                            return
                         logger.error("WebSocket agent run failed for session %s: %s", session_id, e, exc_info=True)
                         # Report sanitized error to frontend via WebSocket
                         try:

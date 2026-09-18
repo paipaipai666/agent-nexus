@@ -19,6 +19,8 @@ TRANSFER_TABLE: list[Transition] = [
     # ── CALL_LLM ──
     Transition(S.CALL_LLM, E.LLM_RESPONSE, S.RECEIVE_RESPONSE, "_on_llm_response"),
     Transition(S.CALL_LLM, E.LLM_ERROR, S.ERROR_ABORT, "_on_llm_error"),
+    # 步数上限：_on_llm_params_ready 在 CALL_LLM 态发 ABORT（handler 在目标态执行）
+    Transition(S.CALL_LLM, E.ABORT, S.DONE, "_on_max_steps_abort"),
 
     # ── RECEIVE_RESPONSE → routing ──
     Transition(S.RECEIVE_RESPONSE, E.ROUTE_NATIVE, S.CHECK_TOOL_CALLS, "_on_receive_native"),
@@ -29,13 +31,18 @@ TRANSFER_TABLE: list[Transition] = [
     Transition(S.CHECK_TOOL_CALLS, E.NO_TOOLS, S.EMIT_ANSWER, "_on_no_tools_answer"),
     Transition(S.CHECK_TOOL_CALLS, E.NO_TOOLS_NO_TEXT, S.DEGRADE, "_on_no_tools_degrade"),
     Transition(S.CHECK_TOOL_CALLS, E.THOUGHT_MISSING, S.RETRY_GATE, "_on_thought_missing"),
+    # native 截断：整批 tool call 标错后直接重入 LLM（_on_receive_native 组装观察）
+    Transition(S.CHECK_TOOL_CALLS, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
+    # native 截断且无 tool_calls → 走重试门
+    Transition(S.CHECK_TOOL_CALLS, E.TRUNCATED_RESPONSE, S.RETRY_GATE, "_on_truncated_response"),
 
     # ── EXECUTE_TOOL ──
     Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
     Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
     # Fast path: bookkeeping-only batch (todo_*) with terminal answer text —
-    # skip the extra LLM round and emit the stashed answer directly.
-    Transition(S.EXECUTE_TOOL, E.ANSWER_READY, S.EMIT_ANSWER, "_on_answer_ready"),
+    # _on_all_tools_done stashes the answer and re-emits ANSWER_READY from
+    # PREPARE_LLM_CALL (handlers run in the landing state), skipping one LLM round.
+    Transition(S.PREPARE_LLM_CALL, E.ANSWER_READY, S.EMIT_ANSWER, "_on_answer_ready"),
 
     # ── CHECK_EMPTY ──
     Transition(S.CHECK_EMPTY, E.EMPTY_RESPONSE, S.RETRY_GATE, "_on_empty_response"),
@@ -54,12 +61,11 @@ TRANSFER_TABLE: list[Transition] = [
     Transition(S.RETRY_GATE, E.RETRIES_LEFT, S.PREPARE_LLM_CALL, "_on_retries_left"),
     Transition(S.RETRY_GATE, E.NO_RETRIES, S.DEGRADE, "_on_no_retries_degrade"),
     Transition(S.RETRY_GATE, E.FALLBACK_TEXT, S.EMIT_ANSWER, "_on_fallback_text"),
+    # thought 重试耗尽：_on_thought_missing 在 RETRY_GATE 态发 DEGRADED
+    Transition(S.RETRY_GATE, E.DEGRADED, S.DEGRADE, "_on_degraded"),
 
     # ── DEGRADE ──
     Transition(S.DEGRADE, E.DEGRADED, S.PREPARE_LLM_CALL, "_on_degraded"),
-
-    # ── MAX_STEPS ──
-    Transition(S.MAX_STEPS, E.ABORT, S.DONE, "_on_max_steps_abort"),
 
     # ── ERROR_ABORT ──
     Transition(S.ERROR_ABORT, E.ABORT, S.DONE, "_on_error_abort"),
