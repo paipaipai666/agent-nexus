@@ -414,6 +414,49 @@ class TestChatService:
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Draft concise release notes." in ctx
 
+    def test_skill_current_isolated_between_threads(self):
+        """并发会话共享 SkillService：A 线程选中的技能不得泄漏到 B 线程。"""
+        import threading
+        from agentnexus.services.skill import SkillService
+        from agentnexus.skills.registry import SkillEntry, SkillRegistry
+        from agentnexus.skills.workflow import Workflow
+
+        def make_entry(sid: str) -> SkillEntry:
+            workflow = Workflow.model_validate({
+                "id": sid, "version": "1", "display_name": sid.upper(),
+                "prompt_profile": {"system": "react"},
+                "tool_policy": {"max_risk": "low"},
+                "steps": [{"type": "prompt", "id": "s", "prompt": "Go."}],
+                "success_criteria": ["Done."],
+            })
+            return SkillEntry(sid, sid, sid.upper(), "", MagicMock(), workflow)
+
+        entry_a, entry_b = make_entry("skill_a"), make_entry("skill_b")
+        registry = SkillRegistry([])
+        registry._entries = [entry_a, entry_b]
+        skill = SkillService(registry, agent=MagicMock())
+        skill.use_default("skill_a")
+
+        barrier = threading.Barrier(2)
+        seen: dict[str, str] = {}
+
+        def worker(tag: str, entry: SkillEntry):
+            barrier.wait()
+            skill.current = entry
+            import time
+            time.sleep(0.05)
+            seen[tag] = skill.current.qualified_id
+
+        threads = [threading.Thread(target=worker, args=t) for t in (("a", entry_a), ("b", entry_b))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert seen == {"a": "skill_a/skill_a", "b": "skill_b/skill_b"}, f"技能选择跨线程泄漏: {seen}"
+        # 新线程（无线程级设置）回退到默认技能
+        assert skill.current.qualified_id == "skill_a/skill_a"
+
     @staticmethod
     def _drain_queue(service, run_id):
         """Drain all currently available events from a run queue without blocking."""

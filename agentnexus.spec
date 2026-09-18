@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 
 def collect_data_globs(*patterns):
     datas = []
@@ -25,6 +27,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
+    # collect_submodules('chromadb'): chromadb resolves several implementations
+    # via string config + importlib (e.g. chromadb.telemetry.product.posthog),
+    # invisible to PyInstaller's static analysis — bundle them all.
     hiddenimports=[
         'chromadb',
         'sentence_transformers',
@@ -86,7 +91,7 @@ a = Analysis(
         'agentnexus.tools.mcp_result',
         'agentnexus.tools.mcp_schema',
         'agentnexus.tools.providers',
-    ],
+    ] + collect_submodules('chromadb'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

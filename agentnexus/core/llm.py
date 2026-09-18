@@ -34,6 +34,40 @@ _provider_health_lock = threading.Lock()
 _PROVIDER_FAILURE_THRESHOLD = 3
 _PROVIDER_COOLDOWN_SECONDS = 60
 
+
+def _is_transient_error(exc: Exception) -> bool:
+    """网络层瞬态错误判定——与 _call 的重试分类保持一致。"""
+    msg = str(exc).lower()
+    name = type(exc).__name__.lower()
+    if any(k in name or k in msg for k in (
+        "connection", "ssl", "timeout", "server",
+        "unexpected_eof", "incomplete", "peer closed",
+    )):
+        return True
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        for attr in ("response", "status", "http_status"):
+            inner = getattr(exc, attr, None)
+            if inner is not None:
+                status_code = getattr(inner, "status_code", None)
+                if status_code is not None:
+                    break
+    return status_code in (429, 503)
+
+# Live capability probe — one tiny call per (model, base_url), cached
+# process-wide so concurrent agents don't each pay the round trip.
+_probe_lock = threading.Lock()
+_probe_cache: dict[tuple[str, str], dict[str, bool]] = {}
+
+_PROBE_NOOP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "noop",
+        "description": "Do nothing. Call this tool when the user asks you to.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
+
 _default_llm: "AgentLLM | None" = None
 
 
@@ -64,16 +98,79 @@ class AgentLLM:
         self.model = _normalize_model_id(raw_model, self.base_url) if "/" not in raw_model else raw_model
         self.api_key = api_key or apiKey or profile[2].get_secret_value()
         self.timeout = timeout or profile[3]
-        self.last_error: str = ""
-        self.last_truncated: bool = False
-        self.last_usage: dict = {}
+        # Per-call results live in thread-local storage: concurrent runs
+        # (multi-session) share this client, and plain instance attributes
+        # would clobber each other between interleaved streams.
+        self._call_state = threading.local()
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
-        self.last_tool_calls: list[dict] = []
-        self._tool_call_mode: bool = False
         self._capabilities: ModelCapabilities | None = None
         self._session_tracker: SessionCapabilityTracker | None = None
-        self.last_reasoning_content: str = ""
-        self._non_transient = False
+
+    @staticmethod
+    def _litellm_can_route(model: str) -> bool:
+        """litellm 是否能路由该模型（不认识的模型走了必然 BadRequest）。"""
+        try:
+            import litellm
+            litellm.get_llm_provider(model)
+            return True
+        except Exception:
+            return False
+
+    def _cs(self):
+        """Per-thread scratch space for the in-flight call's side-channel results."""
+        s = self._call_state
+        if not hasattr(s, "initialized"):
+            s.initialized = True
+            s.tool_calls = []
+            s.tool_call_mode = False
+            s.non_transient = False
+            s.error = ""
+            s.truncated = False
+            s.usage = {}
+            s.reasoning_content = ""
+            s.reasoning_buf = ""
+        return s
+
+    @property
+    def last_tool_calls(self) -> list[dict]:
+        return self._cs().tool_calls
+
+    @last_tool_calls.setter
+    def last_tool_calls(self, value: list[dict]) -> None:
+        self._cs().tool_calls = value
+
+    @property
+    def last_error(self) -> str:
+        return self._cs().error
+
+    @last_error.setter
+    def last_error(self, value: str) -> None:
+        self._cs().error = value
+
+    @property
+    def last_truncated(self) -> bool:
+        return self._cs().truncated
+
+    @last_truncated.setter
+    def last_truncated(self, value: bool) -> None:
+        self._cs().truncated = value
+
+    @property
+    def last_usage(self) -> dict:
+        return self._cs().usage
+
+    @last_usage.setter
+    def last_usage(self, value: dict) -> None:
+        self._cs().usage = value
+
+    @property
+    def last_reasoning_content(self) -> str:
+        return self._cs().reasoning_content
+
+    @last_reasoning_content.setter
+    def last_reasoning_content(self, value: str) -> None:
+        self._cs().reasoning_content = value
+
     def configure(self, *, model: str, base_url: str, api_key: str, timeout: int | None = None) -> None:
         """Hot-switch the underlying model/provider (shared instance — every
         agent holding this client picks the change up on its next call)."""
@@ -93,8 +190,82 @@ class AgentLLM:
     @property
     def capabilities(self) -> ModelCapabilities:
         if self._capabilities is None:
-            self._capabilities = detect_capabilities(self.model, self.base_url)
+            caps = detect_capabilities(self.model, self.base_url)
+            if caps.from_default_fallback:
+                caps = self._merge_probed_capabilities(caps)
+            self._capabilities = caps
         return self._capabilities
+
+    def _merge_probed_capabilities(self, caps: ModelCapabilities) -> ModelCapabilities:
+        """Fill in capabilities for models the static registry doesn't know.
+
+        Probes the endpoint once per (model, base_url) with minimal real
+        calls — a tool-calling call, then (only when tools are unavailable)
+        a JSON-mode call. Explicit config overrides (model_tool_calling /
+        model_json_mode) always win over probe results. Probe failures never
+        raise and never disable a capability the registry granted.
+        """
+        settings = get_settings()
+        if settings.model_tool_calling is not None and settings.model_json_mode is not None:
+            return caps
+        key = (self.model.lower(), (self.base_url or "").rstrip("/"))
+        with _probe_lock:
+            probed = _probe_cache.get(key)
+            if probed is None:
+                probed = self._probe_capabilities()
+                if probed is not None:
+                    _probe_cache[key] = probed
+        if probed is None:
+            return caps
+        if settings.model_tool_calling is None:
+            caps.supports_tool_calling = probed["tool_calling"]
+        if settings.model_json_mode is None:
+            caps.supports_json_mode = probed["json_mode"]
+        return caps
+
+    def _probe_capabilities(self) -> dict[str, bool] | None:
+        """Probe tool-calling / JSON-mode support with minimal real calls.
+
+        Returns {"tool_calling": bool, "json_mode": bool} on a definitive
+        outcome, or None when the endpoint couldn't be reached (transient —
+        left uncached so a later client retries).
+        """
+        provider = select_provider(self.model, self.base_url)
+        if provider is None:
+            return None
+        try:
+            tool_result = provider.stream_chat(
+                messages=[{"role": "user", "content": "Call the noop tool."}],
+                model=self.model,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                temperature=0,
+                tools=[_PROBE_NOOP_TOOL],
+                max_tokens=64,
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            logger.debug("tool-calling probe failed for %s: %s", self.model, exc)
+            return None
+        tool_calling = bool(tool_result.tool_calls)
+        json_mode = False
+        if not tool_calling:
+            try:
+                json_result = provider.stream_chat(
+                    messages=[{"role": "user", "content": 'Reply with exactly: {"ok": true}'}],
+                    model=self.model,
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    temperature=0,
+                    response_format={"type": "json_object"},
+                    max_tokens=64,
+                    timeout=self.timeout,
+                )
+                json.loads(json_result.text)
+                json_mode = True
+            except Exception as exc:
+                logger.debug("json-mode probe failed for %s: %s", self.model, exc)
+        return {"tool_calling": tool_calling, "json_mode": json_mode}
 
     @property
     def session_tracker(self) -> SessionCapabilityTracker:
@@ -118,8 +289,8 @@ class AgentLLM:
             return ""
 
         self.last_tool_calls = []
-        self._tool_call_mode = tools is not None and len(tools) > 0
-        self._non_transient = False
+        self._cs().tool_call_mode = tools is not None and len(tools) > 0
+        self._cs().non_transient = False
 
         # ── before llm hook ────────────────────────────────────
         hook_mgr = get_hook_manager()
@@ -143,7 +314,7 @@ class AgentLLM:
             ) or ""
             if result:
                 break
-            if self._non_transient:
+            if self._cs().non_transient:
                 break
             if attempt < attempts - 1:
                 import random
@@ -184,7 +355,7 @@ class AgentLLM:
                 "context_refs": context_refs,
             })
 
-        self._reasoning_buf = ""
+        self._cs().reasoning_buf = ""
         self.last_reasoning_content = ""
 
         try:
@@ -200,6 +371,7 @@ class AgentLLM:
                             provider = None  # Skip to fallback
                         else:
                             _provider_health.pop(provider_key, None)
+            provider_err: Exception | None = None
             if provider is not None:
                 try:
                     result = self._call_via_provider(
@@ -227,14 +399,26 @@ class AgentLLM:
                         _provider_health.pop(provider_key, None)
 
                     return result.text
-                except Exception as provider_err:
+                except Exception as exc:
+                    provider_err = exc
                     # Track provider failure for circuit breaker
                     with _provider_health_lock:
                         fail_count, _ = _provider_health.get(provider_key, (0, 0))
                         _provider_health[provider_key] = (fail_count + 1, time.time())
-                    logger.warning("Direct provider failed, falling back to LiteLLM: %s", provider_err)
+                    # 瞬态错误（对端断流/超时/429）必须让外层重试直接走
+                    # provider——litellm 往往不认识该模型，只会把瞬态失败
+                    # 变成 "Provider NOT provided" 的确定性致命错误。
+                    if _is_transient_error(exc):
+                        logger.warning("Direct provider failed (transient, will retry): %s", exc)
+                        raise
+                    logger.warning("Direct provider failed, falling back to LiteLLM: %s", exc)
 
             # ── Step 2: LiteLLM fallback ────────────────────────
+            # litellm 路由不了的模型（OpenRouter 的 *:free / stealth / 第三方
+            # 命名）走 litellm 必然失败并掩盖原始 provider 错误——保留原错误
+            # 交给外层重试分类。
+            if provider_err is not None and not self._litellm_can_route(model):
+                raise provider_err
             result = self._call_via_litellm(
                 messages, temperature, silent, tools,
                 response_format, thinking, on_token, model,
@@ -264,21 +448,7 @@ class AgentLLM:
             if "reasoning_effort" in error_lower or "thinking" in error_lower:
                 self.session_tracker.mark_failed("thinking")
 
-            is_transient = any(
-                k in str(type(e).__name__).lower() or k in error_msg.lower()
-                for k in ("connection", "ssl", "timeout", "server",
-                          "unexpected_eof", "incomplete", "peer closed")
-            )
-            status_code = getattr(e, "status_code", None)
-            if status_code is None:
-                for attr in ("response", "status", "http_status"):
-                    inner = getattr(e, attr, None)
-                    if inner is not None:
-                        status_code = getattr(inner, "status_code", None)
-                        if status_code is not None:
-                            break
-            if status_code in (429, 503):
-                is_transient = True
+            is_transient = _is_transient_error(e)
 
             retry_tag = f"[retry {attempt + 1}/{LLM_MAX_RETRIES}]" if attempt < LLM_MAX_RETRIES - 1 else "[exhausted]"
             logger.error("LLM 错误%s: %s", retry_tag, error_msg)
@@ -290,7 +460,7 @@ class AgentLLM:
                 })
 
             if not is_transient:
-                self._non_transient = True
+                self._cs().non_transient = True
                 return ""
 
             # transient error — outer retry loop continues
@@ -325,6 +495,14 @@ class AgentLLM:
             if caps.thinking_effort != "none":
                 reasoning_effort = caps.thinking_effort
 
+        provider_response_format = None
+        if response_format:
+            if tracker.is_available("json_mode", caps.supports_json_mode):
+                provider_response_format = response_format
+            elif isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                if tracker.is_available("json_schema", caps.supports_json_schema):
+                    provider_response_format = response_format
+
         stream_opts = None
         if "openai.com" in (self.base_url or ""):
             stream_opts = {"include_usage": True}
@@ -336,6 +514,7 @@ class AgentLLM:
             base_url=self.base_url,
             temperature=temperature,
             tools=provider_tools,
+            response_format=provider_response_format,
             max_tokens=caps.max_output_tokens,
             timeout=self.timeout,
             parallel_tool_calls=parallel,
@@ -412,7 +591,7 @@ class AgentLLM:
 
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
-                    self._reasoning_buf += rc
+                    self._cs().reasoning_buf += rc
                     if on_token:
                         on_token(rc, is_reasoning=True)
 
@@ -461,7 +640,7 @@ class AgentLLM:
 
         result = "".join(collected)
         self.last_truncated = finish_reason in ("length", "max_tokens")
-        self.last_reasoning_content = getattr(self, "_reasoning_buf", "")
+        self.last_reasoning_content = self._cs().reasoning_buf
 
         self.last_tool_calls = []
         for buf in tool_call_bufs.values():

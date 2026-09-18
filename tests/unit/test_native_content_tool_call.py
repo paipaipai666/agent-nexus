@@ -156,3 +156,139 @@ class TestNativeContentToolCallRecovery:
 
         assert result.answer == '{"温度": "26°C", "建议": "适合外出"}'
         assert calls == []
+
+
+class TestNativeThoughtAnswerSplit:
+    """NATIVE 模式下模型可见文本的 Thought 前缀剥离与思考/答案拆分。
+
+    回归 bug1/bug2/bug3：stealth 类模型的可见文本形如
+    "Thought: <分析> <答案>"，旧实现把整段当答案、且思考不显示。
+    """
+
+    def test_direct_answer_emits_thought_and_strips_prefix(self):
+        """无工具直答：思考必须显示(bug1)，答案与思考都不带 Thought 前缀(bug2/3)。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+
+        def mock_think(**kw):
+            llm.last_tool_calls = []
+            return "Thought: 这是基础算术，直接回答即可。1+1 等于 2。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("1+1等于几")
+
+        thoughts = [e.payload.get("thought", "") for e in emitted
+                    if getattr(getattr(e, "type", None), "name", "") == "ANSWER_THOUGHT"]
+        assert thoughts, "直答也必须发出 ANSWER_THOUGHT（bug1 回归）"
+        assert thoughts[0] == "这是基础算术，直接回答即可。"
+        assert not thoughts[0].lower().startswith("thought"), "思考不得带 Thought 前缀（bug3 回归）"
+        assert result.answer == "1+1 等于 2。", f"答案必须剥离思考前缀（bug2 回归），实际: {result.answer!r}"
+
+    def test_tool_round_thought_stripped(self):
+        """工具轮 TOOLS_FOUND 的思考同样剥离 Thought 前缀。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        te.register_tool("get_weather", "查天气", lambda **kw: {"weather": "晴"})
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+        rounds = [0]
+
+        def mock_think(**kw):
+            rounds[0] += 1
+            if rounds[0] == 1:
+                llm.last_tool_calls = [{"name": "get_weather", "arguments": {"city": "杭州"}}]
+                return "Thought: 先查天气再回答。"
+            llm.last_tool_calls = []
+            return "杭州今天晴。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("杭州天气")
+
+        tools_found = [e.payload.get("thought", "") for e in emitted
+                       if getattr(getattr(e, "type", None), "name", "") == "TOOLS_FOUND"]
+        assert tools_found and tools_found[0] == "先查天气再回答。", f"工具轮思考未剥离前缀: {tools_found!r}"
+        assert result.answer == "杭州今天晴。"
+
+    def test_explicit_answer_marker_splits(self):
+        """"Thought: x 最终答案: y" 按显式标记切分。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+
+        def mock_think(**kw):
+            llm.last_tool_calls = []
+            return "Thought: 汇总以上观察。最终答案: 共 3 项。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("总结一下")
+
+        thoughts = [e.payload.get("thought", "") for e in emitted
+                    if getattr(getattr(e, "type", None), "name", "") == "ANSWER_THOUGHT"]
+        assert thoughts == ["汇总以上观察。"]
+        assert result.answer == "共 3 项。"
+
+    def test_single_sentence_thought_not_duplicated(self):
+        """只有一句思考没有答案体时，思考不单独展示（避免与答案重复）。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+
+        def mock_think(**kw):
+            llm.last_tool_calls = []
+            return "Thought: 直接回答即可。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("你好")
+
+        thoughts = [e for e in emitted
+                    if getattr(getattr(e, "type", None), "name", "") == "ANSWER_THOUGHT"]
+        assert thoughts == [], "单句思考不得重复展示"
+        assert result.answer == "直接回答即可。", f"答案应去标记，实际: {result.answer!r}"
+
+    def test_plain_text_without_marker_unchanged(self):
+        """无 Thought 标记的文本整段是答案，不发射思考事件。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+
+        def mock_think(**kw):
+            llm.last_tool_calls = []
+            return "北京今天晴，26°C。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("北京天气")
+
+        thoughts = [e for e in emitted
+                    if getattr(getattr(e, "type", None), "name", "") == "ANSWER_THOUGHT"]
+        assert thoughts == []
+        assert result.answer == "北京今天晴，26°C。"
+
+    def test_bold_fullwidth_marker_stripped(self):
+        """'**Thought**：' 加粗全角变体也要拆分（stealth 实测格式）。"""
+        llm = _make_llm()
+        te = ToolRegistry()
+        agent = ReActAgent(llm, te, max_steps=5)
+        emitted = []
+        agent._on_event = lambda evt, f, t: emitted.append(evt)
+
+        def mock_think(**kw):
+            llm.last_tool_calls = []
+            return "**Thought**：这是单步知识问答，直接回答即可。\n\nGIL 是全局解释器锁。"
+
+        llm.think.side_effect = mock_think
+        result = agent.run("GIL 是什么")
+
+        thoughts = [e.payload.get("thought", "") for e in emitted
+                    if getattr(getattr(e, "type", None), "name", "") == "ANSWER_THOUGHT"]
+        assert thoughts == ["这是单步知识问答，直接回答即可。"], f"实际: {thoughts!r}"
+        assert result.answer == "GIL 是全局解释器锁。", f"实际: {result.answer!r}"

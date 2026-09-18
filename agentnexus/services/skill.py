@@ -55,7 +55,11 @@ class SkillService:
         self.auto_route_enabled = auto_route
         self.auto_route_llm_fallback = auto_route_llm_fallback
         self.llm_client = llm_client
-        self.current: SkillEntry | None = None
+        # The current skill is per-run-thread: concurrent chat sessions share
+        # this service, and a session-scoped skill must not leak into another
+        # session's auto-routing (each agent run lives on its own thread).
+        self._local = threading.local()
+        self._default_current: SkillEntry | None = None
         self.status = "idle"
         self.last_run = None
         self.last_route: SkillRoute | None = None
@@ -65,6 +69,17 @@ class SkillService:
         # a stale worker must not overwrite a newer index.
         self._embed_rebuild_gen = 0
         self._rebuild_router_index()
+
+    @property
+    def current(self) -> SkillEntry | None:
+        # 线程内显式设置过（含 None）就尊重该值；否则回退到全局默认技能。
+        if hasattr(self._local, "current"):
+            return self._local.current
+        return self._default_current
+
+    @current.setter
+    def current(self, entry: SkillEntry | None) -> None:
+        self._local.current = entry
 
     def refresh(self) -> list[SkillEntry]:
         entries = self.registry.discover()
@@ -133,6 +148,8 @@ class SkillService:
             return None
         try:
             entry = self.use(target)
+            # 默认技能是全局回退：所有运行线程在未自行选择时继承它。
+            self._default_current = entry
             self.selection_source = "default"
             return entry
         except Exception as exc:

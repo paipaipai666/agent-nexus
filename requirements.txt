@@ -11,6 +11,7 @@ pydantic-settings==2.10.1
 PyYAML==6.0.2
 typer==0.16.1
 rich==14.1.0
+langchain-text-splitters==0.3.0
 httpx==0.28.1
 mcp==1.27.1
 prompt-toolkit==3.0.52

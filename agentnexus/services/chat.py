@@ -48,6 +48,7 @@ class AgentEvent:
     payload: dict[str, Any] = field(default_factory=dict)
     run_id: str | None = None
     session_id: str | None = None
+    seq: int = 0  # per-run monotonic sequence for reconnect resume
 
 
 class ChatService:
@@ -73,6 +74,8 @@ class ChatService:
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
+        self._run_event_seq: dict[str, int] = {}
+        self._session_last_run: dict[str, str] = {}
         self._turns: dict[str, TurnRuntime] = {}
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -199,6 +202,11 @@ class ChatService:
 
     def _put_event(self, run_id: str, event: AgentEvent) -> None:
         """Put event into both sync and async queues."""
+        if event is not None:
+            seq = self._run_event_seq.get(run_id, 0) + 1
+            self._run_event_seq[run_id] = seq
+            # frozen dataclass — assign via object.__setattr__
+            object.__setattr__(event, "seq", seq)
         sync_q = self._run_events.get(run_id)
         if sync_q is not None:
             sync_q.put(event)
@@ -284,13 +292,19 @@ class ChatService:
             except Exception as e:
                 logger.warning("Failed to persist session stats: %s", e)
             self._run_snapshots[run.id] = record
+            # Surface the LLM error when the run produced no answer — a silent
+            # empty reply reads as "agent ignored me" (e.g. rate-limited model).
+            llm_error = ""
+            llm_client = getattr(agent, "llm_client", None)
+            if not answer and llm_client is not None:
+                llm_error = getattr(llm_client, "last_error", "") or ""
             self._put_event(run.id, AgentEvent(
                 "message_delta", {"text": answer or ""},
                 run_id=run.id, session_id=session_id,
             ))
             self._put_event(run.id, AgentEvent(
                 "run_finished",
-                {"answer": answer or "", "status": record.status},
+                {"answer": answer or "", "status": record.status, "error": llm_error},
                 run_id=run.id,
                 session_id=session_id,
             ))
@@ -334,6 +348,12 @@ class ChatService:
                 agent._output = old_output
             except Exception as e:
                 logger.debug("Failed to restore agent _output: %s", e)
+            # Run ended — the token snapshot is only meaningful mid-run. Left
+            # populated, a post-run reconnect would overwrite the finalized
+            # answer with raw streamed tokens (reconnect_snapshot).
+            with self._get_session_lock(session_id):
+                self._token_buffers.pop(session_id, None)
+                self._token_cursors.pop(session_id, None)
             self._put_event(run.id, None)
         return run
 
@@ -374,11 +394,22 @@ class ChatService:
     def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
+        # Drop the previous run's queues/state (reconnect resume only ever
+        # targets the latest run) — otherwise these dicts grow unboundedly.
+        prev_run = self._session_last_run.get(session_id)
+        if prev_run:
+            self._run_events.pop(prev_run, None)
+            self._async_run_events.pop(prev_run, None)
+            self._turns.pop(prev_run, None)
+            self._run_event_seq.pop(prev_run, None)
+            self._run_snapshots.pop(prev_run, None)
         run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
         events: queue.Queue[AgentEvent | None] = queue.Queue()
         async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         self._run_events[run.id] = events
         self._async_run_events[run.id] = async_events
+        self._run_event_seq[run.id] = 0
+        self._session_last_run[session_id] = run.id
         version_mgr = self._get_version_manager(session_id)
         turn = TurnRuntime(
             run_id=run.id,

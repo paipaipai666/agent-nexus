@@ -48,6 +48,20 @@ class CodeGenResult:
         return self.passed / self.total
 
 
+def _strip_markdown_fences(code: str) -> str:
+    """Strip ``` fences from LLM output — model completions almost always
+    wrap code in markdown fences, which are a SyntaxError when executed."""
+    c = code.strip()
+    if not c.startswith("```"):
+        return c
+    lines = c.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 @dataclass
 class HumanEvalReport:
     """Aggregate report for HumanEval evaluation."""
@@ -119,6 +133,8 @@ class HumanEvalEvaluator:
 
         if not test_cases:
             return CodeGenResult(trace_id="")
+
+        candidate_code = _strip_markdown_fences(candidate_code)
 
         passed = 0
         failed = 0

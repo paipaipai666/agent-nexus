@@ -336,3 +336,120 @@ class TestCall:
 
         assert llm.last_usage.get("input_tokens", 0) >= 0
         assert llm.last_usage.get("output_tokens", 0) >= 0
+
+
+class TestCapabilityProbe:
+    """Live probe for models the static registry doesn't know (from_default_fallback)."""
+
+    def teardown_method(self):
+        import agentnexus.core.llm as m
+        m._probe_cache.clear()
+
+    @staticmethod
+    def _patch_provider(monkeypatch, provider):
+        import agentnexus.core.llm as m
+        monkeypatch.setattr(m, "select_provider", lambda model, base_url: provider)
+
+    def test_probe_enables_tool_calling_for_unknown_model(self, temp_agentnexus_home, monkeypatch):
+        class _FakeProvider:
+            def stream_chat(self, **kwargs):
+                result = StreamResult()
+                if kwargs.get("tools"):
+                    result.tool_calls = [{"id": "call_1", "name": "noop", "arguments": {}}]
+                else:
+                    result.text = '{"ok": true}'
+                return result
+
+        self._patch_provider(monkeypatch, _FakeProvider())
+        client = AgentLLM(model="stealth/probe-tools", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is True
+
+    def test_probe_enables_json_mode_when_tools_unsupported(self, temp_agentnexus_home, monkeypatch):
+        class _TextOnlyProvider:
+            def stream_chat(self, **kwargs):
+                return StreamResult(text='{"ok": true}')
+
+        self._patch_provider(monkeypatch, _TextOnlyProvider())
+        client = AgentLLM(model="stealth/probe-json", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is False
+        assert client.capabilities.supports_json_mode is True
+
+    def test_probe_failure_keeps_conservative_defaults_and_is_not_cached(
+        self, temp_agentnexus_home, monkeypatch,
+    ):
+        class _DownProvider:
+            def stream_chat(self, **kwargs):
+                raise ConnectionError("network down")
+
+        self._patch_provider(monkeypatch, _DownProvider())
+        client = AgentLLM(model="stealth/probe-down", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is False
+        import agentnexus.core.llm as m
+        assert ("stealth/probe-down", "https://example.test/v1") not in m._probe_cache
+
+    def test_config_override_wins_over_probe(self, temp_agentnexus_home, monkeypatch):
+        monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
+
+        class _FakeProvider:
+            def stream_chat(self, **kwargs):
+                result = StreamResult()
+                if kwargs.get("tools"):
+                    result.tool_calls = [{"id": "call_1", "name": "noop", "arguments": {}}]
+                return result
+
+        self._patch_provider(monkeypatch, _FakeProvider())
+        client = AgentLLM(model="stealth/probe-override", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is False
+
+    def test_known_model_skips_probe(self, temp_agentnexus_home, monkeypatch):
+        import agentnexus.core.llm as m
+
+        self._patch_provider(monkeypatch, None)  # would return None → probe aborts
+        client = AgentLLM(model="deepseek/deepseek-chat", api_key="k",
+                          base_url="https://api.deepseek.com")
+        assert client.capabilities.supports_tool_calling is True
+        assert not m._probe_cache
+
+
+class TestPerCallStateIsolation:
+    """并发运行共享同一 AgentLLM 时，per-call 状态不得互相覆盖。"""
+
+    def test_last_tool_calls_isolated_per_thread(self, temp_agentnexus_home):
+        import threading
+
+        client = AgentLLM(model="deepseek/deepseek-chat", api_key="k",
+                          base_url="https://api.deepseek.com")
+        barrier = threading.Barrier(2)
+        seen: dict[str, list] = {}
+
+        def worker(tag: str):
+            barrier.wait()
+            client.last_tool_calls = [{"name": f"tool_{tag}", "arguments": {}}]
+            client.last_error = f"err_{tag}"
+            # 给对方线程一点覆盖时间
+            import time
+            time.sleep(0.05)
+            seen[tag] = [client.last_tool_calls, client.last_error]
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in ("a", "b")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert seen["a"][0][0]["name"] == "tool_a", "线程 a 的 tool_calls 被线程 b 覆盖"
+        assert seen["a"][1] == "err_a"
+        assert seen["b"][0][0]["name"] == "tool_b"
+        assert seen["b"][1] == "err_b"
+
+    def test_main_thread_defaults(self, temp_agentnexus_home):
+        client = AgentLLM(model="deepseek/deepseek-chat", api_key="k",
+                          base_url="https://api.deepseek.com")
+        assert client.last_tool_calls == []
+        assert client.last_error == ""
+        assert client.last_truncated is False
+        assert client.last_usage == {}

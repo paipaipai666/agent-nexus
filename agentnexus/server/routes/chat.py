@@ -87,7 +87,7 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         return None
 
     elif event_type == "run_finished":
-        return {"type": "answer", "content": payload.get("answer", ""), "run_id": run_id, "seq": seq}
+        return {"type": "answer", "content": payload.get("answer", ""), "error": payload.get("error", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "run_failed":
         return {"type": "error", "message": payload.get("error", ""), "run_id": run_id, "seq": seq}
@@ -377,7 +377,7 @@ def get_session(session_id: str):
 
 
 @router.websocket("/ws/agent/{session_id}")
-async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None, api_key: str | None = None):
+async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None, resumeEventsFrom: int | None = None, api_key: str | None = None):
     """WebSocket endpoint for real-time agent event streaming.
     R8: Accepts optional resumeFrom query param for cursor-based reconnect."""
     from agentnexus.server.app import _get_runtime
@@ -422,6 +422,9 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
 
     # R8: On reconnect with resumeFrom, send snapshot so client can catch up
     token_cursor_offset = 0
+    seq_cursor_offset = 0
+    if resumeEventsFrom is not None and resumeEventsFrom > 0:
+        seq_cursor_offset = resumeEventsFrom
     if resumeFrom is not None and resumeFrom > 0:
         token_cursor_offset = resumeFrom
         lock = chat._get_session_lock(session_id)
@@ -508,19 +511,23 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         R8: Skips token events before resumeFrom cursor for reconnect."""
         nonlocal current_run_id, token_cursor_offset
         current_run_id = run_id
-        seq = 0
+        seq = seq_cursor_offset
         local_token_count = 0
         try:
             async for event in chat.astream_events(run_id):
+                # Reconnect resume: skip events the client already received.
+                if seq and getattr(event, "seq", 0) and event.seq <= seq:
+                    continue
                 gui_event = _map_to_gui_event(event, chat, seq)
                 if gui_event is not None:
+                    gui_event["seq"] = getattr(event, "seq", 0)
                     # R8: Skip token events that the client already has
                     if gui_event.get("type") in ("stream_token", "stream_reasoning"):
                         local_token_count += 1
                         if local_token_count <= token_cursor_offset:
                             continue
                     await ws.send_json(gui_event)
-                    seq += 1
+                    seq = max(seq, getattr(event, "seq", 0))
         except WebSocketDisconnect:
             return
         except RuntimeError as e:
@@ -528,6 +535,18 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                 await send_stream_error(run_id, seq, e)
         except Exception as e:
             await send_stream_error(run_id, seq, e)
+
+    # Reconnect resume: if the client presents an event cursor, re-attach to
+    # the session's most recent run so post-disconnect events (thinking /
+    # tool / answer / done) are delivered instead of dropped. A fresh
+    # connection (no cursor) opens via REST history instead — attaching
+    # there would replay the entire last run.
+    if resumeEventsFrom is not None:
+        last_run_id = getattr(chat, "_session_last_run", {}).get(session_id)
+        if last_run_id and chat._async_run_events.get(last_run_id) is not None:
+            attach_task = asyncio.create_task(stream_events(last_run_id))
+            stream_tasks.add(attach_task)
+            attach_task.add_done_callback(stream_tasks.discard)
 
     try:
         while True:

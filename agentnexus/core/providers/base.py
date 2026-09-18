@@ -35,6 +35,7 @@ class BaseLLMProvider(ABC):
         base_url: str,
         temperature: float = 0,
         tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         timeout: int = 60,
         parallel_tool_calls: bool | None = None,

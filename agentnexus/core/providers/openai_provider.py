@@ -13,6 +13,27 @@ from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
 logger = logging.getLogger(__name__)
 
+# LiteLLM-style provider prefixes that must be stripped before calling an
+# OpenAI-compatible endpoint (the endpoint expects the bare model name).
+# Namespaced provider models like SiliconFlow's "deepseek-ai/DeepSeek-V4-Flash"
+# or Groq's "llama-3/8b" keep the full string — there the whole name IS the
+# endpoint's model id.
+_KNOWN_PROVIDER_PREFIXES = {
+    "openai", "azure", "deepseek", "anthropic", "zhipu", "glm", "zai",
+    "moonshot", "gemini", "google", "bedrock", "vertex_ai", "azure_ai",
+    "cohere", "mistral", "huggingface", "replicate", "anyscale", "ollama",
+    "groq", "together_ai", "openrouter", "perplexity",
+}
+
+
+def _strip_known_prefix(model: str) -> str:
+    if "/" not in model:
+        return model
+    prefix, _, rest = model.partition("/")
+    if prefix.lower() in _KNOWN_PROVIDER_PREFIXES and rest:
+        return rest
+    return model
+
 
 class OpenAIProvider(BaseLLMProvider):
     """Direct provider for any OpenAI-compatible API endpoint."""
@@ -25,6 +46,7 @@ class OpenAIProvider(BaseLLMProvider):
         base_url: str,
         temperature: float = 0,
         tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         timeout: int = 60,
         parallel_tool_calls: bool | None = None,
@@ -39,7 +61,7 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         kwargs: dict[str, Any] = {
-            "model": model.split("/", 1)[1] if "/" in model else model,
+            "model": _strip_known_prefix(model),
             "messages": messages,
             "temperature": temperature,
             "stream": True,
@@ -53,6 +75,9 @@ class OpenAIProvider(BaseLLMProvider):
             kwargs["tool_choice"] = "auto"
             if parallel_tool_calls is not None:
                 kwargs["parallel_tool_calls"] = parallel_tool_calls
+
+        if response_format:
+            kwargs["response_format"] = response_format
 
         if stream_options:
             kwargs["stream_options"] = stream_options
@@ -87,7 +112,10 @@ class OpenAIProvider(BaseLLMProvider):
                 continue
 
             delta = chunk.choices[0].delta
-            content = delta.content or ""
+            # Some deployments (SiliconFlow DeepSeek-V4) leave thinking-tag
+            # residue in delta.content even while reasoning_content is
+            # streamed separately — strip it before accumulation.
+            content = (delta.content or "").replace("</think>", "").replace("<think>", "")
             result.text += content
 
             if on_token and content:

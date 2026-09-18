@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 
 from agentnexus.core.config import get_settings
 
@@ -31,6 +32,11 @@ class ModelCapabilities:
     # Thinking tuning
     thinking_budget_tokens: int = 4_000       # for Anthropic Claude 3.5/4.5
     thinking_effort: str = "medium"            # "none"|"low"|"medium"|"high"
+
+    # Provenance — set when the registry match fell through to the "*"
+    # fallback, i.e. these flags are guesses and the endpoint should be
+    # probed live before trusting them.
+    from_default_fallback: bool = False
 
 
 # ── Static registry — prefix-matched, first-match-wins ──────────────────
@@ -148,17 +154,71 @@ def _normalize_model_id(model_id: str, base_url: str = "") -> str:
         return f"openai/{model_id}"
 
 
+# Alternate vendor slugs seen in the wild (gateway / HuggingFace naming) that
+# must resolve to the same registry prefix as the canonical provider slug.
+_VENDOR_ALIASES = {
+    "deepseek-ai": "deepseek",
+    "zhipu-ai": "zhipu",
+    "zhipuai": "zhipu",
+}
+
+
+def _canonical_model_id(model_id: str) -> str:
+    """Lowercase and rewrite alternate vendor slugs for registry matching.
+
+    ``deepseek-ai/DeepSeek-V4-Flash`` (SiliconFlow naming) canonicalizes to
+    ``deepseek/deepseek-v4-flash`` so it hits the same registry entry as the
+    official slug. The original model_id is left untouched for API calls —
+    endpoints expect their exact naming.
+    """
+    lowered = model_id.strip().lower()
+    vendor, sep, name = lowered.partition("/")
+    if sep:
+        vendor = _VENDOR_ALIASES.get(vendor, vendor)
+        return f"{vendor}/{name}"
+    return lowered
+
+
 def _lookup_registry(model_id: str) -> ModelCapabilities:
     """Match model_id against the static registry. First match wins (ordered).
+
+    Matching is case-insensitive and tolerant of alternate vendor slugs
+    (``deepseek-ai/...`` resolves like ``deepseek/...``). When only the
+    ultimate ``*`` fallback matches, the returned caps carry
+    ``from_default_fallback=True`` so callers can probe the endpoint live
+    instead of trusting the conservative defaults.
 
     Returns a *copy* so that detect_capabilities can mutate the result
     without polluting the static registry entry.
     """
     from dataclasses import replace
+    canonical = _canonical_model_id(model_id)
     for pattern, caps in CAPABILITY_REGISTRY.items():
-        if fnmatch(model_id, pattern):
+        if pattern == "*":
+            continue
+        if fnmatchcase(canonical, pattern):
             return replace(caps)
-    return ModelCapabilities()  # unreachable — "*" matches everything
+    return replace(CAPABILITY_REGISTRY["*"], from_default_fallback=True)
+
+
+@contextmanager
+def _suppress_litellm_noise():
+    """litellm prints 'Provider List' to stdout for models it doesn't know.
+
+    Detection intentionally probes models outside litellm's map, so mute
+    that banner for the duration and restore the previous flag.
+    """
+    try:
+        import litellm
+        prev = litellm.suppress_debug_info
+        litellm.suppress_debug_info = True
+    except Exception:
+        prev = None
+    try:
+        yield
+    finally:
+        if prev is not None:
+            litellm.suppress_debug_info = prev
 
 
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
@@ -171,31 +231,36 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
     caps = _lookup_registry(normalized_id)
 
     # ── Dynamic detection via litellm ──
-    try:
-        import litellm
-        if litellm.supports_function_calling(model=normalized_id):
-            caps.supports_tool_calling = True
-        if litellm.supports_response_schema(model=normalized_id):
-            caps.supports_json_schema = True
-        params = litellm.get_supported_openai_params(model=normalized_id)
-        if params:
-            if "response_format" in params:
-                caps.supports_json_mode = True
-            if "reasoning_effort" in params:
-                caps.supports_thinking = True
-            if "parallel_tool_calls" in params:
-                caps.supports_parallel_tool_calls = True
-            if "image_url" in params:
-                caps.supports_vision = True
-        model_info = litellm.get_model_info(model=normalized_id)
-        caps.max_context_tokens = model_info.get(
-            "max_input_tokens", caps.max_context_tokens
-        )
-        caps.max_output_tokens = model_info.get(
-            "max_output_tokens", caps.max_output_tokens
-        )
-    except Exception as e:
-        logger.debug("LiteLLM dynamic capability detection failed: %s", e)
+    # Skip for registry-unknown models: litellm has no data for them (it
+    # raises and spam-logs "Provider List"), and the caller will determine
+    # support with a live probe instead.
+    if not caps.from_default_fallback:
+        with _suppress_litellm_noise():
+            try:
+                import litellm
+                if litellm.supports_function_calling(model=normalized_id):
+                    caps.supports_tool_calling = True
+                if litellm.supports_response_schema(model=normalized_id):
+                    caps.supports_json_schema = True
+                params = litellm.get_supported_openai_params(model=normalized_id)
+                if params:
+                    if "response_format" in params:
+                        caps.supports_json_mode = True
+                    if "reasoning_effort" in params:
+                        caps.supports_thinking = True
+                    if "parallel_tool_calls" in params:
+                        caps.supports_parallel_tool_calls = True
+                    if "image_url" in params:
+                        caps.supports_vision = True
+                model_info = litellm.get_model_info(model=normalized_id)
+                caps.max_context_tokens = model_info.get(
+                    "max_input_tokens", caps.max_context_tokens
+                )
+                caps.max_output_tokens = model_info.get(
+                    "max_output_tokens", caps.max_output_tokens
+                )
+            except Exception as e:
+                logger.debug("LiteLLM dynamic capability detection failed: %s", e)
 
     # ── User config overrides ──
     settings = get_settings()
@@ -283,10 +348,11 @@ def model_candidates(model_id: str, base_url: str = "") -> list[str]:
 def registry_ctx_max(model_id: str, base_url: str = "") -> int | None:
     """Look up max context tokens from the static capability registry."""
     for candidate in model_candidates(model_id, base_url):
+        canonical = _canonical_model_id(candidate)
         for pattern, caps in CAPABILITY_REGISTRY.items():
             if pattern == "*":
                 continue
-            if fnmatch(candidate, pattern):
+            if fnmatchcase(canonical, pattern):
                 return caps.max_context_tokens
     return None
 

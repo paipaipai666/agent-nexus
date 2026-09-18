@@ -33,6 +33,22 @@ class TestStaticRegistry:
         caps = _lookup_registry("zhipu/glm-3-turbo")
         assert caps.supports_tool_calling is False
 
+    def test_vendor_alias_deepseek_ai_matches_v4_entry(self):
+        """SiliconFlow naming resolves like the official deepseek slug."""
+        caps = _lookup_registry("deepseek-ai/DeepSeek-V4-Flash")
+        assert caps.supports_tool_calling is True
+        assert caps.from_default_fallback is False
+
+    def test_lookup_registry_case_insensitive(self):
+        caps = _lookup_registry("DeepSeek/DeepSeek-V4-Flash")
+        assert caps.supports_tool_calling is True
+        assert caps.from_default_fallback is False
+
+    def test_ultimate_fallback_flagged_for_probe(self):
+        caps = _lookup_registry("stealth/union-alpha")
+        assert caps.supports_tool_calling is False
+        assert caps.from_default_fallback is True
+
     def test_anthropic_claude_46_has_thinking(self):
         caps = _lookup_registry("anthropic/claude-4.6-sonnet")
         assert caps.supports_thinking is True

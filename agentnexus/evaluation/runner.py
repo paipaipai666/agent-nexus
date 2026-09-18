@@ -41,6 +41,18 @@ class ReActAgentRunner:
 
             llm = AgentLLM()
             tool_registry = ToolRegistry()
+            # 与 AppRuntime 对齐: 内置工具按 provider 注册, 否则 eval 下
+            # agent 拿到空工具集, tool_use 类 task 被系统性低估。
+            from agentnexus.tools import register_all_tools
+            from agentnexus.tools.confirm_bridge import ConfirmBridge
+            register_all_tools(
+                tool_registry,
+                non_interactive=True,
+                llm_client=llm,
+                subagent_confirm=ConfirmBridge(),
+                mcp_manager=None,
+                todo_list=None,
+            )
             agent = ReActAgent(
                 llm_client=llm,
                 tool_executor=tool_registry,
@@ -48,15 +60,23 @@ class ReActAgentRunner:
             )
 
             prompt = task.input.get("prompt", "")
-            result = agent.run(question=prompt)
+            # 真实 trace 上下文: agent 循环只在 active trace 下埋点,
+            # eval 若不建 trace, transcript 只能重建并丢失真实时间轴。
+            trace_ctx = self._start_trace(task)
+            try:
+                result = agent.run(question=prompt)
+            finally:
+                self._end_trace(trace_ctx)
 
-            transcript = self._collect_transcript(agent, result)
+            transcript = self._collect_transcript(agent, result, trace_ctx)
             outcome = self._collect_outcome(result)
             metadata = {
                 "runner": "react_agent",
                 "model": getattr(settings, "llm_model_id", "unknown"),
                 "trial_index": trial_index,
             }
+            if trace_ctx is not None:
+                metadata["trace_id"] = trace_ctx.trace_id
 
             usage = getattr(agent, "_total_usage", {})
             if isinstance(usage, dict):
@@ -82,8 +102,52 @@ class ReActAgentRunner:
             error=error,
         )
 
-    def _collect_transcript(self, agent: Any, result: Any) -> list[dict[str, Any]]:
-        """从 agent 执行结果中收集 transcript spans。"""
+    # ── Trace lifecycle ────────────────────────────────────────────
+
+    @staticmethod
+    def _start_trace(task: EvalTask) -> Any | None:
+        """Open a real trace context for the trial, unless one is already active."""
+        try:
+            from agentnexus.observability.tracer import trace_manager
+            if trace_manager.active is not None:
+                return None  # 上游已开 trace, 不劫持别人的上下文
+            return trace_manager.start_trace(task.id, metadata={"eval_task": task.id})
+        except Exception:
+            return None
+
+    @staticmethod
+    def _end_trace(trace_ctx: Any | None) -> None:
+        if trace_ctx is None:
+            return
+        try:
+            from agentnexus.observability.tracer import trace_manager
+            trace_manager.end_trace()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _span_to_transcript(span: Any, trace_id: str) -> dict[str, Any]:
+        """Serialize a TraceSpan to the grader transcript format (real clock)."""
+        from agentnexus.observability.tracer import TraceManager
+
+        record = TraceManager._span_record(trace_id, span)
+        # Grader 协议: LLM 步骤约定名为 "llm", agent 循环的埋点名是 "plan_node"。
+        if record["name"] == "plan_node":
+            record["name"] = "llm"
+        return record
+
+    def _collect_transcript(
+        self, agent: Any, result: Any, trace_ctx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """收集 transcript spans — 优先真实 trace (真实时间轴), 退化时按 step 重建。"""
+        if trace_ctx is not None:
+            real = [self._span_to_transcript(s, trace_ctx.trace_id) for s in trace_ctx.spans]
+            if real:
+                return real
+        return self._reconstruct_from_steps(result)
+
+    def _reconstruct_from_steps(self, result: Any) -> list[dict[str, Any]]:
+        """无 trace 可用时的兜底: 保留步骤顺序, 但不编造时间戳。"""
         spans: list[dict[str, Any]] = []
 
         steps = getattr(result, "steps", []) or []
@@ -96,14 +160,15 @@ class ReActAgentRunner:
 
             llm_span: dict[str, Any] = {
                 "name": "llm",
-                "start_time": i * 2.0,
-                "end_time": i * 2.0 + 1.0,
+                # 没有真实时钟来源 —— 省略时间键; graders 的 start_time 排序
+                # 缺键得到 0, 稳定排序保持这里的插入序 (即真实 step 顺序)。
                 "input": {"step_id": getattr(step, "step_id", i)},
                 "output": {"content": content[:500]},
                 "metadata": {
                     "status": "error" if error else "ok",
                     "strategy": strategy_name,
                     "reasoning": reasoning[:300],
+                    "reconstructed": True,
                 },
             }
             if error:
@@ -133,8 +198,6 @@ class ReActAgentRunner:
 
                 tool_span: dict[str, Any] = {
                     "name": "tool",
-                    "start_time": i * 2.0 + 1.0,
-                    "end_time": i * 2.0 + 1.5,
                     "input": {
                         "tool_name": tool_name,
                         "params": tool_params,
@@ -142,6 +205,7 @@ class ReActAgentRunner:
                     "output": output_data,
                     "metadata": {
                         "status": "error" if (j < len(tool_outputs) and tool_outputs[j].get("error")) else "ok",
+                        "reconstructed": True,
                     },
                 }
                 spans.append(tool_span)
@@ -150,11 +214,9 @@ class ReActAgentRunner:
         if answer:
             spans.append({
                 "name": "final_answer",
-                "start_time": len(steps) * 2.0,
-                "end_time": len(steps) * 2.0 + 0.5,
                 "input": {},
                 "output": {"answer": answer},
-                "metadata": {"status": "ok"},
+                "metadata": {"status": "ok", "reconstructed": True},
             })
 
         return spans
