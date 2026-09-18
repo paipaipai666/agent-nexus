@@ -376,7 +376,7 @@ export default function SettingsPage() {
         {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
         {/* ── Persona Section ─────────────────────────────────── */}
-        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>Persona</h2>
           <div className="space-y-2.5">
             {/* Simple fields */}
@@ -464,7 +464,7 @@ export default function SettingsPage() {
         </div>
 
         {/* ── Model Providers ───────────────────────────────── */}
-        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Model Providers</h2>
             <button
@@ -538,7 +538,7 @@ export default function SettingsPage() {
 
               {/* discovered models (checkbox import) */}
               {p.discovered && p.discovered.length > 0 && (
-                <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+                <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>勾选导入（{p.discovered.filter(m => m.checked).length} 选中）</span>
                     <button
@@ -649,7 +649,7 @@ export default function SettingsPage() {
           const visibleKeys = keys.filter(k => k in config)
           if (visibleKeys.length === 0) return null
           return (
-            <div key={group} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+            <div key={group} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
               <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>{group}</h2>
               <div className="space-y-2.5">
                 {visibleKeys.map(key => (

@@ -42,7 +42,7 @@ export default function SkillsPage() {
 
       <div ref={gridRef} className="flex-1 overflow-y-auto px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
         {skills.map((skill) => (
-          <div key={skill.id} className="p-4 rounded-lg transition-all duration-150" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', opacity: skill.enabled ? 1 : 0.6 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
+          <div key={skill.id} className="p-4 rounded-lg transition-all duration-150" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)', opacity: skill.enabled ? 1 : 0.6 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
             <div className="flex items-start justify-between mb-2.5">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>

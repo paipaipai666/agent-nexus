@@ -18,7 +18,9 @@ export default function Titlebar() {
     <div
       className="h-9 flex items-center select-none shrink-0 relative z-10"
       style={{
-        background: 'var(--surface-0)',
+        background: 'color-mix(in srgb, var(--surface-0) 80%, transparent)',
+        backdropFilter: 'blur(16px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
         borderBottom: '1px solid var(--border-subtle)',
         WebkitAppRegion: 'drag',
       } as React.CSSProperties}

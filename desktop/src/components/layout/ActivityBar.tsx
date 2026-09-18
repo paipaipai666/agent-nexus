@@ -38,6 +38,7 @@ export default function ActivityBar() {
                   color: active ? 'var(--accent)' : 'var(--fg)',
                   opacity: active ? 1 : undefined,
                   background: active ? 'var(--surface-3)' : 'transparent',
+                  boxShadow: active ? 'var(--glow-accent)' : 'none',
                   transitionDuration: '150ms',
                   transitionTimingFunction: 'var(--ease)',
                 }}

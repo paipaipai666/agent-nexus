@@ -115,7 +115,7 @@ export default function StatsPage() {
             { label: 'Avg Latency', value: stats.avg_latency_ms ? `${Math.round(stats.avg_latency_ms)}ms` : '-', icon: Clock, color: 'var(--amber)' },
             { label: 'Total Cost', value: totalCost != null ? `¥${Number(totalCost).toFixed(4)}` : '-', icon: DollarSign, color: 'var(--green)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-xl transition-all" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms' }}>
+            <div key={label} className="p-3.5 rounded-xl depth-lift" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
                 <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
@@ -157,7 +157,7 @@ export default function StatsPage() {
               color: 'var(--blue)',
             },
           ].map(({ label, value, sub, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-xl transition-all" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms' }}>
+            <div key={label} className="p-3.5 rounded-xl depth-lift" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
                 <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
@@ -170,7 +170,7 @@ export default function StatsPage() {
 
         {/* Chart */}
         {chartData.length > 0 && (
-          <div className="p-4 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+          <div className="p-4 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
             <h2 className="text-[13px] font-semibold mb-3" style={{ color: 'var(--fg)', letterSpacing: '-0.01em' }}>Token Usage</h2>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData}>
@@ -197,7 +197,7 @@ export default function StatsPage() {
                   <button
                     onClick={() => loadTraceDetail(trace.trace_id)}
                     className="w-full px-3 py-2.5 flex items-center justify-between text-left transition-colors rounded-lg"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}
                   >

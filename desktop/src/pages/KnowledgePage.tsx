@@ -275,7 +275,7 @@ export default function KnowledgePage() {
             documents.map((doc, i) => {
               const docId = doc.document_id || doc.doc_id || doc.id || ''
               return (
-                <div key={i} className="p-3 rounded-lg flex items-center justify-between group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
+                <div key={i} className="p-3 rounded-lg flex items-center justify-between group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--accent-muted)' }}>
                       <FileText size={14} style={{ color: 'var(--accent)' }} />

@@ -274,6 +274,7 @@ export default function Sidebar() {
                             style={{
                               color: active ? 'var(--fg)' : 'var(--fg-secondary)',
                               background: active ? 'var(--accent-muted)' : 'transparent',
+                              boxShadow: active ? 'var(--glow-accent)' : 'none',
                               transitionDuration: '150ms',
                               transitionTimingFunction: 'var(--ease)',
                             }}

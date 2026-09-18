@@ -68,7 +68,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
   const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
 
   return (
-    <div className="my-2 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--card-highlight)' }}>
+    <div className="my-2 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
       <Collapsible
         defaultExpanded={msg.toolStatus === 'running'}
         header={
@@ -142,7 +142,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
                 color: 'var(--fg-secondary)',
                 background: 'var(--surface-1)',
                 border: '1px solid var(--border-subtle)',
-                boxShadow: 'var(--card-highlight)',
+                boxShadow: 'var(--shadow-card), var(--card-highlight)',
               }}
             >
               {msg.content}
@@ -747,7 +747,7 @@ export default function ChatPage() {
                     key={action.label}
                     onClick={() => { setInput(action.desc); inputRef.current?.focus() }}
                     className="flex items-center gap-3 p-3 rounded-xl text-left transition-all"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms', transitionTimingFunction: 'var(--ease)' }}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)', transitionDuration: '150ms', transitionTimingFunction: 'var(--ease)' }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
                   >
@@ -827,9 +827,9 @@ export default function ChatPage() {
         )}
         <div
           className="max-w-3xl mx-auto transition-all"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--card-highlight)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
-          onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--card-highlight)' }}
-          onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'var(--card-highlight)' }}
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-float), var(--card-highlight)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
+          onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--shadow-float), var(--card-highlight)' }}
+          onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'var(--shadow-float), var(--card-highlight)' }}
         >
 
           {/* Workspace chip — this chat's folder; locked once created */}

@@ -165,7 +165,7 @@ export default function MemoryPage() {
               const memId = m.id || m.memory_id || ''
               const catStyle = getCategoryStyle(m.category)
               return (
-                <div key={memId || i} className="p-3 rounded-lg group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
+                <div key={memId || i} className="p-3 rounded-lg group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="px-1.5 py-0.5 rounded text-2xs font-medium" style={{ background: catStyle.bg, color: catStyle.text }}>{catStyle.label}</span>
                     <ImportanceBar value={m.importance || 0.5} effective={m.effective_importance} />

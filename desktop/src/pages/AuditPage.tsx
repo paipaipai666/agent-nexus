@@ -93,7 +93,7 @@ export default function AuditPage() {
             { label: 'HITL Triggered', value: entries.filter(e => e.hitl_triggered).length, icon: Shield, color: 'var(--amber)' },
             { label: 'Avg Duration', value: entries.length ? `${Math.round(entries.reduce((s, e) => s + e.duration_ms, 0) / entries.length)}ms` : '-', icon: Clock, color: 'var(--cyan)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+            <div key={label} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
               <div className="flex items-center gap-2 mb-1">
                 <Icon size={12} style={{ color }} />
                 <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>

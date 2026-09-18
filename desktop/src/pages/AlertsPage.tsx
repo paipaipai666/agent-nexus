@@ -83,7 +83,7 @@ export default function AlertsPage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {/* Alert Rules */}
-        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <div className="flex items-center gap-2 mb-3">
             <Shield size={14} style={{ color: 'var(--accent)' }} />
             <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Active Rules ({rules.length})</h2>

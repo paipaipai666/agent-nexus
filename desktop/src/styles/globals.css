@@ -77,6 +77,16 @@
   --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.75);
   --scrim: rgba(23, 24, 28, 0.32);
 
+  /* Depth system (v2.1) */
+  --shadow-card: 0 1px 2px rgba(15, 16, 20, 0.05), 0 4px 14px rgba(15, 16, 20, 0.05);
+  --shadow-card-hover: 0 2px 4px rgba(15, 16, 20, 0.07), 0 10px 26px rgba(15, 16, 20, 0.09);
+  --shadow-float: 0 1px 3px rgba(15, 16, 20, 0.08), 0 10px 30px rgba(15, 16, 20, 0.10);
+  --glow-accent: 0 0 0 1px var(--accent-ring), 0 2px 12px var(--accent-glow);
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%);
+  --ambient-bg:
+    radial-gradient(1200px 500px at 70% -10%, rgba(255, 255, 255, 0.7), transparent 60%),
+    radial-gradient(900px 420px at 10% 110%, rgba(225, 29, 72, 0.035), transparent 55%);
+
   /* Typography */
   --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -144,6 +154,16 @@
   --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --scrim: rgba(4, 5, 6, 0.55);
 
+  /* Depth system (v2.1) — ambient multi-layer card shadows, hover lift, accent glow */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.22);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.32), 0 12px 32px rgba(0, 0, 0, 0.30);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 36px rgba(0, 0, 0, 0.35);
+  --glow-accent: 0 0 0 1px var(--accent-ring), 0 2px 12px var(--accent-glow);
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 40%);
+  --ambient-bg:
+    radial-gradient(1200px 500px at 70% -10%, rgba(255, 255, 255, 0.025), transparent 60%),
+    radial-gradient(900px 420px at 10% 110%, rgba(244, 63, 94, 0.03), transparent 55%);
+
   --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
@@ -170,6 +190,8 @@ html, body {
 body {
   font-family: var(--font-sans);
   background-color: var(--surface-0);
+  background-image: var(--ambient-bg);
+  background-attachment: fixed;
   color: var(--fg);
   font-size: 13px;
   line-height: 1.45;
@@ -387,14 +409,14 @@ html.theme-anim * {
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--card-highlight);
+    box-shadow: var(--shadow-card), var(--card-highlight);
   }
 
   .surface-elevated {
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg), var(--card-highlight);
+    box-shadow: var(--shadow-float), var(--card-highlight);
   }
 
   .btn-primary {
@@ -479,5 +501,15 @@ html.theme-anim * {
 
   .page-enter {
     animation: rise-in 0.2s var(--ease);
+  }
+
+  /* Hover lift — shadow grows + 1px rise (v2.1 depth) */
+  .depth-lift {
+    box-shadow: var(--shadow-card), var(--card-highlight);
+    transition: box-shadow 150ms var(--ease), transform 150ms var(--ease), border-color 150ms var(--ease);
+  }
+  .depth-lift:hover {
+    box-shadow: var(--shadow-card-hover), var(--card-highlight);
+    transform: translateY(-1px);
   }
 }

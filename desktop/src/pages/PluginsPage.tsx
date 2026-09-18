@@ -44,7 +44,7 @@ export default function PluginsPage() {
             { label: 'Enabled', value: enabledCount, icon: CheckCircle, color: 'var(--green)' },
             { label: 'Errors', value: errorCount, icon: AlertTriangle, color: 'var(--red)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+            <div key={label} className="p-3.5 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
                 <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
@@ -61,7 +61,7 @@ export default function PluginsPage() {
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No plugins discovered</p>
             </div>
           ) : plugins.map(plugin => (
-            <div key={plugin.name} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+            <div key={plugin.name} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: plugin.enabled ? 'var(--green-muted)' : 'var(--surface-3)' }}>
