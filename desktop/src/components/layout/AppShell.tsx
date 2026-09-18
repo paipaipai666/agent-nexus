@@ -1,6 +1,5 @@
 import { type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
-import ActivityBar from './ActivityBar'
 import Sidebar from './Sidebar'
 import SettingsNav from './SettingsNav'
 import StatusBar from './StatusBar'
@@ -13,10 +12,9 @@ interface AppShellProps {
 }
 
 /**
- * v2.2 app shell — designs/mockups/v2-ui.yaml
- * Titlebar (36) / [ActivityBar 48 | ContextSidebar 232 | main] / StatusBar (24).
- * The activity bar carries two sections only: Chat and Settings. The context
- * sidebar switches content by section (projects/sessions vs settings sub-nav).
+ * v2.3 app shell — no activity bar. Titlebar (36) / [ContextSidebar 232 | main]
+ * / StatusBar (24). The single sidebar switches content by section: chat shows
+ * projects/sessions (+ Settings at the bottom), settings shows the sub-nav.
  */
 export default function AppShell({ children }: AppShellProps) {
   const location = useLocation()
@@ -29,7 +27,6 @@ export default function AppShell({ children }: AppShellProps) {
     <div className="flex flex-col h-screen" style={{ background: 'var(--surface-0)' }}>
       <Titlebar />
       <div className="flex flex-1 overflow-hidden">
-        <ActivityBar />
         <div
           className="shrink-0 overflow-hidden"
           style={{

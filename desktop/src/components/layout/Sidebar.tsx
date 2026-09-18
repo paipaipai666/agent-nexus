@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, Search, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { MessageSquare, Search, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight, Settings } from 'lucide-react'
 import { api } from '../../services/api'
 import { useSession } from '../session/SessionProvider'
 import { useProjects, selectProject, addProject, removeProject, pickAndAddProject, workspaceKey } from '../../services/projects'
@@ -55,6 +55,7 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const isChatActive = location.pathname === '/' || location.pathname.startsWith('/chat/')
+  const isSettingsActive = location.pathname === '/settings' || location.pathname.startsWith('/settings/')
 
   useEffect(() => {
     loadRecentSessions()
@@ -328,6 +329,36 @@ export default function Sidebar() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Settings — pinned to the bottom, styled like a session row */}
+      <div className="shrink-0 px-2.5 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+        <button
+          onClick={() => navigate('/settings')}
+          className="relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all text-left"
+          style={{
+            color: isSettingsActive ? 'var(--fg)' : 'var(--fg-secondary)',
+            background: isSettingsActive ? 'var(--accent-muted)' : 'transparent',
+            boxShadow: isSettingsActive ? 'var(--glow-accent)' : 'none',
+            transitionDuration: '150ms',
+            transitionTimingFunction: 'var(--ease)',
+          }}
+        >
+          {isSettingsActive && (
+            <span
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full"
+              style={{ background: 'var(--accent)' }}
+            />
+          )}
+          <Settings size={14} style={{ color: isSettingsActive ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
+          <span className="text-[12px] font-medium flex-1">Settings</span>
+          <kbd
+            className="font-mono text-[10px] px-1 rounded"
+            style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}
+          >
+            Ctrl K
+          </kbd>
+        </button>
       </div>
     </div>
   )

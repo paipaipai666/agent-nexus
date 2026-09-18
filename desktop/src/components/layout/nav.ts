@@ -14,34 +14,17 @@ export interface NavItem {
   match?: (pathname: string) => boolean
 }
 
-export interface NavGroup {
-  id: 'conversation' | 'system'
-  items: NavItem[]
-}
-
-/** v2.2 information architecture — everything except Chat lives under Settings. */
-export const NAV_GROUPS: NavGroup[] = [
+/** v2.3 — two primary sections only; everything else lives under Settings. */
+export const PRIMARY_NAV: NavItem[] = [
   {
-    id: 'conversation',
-    items: [
-      {
-        id: 'chat', label: 'Chat', path: '/', icon: MessageSquare,
-        match: (p) => p === '/' || p.startsWith('/chat'),
-      },
-    ],
+    id: 'chat', label: 'Chat', path: '/', icon: MessageSquare,
+    match: (p) => p === '/' || p.startsWith('/chat'),
   },
   {
-    id: 'system',
-    items: [
-      {
-        id: 'settings', label: 'Settings', path: '/settings', icon: Settings,
-        match: (p) => p === '/settings' || p.startsWith('/settings/'),
-      },
-    ],
+    id: 'settings', label: 'Settings', path: '/settings', icon: Settings,
+    match: (p) => p === '/settings' || p.startsWith('/settings/'),
   },
 ]
-
-export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
 /** Settings sub-navigation — rendered in the context sidebar under /settings/*. */
 export const SETTINGS_NAV: NavItem[] = [
@@ -60,7 +43,7 @@ export const SETTINGS_NAV: NavItem[] = [
 ]
 
 export function navItemForPath(pathname: string): NavItem | undefined {
-  return NAV_ITEMS.find((i) => (i.match ? i.match(pathname) : pathname.startsWith(i.path)))
+  return PRIMARY_NAV.find((i) => (i.match ? i.match(pathname) : pathname.startsWith(i.path)))
 }
 
 /** Sub-page label for the titlebar breadcrumb (e.g. "Settings / Stats"). */
