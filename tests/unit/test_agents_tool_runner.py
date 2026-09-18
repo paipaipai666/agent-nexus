@@ -16,6 +16,9 @@ class TestExecuteTool:
         ctx.payload = payload or {}
         ctx.abort_code = "BLOCKED"
         ctx.abort_reason = "blocked by policy"
+        ctx.to_feedback.side_effect = (
+            lambda: f"[hook blocked] {ctx.abort_code}: {ctx.abort_reason}"
+        )
         return ctx
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")

@@ -8,6 +8,8 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agentnexus.core.hook_schemas import HookConfig
+
 # Skip litellm's remote model-cost-map fetch at import time — it stalls startup
 # for seconds on unreachable networks and falls back to the bundled copy anyway.
 # config.py is the earliest shared dependency, so this runs before any litellm import.
@@ -361,6 +363,24 @@ class Settings(BaseSettings):
     # 用户自定义追加指令：注入系统上下文末尾，优先级高于平台默认行为
     # 准则，但不得覆盖安全约束。支持多行文本。
     append_system_prompt: str = Field(default="")
+
+    # ── Command Hooks ─────────────────────────────────────────────────────
+    # 声明式命令钩子（见 docs/Hooks.md）。config.yaml 内的 hooks 视为
+    # 用户级、默认信任；~/.agentnexus/hooks.yaml 同；项目级
+    # <workspace>/.agentnexus/hooks.yaml 需经 hash 信任审查。
+    hooks: list[HookConfig] = Field(default_factory=list)
+    hook_trust: str = Field(default="strict")  # strict | bypass
+    hooks_enabled: bool = Field(default=True)
+    # 默认 false：permission_request 钩子只能 deny，不得自动放行 HITL。
+    # 显式开启后钩子决策仍写入 audit（hitl_decision=hook_allowed）。
+    hitl_hooks_may_approve: bool = Field(default=False)
+    # fire() 按 PAYLOAD_SCHEMAS 校验 payload 键类型，发现 fire 点漂移即报错。
+    hook_schema_check: bool = Field(default=True)
+    # 每次 fire 的逐钩子结果追加到 {traces_dir}/hooks.jsonl（审计/排障）。
+    hooks_journal: bool = Field(default=True)
+    # 允许插件执行代码入口（plugin.yaml entrypoint: hooks.py）。默认 false：
+    # 声明式插件保持零代码；代码插件是显式 opt-in。
+    plugins_allow_code: bool = Field(default=False)
 
     # ── RAG / Retrieval ──────────────────────────────────────────────────
     enable_contextual_retrieval: bool = Field(default=False)

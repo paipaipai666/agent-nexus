@@ -52,6 +52,20 @@ def _redact_sensitive_params(value: Any, key: str | None = None) -> Any:
     return value
 
 
+def _hitl_hooks_may_approve() -> bool:
+    """Whether PERMISSION_REQUEST hooks may auto-allow an HITL tool call.
+
+    Explicit opt-in only (config ``hitl_hooks_may_approve``): by default
+    hooks can deny but never approve.
+    """
+    try:
+        from agentnexus.core.config import get_settings
+
+        return bool(getattr(get_settings(), "hitl_hooks_may_approve", False))
+    except Exception:
+        return False
+
+
 def _serialize_params(params: dict, limit: int) -> str:
     redacted = _redact_sensitive_params(params)
     return json.dumps(redacted, ensure_ascii=False, default=str)[:limit]
@@ -108,6 +122,7 @@ class AuditEntry:
     schema_validation: str = ""          # 参数校验结果摘要
     retry_count: int = 0                 # 重试次数
     tool_selection_reason: str = ""      # 为什么选择这个工具
+    hitl_decision: str = ""              # hook_denied:* | hook_allowed | user_allowed | user_denied | no_channel
 
 
 class ToolRegistry:
@@ -278,6 +293,7 @@ class ToolRegistry:
         meta, func = self._get_tool(name)
         start = time.time()
         hitl_triggered = False
+        hitl_decision = ""
         error = None
         result_str = ""
 
@@ -310,16 +326,44 @@ class ToolRegistry:
             # 5. HITL gate
             if meta.require_hitl:
                 hitl_triggered = True
-                if hitl_approver is None:
-                    return "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
-                confirm_summary = (
-                    f"调用者: {caller}\n"
-                    f"工具: {name}\n"
-                    f"风险: {meta.risk_level.value}\n"
-                    f"参数: {json.dumps(redacted_params, ensure_ascii=False, default=str)[:500]}"
-                )
-                if not hitl_approver(confirm_summary):
-                    return "[blocked] 用户取消了该工具调用"
+                hook_mgr.fire(HookType.NOTIFICATION, {
+                    "kind": "hitl_request",
+                    "tool": name,
+                    "caller": caller,
+                    "risk_level": meta.risk_level.value,
+                })
+                # PERMISSION_REQUEST hooks are a decision input to the HITL
+                # gate — never a bypass of it. Deny is always honored; allow
+                # requires the explicit hitl_hooks_may_approve opt-in, and
+                # either way the audit entry records the hook's involvement.
+                perm_ctx = hook_mgr.fire(HookType.PERMISSION_REQUEST, {
+                    "name": name,
+                    "params": redacted_params,
+                    "caller": caller,
+                    "risk_level": meta.risk_level.value,
+                })
+                if perm_ctx.aborted:
+                    hitl_decision = f"hook_denied:{perm_ctx.abort_code}"
+                    return perm_ctx.to_feedback()
+                if (
+                    perm_ctx.payload.get("decision") == "allow"
+                    and _hitl_hooks_may_approve()
+                ):
+                    hitl_decision = "hook_allowed"
+                else:
+                    if hitl_approver is None:
+                        hitl_decision = "no_channel"
+                        return "[blocked] 该工具需要人工确认，但当前没有可用的确认通道"
+                    confirm_summary = (
+                        f"调用者: {caller}\n"
+                        f"工具: {name}\n"
+                        f"风险: {meta.risk_level.value}\n"
+                        f"参数: {json.dumps(redacted_params, ensure_ascii=False, default=str)[:500]}"
+                    )
+                    if not hitl_approver(confirm_summary):
+                        hitl_decision = "user_denied"
+                        return "[blocked] 用户取消了该工具调用"
+                    hitl_decision = "user_allowed"
 
             # 6. Execute with timeout enforcement
             # SEC-008: future.result(timeout=) provides a soft timeout — it raises
@@ -392,6 +436,7 @@ class ToolRegistry:
                     error=error,
                     risk_level=meta.risk_level.value,
                     schema_validation="passed" if not error else "failed",
+                    hitl_decision=hitl_decision,
                 ))
 
     # ── query API (for LLM prompt building) ───────────────────────

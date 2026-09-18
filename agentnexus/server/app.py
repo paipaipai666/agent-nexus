@@ -98,6 +98,7 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     from agentnexus.server.routes.codegraph import router as codegraph_router
     from agentnexus.server.routes.config import router as config_router
     from agentnexus.server.routes.eval_routes import router as eval_router
+    from agentnexus.server.routes.hooks import router as hooks_router
     from agentnexus.server.routes.knowledge import router as knowledge_router
     from agentnexus.server.routes.mcp import router as mcp_router
     from agentnexus.server.routes.memory import router as memory_router
@@ -121,6 +122,7 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     app.include_router(runtime_router, prefix="/api/runtime")
     app.include_router(alerts_router, prefix="/api")
     app.include_router(wiki_router, prefix="/api/wiki")
+    app.include_router(hooks_router, prefix="/api/hooks")
 
     @app.get("/health")
     def health():

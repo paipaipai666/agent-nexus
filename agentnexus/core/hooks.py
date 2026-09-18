@@ -3,19 +3,109 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 SLOW_HOOK_THRESHOLD_MS = 100
 
+_JOURNAL_LOCK = None  # lazy threading.Lock
+
+
+def _journal_lock():
+    global _JOURNAL_LOCK
+    if _JOURNAL_LOCK is None:
+        import threading
+
+        _JOURNAL_LOCK = threading.Lock()
+    return _JOURNAL_LOCK
+
+
+_TIMEOUT_POOL = None
+
+
+def _hook_timeout_pool():
+    global _TIMEOUT_POOL
+    if _TIMEOUT_POOL is None or _TIMEOUT_POOL._shutdown:
+        import concurrent.futures
+
+        _TIMEOUT_POOL = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="hook-timeout",
+        )
+    return _TIMEOUT_POOL
+
+
+def write_hook_journal(records: list[dict]) -> None:
+    """Append per-hook outcome lines to {traces_dir}/hooks.jsonl.
+
+    Gated by config ``hooks_journal`` (default on). Failures never propagate —
+    the journal is observability, not control flow.
+    """
+    if not records:
+        return
+    try:
+        from agentnexus.core.config import get_settings
+
+        settings = get_settings()
+        if not getattr(settings, "hooks_journal", True):
+            return
+        traces_dir = Path(getattr(settings, "traces_dir", "") or "")
+        if not str(traces_dir):
+            return
+        import time as _time
+
+        path = Path(traces_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        line_ts = _time.time()
+        with _journal_lock():
+            with (path / "hooks.jsonl").open("a", encoding="utf-8") as handle:
+                for record in records:
+                    record.setdefault("ts", line_ts)
+                    handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        logger.debug("hook journal write failed", exc_info=True)
+
+
+def read_hook_journal(limit: int = 100) -> list[dict]:
+    """Tail the hook journal (most recent first). Missing/invalid lines skipped."""
+    try:
+        from agentnexus.core.config import get_settings
+
+        traces_dir = Path(getattr(get_settings(), "traces_dir", "") or "")
+        if not str(traces_dir):
+            return []
+        path = Path(traces_dir) / "hooks.jsonl"
+        if not path.is_file():
+            return []
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+        records: list[dict] = []
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return records
+    except Exception:
+        return []
+
 
 class HookType(str, Enum):
     """Supported hook points in the agent lifecycle."""
+
+    # ── Tier 0: user-interaction lifecycle ────────────────────────
+    USER_PROMPT_SUBMIT = "user_prompt_submit"     # payload["prompt"] rewritable; abort = refuse
+    AGENT_STOP = "agent_stop"                     # veto final answer → agent continues
+    PERMISSION_REQUEST = "permission_request"     # Tool Gateway HITL decision input
+    NOTIFICATION = "notification"                 # fire-and-forget (HITL waiting, prompts)
 
     # ── agent-level tool/model lifecycle ──────────────────────────
     BEFORE_TOOL_CALL = "before_tool_call"
@@ -72,6 +162,8 @@ class HookType(str, Enum):
 
 _MUTABLE_HOOKS: frozenset[HookType] = frozenset(
     {
+        HookType.USER_PROMPT_SUBMIT,
+        HookType.PERMISSION_REQUEST,
         HookType.BEFORE_TOOL_CALL,
         HookType.BEFORE_MODEL_CALL,
         HookType.AFTER_MODEL_CALL,
@@ -81,6 +173,74 @@ _MUTABLE_HOOKS: frozenset[HookType] = frozenset(
         HookType.BEFORE_RAG_SEARCH,
     }
 )
+
+# Expected payload keys per event. fire() validates present keys against
+# these types when hook_schema_check is enabled (default) — catches drift
+# between fire sites and hook authors instead of silent misbehavior.
+# Extra keys are allowed (forward compatibility).
+_STR = str
+_DICT = dict
+_LIST = list
+_INT = int
+_FLOAT = float
+_BOOL = bool
+_ANY = object
+
+PAYLOAD_SCHEMAS: dict[HookType, dict[str, Any]] = {
+    HookType.USER_PROMPT_SUBMIT: {"prompt": _STR, "agent_id": _STR},
+    HookType.AGENT_STOP: {"answer": _STR, "steps": _INT, "question": _STR, "agent_id": _STR},
+    HookType.PERMISSION_REQUEST: {"name": _STR, "params": _DICT, "caller": _STR, "risk_level": _STR},
+    HookType.NOTIFICATION: {"kind": _STR},
+    HookType.BEFORE_TOOL_CALL: {"name": _STR, "params": _DICT, "caller": _STR},
+    HookType.AFTER_TOOL_CALL: {"name": _STR, "params": _DICT, "result": _ANY},
+    HookType.ON_TOOL_ERROR: {"name": _STR, "params": _DICT, "error": _ANY},
+    HookType.BEFORE_MODEL_CALL: {"messages": _LIST, "tools": _LIST, "strategy": _STR},
+    HookType.AFTER_MODEL_CALL: {"messages": _LIST, "response_text": _STR},
+    HookType.AGENT_START: {"question": _STR, "agent_id": _STR},
+    HookType.AGENT_END: {"answer": _ANY, "steps": _INT, "agent_id": _STR},
+    HookType.BEFORE_MEMORY_OP: {"op": _STR, "role": _STR, "content": _STR},
+    HookType.AFTER_MEMORY_OP: {"op": _STR, "role": _STR, "content": _STR},
+    HookType.BEFORE_LLM_CALL: {"messages": _LIST, "model": _STR, "tools": _ANY},
+    HookType.AFTER_LLM_CALL: {"messages": _LIST, "model": _STR, "response_text": _STR},
+    HookType.BEFORE_LTM_SAVE: {"session_id": _STR, "content": _STR, "category": _STR, "importance": _INT},
+    HookType.AFTER_LTM_SAVE: {"session_id": _STR, "content": _STR, "category": _STR, "importance": _INT},
+    HookType.BEFORE_LTM_SEARCH: {"category": _ANY, "limit": _INT, "min_similarity": _FLOAT},
+    HookType.AFTER_LTM_SEARCH: {"category": _ANY, "limit": _INT, "result_count": _INT},
+    HookType.BEFORE_SHELL_EXEC: {"command": _STR, "cwd": _ANY, "timeout": _ANY},
+    HookType.AFTER_SHELL_EXEC: {"command": _STR, "cwd": _ANY, "timeout": _ANY, "result": _STR, "backend": _STR},
+    HookType.BEFORE_REGISTRY_INVOKE: {"name": _STR, "params": _DICT, "caller": _STR},
+    HookType.AFTER_REGISTRY_INVOKE: {"name": _STR, "params": _DICT, "caller": _STR,
+                                      "duration_ms": _FLOAT, "error": _ANY},
+    HookType.BEFORE_MCP_CONNECT: {"server_name": _STR},
+    HookType.AFTER_MCP_CONNECT: {"server_name": _STR, "success": _BOOL, "state": _STR},
+    HookType.BEFORE_MCP_CALL_TOOL: {"local_name": _STR, "params": _DICT},
+    HookType.AFTER_MCP_CALL_TOOL: {"local_name": _STR, "server_name": _STR},
+    HookType.BEFORE_SUBAGENT_RUN: {"task": _STR, "role": _STR, "tool_names": _LIST,
+                                    "max_steps": _INT, "retry_reason": _ANY},
+    HookType.AFTER_SUBAGENT_RUN: {"task": _STR, "role": _STR, "tool_names": _LIST,
+                                   "max_steps": _INT, "retry_reason": _ANY,
+                                   "success": _BOOL, "error": _ANY},
+    HookType.BEFORE_RAG_SEARCH: {"query": _STR, "namespace": _STR},
+    HookType.AFTER_RAG_SEARCH: {"query": _STR, "namespace": _STR, "result_count": _INT},
+    HookType.BEFORE_KB_INGEST: {"filepath": _STR, "namespace": _STR, "enable_contextual": _BOOL},
+    HookType.AFTER_KB_INGEST: {"filepath": _STR, "namespace": _STR,
+                                "written_chunks": _INT, "replaced_chunks": _INT},
+    HookType.BEFORE_CHECKPOINT: {"session_id": _STR, "question": _STR},
+    HookType.AFTER_CHECKPOINT: {"session_id": _STR, "question": _STR, "cp_id": _ANY, "parent_id": _ANY},
+    HookType.BEFORE_PLUGIN_LOAD: {},
+    HookType.AFTER_PLUGIN_LOAD: {"loaded_count": _INT, "disabled_count": _INT,
+                                  "failed_count": _INT, "loaded_names": _LIST},
+    HookType.BEFORE_APP_BUILD: {"profile": _ANY, "session_id": _ANY, "restore_session": _ANY},
+    HookType.AFTER_APP_BUILD: {"profile": _ANY, "session_id": _ANY, "mcp_enabled": _BOOL},
+    HookType.BEFORE_COMPACT: {"is_auto": _BOOL, "threshold": _ANY},
+    HookType.AFTER_COMPACT: {"is_auto": _BOOL, "tokens_saved": _INT,
+                              "tokens_before": _INT, "tokens_after": _INT},
+    HookType.BEFORE_WORKFLOW_STEP: {"method": _STR},
+    HookType.AFTER_WORKFLOW_STEP: {"method": _STR},
+    HookType.BEFORE_EVAL_RUN: {"traces_dir": _STR, "days": _INT},
+    HookType.AFTER_EVAL_RUN: {"traces_dir": _STR, "days": _INT,
+                               "trace_count": _INT, "record_count": _INT},
+}
 
 
 @dataclass
@@ -112,7 +272,9 @@ class HookContext:
         self._abort = True
         if code is not None:
             self._abort_code = code
-            self._abort_reason = message
+            # Positional reason doubles as the structured message so
+            # ctx.abort("why", code="X") doesn't silently drop the reason.
+            self._abort_reason = message or reason
             self._abort_details = details or {}
         else:
             self._abort_code = "BLOCKED"
@@ -135,6 +297,30 @@ class HookContext:
     def abort_details(self) -> dict[str, Any]:
         return self._abort_details
 
+    def to_feedback(self) -> str:
+        """Standardized, model-visible text for an aborted hook chain.
+
+        Every abort path must surface this to the model (as observation or
+        error text) so it can adjust instead of blind-retrying.
+        """
+        text = f"[hook blocked] {self.abort_code}"
+        if self._abort_reason:
+            text += f": {self._abort_reason}"
+        if self._abort_details:
+            details = json.dumps(self._abort_details, ensure_ascii=False, default=str)
+            text += f" | details: {details[:500]}"
+        return text
+
+
+class AbortCode:
+    """Structured abort codes (free strings are discouraged)."""
+
+    BLOCKED = "BLOCKED"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    POLICY_VIOLATION = "POLICY_VIOLATION"
+    RATE_LIMITED = "RATE_LIMITED"
+
 
 @dataclass
 class _HookEntry:
@@ -145,6 +331,8 @@ class _HookEntry:
     callback: Callable
     priority: int = 200
     enabled: bool = True
+    fail_count: int = 0      # consecutive exceptions (warned once, then debug)
+    timeout: float | None = None  # seconds; sync callbacks only, None = no cap
 
 
 class HookManager:
@@ -164,8 +352,15 @@ class HookManager:
         name: str | None = None,
         priority: int = 200,
         enabled: bool = True,
+        timeout: float | None = None,
     ) -> str:
-        """Register a hook.  Returns the hook name."""
+        """Register a hook.  Returns the hook name.
+
+        ``timeout`` caps sync callback duration (seconds); on expiry the
+        loop continues without the hook's result — the stray thread is left
+        to finish (same caveat as registry SEC-008: Python cannot kill
+        threads). Async callbacks ignore ``timeout``.
+        """
         hook_name = name or callback.__name__
         self._hooks[hook_name] = _HookEntry(
             name=hook_name,
@@ -173,6 +368,7 @@ class HookManager:
             callback=callback,
             priority=priority,
             enabled=enabled,
+            timeout=timeout,
         )
         return hook_name
 
@@ -219,21 +415,59 @@ class HookManager:
 
         trace_mgr = get_trace_manager()
         ctx = HookContext(hook_type, dict(payload))
+        self._validate_payload(hook_type, ctx.payload)
+        mutable = hook_type in _MUTABLE_HOOKS
+        records: list[dict] = []
         t0 = time.perf_counter()
         with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
             for entry in self._sorted(hook_type):
                 if not entry.enabled:
                     continue
-                try:
-                    if asyncio.iscoroutinefunction(entry.callback):
-                        self._run_async(entry.callback(ctx))
+                record = {"event": hook_type.value, "hook": entry.name,
+                          "kind": "inprocess", "outcome": "ok", "duration_ms": 0.0}
+                before = dict(ctx.payload) if not mutable else None
+                started = time.perf_counter()
+                exc: Exception | None = None
+                with trace_mgr.span("hook_call", {"hook": entry.name}):
+                    try:
+                        if entry.timeout is not None \
+                                and not asyncio.iscoroutinefunction(entry.callback):
+                            record["outcome"] = self._run_with_timeout(entry, ctx)
+                        elif asyncio.iscoroutinefunction(entry.callback):
+                            self._run_async(entry.callback(ctx))
+                        else:
+                            entry.callback(ctx)
+                    except Exception as err:  # noqa: BLE001 — isolation by design
+                        exc = err
+                record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
+                if exc is not None:
+                    entry.fail_count += 1
+                    record["outcome"] = "raised"
+                    if entry.fail_count == 1:
+                        logger.warning("Hook %r raised (suppressed)", entry.name, exc_info=True)
                     else:
-                        entry.callback(ctx)
-                except Exception:
-                    logger.debug("Hook %r raised (fire)", entry.name, exc_info=True)
+                        logger.debug("Hook %r raised again (x%d)", entry.name, entry.fail_count)
+                if before is not None and ctx.payload != before:
+                    changed = sorted(
+                        k for k in set(before) | set(ctx.payload)
+                        if before.get(k) != ctx.payload.get(k)
+                    )
+                    record["changed_keys"] = changed
+                    logger.warning(
+                        "Hook %r mutated read-only %s payload (changed keys: %s)",
+                        entry.name, hook_type.value, changed,
+                    )
+                records.append(record)
                 if ctx.aborted:
                     break
+            if not ctx.aborted:
+                records.extend(self._run_command_hooks(ctx))
+            elif ctx.aborted:
+                records.append({"event": hook_type.value, "hook": "(chain)",
+                                "kind": "chain", "outcome": "aborted",
+                                "abort_code": ctx.abort_code, "duration_ms": 0.0})
         ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
+        write_hook_journal(records)
         self._check_slow(ctx, hook_type)
         return ctx
 
@@ -245,21 +479,56 @@ class HookManager:
 
         trace_mgr = get_trace_manager()
         ctx = HookContext(hook_type, dict(payload))
+        self._validate_payload(hook_type, ctx.payload)
+        mutable = hook_type in _MUTABLE_HOOKS
+        records: list[dict] = []
         t0 = time.perf_counter()
         with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
             for entry in self._sorted(hook_type):
                 if not entry.enabled:
                     continue
-                try:
-                    if asyncio.iscoroutinefunction(entry.callback):
-                        await entry.callback(ctx)
+                record = {"event": hook_type.value, "hook": entry.name,
+                          "kind": "inprocess", "outcome": "ok", "duration_ms": 0.0}
+                before = dict(ctx.payload) if not mutable else None
+                started = time.perf_counter()
+                exc: Exception | None = None
+                with trace_mgr.span("hook_call", {"hook": entry.name}):
+                    try:
+                        if asyncio.iscoroutinefunction(entry.callback):
+                            await entry.callback(ctx)
+                        else:
+                            entry.callback(ctx)
+                    except Exception as err:  # noqa: BLE001 — isolation by design
+                        exc = err
+                record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
+                if exc is not None:
+                    entry.fail_count += 1
+                    record["outcome"] = "raised"
+                    if entry.fail_count == 1:
+                        logger.warning("Hook %r raised (suppressed)", entry.name, exc_info=True)
                     else:
-                        entry.callback(ctx)
-                except Exception:
-                    logger.debug("Hook %r raised (afire)", entry.name, exc_info=True)
+                        logger.debug("Hook %r raised again (x%d)", entry.name, entry.fail_count)
+                if before is not None and ctx.payload != before:
+                    changed = sorted(
+                        k for k in set(before) | set(ctx.payload)
+                        if before.get(k) != ctx.payload.get(k)
+                    )
+                    record["changed_keys"] = changed
+                    logger.warning(
+                        "Hook %r mutated read-only %s payload (changed keys: %s)",
+                        entry.name, hook_type.value, changed,
+                    )
+                records.append(record)
                 if ctx.aborted:
                     break
+            if not ctx.aborted:
+                records.extend(self._run_command_hooks(ctx))
+            elif ctx.aborted:
+                records.append({"event": hook_type.value, "hook": "(chain)",
+                                "kind": "chain", "outcome": "aborted",
+                                "abort_code": ctx.abort_code, "duration_ms": 0.0})
         ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
+        write_hook_journal(records)
         self._check_slow(ctx, hook_type)
         return ctx
 
@@ -271,6 +540,39 @@ class HookManager:
             key=lambda e: e.priority,
         )
 
+    @staticmethod
+    def _validate_payload(hook_type: HookType, payload: dict[str, Any]) -> None:
+        """Log an error when a fire site drifts from PAYLOAD_SCHEMAS.
+
+        Gated by config ``hook_schema_check`` (default on). Never raises —
+        validation exists to catch framework bugs, not to break the loop.
+        """
+        try:
+            from agentnexus.core.config import get_settings
+
+            if not getattr(get_settings(), "hook_schema_check", True):
+                return
+        except Exception:
+            return
+        schema = PAYLOAD_SCHEMAS.get(hook_type)
+        if schema is None:
+            return
+        for key, expected in schema.items():
+            if key not in payload:
+                logger.error(
+                    "hook %s payload missing key %r (fire-site drift)",
+                    hook_type.value, key,
+                )
+                continue
+            value = payload[key]
+            if expected is object:
+                continue
+            if not isinstance(value, expected):
+                logger.error(
+                    "hook %s payload key %r expected %s, got %s",
+                    hook_type.value, key, expected.__name__, type(value).__name__,
+                )
+
     def _check_slow(self, ctx: HookContext, hook_type: HookType) -> None:
         if ctx.elapsed_ms > self._slow_threshold_ms:
             logger.warning(
@@ -279,6 +581,63 @@ class HookManager:
                 ctx.elapsed_ms,
                 self._slow_threshold_ms,
             )
+
+    @staticmethod
+    def _run_command_hooks(ctx: HookContext) -> list[dict]:
+        """Execute declared command hooks after the in-process chain.
+
+        Lazy import keeps subprocess machinery off the hot import path;
+        no-op when no command hooks are declared. Returns journal records.
+        """
+        try:
+            from agentnexus.core.hook_executor import run_command_hooks_for
+
+            results = run_command_hooks_for(ctx)
+        except Exception:
+            # Command hooks must never break the agent loop.
+            logger.warning("command hook execution failed", exc_info=True)
+            return []
+        records: list[dict] = []
+        for result in results:
+            if result.blocked:
+                outcome = "blocked"
+            elif result.timed_out:
+                outcome = "timeout"
+            elif result.exit_code == 0:
+                outcome = "ok"
+            else:
+                outcome = "error"
+            records.append({
+                "event": ctx.hook_type.value,
+                "hook": result.config.command[:80],
+                "kind": "command",
+                "outcome": outcome,
+                "duration_ms": round(result.duration_ms, 1),
+            })
+        return records
+
+    @staticmethod
+    def _run_with_timeout(entry: _HookEntry, ctx: HookContext) -> str:
+        """Run a sync hook callback on a worker thread with a deadline.
+
+        Returns "ok" or "timeout". On timeout the loop continues without the
+        hook's contribution; the stray thread runs to completion (Python
+        cannot kill threads — same caveat as registry SEC-008).
+        """
+        import concurrent.futures
+
+        pool = _hook_timeout_pool()
+        future = pool.submit(entry.callback, ctx)
+        try:
+            future.result(timeout=entry.timeout)
+            return "ok"
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "Hook %r exceeded timeout %.1fs — skipped", entry.name, entry.timeout,
+            )
+            return "timeout"
+        except Exception:
+            raise  # handled by the caller's isolation path
 
     @staticmethod
     def _run_async(coro):
@@ -329,6 +688,7 @@ def on(
     *,
     name: str | None = None,
     priority: int = 200,
+    timeout: float | None = None,
     _manager: HookManager | None = None,
 ) -> Callable:
     """Decorator to register a function as a hook.
@@ -342,7 +702,7 @@ def on(
 
     def decorator(func: Callable) -> Callable:
         mgr = _manager or get_hook_manager()
-        mgr.register(hook_type, func, name=name, priority=priority)
+        mgr.register(hook_type, func, name=name, priority=priority, timeout=timeout)
         return func
 
     return decorator

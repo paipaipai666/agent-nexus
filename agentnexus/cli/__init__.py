@@ -33,6 +33,9 @@ app.add_typer(skill_app, name="skill")
 codegraph_app = typer.Typer(help="代码知识图谱管理")
 app.add_typer(codegraph_app, name="codegraph")
 
+hooks_app = typer.Typer(help="命令钩子管理")
+app.add_typer(hooks_app, name="hooks")
+
 # Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
 import agentnexus.cli.eval  # noqa: E402,F401
 from agentnexus.cli import (
@@ -42,6 +45,7 @@ from agentnexus.cli import (
     config,  # noqa: E402
     eval_cmd,  # noqa: E402
     health_cmd,  # noqa: E402
+    hooks,  # noqa: E402
     kb,  # noqa: E402
     logs,  # noqa: E402
     memory_cmd,  # noqa: E402

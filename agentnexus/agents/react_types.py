@@ -86,6 +86,7 @@ class ReActEventType(Enum):
     FALLBACK_TEXT = auto()     # internal: PROMPT_JSON exhausted → use raw text as answer
     THOUGHT_MISSING = auto()   # NATIVE: model returned tool_calls without Thought text
     TRUNCATED_RESPONSE = auto()  # NATIVE: response cut by output token limit, no tool_calls
+    STOP_VETOED = auto()       # AGENT_STOP hook vetoed the final answer → re-enter LLM loop
     TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
     ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
     STREAM_TOKEN = auto()      # direct emit: LLM streaming token (real-time text)
@@ -140,6 +141,7 @@ class RunState:
     strategy: CallingStrategy = CallingStrategy.PROMPT_JSON
     max_steps: int = 10
     max_json_retries: int = 2
+    stop_vetoes: int = 0       # consecutive AGENT_STOP hook vetoes (cap prevents loops)
     thinking_enabled: bool = False
     cancel_checker: Any = None
     _current_step_span: Any = None  # TraceSpan for current plan_node (avoid circular import)

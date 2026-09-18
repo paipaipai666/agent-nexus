@@ -1,4 +1,4 @@
-"""Transfer table for ReActAgent FSM — 25 transition rules."""
+"""Transfer table for ReActAgent FSM — 26 transition rules."""
 
 from agentnexus.agents.react_types import ReActEventType as E
 from agentnexus.agents.react_types import ReActState as S
@@ -70,6 +70,10 @@ TRANSFER_TABLE: list[Transition] = [
     # ── ERROR_ABORT ──
     Transition(S.ERROR_ABORT, E.ABORT, S.DONE, "_on_error_abort"),
 
-    # ── EMIT_ANSWER ── (unconditional: always → DONE)
+    # ── EMIT_ANSWER ──
+    # AGENT_STOP hook veto: re-enter the LLM loop with feedback instead of
+    # concluding. Explicit rule wins over the unconditional fallback below.
+    Transition(S.EMIT_ANSWER, E.STOP_VETOED, S.PREPARE_LLM_CALL, "_on_stop_vetoed"),
+    # (unconditional: always → DONE)
     Transition(S.EMIT_ANSWER, None, S.DONE, "_on_emit_answer"),
 ]

@@ -50,7 +50,7 @@ def execute_tool(
     if hook_ctx.aborted:
         return ToolError(
             error_code=hook_ctx.abort_code or "EXECUTION_FAILED",
-            message=str(hook_ctx.abort_reason),
+            message=hook_ctx.to_feedback(),
             recoverable=False,
             suggested_action="Check tool policy and agent permissions",
         )

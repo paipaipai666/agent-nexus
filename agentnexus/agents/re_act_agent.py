@@ -218,6 +218,22 @@ class ReActAgent:
         self._step_count = 0
         self._degrade_count = 0
         self._thought_retries = 0
+
+        # ── user prompt submit hook (root agent only; subagent task text
+        #    is internal, not a user prompt) ─────────────────────
+        is_subagent = self.agent_id.startswith("subagent_")
+        if not is_subagent:
+            prompt_ctx = hook_mgr.fire(HookType.USER_PROMPT_SUBMIT, {
+                "prompt": question,
+                "agent_id": self.agent_id,
+            })
+            if prompt_ctx.aborted:
+                refusal = f"[已拒绝] {prompt_ctx.abort_reason or '用户输入被钩子拦截'}"
+                hook_mgr.fire(HookType.AGENT_END, {
+                    "answer": refusal, "steps": 0, "agent_id": self.agent_id,
+                })
+                return ReActResult(answer=refusal, steps=[])
+            question = prompt_ctx.payload.get("prompt", question)
         self._drift_detector = DriftDetector(
             original_goal=question,
             max_steps=self.max_steps,
@@ -307,6 +323,7 @@ class ReActAgent:
             "_on_max_steps_abort": self._on_max_steps_abort,
             "_on_error_abort": self._on_error_abort,
             "_on_emit_answer": self._on_emit_answer,
+            "_on_stop_vetoed": self._on_stop_vetoed,
         }
 
     # ================================================================
@@ -660,6 +677,9 @@ class ReActAgent:
 
     def _on_no_tools_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """CHECK_TOOL_CALLS + NO_TOOLS -> plain text is the final answer."""
+        reason = self._fire_agent_stop(ctx)
+        if reason:
+            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
         return []  # EMIT_ANSWER handler will read ctx.last_answer
 
     def _on_no_tools_degrade(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
@@ -733,6 +753,9 @@ class ReActAgent:
 
     def _on_answer_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + ANSWER_READY -> terminal answer already in ctx.last_answer."""
+        reason = self._fire_agent_stop(ctx)
+        if reason:
+            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
         return []  # EMIT_ANSWER handler will read ctx.last_answer
 
     def _on_classified_tool(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
@@ -751,6 +774,9 @@ class ReActAgent:
         """CLASSIFY + CLASSIFIED_ANSWER -> set final answer."""
         self._emit_answer_thought(ctx)
         ctx.last_answer = event.payload["parsed"]["text"]
+        reason = self._fire_agent_stop(ctx)
+        if reason:
+            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
         return []  # EMIT_ANSWER reads ctx.last_answer
 
     def _on_classified_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
@@ -812,6 +838,9 @@ class ReActAgent:
         step = ctx.steps[-1]
         step.error_message = f"JSON parse failed: {event.payload.get('detail') or event.payload.get('reason', 'unknown')}"
         ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
+        reason = self._fire_agent_stop(ctx)
+        if reason:
+            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
         return []  # EMIT_ANSWER reads ctx.last_answer
 
     # ── DEGRADE ──
@@ -858,6 +887,33 @@ class ReActAgent:
         """ERROR_ABORT + ABORT -> terminate."""
         return []
 
+    def _fire_agent_stop(self, ctx: ExecutionContext) -> str | None:
+        """AGENT_STOP hook: return the veto reason, or None to allow emission.
+
+        Called by every EMIT_ANSWER producer (the returned STOP_VETOED event
+        is looked up in the EMIT_ANSWER landing state — see TRANSFER_TABLE).
+        Consecutive vetoes are capped so a misconfigured hook cannot loop
+        forever (max_steps is the second backstop).
+        """
+        run_state = ctx.run_state
+        if run_state.stop_vetoes >= 2:
+            logger.warning("AGENT_STOP hook vetoed twice — allowing answer to emit")
+            return None
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        stop_ctx = get_hook_manager().fire(HookType.AGENT_STOP, {
+            "answer": ctx.last_answer or "",
+            "steps": run_state.current_step,
+            "question": run_state.question,
+            "agent_id": self.agent_id,
+        })
+        if not stop_ctx.aborted:
+            return None
+        run_state.stop_vetoes += 1
+        reason = stop_ctx.abort_reason or "AGENT_STOP hook vetoed the answer"
+        self._output(f"[agent_stop 拦截 {run_state.stop_vetoes}/2] {reason}")
+        return reason
+
     def _on_emit_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EMIT_ANSWER -> output answer, save memory, conclude."""
         # 关闭最后一个 plan_node span
@@ -895,6 +951,15 @@ class ReActAgent:
                 "subagent_recovery": (tool_state.last_subagent_payload or {}).get("recovery", None),
             }
         return []
+
+    def _on_stop_vetoed(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """EMIT_ANSWER + STOP_VETOED -> inject hook feedback, re-enter LLM loop."""
+        reason = event.payload.get("reason", "")
+        ctx.messages.append({"role": "user", "content": (
+            f"你的最终答案被 agent_stop 钩子拦截：{reason}\n"
+            "请针对拦截原因修正或补充你的回答，然后重新给出最终答案。"
+        )})
+        return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
 
     # ================================================================
     # Static / helper methods (unchanged from original)

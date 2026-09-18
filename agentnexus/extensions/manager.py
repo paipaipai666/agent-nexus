@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,8 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from agentnexus.tools.providers import ToolProvider, default_tool_providers
+
+logger = logging.getLogger(__name__)
 
 PLUGIN_API_VERSION = "1"
 
@@ -41,6 +44,9 @@ class PluginManifest(BaseModel):
     prompts: list[str] = Field(default_factory=list)
     requires: PluginRequires = Field(default_factory=PluginRequires)
     packaging: dict[str, Any] = Field(default_factory=dict)
+    # Optional Python entrypoint (e.g. "hooks.py" in the plugin dir) exposing
+    # register(hook_manager). Only loaded when settings.plugins_allow_code.
+    entrypoint: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -124,8 +130,15 @@ class ExtensionManager:
                 disabled.append(descriptor)
                 continue
             plugin_providers, provider_errors = self._load_plugin_providers(descriptor)
+            # Optional code hooks: plugin dir ships a hooks.py exposing
+            # register(manager). Explicit opt-in via plugins_allow_code —
+            # declarative plugins stay zero-code by default.
+            hook_errors: list[str] = []
+            hooks_loaded = 0
+            if getattr(descriptor.manifest, "entrypoint", None):
+                hooks_loaded, hook_errors = self._load_plugin_hooks(descriptor)
             provider_names = known_providers | {provider.metadata().name for provider in plugin_providers}
-            errors = [*provider_errors, *self._validate_manifest(descriptor.manifest, provider_names)]
+            errors = [*provider_errors, *hook_errors, *self._validate_manifest(descriptor.manifest, provider_names)]
             if errors:
                 failed.append(
                     ExtensionDescriptor(
@@ -138,6 +151,8 @@ class ExtensionManager:
                     )
                 )
             else:
+                if hooks_loaded:
+                    logger.info("plugin %s registered %d code hook(s)", descriptor.name, hooks_loaded)
                 loaded.append(
                     ExtensionDescriptor(
                         descriptor.name,
@@ -167,6 +182,46 @@ class ExtensionManager:
         for descriptor in self._load_report.loaded:
             providers.extend(descriptor.providers)
         return providers
+
+    def _load_plugin_hooks(self, descriptor: ExtensionDescriptor) -> tuple[int, list[str]]:
+        """Execute a plugin's code entrypoint (hooks.py: register(manager)).
+
+        Returns (hooks_registered, errors). Gated by settings.plugins_allow_code —
+        declarative plugins never execute code unless the user opts in.
+        """
+        from agentnexus.core.config import get_settings
+        from agentnexus.core.hooks import get_hook_manager
+
+        manifest = descriptor.manifest
+        entry = (manifest.entrypoint or "").strip() if manifest else ""
+        if not entry:
+            return 0, []
+        if not bool(getattr(get_settings(), "plugins_allow_code", False)):
+            return 0, [f"plugin {descriptor.name!r} declares entrypoint {entry!r} "
+                       "but plugins_allow_code is false"]
+        entry_path = Path(entry)
+        if entry_path.is_absolute() or ".." in entry_path.parts:
+            return 0, [f"invalid entrypoint {entry!r} (must be a relative path inside the plugin)"]
+        target = descriptor.path / entry_path
+        if not target.is_file():
+            return 0, [f"entrypoint not found: {entry}"]
+        try:
+            module_name = f"agentnexus_plugin_hooks_{descriptor.name}"
+            spec = importlib.util.spec_from_file_location(module_name, target)
+            if spec is None or spec.loader is None:
+                return 0, [f"cannot load entrypoint {entry}"]
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            register = getattr(module, "register", None)
+            if not callable(register):
+                return 0, [f"entrypoint {entry} has no register(manager) callable"]
+            manager = get_hook_manager()
+            before = {h["name"] for h in manager.list_hooks()}
+            register(manager)
+            after = {h["name"] for h in manager.list_hooks()}
+            return len(after - before), []
+        except Exception as exc:
+            return 0, [f"entrypoint {entry} failed: {exc}"]
 
     def _plugin_enabled_map(self) -> dict[str, bool]:
         try:
