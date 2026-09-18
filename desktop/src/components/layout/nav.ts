@@ -1,11 +1,11 @@
 import {
-  MessageSquare, Sparkles, Plug, Brain, BookOpen, Library, Package,
-  BarChart3, Activity, Bell, ScrollText, FlaskConical, Settings,
+  MessageSquare, Settings, BookOpen, Library, Sparkles, Plug, Brain,
+  Package, BarChart3, Activity, Bell, ScrollText, FlaskConical,
   type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
-  /** stable id, also used for route matching */
+  /** stable id */
   id: string
   label: string
   path: string
@@ -15,11 +15,11 @@ export interface NavItem {
 }
 
 export interface NavGroup {
-  id: 'conversation' | 'capabilities' | 'observe' | 'system'
+  id: 'conversation' | 'system'
   items: NavItem[]
 }
 
-/** v2 information architecture — designs/mockups/v2-ui.yaml */
+/** v2.2 information architecture — everything except Chat lives under Settings. */
 export const NAV_GROUPS: NavGroup[] = [
   {
     id: 'conversation',
@@ -31,36 +31,41 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: 'capabilities',
-    items: [
-      { id: 'skills', label: 'Skills', path: '/skills', icon: Sparkles },
-      { id: 'mcp', label: 'MCP', path: '/mcp', icon: Plug },
-      { id: 'memory', label: 'Memory', path: '/memory', icon: Brain },
-      { id: 'knowledge', label: 'Knowledge', path: '/knowledge', icon: BookOpen },
-      { id: 'wiki', label: 'Wiki', path: '/wiki', icon: Library },
-      { id: 'plugins', label: 'Plugins', path: '/plugins', icon: Package },
-    ],
-  },
-  {
-    id: 'observe',
-    items: [
-      { id: 'stats', label: 'Stats', path: '/stats', icon: BarChart3 },
-      { id: 'health', label: 'Health', path: '/health', icon: Activity },
-      { id: 'alerts', label: 'Alerts', path: '/alerts', icon: Bell },
-      { id: 'audit', label: 'Audit', path: '/audit', icon: ScrollText },
-      { id: 'eval', label: 'Eval', path: '/eval', icon: FlaskConical },
-    ],
-  },
-  {
     id: 'system',
     items: [
-      { id: 'settings', label: 'Settings', path: '/settings', icon: Settings },
+      {
+        id: 'settings', label: 'Settings', path: '/settings', icon: Settings,
+        match: (p) => p === '/settings' || p.startsWith('/settings/'),
+      },
     ],
   },
 ]
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
+/** Settings sub-navigation — rendered in the context sidebar under /settings/*. */
+export const SETTINGS_NAV: NavItem[] = [
+  { id: 'general', label: 'General', path: '/settings', icon: Settings },
+  { id: 'knowledge', label: 'Knowledge', path: '/settings/knowledge', icon: BookOpen },
+  { id: 'wiki', label: 'Wiki', path: '/settings/wiki', icon: Library },
+  { id: 'skills', label: 'Skills', path: '/settings/skills', icon: Sparkles },
+  { id: 'mcp', label: 'MCP', path: '/settings/mcp', icon: Plug },
+  { id: 'memory', label: 'Memory', path: '/settings/memory', icon: Brain },
+  { id: 'plugins', label: 'Plugins', path: '/settings/plugins', icon: Package },
+  { id: 'stats', label: 'Stats', path: '/settings/stats', icon: BarChart3 },
+  { id: 'health', label: 'Health', path: '/settings/health', icon: Activity },
+  { id: 'alerts', label: 'Alerts', path: '/settings/alerts', icon: Bell },
+  { id: 'audit', label: 'Audit', path: '/settings/audit', icon: ScrollText },
+  { id: 'eval', label: 'Eval', path: '/settings/eval', icon: FlaskConical },
+]
+
 export function navItemForPath(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((i) => (i.match ? i.match(pathname) : pathname.startsWith(i.path)))
+}
+
+/** Sub-page label for the titlebar breadcrumb (e.g. "Settings / Stats"). */
+export function settingsItemForPath(pathname: string): NavItem | undefined {
+  return SETTINGS_NAV.find((i) =>
+    i.path === '/settings' ? pathname === '/settings' : pathname.startsWith(i.path),
+  )
 }

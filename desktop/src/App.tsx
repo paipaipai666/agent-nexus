@@ -57,17 +57,17 @@ export default function App() {
             <Route path="/" element={<ChatPage />} />
             <Route path="/chat/:sessionId" element={<ChatPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/wiki" element={<WikiPage />} />
-            <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/mcp" element={<MCPPage />} />
-            <Route path="/memory" element={<MemoryPage />} />
-            <Route path="/plugins" element={<PluginsPage />} />
-            <Route path="/stats" element={<StatsPage />} />
-            <Route path="/health" element={<HealthPage />} />
-            <Route path="/alerts" element={<AlertsPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/eval" element={<EvalPage />} />
+            <Route path="/settings/knowledge" element={<KnowledgePage />} />
+            <Route path="/settings/wiki" element={<WikiPage />} />
+            <Route path="/settings/skills" element={<SkillsPage />} />
+            <Route path="/settings/mcp" element={<MCPPage />} />
+            <Route path="/settings/memory" element={<MemoryPage />} />
+            <Route path="/settings/plugins" element={<PluginsPage />} />
+            <Route path="/settings/stats" element={<StatsPage />} />
+            <Route path="/settings/health" element={<HealthPage />} />
+            <Route path="/settings/alerts" element={<AlertsPage />} />
+            <Route path="/settings/audit" element={<AuditPage />} />
+            <Route path="/settings/eval" element={<EvalPage />} />
           </Routes>
           </AppShell>
         </Router>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Search, Clock, Plus, Sun, Moon, PanelLeft, type LucideIcon,
 } from 'lucide-react'
-import { NAV_ITEMS } from '../layout/nav'
+import { NAV_ITEMS, SETTINGS_NAV } from '../layout/nav'
 import { useUIStore } from '../../services/ui'
 import { useTheme } from '../theme/ThemeProvider'
 import { api } from '../../services/api'
@@ -64,6 +64,13 @@ export default function CommandPalette() {
         run: () => navigate(`/chat/${s.session_id}`),
       })),
       ...NAV_ITEMS.map((n) => ({
+        id: `nav-${n.id}`,
+        group: 'Navigation' as const,
+        label: `Go to ${n.label}`,
+        icon: n.icon,
+        run: () => navigate(n.path),
+      })),
+      ...SETTINGS_NAV.map((n) => ({
         id: `nav-${n.id}`,
         group: 'Navigation' as const,
         label: `Go to ${n.label}`,

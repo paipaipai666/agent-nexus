@@ -2,7 +2,7 @@ import { Minus, Square, X, Sun, Moon, Search } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useTheme } from '../theme/ThemeProvider'
 import { useUIStore } from '../../services/ui'
-import { navItemForPath } from '../layout/nav'
+import { navItemForPath, settingsItemForPath } from '../layout/nav'
 
 /**
  * v2 titlebar (36px, frameless drag region):
@@ -44,6 +44,15 @@ export default function Titlebar() {
         style={{ color: 'var(--fg-muted)' }}
       >
         <span>{current?.label ?? 'Chat'}</span>
+        {(() => {
+          const sub = settingsItemForPath(location.pathname)
+          return sub && sub.path !== '/settings' ? (
+            <>
+              <span style={{ color: 'var(--fg-faint)' }}>/</span>
+              <span style={{ color: 'var(--fg-secondary)' }}>{sub.label}</span>
+            </>
+          ) : null
+        })()}
         {location.pathname.startsWith('/chat/') && (
           <>
             <span style={{ color: 'var(--fg-faint)' }}>/</span>
