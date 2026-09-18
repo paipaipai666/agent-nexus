@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+from pydantic import SecretStr
+
 # ── hud._format_k ────────────────────────────────────────────────
 
 
@@ -591,6 +593,7 @@ def _make_hud_settings(model_id="test-model", base_url=""):
     settings = MagicMock()
     settings.llm_model_id = model_id
     settings.llm_base_url = base_url
+    settings.get_active_llm_profile.return_value = (model_id, base_url, SecretStr(""), 60)
     return settings
 
 

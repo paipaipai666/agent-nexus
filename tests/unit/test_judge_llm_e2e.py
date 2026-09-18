@@ -13,14 +13,12 @@ class TestLLMAsJudgeE2E:
     """End-to-end judge LLM with realistic output formats."""
 
     def test_judge_llm_creates_with_dedicated_key(self):
+        from pydantic import SecretStr
+
         mock_settings = MagicMock()
-        mock_settings.judge_api_key.get_secret_value.return_value = "sk-judge"
-        mock_settings.judge_model_id = "openai/gpt-4o-mini"
-        mock_settings.judge_base_url = "https://api.openai.com/v1"
-        mock_settings.llm_api_key.get_secret_value.return_value = "sk-main"
-        mock_settings.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.llm_base_url = "https://api.deepseek.com/v1"
-        mock_settings.llm_timeout = 60
+        mock_settings.get_judge_profile.return_value = (
+            "openai/gpt-4o-mini", "https://api.openai.com/v1", SecretStr("sk-judge"), 60,
+        )
 
         import agentnexus.core.judge_llm as j_mod
         old_cache = j_mod._judge_llm
@@ -34,14 +32,12 @@ class TestLLMAsJudgeE2E:
             j_mod._judge_llm = old_cache
 
     def test_judge_llm_fallbacks_to_main_key(self):
+        from pydantic import SecretStr
+
         mock_settings = MagicMock()
-        mock_settings.judge_api_key.get_secret_value.return_value = ""
-        mock_settings.judge_model_id = "openai/gpt-4o-mini"
-        mock_settings.judge_base_url = "https://api.openai.com/v1"
-        mock_settings.llm_api_key.get_secret_value.return_value = "sk-main"
-        mock_settings.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.llm_base_url = "https://api.deepseek.com/v1"
-        mock_settings.llm_timeout = 60
+        mock_settings.get_judge_profile.return_value = (
+            "openai/gpt-4o-mini", "https://api.openai.com/v1", SecretStr("sk-main"), 60,
+        )
 
         import agentnexus.core.judge_llm as j_mod
         old_cache = j_mod._judge_llm

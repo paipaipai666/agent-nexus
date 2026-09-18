@@ -1,5 +1,6 @@
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -95,14 +96,43 @@ class LLMSettings(BaseModel):
     judge_api_key: SecretStr
     judge_base_url: str
 
+class ModelOverride(BaseModel):
+    """Per-model capability overrides. All-None = fully auto-detect."""
+
+    context_length: int | None = Field(default=None, ge=1024)
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    supports_vision: bool | None = None
+    supports_tool_calling: bool | None = None
+    supports_json_mode: bool | None = None
+    supports_json_schema: bool | None = None
+    supports_thinking: bool | None = None
+    supports_parallel_tool_calls: bool | None = None
+
+
+class ModelEntry(BaseModel):
+    """One model offered by a provider, with optional capability overrides."""
+
+    model_id: str
+    override: ModelOverride | None = None
+
+
 class LLMProvider(BaseModel):
-    """A named, switchable LLM endpoint (Codex-style provider profile)."""
+    """A named, switchable LLM endpoint offering one or more models."""
 
     name: str
-    model_id: str
+    models: list[ModelEntry] = Field(default_factory=list)
     base_url: str
     api_key: SecretStr = Field(default=SecretStr(""))
     timeout: int = Field(default=60, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_model_id(cls, data: Any) -> Any:
+        """旧 schema 的单 model_id 字段 → models 列表（一次性迁移）。"""
+        if isinstance(data, dict) and "models" not in data and data.get("model_id"):
+            data = dict(data)
+            data["models"] = [{"model_id": data.pop("model_id")}]
+        return data
 
     @field_validator("base_url")
     @classmethod
@@ -110,6 +140,18 @@ class LLMProvider(BaseModel):
         if v and not v.startswith(("http://", "https://")):
             raise ValueError("base_url 必须以 http:// 或 https:// 开头")
         return v
+
+
+@dataclass
+class ResolvedModel:
+    """A concrete model choice: endpoint credentials + its registry entry."""
+
+    model_id: str
+    base_url: str
+    api_key: SecretStr
+    timeout: int
+    provider: str
+    entry: ModelEntry
 
 
 class RAGSettings(BaseModel):
@@ -284,6 +326,7 @@ class Settings(BaseSettings):
         capabilities = data.pop("capabilities", None)
         persona = data.pop("persona", None)
         super().__init__(**data)
+        self._migrate_llm_profiles()
         self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
         self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
@@ -301,10 +344,12 @@ class Settings(BaseSettings):
     judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
     judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
-    # Switchable provider profiles. When active_provider matches an entry here,
-    # it overrides the flat llm_* fields (which remain the default/fallback).
+    # Switchable provider profiles. When active_model/active_provider matches
+    # an entry here, it overrides the flat llm_* fields (default/fallback).
     llm_providers: list[LLMProvider] = Field(default_factory=list)
-    active_provider: str = Field(default="")  # "" = legacy flat llm_* config
+    active_provider: str = Field(default="")  # legacy provider-granularity selector
+    active_model: str = Field(default="")  # "provider/model"; "" = fall back
+    judge_model: str = Field(default="")  # "provider/model"; "" = legacy judge_* 或跟随任务模型
 
     # ── External Service Keys ─────────────────────────────────────────────
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
@@ -503,16 +548,110 @@ class Settings(BaseSettings):
             judge_base_url=self.judge_base_url,
         )
     def get_active_llm_profile(self) -> tuple[str, str, SecretStr, int]:
-        """Resolve (model_id, base_url, api_key, timeout) of the active provider.
+        """Resolve (model_id, base_url, api_key, timeout) of the active model.
 
-        Falls back to the flat ``llm_*`` fields when no provider is active or the
-        active name no longer exists in ``llm_providers``.
+        Priority: active_model selector > legacy active_provider (first model)
+        > flat ``llm_*`` fields.
         """
+        resolved = self.resolve_active_model()
+        if resolved is not None:
+            return resolved.model_id, resolved.base_url, resolved.api_key, resolved.timeout
+        return self.llm_model_id, self.llm_base_url, self.llm_api_key, self.llm_timeout
+
+    def resolve_active_model(self) -> "ResolvedModel | None":
+        """Resolve the active_model/active_provider selector, or None."""
+        if self.active_model:
+            found = self.find_model(self.active_model)
+            if found is not None:
+                provider, entry = found
+                return ResolvedModel(
+                    model_id=entry.model_id, base_url=provider.base_url,
+                    api_key=provider.api_key, timeout=provider.timeout,
+                    provider=provider.name, entry=entry,
+                )
         if self.active_provider:
             for p in self.llm_providers:
-                if p.name == self.active_provider:
-                    return p.model_id, p.base_url, p.api_key, p.timeout
+                if p.name == self.active_provider and p.models:
+                    return ResolvedModel(
+                        model_id=p.models[0].model_id, base_url=p.base_url,
+                        api_key=p.api_key, timeout=p.timeout,
+                        provider=p.name, entry=p.models[0],
+                    )
+        return None
+
+    def find_model(self, selector: str) -> "tuple[LLMProvider, ModelEntry] | None":
+        """Find (provider, entry) for a "provider/model_id" selector."""
+        pname, sep, mid = selector.partition("/")
+        if not sep or not pname or not mid:
+            return None
+        for p in self.llm_providers:
+            if p.name != pname:
+                continue
+            for m in p.models:
+                if m.model_id == mid:
+                    return p, m
+        return None
+
+    def find_model_override_entry(self, model_id: str, base_url: str) -> "ModelEntry | None":
+        """Locate the ModelEntry for an endpoint — feeds per-model capability overrides."""
+        target = (base_url or "").rstrip("/").lower()
+        for p in self.llm_providers:
+            if (p.base_url or "").rstrip("/").lower() != target:
+                continue
+            for m in p.models:
+                if m.model_id == model_id:
+                    return m
+        return None
+
+    def get_judge_profile(self) -> tuple[str, str, SecretStr, int]:
+        """Resolve judge model: explicit selector > legacy judge_* > follow task model."""
+        if self.judge_model:
+            found = self.find_model(self.judge_model)
+            if found is not None:
+                provider, entry = found
+                return entry.model_id, provider.base_url, provider.api_key, provider.timeout
+        if self._judge_legacy_configured():
+            key = self.judge_api_key.get_secret_value() or self.llm_api_key.get_secret_value()
+            return self.judge_model_id, self.judge_base_url, SecretStr(key), self.llm_timeout
+        resolved = self.resolve_active_model()
+        if resolved is not None:
+            return resolved.model_id, resolved.base_url, resolved.api_key, resolved.timeout
         return self.llm_model_id, self.llm_base_url, self.llm_api_key, self.llm_timeout
+
+    def _judge_legacy_configured(self) -> bool:
+        """True when judge_* flat fields were explicitly set (differ from defaults)."""
+        default_base = "https://open.bigmodel.cn/api/paas/v4/".rstrip("/").lower()
+        return bool(self.judge_api_key.get_secret_value()) \
+            or self.judge_model_id != "zhipu/glm-4.7-flash" \
+            or (self.judge_base_url or "").rstrip("/").lower() != default_base
+
+    def _migrate_llm_profiles(self) -> None:
+        """Idempotent in-memory migration toward the provider/models schema.
+
+        Persists on the next settings save; never writes to disk itself.
+        """
+        providers = list(self.llm_providers)
+        # flat llm_* → seed a "default" provider so pickers have an entry and
+        # switching models becomes discoverable without touching config.yaml.
+        if not providers and self.llm_model_id:
+            providers = [LLMProvider(
+                name="default",
+                models=[ModelEntry(model_id=self.llm_model_id)],
+                base_url=self.llm_base_url,
+                api_key=self.llm_api_key,
+                timeout=self.llm_timeout,
+            )]
+            self.llm_providers = providers
+        # legacy provider-granularity selector → model-granularity
+        if not self.active_model and self.active_provider:
+            for p in providers:
+                if p.name == self.active_provider and p.models:
+                    self.active_model = f"{p.name}/{p.models[0].model_id}"
+                    break
+        # freshly seeded default provider becomes active immediately
+        if not self.active_model and len(providers) == 1 \
+                and providers[0].name == "default" and providers[0].models:
+            self.active_model = f"default/{providers[0].models[0].model_id}"
 
     @property
     def rag(self) -> RAGSettings:

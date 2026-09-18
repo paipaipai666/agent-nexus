@@ -22,6 +22,7 @@ class ModelCapabilities:
     supports_thinking: bool = False           # reasoning/thinking tokens
     supports_parallel_tool_calls: bool = False
     supports_system_role: bool = True
+    supports_vision: bool = False            # image input (multimodal)
 
     # Token limits
     max_context_tokens: int = 128_000
@@ -184,6 +185,8 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
                 caps.supports_thinking = True
             if "parallel_tool_calls" in params:
                 caps.supports_parallel_tool_calls = True
+            if "image_url" in params:
+                caps.supports_vision = True
         model_info = litellm.get_model_info(model=normalized_id)
         caps.max_context_tokens = model_info.get(
             "max_input_tokens", caps.max_context_tokens
@@ -202,6 +205,30 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         caps.supports_json_mode = settings.model_json_mode
     if settings.model_thinking is not None:
         caps.supports_thinking = settings.model_thinking
+
+    # Per-model override (highest priority) — from the provider's model entry.
+    # Match both the raw id and the registry-normalized id (normalization adds
+    # a vendor prefix for bare model names).
+    entry = settings.find_model_override_entry(model_id, base_url) \
+        or settings.find_model_override_entry(normalized_id, base_url)
+    if entry is not None and entry.override is not None:
+        ov = entry.override
+        if ov.context_length is not None:
+            caps.max_context_tokens = ov.context_length
+        if ov.max_output_tokens is not None:
+            caps.max_output_tokens = ov.max_output_tokens
+        if ov.supports_vision is not None:
+            caps.supports_vision = ov.supports_vision
+        if ov.supports_tool_calling is not None:
+            caps.supports_tool_calling = ov.supports_tool_calling
+        if ov.supports_json_mode is not None:
+            caps.supports_json_mode = ov.supports_json_mode
+        if ov.supports_json_schema is not None:
+            caps.supports_json_schema = ov.supports_json_schema
+        if ov.supports_thinking is not None:
+            caps.supports_thinking = ov.supports_thinking
+        if ov.supports_parallel_tool_calls is not None:
+            caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
 
     return caps
 

@@ -10,6 +10,7 @@ Covers:
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 from textual.app import App
 
 pytestmark = pytest.mark.asyncio
@@ -104,11 +105,17 @@ class TestSidePanelRendering:
         assert panel._tool_items[0]["name"] == "test_tool"
 
 
+
+def _settings_with_profile(m, model="n/a"):
+    """Configure a mocked get_settings to expose the active-profile contract."""
+    m.return_value.llm_model_id = model
+    m.return_value.get_active_llm_profile.return_value = (model, "", SecretStr(""), 60)
+
 class TestHUDRendering:
 
     async def test_hud_build_text_contains_model(self):
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "test-model"
+            _settings_with_profile(mock_settings, "test-model")
             app = App()
             app.compose = lambda: []
             from agentnexus.tui.widgets.hud import HUD
@@ -120,7 +127,7 @@ class TestHUDRendering:
 
     async def test_hud_update_capabilities(self):
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "model"
+            _settings_with_profile(mock_settings, "model")
             app = App()
             app.compose = lambda: []
             from agentnexus.tui.widgets.hud import HUD

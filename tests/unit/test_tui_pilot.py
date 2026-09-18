@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 from textual.app import App
 from textual.widgets import Button, Label, Static
 
@@ -130,6 +131,12 @@ class TestConfirmDialogPilot:
 # ── HUD widget tests ────────────────────────────────────────────────
 
 
+
+def _settings_with_profile(m, model="n/a"):
+    """Configure a mocked get_settings to expose the active-profile contract."""
+    m.return_value.llm_model_id = model
+    m.return_value.get_active_llm_profile.return_value = (model, "", SecretStr(""), 60)
+
 class HUDTestApp(App):
     """Minimal app that mounts a HUD widget."""
 
@@ -143,7 +150,7 @@ class TestHUDWidgetPilot:
     async def test_compose_shows_model_name(self):
         """HUD displays the short model name from settings."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "provider/my-model"
+            _settings_with_profile(mock_settings, "provider/my-model")
             app = HUDTestApp()
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
@@ -154,7 +161,7 @@ class TestHUDWidgetPilot:
     async def test_update_capabilities_reflects_in_text(self):
         """Calling update_capabilities changes the rendered HUD text."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "model"
+            _settings_with_profile(mock_settings, "model")
             app = HUDTestApp()
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
@@ -169,7 +176,7 @@ class TestHUDWidgetPilot:
     async def test_update_context_updates_display(self):
         """Calling update_context changes token display."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "model"
+            _settings_with_profile(mock_settings, "model")
             app = HUDTestApp()
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
@@ -183,7 +190,7 @@ class TestHUDWidgetPilot:
     async def test_compacting_indicator_shows(self):
         """Setting compacting flag shows the gear indicator."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "model"
+            _settings_with_profile(mock_settings, "model")
             app = HUDTestApp()
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
@@ -197,7 +204,7 @@ class TestHUDWidgetPilot:
     async def test_version_info_updates(self):
         """update_version changes the version segment in rendered text."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "model"
+            _settings_with_profile(mock_settings, "model")
             app = HUDTestApp()
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
@@ -237,7 +244,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_launch_sets_title(self):
         """App TITLE is AgentNexus and ChatScreen is pushed on mount."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -253,7 +260,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_has_chat_area(self):
         """Chat area widget is present after launch."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -267,7 +274,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_has_input_bar(self):
         """Input bar with chat-input is present after launch."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -287,7 +294,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_has_hud(self):
         """HUD widget is present after launch."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -302,7 +309,7 @@ class TestAgentNexusTUIPilot:
     async def test_hud_is_below_input_bar(self):
         """HUD should render after the input bar at the bottom."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -318,7 +325,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_quit_action_is_disabled(self):
         """Default Textual quit shortcut must not close the TUI."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -335,7 +342,7 @@ class TestAgentNexusTUIPilot:
     async def test_exit_command_closes_tui(self):
         """The supported TUI exit path is the explicit /exit command."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             from agentnexus.tui.widgets.input_bar import InputBar
             app = AgentNexusTUI(
@@ -352,7 +359,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_has_side_panel(self):
         """Runtime side panel is present after launch."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),
@@ -369,7 +376,7 @@ class TestAgentNexusTUIPilot:
     async def test_app_renders_top_bar(self):
         """Top bar is rendered with welcome message."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
-            mock_settings.return_value.llm_model_id = "n/a"
+            _settings_with_profile(mock_settings, "n/a")
             from agentnexus.tui.app import AgentNexusTUI
             app = AgentNexusTUI(
                 agent=_make_mock_agent(),

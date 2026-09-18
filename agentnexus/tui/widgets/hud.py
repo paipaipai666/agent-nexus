@@ -33,10 +33,10 @@ class HUD(Widget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         settings = get_settings()
-        full_id = settings.llm_model_id
+        full_id, base_url, _key, _timeout = settings.get_active_llm_profile()
         self.model = full_id
         self._display_model = full_id.split("/")[-1] if "/" in full_id else full_id
-        self.ctx_max = resolve_ctx_max(full_id, getattr(settings, "llm_base_url", ""))
+        self.ctx_max = resolve_ctx_max(full_id, base_url)
         # Current context (STM) size — shown in the context bar
         self.current_tokens = 0
         # Cumulative usage

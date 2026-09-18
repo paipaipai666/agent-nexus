@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Save, Loader2, RotateCcw, Plus, Trash2 } from 'lucide-react'
-import { api } from '../services/api'
+import { Save, Loader2, RotateCcw, Plus, Trash2, RefreshCw } from 'lucide-react'
+import { api, ProviderDraft, ProviderInfo, ModelOverrideDraft } from '../services/api'
 
 interface PersonaProject {
   name: string
@@ -15,11 +15,6 @@ interface PersonaData {
 }
 
 const GROUPS: Record<string, string[]> = {
-  'LLM': [
-    'llm_model_id', 'llm_base_url', 'llm_api_key', 'llm_timeout',
-    'model_tool_calling', 'model_json_mode', 'model_thinking', 'model_thinking_budget',
-  ],
-  'Judge LLM': ['judge_api_key', 'judge_model_id', 'judge_base_url'],
   'Agent': ['max_agent_steps', 'runtime_profile', 'trace_retention_days'],
   'Budget': ['budget_simple_max_tokens', 'budget_complex_max_tokens', 'budget_high_value_max_tokens', 'budget_exceed_strategy'],
   'RAG': [
@@ -67,19 +62,30 @@ const GROUPS: Record<string, string[]> = {
 }
 
 const EMPTY_PERSONA: PersonaData = { agent_name: '', identity: '', tone: '', projects: [] }
-interface ProviderDraft {
-  name: string
-  model_id: string
-  base_url: string
-  api_key: string   // '' = keep the stored key
-  timeout: string   // string for the input; parsed on save
-}
-interface ProviderInfo {
-  name: string
-  model_id: string
-  base_url: string
-  api_key: string   // '****' when set, '' when empty
-  timeout: number
+
+const OVERRIDE_FIELDS: Array<{ key: keyof ModelOverrideDraft; label: string; kind: 'bool' | 'int' }> = [
+  { key: 'supports_vision', label: '视觉', kind: 'bool' },
+  { key: 'supports_tool_calling', label: '工具调用', kind: 'bool' },
+  { key: 'supports_json_mode', label: 'JSON 模式', kind: 'bool' },
+  { key: 'supports_json_schema', label: 'JSON Schema', kind: 'bool' },
+  { key: 'supports_thinking', label: '思考', kind: 'bool' },
+  { key: 'supports_parallel_tool_calls', label: '并行工具', kind: 'bool' },
+  { key: 'context_length', label: '上下文长度', kind: 'int' },
+  { key: 'max_output_tokens', label: '最大输出', kind: 'int' },
+]
+
+function TriSelect({ value, onChange }: { value: boolean | null | undefined; onChange: (v: boolean | null) => void }) {
+  return (
+    <select
+      value={value === true ? 'y' : value === false ? 'n' : ''}
+      onChange={e => onChange(e.target.value === '' ? null : e.target.value === 'y')}
+      className="input-field text-xs"
+    >
+      <option value="">自动</option>
+      <option value="y">是</option>
+      <option value="n">否</option>
+    </select>
+  )
 }
 
 export default function SettingsPage() {
@@ -93,12 +99,13 @@ export default function SettingsPage() {
   const [personaDraft, setPersonaDraft] = useState<PersonaData>(EMPTY_PERSONA)
   const [personaSaving, setPersonaSaving] = useState(false)
   const personaEdited = JSON.stringify(persona) !== JSON.stringify(personaDraft)
-  // Model providers state (switchable LLM endpoints)
+  // Model providers state (multi-provider, multi-model switchable profiles)
   const [savedProviders, setSavedProviders] = useState<ProviderInfo[]>([])
   const [providersDraft, setProvidersDraft] = useState<ProviderDraft[]>([])
   const [providersDirty, setProvidersDirty] = useState(false)
   const [providersSaving, setProvidersSaving] = useState(false)
-  const [activeProvider, setActiveProvider] = useState('')
+  const [activeModel, setActiveModel] = useState('')
+  const [judgeModel, setJudgeModel] = useState('')
 
   useEffect(() => {
     api.getConfig().then((cfg) => {
@@ -115,12 +122,16 @@ export default function SettingsPage() {
       }
     }).catch(console.error)
     api.getLlmProviders().then((d) => {
-      const rows: ProviderDraft[] = (d.providers || []).map(p => ({
-        name: p.name, model_id: p.model_id, base_url: p.base_url, api_key: '', timeout: String(p.timeout ?? 60),
-      }))
       setSavedProviders(d.providers || [])
-      setProvidersDraft(rows)
-      setActiveProvider(d.active || '')
+      setProvidersDraft((d.providers || []).map(p => ({
+        name: p.name,
+        base_url: p.base_url,
+        api_key: '',
+        timeout: String(p.timeout ?? 60),
+        models: (p.models || []).map(m => ({ model_id: m.model_id, override: m.override || null })),
+      })))
+      setActiveModel(d.active_model || d.active || '')
+      setJudgeModel(d.judge_model || '')
     }).catch(() => {})
   }, [])
 
@@ -165,7 +176,7 @@ export default function SettingsPage() {
   const handlePersonaReset = useCallback(() => {
     setPersonaDraft(persona)
   }, [persona])
-  const handleProviderField = (index: number, field: keyof ProviderDraft, value: string) => {
+  const handleProviderField = (index: number, field: 'name' | 'base_url' | 'api_key' | 'timeout', value: string) => {
     setProvidersDraft(prev => {
       const next = [...prev]
       next[index] = { ...next[index], [field]: value }
@@ -175,7 +186,7 @@ export default function SettingsPage() {
   }
 
   const addProviderRow = () => {
-    setProvidersDraft(prev => [...prev, { name: '', model_id: '', base_url: '', api_key: '', timeout: '60' }])
+    setProvidersDraft(prev => [...prev, { name: '', base_url: '', api_key: '', timeout: '60', models: [] }])
     setProvidersDirty(true)
   }
 
@@ -184,21 +195,116 @@ export default function SettingsPage() {
     setProvidersDirty(true)
   }
 
+  const handleModelId = (pIdx: number, mIdx: number, value: string) => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      const models = [...next[pIdx].models]
+      models[mIdx] = { ...models[mIdx], model_id: value }
+      next[pIdx] = { ...next[pIdx], models }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
+  const addModelRow = (pIdx: number, modelId = '') => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      next[pIdx] = { ...next[pIdx], models: [...next[pIdx].models, { model_id: modelId, override: null }] }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
+  const removeModelRow = (pIdx: number, mIdx: number) => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      next[pIdx] = { ...next[pIdx], models: next[pIdx].models.filter((_, i) => i !== mIdx) }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
+  const handleOverride = (pIdx: number, mIdx: number, field: keyof ModelOverrideDraft, raw: string, kind: 'bool' | 'int') => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      const models = [...next[pIdx].models]
+      const override: ModelOverrideDraft = { ...(models[mIdx].override || {}) }
+      if (raw === '') {
+        delete override[field]
+      } else {
+        const value = kind === 'bool' ? raw === 'y' : parseInt(raw, 10)
+        if (typeof value === 'number' && !Number.isFinite(value)) return prev
+        ;(override as Record<string, boolean | number | null | undefined>)[field] = value
+      }
+      models[mIdx] = { ...models[mIdx], override: Object.keys(override).length ? override : null }
+      next[pIdx] = { ...next[pIdx], models }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
+  const handleDiscover = async (pIdx: number) => {
+    const row = providersDraft[pIdx]
+    setError(null)
+    setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? { ...p, discovering: true } : p))
+    try {
+      const d = await api.discoverLlmModels(row.base_url, row.api_key, row.name)
+      setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? {
+        ...p,
+        discovering: false,
+        discovered: d.models.map(m => ({ ...m, checked: false })),
+      } : p))
+    } catch (e) {
+      setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? { ...p, discovering: false } : p))
+      setError(`拉取模型列表失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const toggleDiscovered = (pIdx: number, id: string) => {
+    setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? {
+      ...p,
+      discovered: (p.discovered || []).map(m => m.id === id ? { ...m, checked: !m.checked } : m),
+    } : p))
+  }
+
+  const importDiscovered = (pIdx: number) => {
+    setProvidersDraft(prev => {
+      const next = [...prev]
+      const row = next[pIdx]
+      const existing = new Set(row.models.map(m => m.model_id))
+      const picked = (row.discovered || []).filter(m => m.checked && !existing.has(m.id))
+      next[pIdx] = {
+        ...row,
+        models: [...row.models, ...picked.map(m => ({ model_id: m.id, override: null }))],
+        discovered: undefined,
+      }
+      return next
+    })
+    setProvidersDirty(true)
+  }
+
   const handleProvidersSave = async () => {
     setProvidersSaving(true); setError(null)
     try {
       await api.updateLlmProviders(providersDraft.map(r => ({
-        name: r.name, model_id: r.model_id, base_url: r.base_url,
+        name: r.name,
+        base_url: r.base_url,
         ...(r.api_key ? { api_key: r.api_key } : {}),
         timeout: parseInt(r.timeout, 10) || 60,
+        models: r.models,
       })))
       setProvidersDirty(false)
       // Reload so key masking + normalized values come from the server
       const d = await api.getLlmProviders()
       setSavedProviders(d.providers || [])
       setProvidersDraft((d.providers || []).map(p => ({
-        name: p.name, model_id: p.model_id, base_url: p.base_url, api_key: '', timeout: String(p.timeout ?? 60),
+        name: p.name,
+        base_url: p.base_url,
+        api_key: '',
+        timeout: String(p.timeout ?? 60),
+        models: (p.models || []).map(m => ({ model_id: m.model_id, override: m.override || null })),
       })))
+      setActiveModel(d.active_model || d.active || '')
     } catch (e) {
       setError(`Failed to save providers: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -206,13 +312,23 @@ export default function SettingsPage() {
     }
   }
 
-  const handleUseProvider = async (name: string) => {
+  const handleUseModel = async (selector: string) => {
     setError(null)
     try {
-      await api.setActiveLlmProvider(name)
-      setActiveProvider(name)
+      await api.setActiveLlmProvider(selector)
+      setActiveModel(selector)
     } catch (e) {
       setError(`切换模型失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const handleJudgeModelChange = async (selector: string) => {
+    setError(null)
+    try {
+      await api.updateConfig('judge_model', selector)
+      setJudgeModel(selector)
+    } catch (e) {
+      setError(`保存 judge 模型失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -356,52 +472,160 @@ export default function SettingsPage() {
               className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
               style={{ background: 'var(--surface-3)', color: 'var(--fg)' }}
             >
-              <Plus size={12} /> Add
+              <Plus size={12} /> Add Provider
             </button>
           </div>
           <p className="text-[11px] mb-3" style={{ color: 'var(--fg-faint)' }}>
-            可切换的模型端点；在聊天输入框左下角随时切换。未选择时使用下方 LLM 组的 llm_* 默认配置。
+            每个供应商可挂多个模型；能力默认值自动检测，可逐项覆盖。聊天输入框左下角随时切换任务模型。
           </p>
+
+          {/* Judge model picker */}
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>Judge 模型</label>
+            <select
+              value={judgeModel}
+              onChange={e => handleJudgeModelChange(e.target.value)}
+              className="input-field flex-1 font-mono text-xs"
+            >
+              <option value="">跟随任务模型</option>
+              {providersDraft.flatMap(p =>
+                p.models.map(m => (
+                  <option key={`${p.name}/${m.model_id}`} value={`${p.name}/${m.model_id}`}>
+                    {p.name} / {m.model_id}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
           {providersDraft.length === 0 && (
             <p className="text-xs italic" style={{ color: 'var(--fg-faint)' }}>No providers configured</p>
           )}
-          {providersDraft.map((p, idx) => (
-            <div key={idx} className="flex items-center gap-2 mb-1.5">
-              {activeProvider === p.name && p.name ? (
-                <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 text-center" style={{ background: 'var(--green-muted)', color: 'var(--green)' }}>Active</span>
-              ) : (
+
+          {providersDraft.map((p, pIdx) => (
+            <div key={pIdx} className="mb-3 p-3 rounded-md" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              {/* provider endpoint row */}
+              <div className="flex items-center gap-2 mb-2">
+                <input type="text" value={p.name} onChange={e => handleProviderField(pIdx, 'name', e.target.value)} className="input-field w-28 shrink-0 font-mono text-xs" placeholder="名称" />
+                <input type="text" value={p.base_url} onChange={e => handleProviderField(pIdx, 'base_url', e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="base_url" />
+                <input
+                  type="password"
+                  value={p.api_key}
+                  onChange={e => handleProviderField(pIdx, 'api_key', e.target.value)}
+                  className="input-field w-28 shrink-0 font-mono text-xs"
+                  placeholder={savedProviders.find(s => s.name === p.name)?.api_key === '****' ? '****（留空保持不变）' : 'api_key'}
+                />
+                <input type="text" value={p.timeout} onChange={e => handleProviderField(pIdx, 'timeout', e.target.value)} className="input-field w-14 shrink-0 font-mono text-xs" placeholder="超时" title="timeout（秒）" />
                 <button
-                  onClick={() => handleUseProvider(p.name)}
-                  disabled={providersDirty || !p.name.trim()}
-                  className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 transition-colors disabled:opacity-40"
-                  style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}
-                  title={providersDirty ? '先保存再切换' : '切换为该模型'}
+                  onClick={() => handleDiscover(pIdx)}
+                  disabled={p.discovering || !p.base_url.trim()}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors shrink-0 disabled:opacity-40"
+                  style={{ background: 'var(--surface-3)', color: 'var(--fg)' }}
+                  title="从供应商 /v1/models 拉取模型列表"
                 >
-                  Use
+                  {p.discovering ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 拉取模型
                 </button>
+                <button
+                  onClick={() => removeProviderRow(pIdx)}
+                  className="p-1.5 rounded-md transition-colors shrink-0"
+                  style={{ color: 'var(--fg-faint)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+
+              {/* discovered models (checkbox import) */}
+              {p.discovered && p.discovered.length > 0 && (
+                <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>勾选导入（{p.discovered.filter(m => m.checked).length} 选中）</span>
+                    <button
+                      onClick={() => importDiscovered(pIdx)}
+                      disabled={!p.discovered.some(m => m.checked)}
+                      className="px-2 py-0.5 rounded text-[10px] transition-colors disabled:opacity-40"
+                      style={{ background: 'var(--accent)', color: 'white' }}
+                    >
+                      导入选中
+                    </button>
+                  </div>
+                  {p.discovered.map(m => (
+                    <label key={m.id} className="flex items-center gap-2 text-[11px] py-0.5 cursor-pointer" style={{ color: 'var(--fg-muted)' }}>
+                      <input type="checkbox" checked={m.checked} onChange={() => toggleDiscovered(pIdx, m.id)} />
+                      <span className="font-mono">{m.id}</span>
+                      {m.context_length && <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>{(m.context_length / 1024).toFixed(0)}k ctx</span>}
+                    </label>
+                  ))}
+                </div>
               )}
-              <input type="text" value={p.name} onChange={e => handleProviderField(idx, 'name', e.target.value)} className="input-field w-24 shrink-0 font-mono text-xs" placeholder="名称" />
-              <input type="text" value={p.model_id} onChange={e => handleProviderField(idx, 'model_id', e.target.value)} className="input-field w-44 shrink-0 font-mono text-xs" placeholder="model_id（如 openai/gpt-4o）" />
-              <input type="text" value={p.base_url} onChange={e => handleProviderField(idx, 'base_url', e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="base_url" />
-              <input
-                type="password"
-                value={p.api_key}
-                onChange={e => handleProviderField(idx, 'api_key', e.target.value)}
-                className="input-field w-28 shrink-0 font-mono text-xs"
-                placeholder={savedProviders.find(s => s.name === p.name)?.api_key === '****' ? '****（留空保持不变）' : 'api_key'}
-              />
-              <input type="text" value={p.timeout} onChange={e => handleProviderField(idx, 'timeout', e.target.value)} className="input-field w-14 shrink-0 font-mono text-xs" placeholder="超时" title="timeout（秒）" />
+
+              {/* models table */}
+              {p.models.map((m, mIdx) => {
+                const selector = `${p.name}/${m.model_id}`
+                const isActive = selector === activeModel
+                return (
+                  <div key={mIdx} className="mb-1.5">
+                    <div className="flex items-center gap-2">
+                      {isActive ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 text-center" style={{ background: 'var(--green-muted)', color: 'var(--green)' }}>Active</span>
+                      ) : (
+                        <button
+                          onClick={() => handleUseModel(selector)}
+                          disabled={providersDirty || !p.name.trim() || !m.model_id.trim()}
+                          className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 transition-colors disabled:opacity-40"
+                          style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}
+                          title={providersDirty ? '先保存再切换' : '设为任务模型'}
+                        >
+                          Use
+                        </button>
+                      )}
+                      <input type="text" value={m.model_id} onChange={e => handleModelId(pIdx, mIdx, e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="model_id" />
+                      <button
+                        onClick={() => removeModelRow(pIdx, mIdx)}
+                        className="p-1 rounded-md transition-colors shrink-0"
+                        style={{ color: 'var(--fg-faint)' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                    {/* capability overrides — empty = auto-detect */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 ml-14">
+                      {OVERRIDE_FIELDS.map(f => (
+                        <label key={f.key} className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>
+                          {f.label}
+                          {f.kind === 'bool' ? (
+                            <TriSelect
+                              value={typeof m.override?.[f.key] === 'boolean' ? m.override[f.key] as boolean : null}
+                              onChange={v => handleOverride(pIdx, mIdx, f.key, v === null ? '' : v ? 'y' : 'n', 'bool')}
+                            />
+                          ) : (
+                            <input
+                              type="number"
+                              value={typeof m.override?.[f.key] === 'number' ? m.override[f.key] as number : ''}
+                              onChange={e => handleOverride(pIdx, mIdx, f.key, e.target.value, 'int')}
+                              className="input-field w-20 text-[10px] font-mono"
+                              placeholder="自动"
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
               <button
-                onClick={() => removeProviderRow(idx)}
-                className="p-1.5 rounded-md transition-colors shrink-0"
-                style={{ color: 'var(--fg-faint)' }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+                onClick={() => addModelRow(pIdx)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors mt-1"
+                style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}
               >
-                <Trash2 size={12} />
+                <Plus size={10} /> 添加模型
               </button>
             </div>
           ))}
+
           <div className="flex items-center gap-2 pt-1">
             {providersDirty && (
               <button
@@ -415,7 +639,7 @@ export default function SettingsPage() {
               </button>
             )}
             <span className="text-[10px] ml-auto" style={{ color: 'var(--fg-faint)' }}>
-              当前生效：{activeProvider || '默认（llm_* 配置）'}
+              当前任务模型：{activeModel || '默认（llm_* 配置）'}
             </span>
           </div>
         </div>

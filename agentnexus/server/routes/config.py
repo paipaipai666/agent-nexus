@@ -29,6 +29,7 @@ class PersonaUpdateRequest(BaseModel):
 SETTABLE_KEYS = {
     # LLM
     "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
+    "active_model", "judge_model",
     "model_tool_calling", "model_json_mode", "model_thinking", "model_thinking_budget",
     # Judge LLM
     "judge_api_key", "judge_model_id", "judge_base_url",
@@ -119,9 +120,26 @@ def get_config():
     return config
 
 
+class ModelOverrideInput(BaseModel):
+    context_length: int | None = None
+    max_output_tokens: int | None = None
+    supports_vision: bool | None = None
+    supports_tool_calling: bool | None = None
+    supports_json_mode: bool | None = None
+    supports_json_schema: bool | None = None
+    supports_thinking: bool | None = None
+    supports_parallel_tool_calls: bool | None = None
+
+
+class ModelEntryInput(BaseModel):
+    model_id: str
+    override: ModelOverrideInput | None = None
+
+
 class ProviderInput(BaseModel):
     name: str
-    model_id: str
+    models: list[ModelEntryInput] = []
+    model_id: str | None = None  # legacy single-model field → seeds models
     base_url: str
     api_key: str | None = None  # None or "****" = keep the stored key
     timeout: int = 60
@@ -132,13 +150,22 @@ class ProvidersUpdateRequest(BaseModel):
 
 
 class ActiveProviderRequest(BaseModel):
-    name: str  # "" = legacy flat llm_* config
+    name: str  # "provider/model", bare provider name (first model), or "" = flat llm_*
+
+
+class DiscoverRequest(BaseModel):
+    base_url: str
+    api_key: str | None = None
+    provider: str | None = None  # fallback key source: stored provider with this name
 
 
 def _mask_provider(p: Any) -> dict[str, Any]:
     return {
         "name": p.name,
-        "model_id": p.model_id,
+        "models": [
+            {"model_id": m.model_id, "override": m.override.model_dump() if m.override else None}
+            for m in p.models
+        ],
         "base_url": p.base_url,
         "api_key": "****" if p.api_key.get_secret_value() else "",
         "timeout": p.timeout,
@@ -156,13 +183,23 @@ def _validate_providers(providers: list[ProviderInput]) -> list[dict[str, Any]]:
         if name in seen:
             raise ValueError(f"duplicate provider name: {name}")
         seen.add(name)
-        if not p.model_id.strip():
-            raise ValueError(f"provider '{name}': model_id is required")
         if not p.base_url.startswith(("http://", "https://")):
             raise ValueError(f"provider '{name}': base_url must start with http(s)://")
+        models: list[dict[str, Any]] = []
+        raw_models = p.models or ([ModelEntryInput(model_id=p.model_id)] if p.model_id else [])
+        for m in raw_models:
+            mid = m.model_id.strip()
+            if not mid:
+                raise ValueError(f"provider '{name}': model_id is required")
+            if any(x["model_id"] == mid for x in models):
+                raise ValueError(f"provider '{name}': duplicate model_id: {mid}")
+            models.append({
+                "model_id": mid,
+                "override": m.override.model_dump() if m.override else None,
+            })
         out.append({
             "name": name,
-            "model_id": p.model_id.strip(),
+            "models": models,
             "base_url": p.base_url.strip(),
             "api_key": p.api_key,
             "timeout": p.timeout,
@@ -192,7 +229,9 @@ def list_llm_providers():
     settings = get_settings()
     return {
         "providers": [_mask_provider(p) for p in settings.llm_providers],
-        "active": settings.active_provider,
+        "active": settings.active_model or settings.active_provider,
+        "active_model": settings.active_model,
+        "judge_model": settings.judge_model,
         "legacy": {
             "model_id": settings.llm_model_id,
             "base_url": settings.llm_base_url,
@@ -231,20 +270,96 @@ def set_active_llm_provider(req: ActiveProviderRequest):
     from agentnexus.server.app import _get_runtime
 
     data = load_config_yaml()
-    stored_names = {p.get("name") for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
-    if req.name and req.name not in stored_names:
-        raise HTTPException(status_code=404, detail=f"Unknown provider: {req.name}")
-    data["active_provider"] = req.name
+    stored = {p.get("name"): p for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
+    selector = req.name.strip()
+    if selector:
+        pname, _, mid = selector.partition("/")
+        provider = stored.get(pname)
+        if provider is None:
+            raise HTTPException(status_code=404, detail=f"Unknown provider: {pname}")
+        model_ids = [m.get("model_id") for m in (provider.get("models") or []) if isinstance(m, dict)]
+        if mid and mid not in model_ids:
+            raise HTTPException(status_code=404, detail=f"Unknown model: {selector}")
+        if not mid and not model_ids:
+            raise HTTPException(status_code=404, detail=f"Provider '{pname}' has no models")
+    data["active_model"] = selector
+    data["active_provider"] = selector.partition("/")[0] if selector else ""
     write_config_yaml(data)
     _reset_settings_cache()
 
     settings = get_settings()
     _apply_active_llm(_get_runtime(), settings)
-    return {"status": "updated", "active": req.name, "model_id": settings.get_active_llm_profile()[0]}
+    return {"status": "updated", "active": selector, "model_id": settings.get_active_llm_profile()[0]}
+
+
+@router.post("/llm/discover")
+def discover_models(req: DiscoverRequest):
+    """Proxy the provider's GET /models endpoint — feeds the model-picker import UI.
+
+    The api_key is used for this request only; it is never persisted or logged.
+    """
+    base_url = (req.base_url or "").strip().rstrip("/")
+    if not base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="base_url must start with http(s)://")
+    api_key = req.api_key or ""
+    if not api_key and req.provider:
+        from agentnexus.core.config import get_settings
+        for p in get_settings().llm_providers:
+            if p.name == req.provider:
+                api_key = p.api_key.get_secret_value()
+                break
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key or "not-needed", base_url=base_url, timeout=20)
+        out = []
+        for m in client.models.list():
+            ctx = getattr(m, "context_length", None)
+            out.append({"id": m.id, "context_length": ctx if isinstance(ctx, int) else None})
+        out.sort(key=lambda x: x["id"])
+        return {"models": out}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {type(e).__name__}: {e}")
+
+
+@router.get("/llm/capabilities")
+def get_llm_capabilities():
+    """Detected capabilities of the active LLM profile.
+
+    ``source`` tells the caller how the flags were determined:
+    ``registry`` (static match), ``probe`` (live endpoint probe for
+    registry-unknown models), or ``config`` (explicit user override).
+    """
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    llm = runtime.llm
+    caps = llm.capabilities  # detect (+ live probe for unknown models), cached per instance
+    settings = runtime.settings
+    overridden = settings.model_tool_calling is not None or settings.model_json_mode is not None
+    if overridden:
+        source = "config"
+    elif caps.from_default_fallback:
+        source = "probe"
+    else:
+        source = "registry"
+    return {
+        "model": llm.model,
+        "base_url": llm.base_url,
+        "source": source,
+        "tool_calling": caps.supports_tool_calling,
+        "json_mode": caps.supports_json_mode,
+        "json_schema": caps.supports_json_schema,
+        "thinking": caps.supports_thinking,
+        "vision": caps.supports_vision,
+        "parallel_tool_calls": caps.supports_parallel_tool_calls,
+        "max_context_tokens": caps.max_context_tokens,
+        "max_output_tokens": caps.max_output_tokens,
+        "session_disabled": sorted(llm.session_tracker.disabled_features),
+    }
 
 @router.put("")
 def update_config(req: ConfigUpdateRequest):
-    from agentnexus.core.config import load_config_yaml, write_config_yaml
+    from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml
 
     if req.key not in SETTABLE_KEYS:
         raise HTTPException(status_code=400, detail=f"Key '{req.key}' is not settable")
@@ -260,6 +375,12 @@ def update_config(req: ConfigUpdateRequest):
     write_config_yaml(data)
 
     _reset_settings_cache()
+
+    # LLM-facing keys must reach the live shared client immediately —
+    # without this, edits "succeed" but the running agent keeps the old config.
+    if req.key in ("llm_model_id", "llm_base_url", "llm_api_key", "llm_timeout", "active_model"):
+        from agentnexus.server.app import _get_runtime
+        _apply_active_llm(_get_runtime(), get_settings())
 
     return {"status": "updated", "key": req.key}
 

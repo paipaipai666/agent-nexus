@@ -1,6 +1,57 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 let apiKey: string | null = null
 
+// ── LLM provider profile types ──────────────────────────────────────────
+export interface ModelOverrideDraft {
+  context_length?: number | null
+  max_output_tokens?: number | null
+  supports_vision?: boolean | null
+  supports_tool_calling?: boolean | null
+  supports_json_mode?: boolean | null
+  supports_json_schema?: boolean | null
+  supports_thinking?: boolean | null
+  supports_parallel_tool_calls?: boolean | null
+}
+
+export interface ModelDraft {
+  model_id: string
+  override: ModelOverrideDraft | null
+}
+
+export interface DiscoveredModel {
+  id: string
+  context_length: number | null
+  checked: boolean
+}
+
+export interface ProviderDraft {
+  name: string
+  base_url: string
+  api_key: string // '' = keep the stored key
+  timeout: string // string for the input; parsed on save
+  models: ModelDraft[]
+  // transient discovery state (never persisted)
+  discovered?: DiscoveredModel[]
+  discovering?: boolean
+}
+
+export interface ProviderInfo {
+  name: string
+  base_url: string
+  api_key: string // '****' when set, '' when empty
+  timeout: number
+  models: ModelDraft[]
+}
+
+/** Wire format for PUT /api/config/llm/providers. */
+export interface ProviderSaveInput {
+  name: string
+  base_url: string
+  api_key?: string // omitted = keep stored key
+  timeout?: number
+  models: ModelDraft[]
+}
+
 export function setApiKey(key: string) {
   apiKey = key
 }
@@ -212,15 +263,17 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(persona),
     }),
-  // LLM providers (multi-provider switchable profiles)
+  // LLM providers (multi-provider, multi-model switchable profiles)
   getLlmProviders: () =>
     request<{
-      providers: Array<{ name: string; model_id: string; base_url: string; api_key: string; timeout: number }>
+      providers: ProviderInfo[]
       active: string
+      active_model: string
+      judge_model: string
       legacy: { model_id: string; base_url: string; has_api_key: boolean }
     }>('/api/config/llm/providers'),
 
-  updateLlmProviders: (providers: Array<{ name: string; model_id: string; base_url: string; api_key?: string; timeout?: number }>) =>
+  updateLlmProviders: (providers: ProviderSaveInput[]) =>
     request<{ status: string; count: number }>('/api/config/llm/providers', {
       method: 'PUT',
       body: JSON.stringify({ providers }),
@@ -231,6 +284,28 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
+
+  discoverLlmModels: (base_url: string, api_key: string, provider?: string) =>
+    request<{ models: Array<{ id: string; context_length: number | null }> }>(
+      '/api/config/llm/discover',
+      { method: 'POST', body: JSON.stringify({ base_url, api_key, provider }) },
+    ),
+
+  getModelCapabilities: () =>
+    request<{
+      model: string
+      base_url: string
+      source: 'registry' | 'probe' | 'config'
+      tool_calling: boolean
+      json_mode: boolean
+      json_schema: boolean
+      thinking: boolean
+      vision: boolean
+      parallel_tool_calls: boolean
+      max_context_tokens: number
+      max_output_tokens: number
+      session_disabled: string[]
+    }>('/api/config/llm/capabilities'),
 
   // Stats
   getStats: (days = 7) => request<Record<string, any>>(`/api/stats?days=${days}`),

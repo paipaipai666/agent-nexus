@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+from pydantic import SecretStr
+
 from agentnexus.core.capabilities import resolve_ctx_max
 from agentnexus.tui.widgets.hud import HUD
 
@@ -25,6 +27,12 @@ class TestResolveCtxMax:
             assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") == 262144
 
 
+
+def _settings_with_profile(m, model="n/a"):
+    """Configure a mocked get_settings to expose the active-profile contract."""
+    m.return_value.llm_model_id = model
+    m.return_value.get_active_llm_profile.return_value = (model, "", SecretStr(""), 60)
+
 class TestHudBuildText:
     """Test HUD._build_text() pure rendering logic."""
 
@@ -32,7 +40,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_basic_build_text(self, mock_settings, mock_ctx):
         """Default state shows model name and unknown context when unresolved."""
-        mock_settings.return_value.llm_model_id = "test/test-model"
+        _settings_with_profile(mock_settings, "test/test-model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         text = hud._build_text()
@@ -43,7 +51,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_with_thinking_and_strategy(self, mock_settings, mock_ctx):
         """Thinking indicator and strategy label appear when enabled."""
-        mock_settings.return_value.llm_model_id = "simple-model"
+        _settings_with_profile(mock_settings, "simple-model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud._supports_thinking = True
@@ -56,7 +64,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_compact_indicator(self, mock_settings, mock_ctx):
         """Compact indicator (⚙) appears when _compacting is True."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud._compacting = True
@@ -67,7 +75,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_context_bar_when_ctx_max_known(self, mock_settings, mock_ctx):
         """Context bar with filled/empty blocks appears when ctx_max is set."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         assert hud.ctx_max == 128000
@@ -83,7 +91,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_no_ctx_bar_when_ctx_max_unknown(self, mock_settings, mock_ctx):
         """No progress bar when ctx_max is None."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         assert hud.ctx_max is None
@@ -98,7 +106,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_version_display_with_undo_redo(self, mock_settings, mock_ctx):
         """Version section shows undo/redo actions when available."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.update_version("abcdef123456", can_undo=True, can_redo=True)
@@ -111,7 +119,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_token_display(self, mock_settings, mock_ctx):
         """Token totals shown as in:Xk out:Yk."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.total_input = 15000
@@ -124,7 +132,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_update_capabilities_sets_state(self, mock_settings, mock_ctx):
         """update_capabilities sets internal flags (refresh is a no-op here)."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.update_capabilities(supports_thinking=True, strategy="原生工具")
@@ -135,7 +143,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_update_context_sets_state(self, mock_settings, mock_ctx):
         """update_context sets token values without crashing."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.update_context(current_tokens=100, total_input=200, total_output=300)
@@ -147,7 +155,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_set_compacting_sets_state(self, mock_settings, mock_ctx):
         """set_compacting toggles the _compacting flag."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.set_compacting(True)
@@ -159,7 +167,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_update_version_sets_state(self, mock_settings, mock_ctx):
         """update_version stores head/undo/redo state."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.update_version("deadbeef1234", can_undo=True, can_redo=False)
@@ -171,7 +179,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_head_shortened_to_8_chars(self, mock_settings, mock_ctx):
         """Long HEAD is truncated to 8 characters in display."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud._head = "abcdefghijklmnop"
@@ -183,7 +191,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_head_dash_not_truncated(self, mock_settings, mock_ctx):
         """Default HEAD '---' is shown as-is, not truncated."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         assert hud._head == "---"
@@ -194,7 +202,7 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_context_bar_saturation(self, mock_settings, mock_ctx):
         """Context bar shows full blocks when ctx_used >= ctx_max."""
-        mock_settings.return_value.llm_model_id = "model"
+        _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.current_tokens = 99999  # well beyond ctx_max
