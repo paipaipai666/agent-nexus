@@ -82,7 +82,7 @@ describe('Sidebar session-updated event', () => {
   })
 
   it('does not refresh on non-chat routes', async () => {
-    renderSidebar('/settings/general')
+    renderSidebar('/stats')
 
     await act(async () => {
       await new Promise(r => setTimeout(r, 50))

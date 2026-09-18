@@ -1,6 +1,27 @@
 # Changelog
 
 All notable changes to AgentNexus will be documented in this file.
+
+## [Unreleased]
+
+### Changed
+
+- **Desktop: v2 UI 全面重设计（Linear 式精致暗色）** — 桌面端前端按 `designs/mockups/v2-ui.yaml` 规范重构。新应用外壳：36px 自定义 titlebar（breadcrumb / 搜索触发 / 主题切换 / 窗口控制）+ VS Code 式 48px Activity Bar（Chat、Skills、MCP、Memory、Knowledge、Wiki、Plugins、Stats、Health、Alerts、Audit、Eval、Settings 全部提升为一级导航）+ 随路由切换的 232px Context Sidebar（仅 Chat 区显示项目/会话）+ 24px mono 状态栏（含上下文用量条）。新增 Ctrl+K 全局命令面板（分组 Recent/Navigation/Actions、实时过滤、全键盘操作）与 Ctrl+B 侧边栏折叠（250ms 宽度动画）。双主题 token 体系重写（暗色近黑四级明度阶梯 #0a0b0d→#1e2127、1px 半透明边框、暗色卡片 inset 顶部高光、accent 微渐变主按钮；亮色完整对照；默认改为暗色，切换 200ms 动画）。圆角体系 8/12/999。字体：Anton 移除，Inter + Geist Mono，基础字号 13px 紧凑密度。旧 /settings/* 子路由全部提升为顶级路由（/stats、/skills 等），SettingsLayout 删除。Chat 页用户消息改为右对齐弱化气泡、工具卡/输入框/空状态按 v2 组件规格重制；Stats 页改 segmented 时间范围 + v2 KPI 卡；其余页面卡片统一切到 surface-2 + card-highlight。
+
+### Bug Fixes
+
+- **OpenAI 兼容端点模型名被误截断** — `OpenAIProvider` 对含 `/` 的模型名无条件 `split("/", 1)[1]`, 把 SiliconFlow 的 `deepseek-ai/DeepSeek-V4-Flash` 截成 `DeepSeek-V4-Flash` 发给端点 (400 Model does not exist)。改为白名单化剥离: 仅已知 litellm provider 前缀 (`deepseek/`, `openai/`, `zhipu/` 等) 才剥离; 命名空间式模型名 (SiliconFlow/Groq/OpenRouter 等) 保留全名。
+- **流式 content 混入 think 标签残留** — SiliconFlow 部署的 DeepSeek-V4 在流式下 reasoning_content 正确分离, 但 delta.content 残留 `</think>` 片段 (如 `42</think>42`), 污染 ReAct JSON 解析。`OpenAIProvider` 累加 content 时剥离 think 标签。
+- **Eval runner 工具集为空** — `ReActAgentRunner` 构造 `ToolRegistry()` 后未调 `register_all_tools`, eval 下 agent 拿到空工具集, tool_use 类 task 被系统性低估 (regression suite 实测 6/10 → 修复后工具真实执行)。现与 `AppRuntime` 对齐注册全部内置 provider 工具 (non_interactive)。
+- **HumanEval 评分器 markdown 围栏 SyntaxError** — `HumanEvalEvaluator.evaluate()` 直接执行候选代码, 对 LLM 输出里几乎必然存在的 ` ```python ``` ` 围栏零容错, 真实模型成绩会被系统性压到 0。执行前现剥离围栏。官方 openai/human-eval 164 题 oracle 验证: gold 164/164 (100%), 语义破坏注入 24/24 检出、0 误报 (`experiments/run_humaneval_oracle.py`)
+
+- **Eval runner 真实 transcript 时间轴** — `ReActAgentRunner` 此前在 eval 中直接调用 `agent.run()` 而没有建立 trace 上下文, agent 循环的 span 埋点全部不生效, `_collect_transcript` 只能用 `i * 2.0` 编造时间戳重建 transcript。现在 runner 会为每个 trial 建立真实 trace 上下文（已有上游 trace 时不劫持），transcript 直接来自真实 spans（墙钟时间、`latency_ms`、真实 input/output），并将 agent 埋点名 `plan_node` 映射为 grader 协议名 `llm`。无 trace 可用时的兜底重建不再编造时间戳，显式标注 `reconstructed: true`。trial metadata 新增 `trace_id` 供 replay/审计回溯。
+
+### Testing
+
+- 新增 `tests/unit/test_eval_runner_transcript.py`（5 个行为测试：真实时钟、grader 协议映射、trace_id 记录、不劫持上游 trace、兜底不编造时间）
+- 新增 `experiments/e2e_eval_smoke.py` — mock 模型端到端验证 runner→trace→grader→report 全链路（含正反两个 grader 判定）
+
 ## [0.2.16] - 2026-09-10
 
 ### Changed

@@ -246,7 +246,7 @@ export default function EvalPage() {
             {tasks.length === 0 ? (
               <div className="text-center py-8" style={{ color: 'var(--fg-muted)' }}>No tasks found</div>
             ) : tasks.map(task => (
-              <div key={task.id} className="p-3 rounded-lg cursor-pointer" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }} onClick={() => handleShowTaskDetail(task.id)} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+              <div key={task.id} className="p-3 rounded-lg cursor-pointer" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }} onClick={() => handleShowTaskDetail(task.id)} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span>{categoryIcon(task.category)}</span>
@@ -292,7 +292,7 @@ export default function EvalPage() {
             {suites.length === 0 ? (
               <div className="text-center py-8" style={{ color: 'var(--fg-muted)' }}>No suites found</div>
             ) : suites.map(suite => (
-              <div key={suite.name} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+              <div key={suite.name} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <span className="font-medium" style={{ color: 'var(--fg)' }}>{suite.name}</span>
@@ -337,7 +337,7 @@ export default function EvalPage() {
             {suiteResult ? (
               <div className="space-y-3">
                 {/* Summary Card */}
-                <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-medium" style={{ color: 'var(--fg)' }}>{suiteResult.suite_name} ({suiteResult.eval_type})</h3>
                     <span className="text-sm font-medium px-2 py-0.5 rounded" style={{
@@ -358,7 +358,7 @@ export default function EvalPage() {
                 {/* Per-Task Results */}
                 <h3 className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Task Results</h3>
                 {suiteResult.task_reports?.map((tr: any) => (
-                  <div key={tr.task_id} className="p-3 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div key={tr.task_id} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {tr.passed ? <CheckCircle size={14} style={{ color: 'var(--green)' }} /> : <XCircle size={14} style={{ color: 'var(--red)' }} />}
@@ -407,7 +407,7 @@ export default function EvalPage() {
                 <p>No baselines saved yet</p>
               </div>
             ) : baselines.map(bl => (
-              <div key={bl.suite} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+              <div key={bl.suite} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium" style={{ color: 'var(--fg)' }}>{bl.suite}</span>
                   <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{bl.timestamp?.slice(0, 19)}</span>

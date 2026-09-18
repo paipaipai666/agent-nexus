@@ -215,7 +215,7 @@ export default function WikiPage() {
       {/* Header */}
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Wiki</h1>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Wiki</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>
             Hybrid knowledge system with confidence routing
           </p>
@@ -305,7 +305,7 @@ export default function WikiPage() {
                           background: selectedPage?.page_id === page.page_id ? 'var(--surface-2)' : 'var(--surface-1)',
                           border: '1px solid var(--border)',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
                         onMouseLeave={e => {
                           if (selectedPage?.page_id !== page.page_id) e.currentTarget.style.background = 'var(--surface-1)'
                         }}
@@ -340,7 +340,7 @@ export default function WikiPage() {
 
                 {/* Page Detail */}
                 {selectedPage && (
-                  <div className="flex-1 p-4 rounded-lg overflow-y-auto" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="flex-1 p-4 rounded-lg overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h2 className="text-lg font-medium" style={{ color: 'var(--fg)' }}>{selectedPage.title}</h2>
@@ -431,7 +431,7 @@ export default function WikiPage() {
                 </div>
 
                 {queryResult && (
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-xs px-2 py-1 rounded-full font-mono" style={{ background: queryResult.used_wiki ? 'var(--accent-muted)' : 'var(--surface-2)', color: queryResult.used_wiki ? 'var(--accent)' : 'var(--fg-muted)' }}>
                         {queryResult.used_wiki ? 'Wiki' : 'RAG'}
@@ -496,7 +496,7 @@ export default function WikiPage() {
                   </div>
                 ) : (
                   reviews.map(item => (
-                    <div key={item.item_id} className="p-3 rounded-lg flex items-start justify-between" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                    <div key={item.item_id} className="p-3 rounded-lg flex items-start justify-between" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                       <div className="flex items-start gap-3">
                         <span className="text-xs px-1.5 py-0.5 rounded-full font-mono font-bold" style={{ color: priorityLabel[item.priority]?.color }}>
                           {priorityLabel[item.priority]?.label || `P${item.priority}`}
@@ -525,19 +525,19 @@ export default function WikiPage() {
             {tab === 'stats' && stats && (
               <div className="max-w-xl mx-auto space-y-6">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>Pages</p>
                     <p className="text-2xl font-medium" style={{ color: 'var(--fg)' }}>{stats.page_count}</p>
                   </div>
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>Statements</p>
                     <p className="text-2xl font-medium" style={{ color: 'var(--fg)' }}>{stats.statement_count}</p>
                   </div>
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>Pending Reviews</p>
                     <p className="text-2xl font-medium" style={{ color: stats.pending_reviews > 0 ? 'var(--yellow)' : 'var(--green)' }}>{stats.pending_reviews}</p>
                   </div>
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>Calibration</p>
                     <p className="text-2xl font-medium" style={{ color: stats.calibration_needed ? 'var(--yellow)' : 'var(--green)' }}>
                       {stats.calibration_needed ? 'Needed' : 'OK'}
@@ -547,7 +547,7 @@ export default function WikiPage() {
 
                 {/* Confidence Distribution */}
                 {stats.confidence_distribution && Object.keys(stats.confidence_distribution).length > 0 && (
-                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--fg-secondary)' }}>Confidence Distribution</h3>
                     <div className="space-y-2">
                       {Object.entries(stats.confidence_distribution).map(([level, count]) => (

@@ -4,25 +4,28 @@ import { Folder, Wrench, ListTodo } from 'lucide-react'
 export default function StatusBar() {
   const { sessionId, contextUsed, stmTokens, ctxMax, totalInput, totalOutput, stepCount, cwd, toolCount, todoCount } = useSession()
 
+  const ctxPct = stmTokens != null && ctxMax ? Math.min(100, Math.round((stmTokens / ctxMax) * 100)) : (contextUsed ?? null)
+
   return (
     <div
-      className="h-8 flex items-center shrink-0 font-mono text-[11px] gap-0.5"
+      className="h-6 flex items-center shrink-0 font-mono text-[11px] gap-0.5"
       style={{
         background: 'var(--surface-1)',
-        borderTop: '1px solid var(--border)',
+        borderTop: '1px solid var(--border-subtle)',
         color: 'var(--fg-muted)',
-        paddingLeft: 14,
-        paddingRight: 14,
+        paddingLeft: 12,
+        paddingRight: 12,
       }}
     >
       <StatusItem>
         <span
-          className="w-[4px] h-[4px] rounded-full"
+          className="w-[6px] h-[6px] rounded-full animate-pulse"
           style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)' }}
         />
         {sessionId ? 'connected' : 'disconnected'}
       </StatusItem>
       <Sep />
+
       {cwd && (
         <>
           <StatusItem>
@@ -50,21 +53,29 @@ export default function StatusBar() {
           <Sep />
         </>
       )}
-      {stmTokens != null && ctxMax != null && ctxMax > 0 && (
-        <>
-          <StatusItem>ctx {Math.round(stmTokens / 1000)}k/{Math.round(ctxMax / 1000)}k ({contextUsed ?? Math.round(stmTokens / ctxMax * 100)}%)</StatusItem>
-          <Sep />
-        </>
-      )}
-      {(totalInput != null || totalOutput != null) && (
-        <>
-          <StatusItem>in:{(totalInput ?? 0).toLocaleString()} out:{(totalOutput ?? 0).toLocaleString()}</StatusItem>
-          <Sep />
-        </>
-      )}
       {stepCount != null && (
         <StatusItem>{stepCount} steps</StatusItem>
       )}
+      {/* Right: context usage + token totals */}
+      <div className="ml-auto flex items-center gap-3">
+        {(totalInput != null || totalOutput != null) && (
+          <span>in:{(totalInput ?? 0).toLocaleString()} out:{(totalOutput ?? 0).toLocaleString()}</span>
+        )}
+        {ctxPct != null && (
+          <>
+            <span>ctx {ctxPct}%</span>
+            <span
+              className="w-24 h-[3px] rounded-full overflow-hidden"
+              style={{ background: 'var(--surface-3)' }}
+            >
+              <span
+                className="block h-full rounded-full transition-all"
+                style={{ width: `${ctxPct}%`, background: 'var(--accent)', transitionDuration: '400ms', transitionTimingFunction: 'var(--ease)' }}
+              />
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

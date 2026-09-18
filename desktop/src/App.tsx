@@ -3,7 +3,7 @@ import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import ThemeProvider from './components/theme/ThemeProvider'
 import SessionProvider from './components/session/SessionProvider'
-import SettingsLayout from './components/settings/SettingsLayout'
+
 import LoadingScreen from './components/LoadingScreen'
 import ChatPage from './pages/ChatPage'
 import KnowledgePage from './pages/KnowledgePage'
@@ -56,21 +56,18 @@ export default function App() {
           <Routes>
             <Route path="/" element={<ChatPage />} />
             <Route path="/chat/:sessionId" element={<ChatPage />} />
-            <Route path="/settings" element={<SettingsLayout />}>
-              <Route index element={<SettingsPage />} />
-              <Route path="general" element={<SettingsPage />} />
-              <Route path="knowledge" element={<KnowledgePage />} />
-              <Route path="wiki" element={<WikiPage />} />
-              <Route path="skills" element={<SkillsPage />} />
-              <Route path="mcp" element={<MCPPage />} />
-              <Route path="memory" element={<MemoryPage />} />
-              <Route path="plugins" element={<PluginsPage />} />
-              <Route path="stats" element={<StatsPage />} />
-              <Route path="health" element={<HealthPage />} />
-              <Route path="alerts" element={<AlertsPage />} />
-              <Route path="audit" element={<AuditPage />} />
-              <Route path="eval" element={<EvalPage />} />
-            </Route>
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/knowledge" element={<KnowledgePage />} />
+            <Route path="/wiki" element={<WikiPage />} />
+            <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/mcp" element={<MCPPage />} />
+            <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/plugins" element={<PluginsPage />} />
+            <Route path="/stats" element={<StatsPage />} />
+            <Route path="/health" element={<HealthPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/eval" element={<EvalPage />} />
           </Routes>
           </AppShell>
         </Router>

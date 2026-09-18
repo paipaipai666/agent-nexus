@@ -75,16 +75,34 @@ export default function StatsPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="px-6 pt-5 pb-4 flex items-end justify-between" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
         <div>
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Stats &amp; Logs</h1>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Token usage, task metrics, and trace logs</p>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Usage Overview</h1>
+          <p className="text-[13px] mt-1" style={{ color: 'var(--fg-muted)' }}>Agent activity, token consumption and cost across all projects.</p>
         </div>
-        <select value={days} onChange={e => setDays(Number(e.target.value))} className="input-field text-sm">
-          <option value={1}>1 day</option>
-          <option value={7}>7 days</option>
-          <option value={30}>30 days</option>
-        </select>
+        {/* Segmented range control (v2) */}
+        <div
+          className="flex items-center gap-0.5 p-0.5 rounded-lg"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', height: 26 }}
+        >
+          {[{ v: 1, l: '24h' }, { v: 7, l: '7d' }, { v: 30, l: '30d' }].map(({ v, l }) => (
+            <button
+              key={v}
+              onClick={() => setDays(v)}
+              className="px-3 rounded-md font-mono text-[11px] transition-all"
+              style={{
+                height: 20,
+                background: days === v ? 'var(--surface-3)' : 'transparent',
+                color: days === v ? 'var(--fg)' : 'var(--fg-muted)',
+                boxShadow: days === v ? 'var(--card-highlight)' : 'none',
+                transitionDuration: '150ms',
+                transitionTimingFunction: 'var(--ease)',
+              }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
@@ -97,12 +115,12 @@ export default function StatsPage() {
             { label: 'Avg Latency', value: stats.avg_latency_ms ? `${Math.round(stats.avg_latency_ms)}ms` : '-', icon: Clock, color: 'var(--amber)' },
             { label: 'Total Cost', value: totalCost != null ? `¥${Number(totalCost).toFixed(4)}` : '-', icon: DollarSign, color: 'var(--green)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div key={label} className="p-3.5 rounded-xl transition-all" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms' }}>
               <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
-                <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
+                <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
+                <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
               </div>
-              <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>{value}</p>
+              <p className="text-xl font-semibold font-mono" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>{value}</p>
             </div>
           ))}
         </div>
@@ -139,21 +157,21 @@ export default function StatsPage() {
               color: 'var(--blue)',
             },
           ].map(({ label, value, sub, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div key={label} className="p-3.5 rounded-xl transition-all" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms' }}>
               <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
-                <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>{label}</span>
+                <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}><Icon size={12} style={{ color }} /></div>
+                <span className="text-[11px] font-medium uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>{label}</span>
               </div>
-              <p className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>{value}</p>
-              {sub && <p className="text-xs mt-0.5" style={{ color: 'var(--fg-faint)' }}>{sub}</p>}
+              <p className="text-xl font-semibold font-mono" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>{value}</p>
+              {sub && <p className="text-[11px] mt-0.5 font-mono" style={{ color: 'var(--fg-faint)' }}>{sub}</p>}
             </div>
           ))}
         </div>
 
         {/* Chart */}
         {chartData.length > 0 && (
-          <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
-            <h2 className="text-sm font-medium mb-3" style={{ color: 'var(--fg-secondary)' }}>Token Usage</h2>
+          <div className="p-4 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
+            <h2 className="text-[13px] font-semibold mb-3" style={{ color: 'var(--fg)', letterSpacing: '-0.01em' }}>Token Usage</h2>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -179,9 +197,9 @@ export default function StatsPage() {
                   <button
                     onClick={() => loadTraceDetail(trace.trace_id)}
                     className="w-full px-3 py-2.5 flex items-center justify-between text-left transition-colors rounded-lg"
-                    style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}
                   >
                     <div className="flex items-center gap-2.5">
                       {expandedTrace === trace.trace_id

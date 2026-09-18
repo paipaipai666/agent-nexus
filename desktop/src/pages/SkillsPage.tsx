@@ -36,13 +36,13 @@ export default function SkillsPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4">
-        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Skills</h1>
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Skills</h1>
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{skills.filter(s => s.enabled).length} of {skills.length} enabled</p>
       </div>
 
       <div ref={gridRef} className="flex-1 overflow-y-auto px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-3 content-start">
         {skills.map((skill) => (
-          <div key={skill.id} className="p-4 rounded-lg transition-all duration-150" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', opacity: skill.enabled ? 1 : 0.6 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+          <div key={skill.id} className="p-4 rounded-lg transition-all duration-150" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', opacity: skill.enabled ? 1 : 0.6 }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
             <div className="flex items-start justify-between mb-2.5">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: skill.enabled ? 'var(--accent-muted)' : 'var(--surface-3)' }}>

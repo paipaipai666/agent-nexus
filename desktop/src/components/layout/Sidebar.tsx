@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, Settings, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { MessageSquare, Search, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { api } from '../../services/api'
 import { useSession } from '../session/SessionProvider'
 import { useProjects, selectProject, addProject, removeProject, pickAndAddProject, workspaceKey } from '../../services/projects'
@@ -39,17 +39,22 @@ const formatTime = (dateStr: string) => {
   return new Date(dateStr + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+/**
+ * Context sidebar for the Chat section (v2: 232px, luminance-step surfaces).
+ * Projects group their sessions Codex-style; the New Chat button binds to the
+ * currently selected project folder.
+ */
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { isSessionRunning, activateSession, sessions } = useSession()
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(false)
+  const [query, setQuery] = useState('')
   const { projects, selected } = useProjects()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const isChatActive = location.pathname === '/' || location.pathname.startsWith('/chat/')
-  const isSettingsActive = location.pathname.startsWith('/settings')
 
   useEffect(() => {
     loadRecentSessions()
@@ -85,8 +90,10 @@ export default function Sidebar() {
   // implicit groups ordered by recency.
   const groups = useMemo<ProjectGroup[]>(() => {
     const byKey = new Map<string, RecentSession[]>()
+    const q = query.trim().toLowerCase()
     for (const s of recentSessions) {
       if (!s.workspace_path) continue
+      if (q && !s.preview.toLowerCase().includes(q)) continue
       const key = workspaceKey(s.workspace_path)
       const list = byKey.get(key)
       if (list) list.push(s)
@@ -103,7 +110,7 @@ export default function Sidebar() {
       .map(([key, list]) => ({ key, path: list[0].workspace_path, explicit: false, sessions: sortByRecency(list) }))
       .sort((a, b) => parseTime(b.sessions[0].last_message_at) - parseTime(a.sessions[0].last_message_at))
     return [...explicit, ...orphans]
-  }, [recentSessions, projects])
+  }, [recentSessions, projects, query])
 
   const handleNewChat = () => {
     // Dispatch event so ChatPage can reset session state even when already on '/'.
@@ -123,39 +130,61 @@ export default function Sidebar() {
   const selectedKey = selected ? workspaceKey(selected) : null
 
   return (
-    <nav
-      className="w-[220px] flex flex-col shrink-0"
-      style={{
-        background: 'var(--surface-1)',
-        borderRight: '1px solid var(--border)',
-        borderRadius: '8px 0 0 8px',
-        boxShadow: '1px 0 4px rgba(17,17,23,0.05)',
-      }}
-    >
-      <div className="flex-1 overflow-y-auto px-3 py-3">
-        {/* New Chat — binds to the selected project folder */}
+    <div className="w-[232px] flex flex-col h-full shrink-0" role="complementary" aria-label="Chat sessions">
+      {/* New Chat + search */}
+      <div className="px-2.5 pt-2.5 pb-1.5 shrink-0">
         <button
           onClick={handleNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md transition-all duration-150 text-left mb-1"
+          className="btn-primary w-full flex items-center justify-center gap-1.5"
+          style={{ height: 30 }}
+        >
+          <Plus size={13} />
+          New Chat
+        </button>
+        <div
+          className="mt-2 flex items-center gap-1.5 h-7 px-2.5 rounded-lg transition-all"
           style={{
-            background: 'var(--blue)',
-            color: '#ffffff',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border-subtle)',
+            transitionDuration: '200ms',
+            transitionTimingFunction: 'var(--ease)',
+          }}
+          onFocusCapture={(e) => {
+            e.currentTarget.style.borderColor = 'var(--accent-ring)'
+            e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow)'
+          }}
+          onBlurCapture={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border-subtle)'
+            e.currentTarget.style.boxShadow = 'none'
           }}
         >
-          <Plus size={14} />
-          <span className="text-[13px] font-medium">New Chat</span>
-        </button>
+          <Search size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search sessions…"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[12px]"
+            style={{ color: 'var(--fg)' }}
+          />
+        </div>
+      </div>
 
-        {/* Projects header + add */}
-        <div className="mb-1 mt-2 flex items-center justify-between pr-1">
-          <span className="px-3 text-[10px] font-medium tracking-wider" style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
-            PROJECTS
+      {/* Projects */}
+      <div className="flex-1 overflow-y-auto px-2.5 pb-2.5">
+        <div className="flex items-center justify-between pr-1 pt-2 pb-0.5">
+          <span
+            className="px-1 text-[11px] font-medium uppercase"
+            style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
+          >
+            Projects
           </span>
           <button
             onClick={handleAddProject}
-            className="p-1 rounded transition-colors hover:bg-[var(--surface-2)]"
+            className="p-1 rounded-md transition-colors"
             style={{ color: 'var(--fg-faint)' }}
-            title="添加项目文件夹"
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+            title="Add project folder"
           >
             <FolderPlus size={12} />
           </button>
@@ -168,14 +197,16 @@ export default function Sidebar() {
         ) : groups.length === 0 ? (
           <button
             onClick={handleAddProject}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-md transition-colors text-left hover:bg-[var(--surface-2)]"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left"
             style={{ color: 'var(--fg-faint)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-3)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
             <FolderPlus size={13} style={{ flexShrink: 0 }} />
             <span className="text-[12px]">Add a project folder…</span>
           </button>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {groups.map((group) => {
               const isSelected = selectedKey === group.key
               const isCollapsed = !!collapsed[group.key]
@@ -183,26 +214,26 @@ export default function Sidebar() {
                 <div key={group.key}>
                   {/* Project header */}
                   <div
-                    className="group/proj flex items-center gap-0.5 px-1 py-1 rounded-md"
-                    style={{ background: isSelected ? 'var(--surface-2)' : 'transparent' }}
+                    className="group/proj flex items-center gap-0.5 px-1 py-1 rounded-lg transition-colors"
+                    style={{ background: isSelected ? 'var(--surface-3)' : 'transparent', transitionDuration: '150ms' }}
                   >
                     <button
                       onClick={() => setCollapsed(c => ({ ...c, [group.key]: !c[group.key] }))}
                       className="p-0.5 shrink-0 transition-opacity"
                       style={{ color: 'var(--fg-faint)' }}
-                      title={isCollapsed ? '展开' : '折叠'}
+                      title={isCollapsed ? 'Expand' : 'Collapse'}
                     >
                       {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     </button>
                     <button
                       onClick={() => selectProject(group.path)}
                       className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                      title={`${group.path}\n选中后，新会话将在此文件夹中创建`}
+                      title={`${group.path}\nNew chats are created in this folder`}
                     >
                       <FolderOpen size={12} style={{ color: isSelected ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
                       <span
-                        className="text-[12px] truncate"
-                        style={{ color: isSelected ? 'var(--fg)' : 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
+                        className="text-[12px] font-medium truncate"
+                        style={{ color: isSelected ? 'var(--fg)' : 'var(--fg-secondary)', fontFamily: 'var(--font-mono)' }}
                       >
                         {group.path.split(/[\\/]/).filter(Boolean).pop() ?? group.path}
                       </span>
@@ -212,7 +243,7 @@ export default function Sidebar() {
                         onClick={() => removeProject(group.path)}
                         className="p-0.5 shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
                         style={{ color: 'var(--fg-faint)' }}
-                        title="从项目列表移除（会话保留）"
+                        title="Remove from projects (sessions are kept)"
                       >
                         <X size={11} />
                       </button>
@@ -221,7 +252,7 @@ export default function Sidebar() {
                         onClick={() => addProject(group.path)}
                         className="p-0.5 shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
                         style={{ color: 'var(--fg-faint)' }}
-                        title="添加为项目"
+                        title="Add as project"
                       >
                         <Plus size={11} />
                       </button>
@@ -230,7 +261,7 @@ export default function Sidebar() {
 
                   {/* Sessions under this project */}
                   {!isCollapsed && (
-                    <div className="ml-4 space-y-0.5">
+                    <div className="ml-3.5 space-y-0.5">
                       {group.sessions.length === 0 ? (
                         <div className="px-3 py-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>No chats yet</div>
                       ) : group.sessions.map((session) => {
@@ -239,29 +270,37 @@ export default function Sidebar() {
                           <button
                             key={session.session_id}
                             onClick={() => handleSessionClick(session.session_id)}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-150 text-left"
+                            className="relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all text-left"
                             style={{
-                              color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                              background: active ? 'var(--surface-2)' : 'transparent',
+                              color: active ? 'var(--fg)' : 'var(--fg-secondary)',
+                              background: active ? 'var(--accent-muted)' : 'transparent',
+                              transitionDuration: '150ms',
+                              transitionTimingFunction: 'var(--ease)',
                             }}
                           >
-                            <MessageSquare size={14} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
+                            {active && (
+                              <span
+                                className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full"
+                                style={{ background: 'var(--accent)' }}
+                              />
+                            )}
+                            <MessageSquare size={12} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
                             <span className="text-[12px] truncate flex-1" title={session.preview || 'New session'}>
                               {session.preview || 'New session'}
                             </span>
                             {isSessionRunning(session.session_id) && (
                               <span
-                                className="w-2 h-2 rounded-full shrink-0 animate-pulse"
-                                style={{ background: 'var(--green, #22c55e)' }}
+                                className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                                style={{ background: 'var(--green)' }}
                                 title="Running"
                               />
                             )}
-                            {/* R5: pending confirm badge — orange pulsing "!" */}
+                            {/* pending confirm badge — pulsing "!" */}
                             {sessions.get(session.session_id)?.pendingConfirm && (
                               <span
                                 className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
-                                style={{ background: '#f59e0b', color: '#fff' }}
-                                title="等待工具确认"
+                                style={{ background: 'var(--amber)', color: '#0a0b0d' }}
+                                title="Waiting for tool confirmation"
                               >
                                 !
                               </span>
@@ -288,23 +327,7 @@ export default function Sidebar() {
             })}
           </div>
         )}
-
-        {/* Settings */}
-        <div className="mt-4">
-          <div className="h-px my-2 mx-3" style={{ background: 'var(--border)' }} />
-          <button
-            onClick={() => navigate('/settings/general')}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md transition-all duration-150 text-left"
-            style={{
-              color: isSettingsActive ? 'var(--fg)' : 'var(--fg-muted)',
-              background: isSettingsActive ? 'var(--surface-2)' : 'transparent',
-            }}
-          >
-            <Settings size={16} style={{ color: isSettingsActive ? 'var(--accent)' : undefined }} />
-            <span className="text-[13px] truncate">Settings</span>
-          </button>
-        </div>
       </div>
-    </nav>
+    </div>
   )
 }

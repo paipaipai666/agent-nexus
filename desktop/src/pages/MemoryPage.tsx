@@ -96,7 +96,7 @@ export default function MemoryPage() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Memory</h1>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Memory</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{longMemories.length} long-term · {shortMessages.length} short-term</p>
         </div>
         {tab === 'long' && (
@@ -165,7 +165,7 @@ export default function MemoryPage() {
               const memId = m.id || m.memory_id || ''
               const catStyle = getCategoryStyle(m.category)
               return (
-                <div key={memId || i} className="p-3 rounded-lg group transition-colors" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+                <div key={memId || i} className="p-3 rounded-lg group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="px-1.5 py-0.5 rounded text-2xs font-medium" style={{ background: catStyle.bg, color: catStyle.text }}>{catStyle.label}</span>
                     <ImportanceBar value={m.importance || 0.5} effective={m.effective_importance} />

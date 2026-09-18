@@ -60,23 +60,23 @@ describe('Sidebar', () => {
     expect(screen.getByText('New Chat')).toBeInTheDocument()
   })
 
-  it('renders PROJECTS section label', () => {
+  it('renders Projects section label', () => {
     renderSidebar()
 
-    expect(screen.getByText('PROJECTS')).toBeInTheDocument()
+    expect(screen.getByText('Projects')).toBeInTheDocument()
   })
 
-  it('renders Settings button', () => {
+  it('renders session search field', () => {
     renderSidebar()
 
-    expect(screen.getByText('Settings')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Search sessions…')).toBeInTheDocument()
   })
 
-  it('renders as a nav element', () => {
+  it('renders as a complementary region', () => {
     const { container } = renderSidebar()
 
-    const nav = container.querySelector('nav')
-    expect(nav).toBeInTheDocument()
+    const region = container.querySelector('[role="complementary"]')
+    expect(region).toBeInTheDocument()
   })
 
   it('groups sessions under their project folder', async () => {

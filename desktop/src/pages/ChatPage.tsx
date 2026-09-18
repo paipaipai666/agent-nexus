@@ -68,7 +68,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
   const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
 
   return (
-    <div className="my-3 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+    <div className="my-2 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--card-highlight)' }}>
       <Collapsible
         defaultExpanded={msg.toolStatus === 'running'}
         header={
@@ -124,8 +124,8 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
       <div className="max-w-3xl mx-auto px-6">
         {/* Role label — only for user messages */}
         {msg.role === 'user' && (
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>
+          <div className="flex items-center justify-end gap-2 mb-1">
+            <span className="text-[11px] uppercase font-medium" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>
               You
             </span>
           </div>
@@ -135,8 +135,18 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
         {msg.role === 'tool' ? (
           <ToolCard msg={msg} />
         ) : msg.role === 'user' ? (
-          <div className="text-[14px] leading-relaxed" style={{ color: 'var(--fg)' }}>
-            {msg.content}
+          <div className="flex justify-end">
+            <div
+              className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%]"
+              style={{
+                color: 'var(--fg-secondary)',
+                background: 'var(--surface-1)',
+                border: '1px solid var(--border-subtle)',
+                boxShadow: 'var(--card-highlight)',
+              }}
+            >
+              {msg.content}
+            </div>
           </div>
         ) : msg.role === 'system' ? (
           <Collapsible
@@ -180,6 +190,7 @@ export default function ChatPage() {
   const [showPalette, setShowPalette] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
+  const [paletteDismissed, setPaletteDismissed] = useState(false)
   const paletteAnimDoneRef = useRef(false)
 
   const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
@@ -228,9 +239,12 @@ export default function ChatPage() {
     if (currentSid) {
       const cachedState = getLiveSessionState(currentSid)
       if (cachedState && cachedState.messages.length > 0) {
+        // The provider passes activeState.messages straight from the Map, so
+        // the UI already reflects live state — no setMessages here. Writing
+        // the snapshot back would clobber events that landed after the read
+        // (replace-with-stale-array race while a run is streaming).
         console.log('[loadAndDisplayMessages] Using Map cache:', cachedState.messages.length, 'messages')
         for (const m of cachedState.messages) animatedIds.add(m.id)
-        setMessages(cachedState.messages)
         return
       }
     }
@@ -521,7 +535,7 @@ export default function ChatPage() {
 
   const handleSend = () => {
     const text = input.trim(); if (!text) return
-    setInput(''); setShowPalette(false)
+    setInput(''); setShowPalette(false); setPaletteDismissed(false)
     if (text.startsWith('/')) { handleSlashCommand(text); return }
     if (isRunning) { queueMessage(text) }
     else handleSendMessage(text)
@@ -621,8 +635,10 @@ export default function ChatPage() {
       if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteIndex(i => (i + 1) % filteredCommands.length); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handlePaletteSelect(filteredCommands[paletteIndex].cmd); return }
-      if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); paletteAnimDoneRef.current = false; return }
+      if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); setPaletteDismissed(true); paletteAnimDoneRef.current = false; return }
     }
+    // Palette open with no matches (e.g. mid-typing an argument) — Esc still dismisses
+    if (showPalette && e.key === 'Escape') { e.preventDefault(); setShowPalette(false); setPaletteDismissed(true); return }
     if (e.key === 'Escape' && isRunning) {
       e.preventDefault()
       const now = Date.now()
@@ -639,7 +655,12 @@ export default function ChatPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value
     setInput(v)
-    const show = v.startsWith('/') && v.length > 0
+    // Dismissal (Esc) persists until the user leaves the slash-command context,
+    // e.g. clears the leading '/'. Otherwise the palette would pop back open on
+    // every keystroke while typing.
+    const isSlashContext = v.startsWith('/') && v.length > 0
+    if (!isSlashContext) setPaletteDismissed(false)
+    const show = isSlashContext && !paletteDismissed
     if (!show) paletteAnimDoneRef.current = false
     setShowPalette(show)
     setPaletteFilter(v)
@@ -698,19 +719,19 @@ export default function ChatPage() {
           <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
             <div className="text-center">
               <h1
-                className="text-[42px] mb-2 tracking-wide uppercase"
-                style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}
+                className="text-[22px] font-semibold mb-2"
+                style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}
               >
                 What are we building?
               </h1>
-              <p className="text-[16px] max-w-md mx-auto" style={{ color: 'var(--fg-secondary)' }}>
+              <p className="text-[13px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
                 Code. Debug. Create. Ship.
               </p>
             </div>
 
             {/* Quick Actions */}
             <div className="w-full max-w-2xl mt-4">
-              <div className="text-[11px] font-medium tracking-widest mb-3 uppercase" style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+              <div className="text-[11px] font-medium mb-3 uppercase" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>
                 Start a conversation
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -725,12 +746,12 @@ export default function ChatPage() {
                   <button
                     key={action.label}
                     onClick={() => { setInput(action.desc); inputRef.current?.focus() }}
-                    className="flex items-center gap-3 p-3 rounded-md text-left transition-colors"
-                    style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-1)' }}
+                    className="flex items-center gap-3 p-3 rounded-xl text-left transition-all"
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)', transitionDuration: '150ms', transitionTimingFunction: 'var(--ease)' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
                   >
-                    <div className="w-10 h-10 rounded-md flex items-center justify-center text-lg" style={{ background: 'var(--accent-muted)' }}>
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base" style={{ background: 'var(--accent-muted)' }}>
                       {action.icon}
                     </div>
                     <div>
@@ -768,9 +789,10 @@ export default function ChatPage() {
         {/* Command Palette */}
         {showPalette && filteredCommands.length > 0 && (
           <div
-            className="absolute bottom-full left-6 right-6 mb-2 rounded-lg overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
-            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
+            className="absolute bottom-full left-6 right-6 mb-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-elevated)' }}
           >
+
             {(() => {
               const CATEGORY_LABELS: Record<string, string> = { system: 'System', skill: 'Skills', mcp: 'MCP Tools', plugin: 'Plugins' }
               const CATEGORY_COLORS: Record<string, string> = { system: 'var(--fg-faint)', skill: 'var(--green)', mcp: 'var(--blue)', plugin: 'var(--amber)' }
@@ -803,12 +825,13 @@ export default function ChatPage() {
             })()}
           </div>
         )}
-
-        {/* Floating Input */}
         <div
-          className="max-w-3xl mx-auto"
-          style={{ background: 'var(--surface-1)', border: '2px solid var(--border-strong)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-hard)' }}
+          className="max-w-3xl mx-auto transition-all"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--card-highlight)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
+          onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--card-highlight)' }}
+          onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'var(--card-highlight)' }}
         >
+
           {/* Workspace chip — this chat's folder; locked once created */}
           <div className="flex items-center px-3 pt-2">
             {sessionId ? (
@@ -856,8 +879,9 @@ export default function ChatPage() {
                 disabled={!input.trim()}
                 className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0"
                 style={{
-                  background: input.trim() ? 'var(--accent)' : 'var(--surface-3)',
+                  background: input.trim() ? 'var(--accent-gradient)' : 'var(--surface-3)',
                   color: input.trim() ? '#ffffff' : 'var(--fg-faint)',
+                  boxShadow: input.trim() ? '0 1px 6px var(--accent-glow)' : 'none',
                 }}
               >
                 <Send size={14} />
@@ -866,7 +890,7 @@ export default function ChatPage() {
           </div>
 
           {/* HUD row — model switcher + session actions */}
-          <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
+          <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-muted)' }}>
             <ModelPicker
               currentModel={runtimeStatus?.model_id ?? null}
               onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}
@@ -888,7 +912,7 @@ export default function ChatPage() {
 
       {/* Checkpoint Overlay */}
       {showCheckpoints && (
-        <div className="absolute bottom-28 left-5 w-96 rounded-lg overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-lg)' }}>
+        <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-elevated)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
             <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>

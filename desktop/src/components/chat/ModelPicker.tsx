@@ -206,7 +206,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
           </div>
 
           <button
-            onClick={() => { setOpen(false); navigate('/settings/general') }}
+            onClick={() => { setOpen(false); navigate('/settings') }}
             className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-3)] shrink-0"
             style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}
           >

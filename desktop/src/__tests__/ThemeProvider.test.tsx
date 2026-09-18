@@ -19,30 +19,18 @@ describe('ThemeProvider', () => {
     document.documentElement.removeAttribute('data-theme')
   })
 
-  it('defaults to light theme', () => {
+  it('defaults to dark theme', () => {
     render(
       <ThemeProvider>
         <ThemeConsumer />
       </ThemeProvider>
     )
 
-    expect(screen.getByTestId('theme')).toHaveTextContent('light')
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
   })
 
   it('reads saved theme from localStorage', () => {
-    localStorage.setItem('agentnexus-theme', 'dark')
-
-    render(
-      <ThemeProvider>
-        <ThemeConsumer />
-      </ThemeProvider>
-    )
-
-    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
-  })
-
-  it('toggles theme from light to dark', async () => {
-    const user = userEvent.setup()
+    localStorage.setItem('agentnexus-theme', 'light')
 
     render(
       <ThemeProvider>
@@ -51,13 +39,25 @@ describe('ThemeProvider', () => {
     )
 
     expect(screen.getByTestId('theme')).toHaveTextContent('light')
+  })
+
+  it('toggles theme from dark to light', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ThemeProvider>
+        <ThemeConsumer />
+      </ThemeProvider>
+    )
+
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
 
     await user.click(screen.getByText('toggle'))
 
-    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
+    expect(screen.getByTestId('theme')).toHaveTextContent('light')
   })
 
-  it('toggles theme back to light', async () => {
+  it('toggles theme back to dark', async () => {
     const user = userEvent.setup()
 
     render(
@@ -67,10 +67,10 @@ describe('ThemeProvider', () => {
     )
 
     await user.click(screen.getByText('toggle'))
-    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
+    expect(screen.getByTestId('theme')).toHaveTextContent('light')
 
     await user.click(screen.getByText('toggle'))
-    expect(screen.getByTestId('theme')).toHaveTextContent('light')
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
   })
 
   it('persists theme to localStorage', async () => {
@@ -84,7 +84,7 @@ describe('ThemeProvider', () => {
 
     await user.click(screen.getByText('toggle'))
 
-    expect(localStorage.getItem('agentnexus-theme')).toBe('dark')
+    expect(localStorage.getItem('agentnexus-theme')).toBe('light')
   })
 
   it('sets data-theme attribute on document root', () => {
@@ -94,7 +94,7 @@ describe('ThemeProvider', () => {
       </ThemeProvider>
     )
 
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
 
   it('ignores invalid localStorage value', () => {
@@ -106,7 +106,7 @@ describe('ThemeProvider', () => {
       </ThemeProvider>
     )
 
-    expect(screen.getByTestId('theme')).toHaveTextContent('light')
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark')
   })
 
   it('provides context to nested components', () => {
@@ -123,6 +123,6 @@ describe('ThemeProvider', () => {
       </ThemeProvider>
     )
 
-    expect(screen.getByTestId('deep')).toHaveTextContent('light')
+    expect(screen.getByTestId('deep')).toHaveTextContent('dark')
   })
 })

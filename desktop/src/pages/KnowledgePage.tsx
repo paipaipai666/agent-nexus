@@ -183,7 +183,7 @@ export default function KnowledgePage() {
       {/* Header */}
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>Knowledge Base</h1>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Knowledge Base</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{documents.length} documents · {totalChunks} chunks</p>
         </div>
         <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".txt,.md,.pdf,.html,.doc,.docx,.json,.csv" />
@@ -275,7 +275,7 @@ export default function KnowledgePage() {
             documents.map((doc, i) => {
               const docId = doc.document_id || doc.doc_id || doc.id || ''
               return (
-                <div key={i} className="p-3 rounded-lg flex items-center justify-between group transition-colors" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+                <div key={i} className="p-3 rounded-lg flex items-center justify-between group transition-colors" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'} onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}>
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--accent-muted)' }}>
                       <FileText size={14} style={{ color: 'var(--accent)' }} />

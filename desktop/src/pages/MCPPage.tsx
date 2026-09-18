@@ -47,7 +47,7 @@ export default function MCPPage() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>MCP Servers</h1>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>MCP Servers</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>{connected} connected · {totalTools} tools</p>
         </div>
         <div className="flex items-center gap-2">
@@ -73,7 +73,7 @@ export default function MCPPage() {
             { label: 'Resources', value: servers.reduce((s, sv) => s + sv.resource_count, 0), icon: Package, color: 'var(--blue)' },
             { label: 'Prompts', value: servers.reduce((s, sv) => s + sv.prompt_count, 0), icon: FileText, color: 'var(--purple)' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-3.5 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div key={label} className="p-3.5 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>
                   <Icon size={12} style={{ color }} />
@@ -93,7 +93,7 @@ export default function MCPPage() {
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No MCP servers configured</p>
             </div>
           ) : servers.map(server => (
-            <div key={server.name} className="rounded-lg overflow-hidden" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div key={server.name} className="rounded-lg overflow-hidden" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
               <div className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: server.connected ? 'var(--green)' : server.state === 'healthy' ? 'var(--amber)' : 'var(--red)', boxShadow: server.connected ? '0 0 8px var(--green-muted)' : 'none' }} />

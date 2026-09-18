@@ -368,7 +368,7 @@ export default function SettingsPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4">
-        <h1 className="text-xl uppercase tracking-wider" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)' }}>General</h1>
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>General</h1>
         <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Core configuration for LLM, agent, RAG, and execution</p>
       </div>
 
@@ -376,7 +376,7 @@ export default function SettingsPage() {
         {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
         {/* ── Persona Section ─────────────────────────────────── */}
-        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
           <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>Persona</h2>
           <div className="space-y-2.5">
             {/* Simple fields */}
@@ -464,7 +464,7 @@ export default function SettingsPage() {
         </div>
 
         {/* ── Model Providers ───────────────────────────────── */}
-        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+        <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Model Providers</h2>
             <button
@@ -538,7 +538,7 @@ export default function SettingsPage() {
 
               {/* discovered models (checkbox import) */}
               {p.discovered && p.discovered.length > 0 && (
-                <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>勾选导入（{p.discovered.filter(m => m.checked).length} 选中）</span>
                     <button
@@ -649,7 +649,7 @@ export default function SettingsPage() {
           const visibleKeys = keys.filter(k => k in config)
           if (visibleKeys.length === 0) return null
           return (
-            <div key={group} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div key={group} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
               <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>{group}</h2>
               <div className="space-y-2.5">
                 {visibleKeys.map(key => (

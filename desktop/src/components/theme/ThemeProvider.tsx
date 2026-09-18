@@ -7,7 +7,7 @@ interface ThemeContextType {
   toggleTheme: () => void
 }
 
-const ThemeContext = createContext<ThemeContextType>({ theme: 'light', toggleTheme: () => {} })
+const ThemeContext = createContext<ThemeContextType>({ theme: 'dark', toggleTheme: () => {} })
 
 export function useTheme() {
   return useContext(ThemeContext)
@@ -20,7 +20,7 @@ interface ThemeProviderProps {
 export default function ThemeProvider({ children }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem('agentnexus-theme')
-    return saved === 'dark' ? 'dark' : 'light'
+    return saved === 'light' ? 'light' : 'dark'
   })
 
   useEffect(() => {
@@ -28,7 +28,13 @@ export default function ThemeProvider({ children }: ThemeProviderProps) {
     localStorage.setItem('agentnexus-theme', theme)
   }, [theme])
 
-  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  const toggleTheme = () => {
+    // Animate the color transition, then clean up so hover transitions stay snappy
+    document.documentElement.classList.add('theme-anim')
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+    window.setTimeout(() => document.documentElement.classList.remove('theme-anim'), 260)
+  }
+
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>

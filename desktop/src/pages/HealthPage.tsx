@@ -98,7 +98,7 @@ export default function HealthPage() {
         {health && (
           <>
             {/* Overall Status */}
-            <div className="p-5 rounded-lg flex items-center gap-4" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+            <div className="p-5 rounded-lg flex items-center gap-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
               <StatusIcon status={health.status} size={32} />
               <div>
                 <p className="text-xl font-semibold" style={{ color: health.status === 'ok' ? 'var(--green)' : 'var(--amber)' }}>
@@ -120,7 +120,7 @@ export default function HealthPage() {
                 const statusColor = check.status === 'ok' ? 'var(--green)' : check.status === 'degraded' ? 'var(--amber)' : 'var(--red)'
 
                 return (
-                  <div key={name} className="p-4 rounded-lg" style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                  <div key={name} className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--card-highlight)' }}>
                     <div className="flex items-center gap-3 mb-2">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>
                         <Icon size={16} style={{ color: statusColor }} />
