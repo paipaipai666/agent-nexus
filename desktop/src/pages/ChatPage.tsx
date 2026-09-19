@@ -160,16 +160,24 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           <ToolCard msg={msg} />
         ) : msg.role === 'user' ? (
           <div className="flex justify-end">
-            <div
-              className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%]"
-              style={{
-                color: 'var(--fg-secondary)',
-                background: 'var(--surface-1)',
-                border: '1px solid var(--border-subtle)',
-                boxShadow: 'var(--shadow-card), var(--card-highlight)',
-              }}
-            >
-              {msg.content}
+            <div className="flex flex-col items-end">
+              <div
+                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%]"
+                style={{
+                  color: 'var(--fg-secondary)',
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--border-subtle)',
+                  boxShadow: 'var(--shadow-card), var(--card-highlight)',
+                }}
+              >
+                {msg.content}
+              </div>
+              {msg.reaction && (
+                <div className="flex items-center gap-1.5 mt-1 text-[11px] italic" style={{ color: 'var(--fg-muted)' }}>
+                  <span className="not-italic text-sm leading-none">{msg.reaction.emoji}</span>
+                  {msg.reaction.comment && <span>{msg.reaction.comment}</span>}
+                </div>
+              )}
             </div>
           </div>
         ) : msg.role === 'system' ? (

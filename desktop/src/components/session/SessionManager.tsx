@@ -7,6 +7,8 @@ export interface Message {
   content: string
   toolName?: string
   toolStatus?: 'running' | 'done' | 'error'
+  /** Optional emoji reaction the agent attached under this user message. */
+  reaction?: { emoji: string; comment: string }
   timestamp: Date
 }
 
@@ -418,6 +420,21 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             }
           }
           return { ...prev, messages: [...prev.messages, card] }
+        })
+      }),
+      wsPool.on(sid, 'user_reaction', (data) => {
+        // express_reaction tool rewritten by the server — attach the emoji to
+        // the last user message bubble instead of showing a tool card.
+        if (!data?.emoji) return
+        updateSession(sid, prev => {
+          let idx = -1
+          for (let i = prev.messages.length - 1; i >= 0; i--) {
+            if (prev.messages[i].role === 'user') { idx = i; break }
+          }
+          if (idx === -1) return prev
+          const messages = [...prev.messages]
+          messages[idx] = { ...messages[idx], reaction: { emoji: data.emoji, comment: data.comment || '' } }
+          return { ...prev, messages }
         })
       }),
       wsPool.on(sid, 'tool_call', (data) => {

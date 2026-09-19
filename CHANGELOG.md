@@ -11,6 +11,7 @@ All notable changes to AgentNexus will be documented in this file.
 - **提示词系统五件套** — ① AGENTS.md 层级发现（Codex 语义：`~/.agentnexus/AGENTS.md` + 根→cwd 链，深层覆盖浅层，单文件 8k/总量 20k 预算，不读 CLAUDE.md）；② 系统上下文注入 `== 运行环境 ==` 块（OS/工作目录(会话 workspace 感知)/终端/本地时间精确到分钟带时区）；③ 消除工具描述双轨——NATIVE_TOOLS 策略只发 native schema，JSON 类策略保留文本清单作为唯一工具面，策略降级时自动重建消息块补回清单；④ 用户定制面 `append_system_prompt`（config.yaml，注入系统上下文末尾，高于平台默认准则、低于安全约束）；⑤ `react.txt`/`react_think.txt` 新增 `== 身份 ==` 与 `== 输出契约 ==` 段（Persona 未配置时的默认身份；语言跟随用户、简洁优先、最终答案自包含）
 - **提示词 section 化与增量重建** — 上下文块改为命名 section 字典（`build_react_sections`/`diff_sections`/`assemble_react_messages`），消息按稳定→易变分组（rules/memory/conversation/static/tools/volatile）；重建时只重渲染含变更 section 的组，未变更组字节级一致，provider 前缀缓存命中到第一个变更点；每次重建记录 `prompt sections rebuilt: <变更名>` 调试日志
 - 新增 `agentnexus/agents/runtime_context.py`（环境块 + AGENTS.md 发现）与 `tests/unit/test_runtime_context.py`（13 个行为测试）
+- **`express_reaction`：模型对用户提问的表情反馈（娱乐功能）** — 新增 `agentnexus/tools/user_reaction.py` 与 `ReactionToolProvider`（`enable_user_reaction` 默认 `false`，关闭时工具不注册、模型不可见）。模型在 ReAct 循环内**自主决定**是否对用户提问表达反应，8 种枚举（👍👎🤩😔🤔😑😲🥱）加一句可选吐槽（50 字截断），不调用即无反应。GUI 侧不出现工具卡片：`server/routes/chat.py` 新增 `_GUI_EVENT_OVERRIDES` 映射表，`tool_start` 改写为 `user_reaction` 事件、`tool_done` 跳过，桌面端将表情渲染在用户消息气泡下方（`SessionManager.tsx` 事件监听 / `ChatPage.tsx` 气泡渲染），TUI 同步支持（`ChatMessage.attach_reaction`，TOOL_START/TOOL_DONE 特判跳过卡片）
 
 ### Changed
 
@@ -29,6 +30,7 @@ All notable changes to AgentNexus will be documented in this file.
 
 - 新增 `tests/unit/test_eval_runner_transcript.py`（5 个行为测试：真实时钟、grader 协议映射、trace_id 记录、不劫持上游 trace、兜底不编造时间）
 - 新增 `experiments/e2e_eval_smoke.py` — mock 模型端到端验证 runner→trace→grader→report 全链路（含正反两个 grader 判定）
+- 新增 `tests/unit/test_user_reaction.py`（15 用例：枚举校验、吐槽截断与空白归一、开关默认关闭 / 开启注册 / 配置读取异常降级、GUI 事件改写含 JSON 字符串参数与普通工具不受影响）
 
 ## [0.2.16] - 2026-09-10
 

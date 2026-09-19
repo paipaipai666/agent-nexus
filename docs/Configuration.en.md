@@ -160,6 +160,12 @@ persona:
 
 Also editable directly in the Desktop GUI Settings page.
 
+### Interaction (1)
+
+| Field | Default | Description |
+|------|--------|------|
+| `enable_user_reaction` | `False` | Registers the `express_reaction` tool: the agent may optionally react to the user's question with an emoji (entertainment; not calling = no reaction). When off, the tool is not registered and the model never sees it |
+
 ### Other
 
 | Field | Default | Description |

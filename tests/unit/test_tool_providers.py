@@ -21,6 +21,7 @@ def test_default_providers_expose_specs():
         "codegraph",
         "browser",
         "computer-use",
+        "reaction",
     ]
 
 

@@ -81,8 +81,10 @@ class ChatArea(Widget):
     """
 
     def add_message(self, role: str, content: str):
-        self.mount(ChatMessage(role, content))
+        widget = ChatMessage(role, content)
+        self.mount(widget)
         self.call_after_refresh(self.scroll_end)
+        return widget
 
     def add_system(self, text: str):
         self.mount(ChatMessage("system", text, markup=True))
@@ -119,6 +121,7 @@ class ChatScreen(Screen):
         self._current_tool_name: str = ""
         self._current_tool_widget = None
         self._current_tool_started_at = 0.0
+        self._last_user_msg_widget = None  # express_reaction attaches emoji here
         self._turn_tool_names: list[str] = []
         self._turn_thought_count = 0
         self._skill_registry: SkillRegistry | None = None
@@ -235,7 +238,7 @@ class ChatScreen(Screen):
         inp = self.query_one("#chat-input", Input)
         inp.value = ""
         self._update_command_suggestions("")
-        self._chat_area.add_message("user", text)
+        self._last_user_msg_widget = self._chat_area.add_message("user", text)
         if text.startswith("/"):
             self._handle_command(text)
         elif self._chat_service.is_processing:
@@ -1548,6 +1551,23 @@ class ChatScreen(Screen):
             elif etype == E.TOOL_START:
                 self._stop_spinner()
                 tool_name = event.payload.get("name", "")
+                if tool_name == "express_reaction":
+                    # Entertainment reaction — attach an emoji row under the
+                    # user's message instead of showing a tool card.
+                    from agentnexus.tools.user_reaction import (
+                        REACTION_EMOJI,
+                        parse_reaction_arguments,
+                    )
+                    name, comment = parse_reaction_arguments(
+                        event.payload.get("arguments", {}))
+                    emoji = REACTION_EMOJI.get(name, "")
+                    if self._last_user_msg_widget is not None:
+                        try:
+                            self._last_user_msg_widget.attach_reaction(emoji, comment)
+                        except Exception as e:
+                            logger.debug("attach_reaction failed: %s", e)
+                    self._chat_area.call_after_refresh(self._chat_area.scroll_end)
+                    return
                 self._current_tool_name = tool_name
                 self._turn_tool_names.append(tool_name)
                 self._current_tool_started_at = time.monotonic()
@@ -1560,6 +1580,9 @@ class ChatScreen(Screen):
                 self._spinner_timer = self.set_interval(0.12, self._tick_spinner)
             elif etype == E.TOOL_DONE:
                 self._stop_spinner()
+                if event.payload.get("name", "") == "express_reaction":
+                    # Already presented as an emoji under the user's message.
+                    return
                 result = event.payload.get("result", "")
                 if self._current_tool_started_at:
                     self._current_tool_started_at = 0.0

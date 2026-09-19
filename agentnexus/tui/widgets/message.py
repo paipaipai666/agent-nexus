@@ -87,6 +87,18 @@ class ChatMessage(Widget):
                 self.mount(w)
 
 
+    def attach_reaction(self, emoji: str, comment: str = ""):
+        """Mount a small emoji reaction row under this message (user bubbles).
+
+        Used by the express_reaction entertainment tool — renders as a subtle
+        footnote instead of a tool card.
+        """
+        if not emoji:
+            return
+        quip = f" {comment}" if comment else ""
+        self.mount(Static(_safe(f"{emoji}{quip}"), classes="msg-reaction"))
+
+
 class ToolCall(Widget):
     """Inline tool call display — warm orange border, tool name + result."""
 

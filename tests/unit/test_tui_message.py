@@ -45,6 +45,31 @@ class TestChatMessage:
         assert children[0].id == "msg-content"
 
 
+class TestAttachReaction:
+    def test_attach_mounts_reaction_row(self):
+        msg = ChatMessage("user", "hello")
+        with patch.object(msg, "mount") as mock_mount:
+            msg.attach_reaction("👍", "这题有意思")
+        assert mock_mount.call_count == 1
+        row = mock_mount.call_args[0][0]
+        assert isinstance(row, Static)
+        assert "msg-reaction" in row.classes
+        assert row.content.plain == "👍 这题有意思"
+
+    def test_attach_without_comment(self):
+        msg = ChatMessage("user", "hello")
+        with patch.object(msg, "mount") as mock_mount:
+            msg.attach_reaction("🤩")
+        row = mock_mount.call_args[0][0]
+        assert row.content.plain == "🤩"
+
+    def test_empty_emoji_is_noop(self):
+        msg = ChatMessage("user", "hello")
+        with patch.object(msg, "mount") as mock_mount:
+            msg.attach_reaction("")
+        mock_mount.assert_not_called()
+
+
 class TestToolCall:
     def test_init(self):
         tc = ToolCall("bash", "ok", 150)

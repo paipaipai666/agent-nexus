@@ -384,6 +384,9 @@ class Settings(BaseSettings):
 
     # ── RAG / Retrieval ──────────────────────────────────────────────────
     enable_contextual_retrieval: bool = Field(default=False)
+    # express_reaction 工具（娱乐：模型自主决定是否对用户提问发表情反应）。
+    # 默认 false：不往工具列表里注入娱乐工具；开启后模型可选择调用。
+    enable_user_reaction: bool = Field(default=True)
     enable_query_rewrite: bool = Field(default=True)
     enable_multi_query: bool = Field(default=True)
     enable_hyde: bool = Field(default=False)

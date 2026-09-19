@@ -57,6 +57,15 @@ ChatMessage.system {
   border-left: tall $muted;
 }
 
+/* express_reaction emoji — subtle footnote under the user bubble */
+.msg-reaction {
+  color: $text-dim;
+  text-style: italic;
+  padding: 0 0 0 1;
+  width: 1fr;
+  height: auto;
+}
+
 /* ===== Tool Call ===== */
 ToolCall {
   padding: 0 1;

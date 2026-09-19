@@ -14,6 +14,33 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def _reaction_event(payload: dict, run_id, seq: int) -> dict:
+    """Rewrite an express_reaction tool_start into a user_reaction event.
+
+    The reaction tool must never reach the GUI as a tool card; it renders as a
+    small emoji under the user's message bubble instead.
+    """
+    from agentnexus.tools.user_reaction import REACTION_EMOJI, parse_reaction_arguments
+
+    name, comment = parse_reaction_arguments(payload.get("arguments", {}))
+    return {
+        "type": "user_reaction",
+        "reaction": name,
+        "emoji": REACTION_EMOJI.get(name, ""),
+        "comment": comment,
+        "run_id": run_id,
+        "seq": seq,
+    }
+
+
+# Tools whose GUI presentation is specialized: their tool_start is rewritten by
+# the mapped function and their tool_done is skipped entirely. Add entries here
+# instead of scattering name checks across _map_to_gui_event.
+_GUI_EVENT_OVERRIDES = {
+    "express_reaction": _reaction_event,
+}
+
+
 def _parse_journal_entry(entry: str) -> dict[str, str]:
     """Parse a TurnRuntime journal entry into structured data."""
     if entry.startswith("thought: "):
@@ -43,6 +70,9 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
 
     # Direct tool events — payload carries structured data, no journal parsing needed
     if event_type == "tool_start":
+        override = _GUI_EVENT_OVERRIDES.get(payload.get("name", ""))
+        if override is not None:
+            return override(payload, run_id, seq)
         return {
             "type": "tool_call",
             "tool_name": payload.get("name", ""),
@@ -52,6 +82,9 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         }
 
     if event_type == "tool_done":
+        if payload.get("name", "") in _GUI_EVENT_OVERRIDES:
+            # Already presented by the rewritten tool_start event.
+            return None
         return {
             "type": "tool_result",
             "tool_name": payload.get("name", ""),
