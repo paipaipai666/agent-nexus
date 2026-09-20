@@ -72,7 +72,7 @@ function createEmptySession(sessionId: string): SessionState {
 
 // ── Context type (backward-compatible with SessionProvider) ─────
 
-interface SessionManagerContextType {
+export interface SessionManagerContextType {
   // Session metadata
   sessionId: string | null
   modelName: string | null
@@ -590,6 +590,13 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         if (data.run_id) {
           updateSession(sid, prev => ({ ...prev, currentRunId: data.run_id }))
         }
+        // Server-confirmed turn start: the backend persists the session
+        // preview BEFORE sending run_started (update_session_preview runs
+        // first in the send_message branch), so refetching now makes a new
+        // session visible in the sidebar immediately. The send-time
+        // session-updated races that write and usually sees nothing —
+        // this is the confirmation point (codex/opencode refresh here).
+        window.dispatchEvent(new Event('session-updated'))
       }),
       wsPool.on(sid, 'confirm_request', (data) => {
         updateSession(sid, prev => ({

@@ -119,6 +119,25 @@ export default function Sidebar() {
     window.dispatchEvent(new Event('new-chat'))
     navigate('/')
   }
+
+  // Draft row (opencode-style): the in-progress chat is visible BEFORE the
+  // server row exists. Two draft states:
+  //   '/'          — New Chat screen, session not yet created (lazy creation)
+  //   /chat/:sid   — session created + first message sent, but the server
+  //                  row isn't visible yet (preview lands at run_started;
+  //                  local first user message bridges the gap)
+  const draftSession = useMemo<{ id: string; preview: string; isNew: boolean } | null>(() => {
+    if (location.pathname === '/') {
+      return { id: '', preview: '', isNew: true }
+    }
+    if (location.pathname.startsWith('/chat/')) {
+      const sid = location.pathname.slice('/chat/'.length)
+      if (!sid || recentSessions.some(s => s.session_id === sid)) return null
+      const firstUser = sessions.get(sid)?.messages.find(m => m.role === 'user')
+      return { id: sid, preview: firstUser?.content ?? '', isNew: false }
+    }
+    return null
+  }, [location.pathname, recentSessions, sessions])
   const handleAddProject = async () => {
     await pickAndAddProject(selected)
   }
@@ -172,6 +191,40 @@ export default function Sidebar() {
 
       {/* Projects */}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
+        {/* Draft chat — pinned above project groups, visible before the
+            server-side session row exists (lazy creation / pre-run_started) */}
+        {draftSession && (
+          <button
+            onClick={() => (draftSession.isNew ? navigate('/') : handleSessionClick(draftSession.id))}
+            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 mb-1 rounded-lg transition-all text-left"
+            style={{
+              color: 'var(--fg)',
+              background: 'var(--accent-muted)',
+              boxShadow: 'var(--glow-accent)',
+              transitionDuration: '150ms',
+              transitionTimingFunction: 'var(--ease)',
+            }}
+          >
+            <span
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full"
+              style={{ background: 'var(--accent)' }}
+            />
+            <MessageSquare size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            <span className="text-[12px] truncate flex-1" title={draftSession.preview || 'New session'}>
+              {draftSession.preview || 'New session'}
+            </span>
+            {!draftSession.isNew && isSessionRunning(draftSession.id) && (
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                style={{ background: 'var(--green)' }}
+                title="Running"
+              />
+            )}
+            <span className="text-[10px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
+              now
+            </span>
+          </button>
+        )}
         <div className="flex items-center justify-between pr-1 pt-3 pb-1.5">
           <span
             className="px-1 text-[11px] font-medium uppercase"
