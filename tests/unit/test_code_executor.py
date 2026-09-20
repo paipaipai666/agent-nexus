@@ -95,7 +95,7 @@ class TestPythonExecute:
         assert "No safe Python execution sandbox" in result
         assert "hello" not in result
 
-    @patch("agentnexus.tools.code_executor.subprocess.run")
+    @patch("agentnexus.tools.code_executor.process_tracker.run_tracked")
     @patch("agentnexus.tools.code_executor.shutil.which")
     def test_docker_backend_uses_restricted_container_flags(self, mock_which, mock_run):
         mock_which.return_value = "docker"

@@ -237,11 +237,10 @@ class ChatService:
             self._token_cursors[session_id] = 0
         # Mark this session as processing
         self.mark_processing(True, session_id=session_id)
-        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
-        if on_run_started is not None:
-            on_run_started(run)
-        # Persist user question immediately so it survives even if the run
-        # is interrupted (e.g. WebSocket disconnect, page navigation).
+        # Persist user question BEFORE the run starts so it is durable the
+        # moment on_run_started fires (run_started ⇒ user message already
+        # on disk — a disconnect/cancel from the event-loop thread can no
+        # longer win the first commit slot).
         try:
             version_mgr = self._get_version_manager(session_id)
             existing = version_mgr.get_messages(limit=0)
@@ -252,6 +251,9 @@ class ChatService:
                 )
         except Exception as e:
             logger.debug("Failed to persist user question immediately: %s", e)
+        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
+        if on_run_started is not None:
+            on_run_started(run)
         old_on_event = getattr(agent, "_on_event", None)
         old_output = getattr(agent, "_output", None)
         try:
@@ -313,6 +315,10 @@ class ChatService:
                 run_id=run.id, session_id=session_id,
             ))
         except Exception as exc:
+            # If the turn was already settled externally (cancel_run from the
+            # WS lifecycle / cancel endpoint), its terminal events were
+            # emitted there — re-emitting would duplicate them for the client.
+            already_settled = turn.record_snapshot.status != "running"
             if turn.cancel_checker() or isinstance(exc, AgentCancelled):
                 record = turn.cancel("cancelled")
                 event_type = "run_interrupted"
@@ -320,20 +326,21 @@ class ChatService:
                 record = turn.fail("Agent 执行错误", str(exc))
                 event_type = "run_failed"
             self._run_snapshots[run.id] = record
-            payload = {
-                "error": str(exc),
-                "status": record.status,
-                "answer": record.answer,
-                "reason": record.reason,
-            }
-            self._put_event(run.id, AgentEvent(
-                event_type, payload,
-                run_id=run.id, session_id=session_id,
-            ))
-            self._put_event(run.id, AgentEvent(
-                "run_persisted", {"status": record.status},
-                run_id=run.id, session_id=session_id,
-            ))
+            if not already_settled:
+                payload = {
+                    "error": str(exc),
+                    "status": record.status,
+                    "answer": record.answer,
+                    "reason": record.reason,
+                }
+                self._put_event(run.id, AgentEvent(
+                    event_type, payload,
+                    run_id=run.id, session_id=session_id,
+                ))
+                self._put_event(run.id, AgentEvent(
+                    "run_persisted", {"status": record.status},
+                    run_id=run.id, session_id=session_id,
+                ))
             raise
         finally:
             current_workspace.reset(_ws_token)
@@ -639,6 +646,28 @@ class ChatService:
             if event is None:
                 break
             yield event
+
+    def is_run_active(self, run_id: str) -> bool:
+        """True while the run is still executing (not finished/failed/cancelled).
+
+        Used by connection-lifecycle code to cancel only live runs — calling
+        cancel_run on a completed run would re-emit terminal events.
+        """
+        turn = self._turns.get(run_id)
+        return turn is not None and turn.record_snapshot.status == "running"
+
+    def cancel_all_runs(self, reason: str = "server_shutdown") -> None:
+        """Cancel every still-active run (graceful shutdown / process exit).
+
+        Each cancellation persists results and queues terminal events, so
+        nothing is lost when the server goes down.
+        """
+        for run_id in list(self._turns.keys()):
+            try:
+                if self.is_run_active(run_id):
+                    self.cancel_run(run_id, reason=reason)
+            except Exception:
+                logger.exception("Failed to cancel run %s during shutdown", run_id)
 
     def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
         turn = self._turns.get(run_id)

@@ -47,7 +47,7 @@ class TestShellSandboxUnavailable:
 
 class TestRunShellCommand:
     def test_run_shell_command_success(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mock_format = mocker.patch(
             "agentnexus.tools.shell._format_shell_result",
             return_value="formatted",
@@ -62,7 +62,7 @@ class TestRunShellCommand:
         assert result == "formatted"
 
     def test_run_shell_command_cwd(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -73,7 +73,7 @@ class TestRunShellCommand:
         assert mock_run.call_args[1].get("cwd") == "/tmp"
 
     def test_run_shell_command_timeout(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -85,7 +85,7 @@ class TestRunShellCommand:
 
     def test_run_shell_command_timeout_expired(self, mocker):
         mocker.patch(
-            "subprocess.run",
+            "agentnexus.tools.shell.process_tracker.run_tracked",
             side_effect=subprocess.TimeoutExpired("cmd", 30),
         )
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="")
@@ -94,7 +94,7 @@ class TestRunShellCommand:
             _run_shell_command(["sleep", "100"], timeout=30)
 
     def test_run_shell_command_encoding(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -413,9 +413,13 @@ class TestExecuteShellDocker:
 
 class TestExecuteShellLocally:
     def test_windows_uses_cmd_c(self, mocker):
-        """CRIT-04: Windows uses cmd /c instead of shell=True."""
+        """CRIT-04: Windows uses cmd /c instead of shell=True.
+
+        run_tracked 不接受 shell 参数（仅列表形式调用），shell=True
+        在结构上被杜绝；这里断言 cmd 列表形式即可。
+        """
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="ok")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -423,13 +427,12 @@ class TestExecuteShellLocally:
 
         _execute_shell_locally("echo hi", "C:\\tmp", 30)
 
-        assert mock_run.call_args[1].get("shell") is False
         assert mock_run.call_args[0][0] == ["cmd", "/c", "echo hi"]
 
     def test_unix_uses_sh_dash_lc(self, mocker):
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Linux")
         mocker.patch("agentnexus.tools.shell.shutil.which", return_value="/bin/sh")
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="ok")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -441,7 +444,7 @@ class TestExecuteShellLocally:
 
     def test_cwd_passed(self, mocker):
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="ok")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -453,7 +456,7 @@ class TestExecuteShellLocally:
 
     def test_encoding(self, mocker):
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.shell.process_tracker.run_tracked")
         mocker.patch("agentnexus.tools.shell._format_shell_result", return_value="ok")
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""

@@ -381,7 +381,7 @@ class TestExecuteDocker:
 
 class TestRunCommand:
     def test_success(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.code_executor.process_tracker.run_tracked")
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = "hello"
         mock_run.return_value.stderr = ""
@@ -389,7 +389,7 @@ class TestRunCommand:
         assert "hello" in result
 
     def test_cwd_passed(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.code_executor.process_tracker.run_tracked")
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""
@@ -397,7 +397,7 @@ class TestRunCommand:
         assert mock_run.call_count >= 1
 
     def test_timeout(self, mocker):
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch("agentnexus.tools.code_executor.process_tracker.run_tracked")
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = ""
         mock_run.return_value.stderr = ""

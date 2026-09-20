@@ -105,3 +105,36 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
         "step_count": step_count,
         "skill_id": skill_id,
     }
+
+
+def _schedule_process_exit(delay_sec: float = 1.0) -> None:
+    """Exit the process shortly after the response flushes.
+
+    The server runs as the desktop wrapper's sidecar (bound to loopback);
+    uvicorn's SIGTERM path can't be reached from an HTTP handler on Windows
+    (os.kill(SIGTERM) is a hard kill there), so exit is scheduled directly.
+    Runs were already cancelled + persisted above.
+    """
+    import os
+    import threading
+
+    timer = threading.Timer(delay_sec, os._exit, args=(0,))
+    timer.daemon = True
+    timer.start()
+
+
+@router.post("/shutdown")
+def shutdown():
+    """Graceful shutdown for the desktop wrapper.
+
+    决策 1/6: closing the app must stop everything — cancel all active runs
+    (results persist, terminal events queue) and then exit the process.
+    """
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    chat = getattr(getattr(runtime, "services", None), "chat", None)
+    if chat is not None and hasattr(chat, "cancel_all_runs"):
+        chat.cancel_all_runs(reason="server_shutdown")
+    _schedule_process_exit()
+    return {"status": "shutting_down"}

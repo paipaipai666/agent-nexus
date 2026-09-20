@@ -9,6 +9,23 @@ let mainWindow: BrowserWindow | null = null
 let backendProcess: ChildProcess | null = null
 let backendReady = false
 
+// Electron 33 ships Node 20 — no Promise.withResolvers. Keep the linear
+// withResolvers control flow via this local helper (falls back to the
+// executor form, which the API here specifically requires).
+function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  const ctor = Promise as unknown as {
+    withResolvers?: () => { promise: Promise<T>; resolve: (value: T) => void }
+  }
+  if (typeof ctor.withResolvers === 'function') {
+    return ctor.withResolvers()
+  }
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 const BACKEND_PORT = 18765
 const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`
 const HEALTH_CHECK_INTERVAL_MS = 500
@@ -160,20 +177,60 @@ function startBackend(): Promise<boolean> {
   })
 }
 
-function stopBackend() {
-  if (!backendProcess) return
-  console.log('Stopping backend...')
-  killBackendTree('SIGINT')
-  const forceKill = setTimeout(() => {
-    killBackendTree('SIGKILL')
-    backendProcess = null
-    backendReady = false
-  }, 3000)
-  backendProcess.on('exit', () => {
-    clearTimeout(forceKill)
-    backendProcess = null
-    backendReady = false
+// 产品决策：关闭 = 立刻停止，但结果必须落盘。先请求服务端 /shutdown
+// （取消所有活跃 run、写终态、自行退出），等待自然退出；超时再走硬杀。
+function postShutdown(): Promise<void> {
+  const { promise, resolve } = withResolvers<void>()
+  const req = http.request(
+    {
+      host: '127.0.0.1',
+      port: BACKEND_PORT,
+      path: '/api/runtime/shutdown',
+      method: 'POST',
+      timeout: 1500,
+    },
+    (res) => {
+      res.resume()
+      res.on('end', resolve)
+    },
+  )
+  req.on('error', resolve)
+  req.on('timeout', () => {
+    req.destroy()
+    resolve()
   })
+  req.end()
+  return promise
+}
+
+async function stopBackend() {
+  const proc = backendProcess
+  if (!proc) return
+  console.log('Stopping backend (graceful shutdown)...')
+
+  // 1) Ask the server to cancel active runs (persist) and self-exit.
+  await postShutdown()
+
+  // 2) Wait for natural exit (the server schedules its own exit ~1s after
+  // the response). Race note: the 'exit' handler in startBackend may null
+  // backendProcess first; we hold our own reference.
+  const { promise: exitPromise, resolve: resolveExit } = withResolvers<boolean>()
+  const timer = setTimeout(() => resolveExit(false), 4000)
+  proc.once('exit', () => {
+    clearTimeout(timer)
+    resolveExit(true)
+  })
+  const exited = await exitPromise
+  if (exited) {
+    backendProcess = null
+    backendReady = false
+    return
+  }
+
+  console.log('Backend did not exit in time; force killing...')
+  killBackendTree('SIGKILL')
+  backendProcess = null
+  backendReady = false
 }
 
 async function createWindow() {
@@ -231,8 +288,17 @@ app.on('activate', () => {
   }
 })
 
-app.on('before-quit', () => {
-  stopBackend()
+let isQuitting = false
+
+app.on('before-quit', (event) => {
+  // Async cleanup: hold the quit until the backend has finished cancelling
+  // runs and exited (or was force-killed), then re-issue quit.
+  if (isQuitting) return
+  event.preventDefault()
+  isQuitting = true
+  void stopBackend().finally(() => {
+    app.quit()
+  })
 })
 
 // Window control IPC

@@ -76,7 +76,7 @@ class TestShellInjection:
         mock_settings.return_value.shell_enabled = True
         mock_settings.return_value.shell_execution_backend = "local_unsafe"
         mock_check.return_value = None
-        with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.shell.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = ""
             mock_run.return_value.returncode = 0
@@ -530,7 +530,7 @@ class TestShellInfiniteLoop:
         mock_settings.return_value.shell_enabled = True
         mock_settings.return_value.shell_execution_backend = "local_unsafe"
         from agentnexus.tools.shell import shell_exec
-        with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.shell.process_tracker.run_tracked") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("cmd", 30)
             result = shell_exec("while true; do :; done")
         assert "超时" in result or "timeout" in result.lower()
@@ -581,7 +581,7 @@ class TestShellEdgeCases:
         mock_settings.return_value.shell_timeout = 30
         mock_settings.return_value.shell_execution_backend = "local_unsafe"
         from agentnexus.tools.shell import shell_exec
-        with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.shell.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = ""
             mock_run.return_value.returncode = 0

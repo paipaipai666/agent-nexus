@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
+from agentnexus.tools import process_tracker
 
 try:
     from e2b_code_interpreter import Sandbox
@@ -265,7 +266,7 @@ def _execute_docker(code: str, settings, timeout: int) -> str:
 
 
 def _run_command(cmd: list[str], timeout: int, cwd: str | None = None) -> str:
-    result = subprocess.run(
+    result = process_tracker.run_tracked(
         cmd,
         cwd=cwd,
         capture_output=True,
@@ -319,7 +320,7 @@ def _disabled_message() -> str:
 
 
 def _execute_locally(code: str, timeout: int = 30) -> str:
-    result = subprocess.run(
+    result = process_tracker.run_tracked(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,

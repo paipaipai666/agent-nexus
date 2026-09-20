@@ -83,3 +83,56 @@ def test_memory_append_failure_does_not_block_checkpoint():
     turn.cancel("cancelled")
 
     version.commit_with_messages.assert_called_once()
+
+
+def _committed_messages(version):
+    call = version.commit_with_messages.call_args
+    return call.kwargs.get("messages", call[1].get("messages", []))
+
+
+def test_cancel_commits_cancelled_marker_message():
+    """决策 5：被取消的 turn 必须在历史中留下'已取消'标注。"""
+    memory = MagicMock()
+    memory.short_term.to_json.return_value = '{"messages":[]}'
+    memory.short_term.get_all.return_value = [{"role": "user", "content": "do work"}]
+    version = MagicMock()
+    version.get_message_count.return_value = 0
+    turn = _turn(memory, version)
+
+    record = turn.cancel("user interrupted")
+
+    assert record.status == "interrupted"
+    messages = _committed_messages(version)
+    assert any(
+        m.get("role") == "assistant" and "已取消" in m.get("content", "")
+        for m in messages
+    ), f"cancelled marker missing from committed messages: {messages}"
+
+
+def test_cancel_marker_includes_reason():
+    memory = MagicMock()
+    memory.short_term.to_json.return_value = '{"messages":[]}'
+    memory.short_term.get_all.return_value = []
+    version = MagicMock()
+    version.get_message_count.return_value = 0
+    turn = _turn(memory, version)
+
+    turn.cancel("client_disconnected")
+
+    messages = _committed_messages(version)
+    marker = next(m for m in messages if "已取消" in m.get("content", ""))
+    assert "client_disconnected" in marker["content"]
+
+
+def test_finish_does_not_commit_cancelled_marker():
+    memory = MagicMock()
+    memory.short_term.to_json.return_value = '{"messages":[]}'
+    memory.short_term.get_all.return_value = []
+    version = MagicMock()
+    version.get_message_count.return_value = 0
+    turn = _turn(memory, version)
+
+    turn.finish("done")
+
+    messages = _committed_messages(version)
+    assert not any("已取消" in m.get("content", "") for m in messages)

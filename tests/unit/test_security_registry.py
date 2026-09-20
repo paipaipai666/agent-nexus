@@ -173,7 +173,7 @@ class TestCodeExecutorSecurity:
         mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
 
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("python", 30)
             result = python_execute("import time; time.sleep(100)")
         assert "超时" in result
@@ -187,7 +187,7 @@ class TestCodeExecutorSecurity:
         mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
 
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.returncode = 1
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = "SyntaxError: invalid syntax"
@@ -254,7 +254,7 @@ class TestCodeExecutorAdversarial:
         mock_settings.return_value.code_execution_allow_unsafe_local = True
         mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute, subprocess
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("python", 30)
             result = python_execute("x = 'a' * 10**9")
         assert "超时" in result
@@ -269,7 +269,7 @@ class TestCodeExecutorAdversarial:
         settings.code_execution_allow_unsafe_local = True
         settings.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "ok"
             mock_run.return_value.stderr = ""
@@ -303,7 +303,7 @@ class TestCodeExecutorAdversarial:
         mock_settings.return_value.code_execution_allow_unsafe_local = True
         mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute, sys
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = ""
@@ -320,7 +320,7 @@ class TestCodeExecutorAdversarial:
         mock_settings.return_value.code_execution_allow_unsafe_local = True
         mock_settings.return_value.code_execution_timeout = 30
         from agentnexus.tools.code_executor import python_execute
-        with patch("agentnexus.tools.code_executor.subprocess.run") as mock_run:
+        with patch("agentnexus.tools.code_executor.process_tracker.run_tracked") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = ""

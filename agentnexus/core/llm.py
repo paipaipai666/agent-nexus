@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
@@ -105,6 +105,34 @@ class AgentLLM:
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
         self._capabilities: ModelCapabilities | None = None
         self._session_tracker: SessionCapabilityTracker | None = None
+        # Cooperative cancellation: a watcher thread closes the in-flight
+        # provider stream the moment the checker fires (产品决策: 取消=
+        # 立刻停止). Set per run by the agent; None on legacy paths.
+        self._cancel_checker: Callable[[], bool] | None = None
+        self._active_provider: Any = None
+
+    def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
+        """Install a cooperative cancellation callback for the current run."""
+        self._cancel_checker = checker
+
+    def _cancel_watcher(self, stop: threading.Event) -> None:
+        """Poll the cancel checker; on fire, close the active provider stream.
+
+        Without this, a stalled network read hides the cancel signal until
+        the next token arrives (token-boundary polling only).
+        """
+        checker = self._cancel_checker
+        while not stop.wait(0.05):
+            if checker is not None and checker():
+                provider = self._active_provider
+                if provider is not None:
+                    try:
+                        abort = getattr(provider, "abort_active_stream", None)
+                        if abort is not None:
+                            abort()
+                    except Exception:
+                        pass
+                return
 
     @staticmethod
     def _litellm_can_route(model: str) -> bool:
@@ -305,21 +333,36 @@ class AgentLLM:
 
         effective_messages = projection_fn(messages) if projection_fn else messages
 
+        # Cancel watcher: while a run is active, poll the checker and close
+        # the in-flight provider stream on fire. Without it a stalled read
+        # hides cancel until the next token (old token-boundary behavior).
+        stop_watcher = threading.Event()
+        watcher = None
+        if self._cancel_checker is not None:
+            watcher = threading.Thread(
+                target=self._cancel_watcher, args=(stop_watcher,),
+                name="llm-cancel-watcher", daemon=True,
+            )
+            watcher.start()
+
         attempts = max(1, min(max_attempts or LLM_MAX_RETRIES, LLM_MAX_RETRIES))
         result = ""
-        for attempt in range(attempts):
-            result = self._call(
-                effective_messages, temperature, silent, attempt,
-                tools, response_format, thinking, on_token=on_token,
-            ) or ""
-            if result:
-                break
-            if self._cs().non_transient:
-                break
-            if attempt < attempts - 1:
-                import random
-                delay = LLM_RETRY_BASE_DELAY * (2 ** attempt) * (0.5 + random.random())
-                time.sleep(delay)
+        try:
+            for attempt in range(attempts):
+                result = self._call(
+                    effective_messages, temperature, silent, attempt,
+                    tools, response_format, thinking, on_token=on_token,
+                ) or ""
+                if result:
+                    break
+                if self._cs().non_transient:
+                    break
+                if attempt < attempts - 1:
+                    import random
+                    delay = LLM_RETRY_BASE_DELAY * (2 ** attempt) * (0.5 + random.random())
+                    time.sleep(delay)
+        finally:
+            stop_watcher.set()
 
         # ── after llm hook ─────────────────────────────────────
         hook_mgr.fire(HookType.AFTER_LLM_CALL, {
@@ -433,6 +476,10 @@ class AgentLLM:
             # 取消信号必须直接传播，不能被重试逻辑吞掉
             if isinstance(e, AgentCancelled):
                 raise
+            # 流被 cancel-watcher 关闭后底层会抛 httpx/连接错误——统一
+            # 还原为 AgentCancelled，避免被重试循环当作瞬态错误重放。
+            if self._cancel_checker is not None and self._cancel_checker():
+                raise AgentCancelled("cancelled") from e
 
             error_msg = str(e)
             self.last_error = error_msg
@@ -507,21 +554,25 @@ class AgentLLM:
         if "openai.com" in (self.base_url or ""):
             stream_opts = {"include_usage": True}
 
-        return provider.stream_chat(
-            messages=messages,
-            model=self.model,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            temperature=temperature,
-            tools=provider_tools,
-            response_format=provider_response_format,
-            max_tokens=caps.max_output_tokens,
-            timeout=self.timeout,
-            parallel_tool_calls=parallel,
-            stream_options=stream_opts,
-            reasoning_effort=reasoning_effort,
-            on_token=on_token,
-        )
+        self._active_provider = provider
+        try:
+            return provider.stream_chat(
+                messages=messages,
+                model=self.model,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                temperature=temperature,
+                tools=provider_tools,
+                response_format=provider_response_format,
+                max_tokens=caps.max_output_tokens,
+                timeout=self.timeout,
+                parallel_tool_calls=parallel,
+                stream_options=stream_opts,
+                reasoning_effort=reasoning_effort,
+                on_token=on_token,
+            )
+        finally:
+            self._active_provider = None
 
     def _call_via_litellm(self, messages, temperature, silent, tools, response_format, thinking,
                           on_token, model) -> str:

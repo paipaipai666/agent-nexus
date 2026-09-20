@@ -12,6 +12,7 @@ import unicodedata
 from pathlib import Path
 
 from agentnexus.core.config import get_settings
+from agentnexus.tools import process_tracker
 
 _SYSTEM = platform.system()
 
@@ -275,27 +276,18 @@ def _execute_shell_docker(command: str, work_dir: str, settings, timeout_sec: in
 def _execute_shell_locally(command: str, work_dir: str, timeout_sec: int) -> str:
     if _SYSTEM == "Windows":
         cmd = ["cmd", "/c", command]
-        result = subprocess.run(
-            cmd,
-            shell=False,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            encoding="utf-8",
-            errors="replace",
-        )
     else:
         shell = shutil.which("sh") or "/bin/sh"
-        result = subprocess.run(
-            [shell, "-lc", command],
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            encoding="utf-8",
-            errors="replace",
-        )
+        cmd = [shell, "-lc", command]
+    result = process_tracker.run_tracked(
+        cmd,
+        cwd=work_dir,
+        capture_output=True,
+        text=True,
+        timeout=timeout_sec,
+        encoding="utf-8",
+        errors="replace",
+    )
     return _format_shell_result(result)
 
 
@@ -317,7 +309,7 @@ def _execute_shell_locally_with_warning(
 
 
 def _run_shell_command(cmd: list[str], timeout: int, cwd: str | None = None) -> str:
-    result = subprocess.run(
+    result = process_tracker.run_tracked(
         cmd,
         cwd=cwd,
         capture_output=True,

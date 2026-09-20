@@ -45,7 +45,7 @@ class TestShellExec:
         result = shell_exec("rm -rf /")
         assert "blocked" in result
 
-    @patch("agentnexus.tools.shell.subprocess.run")
+    @patch("agentnexus.tools.shell.process_tracker.run_tracked")
     @patch("agentnexus.tools.shell.get_settings")
     def test_successful_execution(self, mock_settings, mock_run):
         mock_settings.return_value.shell_enabled = True
@@ -57,7 +57,7 @@ class TestShellExec:
         result = shell_exec("echo hello")
         assert "hello" in result
 
-    @patch("agentnexus.tools.shell.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30))
+    @patch("agentnexus.tools.shell.process_tracker.run_tracked", side_effect=subprocess.TimeoutExpired("cmd", 30))
     @patch("agentnexus.tools.shell.get_settings")
     def test_timeout(self, mock_settings, mock_run):
         mock_settings.return_value.shell_enabled = True
@@ -79,7 +79,7 @@ class TestShellExec:
         assert "unsafe local shell" in result
         assert "hello" in result
 
-    @patch("agentnexus.tools.shell.subprocess.run")
+    @patch("agentnexus.tools.shell.process_tracker.run_tracked")
     @patch("agentnexus.tools.shell.shutil.which")
     def test_docker_backend_uses_restricted_container_flags(self, mock_which, mock_run):
         mock_which.return_value = "docker"

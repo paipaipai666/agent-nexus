@@ -692,9 +692,16 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         closed.set()
         confirm_approved[0] = False
         confirm_event.set()
-        # Don't cancel the running agent on WebSocket disconnect — let it
-        # finish in the background and persist results. The user will see
-        # completed results when they reconnect to this session.
+        # 产品决策：断连/界面关闭 = 立刻停止。Cancel the run this socket
+        # owns while it is still active; cancel_run persists results and
+        # emits run_interrupted/run_persisted, so a reconnecting client sees
+        # the cancelled tail via resume replay. Completed runs are left
+        # untouched — re-cancelling would duplicate terminal events.
+        if current_run_id and chat.is_run_active(current_run_id):
+            try:
+                chat.cancel_run(current_run_id, reason="client_disconnected")
+            except Exception:
+                logger.exception("Failed to cancel run %s on disconnect", current_run_id)
         if stream_tasks:
             for task in stream_tasks:
                 task.cancel()

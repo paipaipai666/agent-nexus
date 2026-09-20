@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import threading
 import traceback
 from typing import Any, Callable
 
@@ -59,28 +60,50 @@ def execute_tool(
     try:
         if cancel_checker is not None and cancel_checker():
             raise AgentCancelled("cancelled")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                tool_executor.invoke,
-                name=name,
-                params=arguments,
-                caller=caller,
-                hitl_approver=hitl_approver,
-                tool_policy=tool_policy,
-            )
+        # Capture the tool worker's tid so the cancel path can kill the
+        # processes spawned by the currently running tool (产品决策: cancel
+        # = 立刻停止，参考 pi killProcessTree / codex process_group)。
+        worker_tid: list[int] = []
+
+        def _invoke_tracked(**kwargs):
+            worker_tid.append(threading.get_ident())
+            return tool_executor.invoke(**kwargs)
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            _invoke_tracked,
+            name=name,
+            params=arguments,
+            caller=caller,
+            hitl_approver=hitl_approver,
+            tool_policy=tool_policy,
+        )
+        try:
             # Poll with periodic cancel checks — future.result() without a
             # timeout would make cancel signals invisible during tool
             # execution. The actual timeout cap is the registry's
             # ToolMeta.timeout_sec, enforced inside invoke().
             while True:
                 if cancel_checker is not None and cancel_checker():
-                    future.cancel()
+                    # Kill the in-flight tool's process tree immediately
+                    # instead of waiting for it to finish.
+                    if worker_tid:
+                        from agentnexus.tools import process_tracker
+                        process_tracker.kill_processes_for_thread(worker_tid[0])
+                    future.cancel()  # no-op once running; pending only
                     raise AgentCancelled("cancelled")
                 try:
-                    result = future.result(timeout=1.0)
+                    result = future.result(timeout=0.2)
                     break
                 except concurrent.futures.TimeoutError:
                     continue
+        finally:
+            # Do NOT wait for the tool thread: after a cancel-kill it exits
+            # promptly, but non-killable tools (MCP remote calls) may keep
+            # running until their own timeout — the agent must not block on
+            # them. This replaces the old `with ThreadPoolExecutor` block,
+            # which waited for the tool to complete even after cancel.
+            executor.shutdown(wait=False)
 
         # ── after hook (observer) ──────────────────────────────
         hook_mgr.fire(HookType.AFTER_TOOL_CALL, {

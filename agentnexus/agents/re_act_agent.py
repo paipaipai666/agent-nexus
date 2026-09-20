@@ -194,6 +194,10 @@ class ReActAgent:
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
         """Install a cooperative cancellation callback for the next run."""
         self._cancel_checker = checker
+        # Forward to the LLM client so its watcher can close an in-flight
+        # stream immediately on cancel (产品决策: 取消 = 立刻停止).
+        if hasattr(self.llm_client, "set_cancel_checker"):
+            self.llm_client.set_cancel_checker(checker)
 
     @property
     def _react_template(self) -> str:

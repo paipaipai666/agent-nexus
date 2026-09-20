@@ -138,9 +138,24 @@ class TurnRuntime:
                 all_msgs = self._memory.short_term.get_all()
                 journal_count = self._version.get_message_count()
                 new_msgs = all_msgs[journal_count:]
+                messages = list(new_msgs)
+                # 决策 5: cancelled/failed turns leave an explicit marker in
+                # the message journal so a reopened session shows what
+                # happened — the answer itself is checkpoint metadata, not a
+                # history message.
+                if record.status == "interrupted":
+                    messages.append({
+                        "role": "assistant",
+                        "content": f"[已取消] {record.reason}".rstrip(),
+                    })
+                elif record.status == "failed":
+                    messages.append({
+                        "role": "assistant",
+                        "content": f"[执行失败] {record.reason}".rstrip(),
+                    })
                 # Atomically write messages + checkpoint in one transaction
                 self._version.commit_with_messages(
-                    messages=new_msgs,
+                    messages=messages,
                     question=record.question,
                     answer=record.answer,
                 )
