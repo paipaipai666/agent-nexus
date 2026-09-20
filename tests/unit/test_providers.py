@@ -342,7 +342,12 @@ class TestStreamResult:
 class TestFallbackBehavior:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_failure_falls_back_to_litellm(self, mock_trace, mock_settings):
+    def test_provider_transient_failure_skips_litellm(self, mock_trace, mock_settings):
+        """瞬态 provider 错误必须重试 provider 本身，不回退 litellm。
+
+        litellm 常路由不了这些模型，回退会把瞬态失败变成确定性致命错误
+        （llm.py 中 raise 处的刻意设计）。
+        """
         mock_settings.return_value.llm_model_id = "gpt-4"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.openai.com"
@@ -355,6 +360,31 @@ class TestFallbackBehavior:
 
         mock_provider = MagicMock()
         mock_provider.stream_chat.side_effect = ConnectionError("connection refused")
+
+        with patch("agentnexus.core.llm.select_provider", return_value=mock_provider):
+            with patch("litellm.completion") as mock_litellm:
+                result = llm._call(
+                    [{"role": "user", "content": "hi"}], 0, True, 0,
+                )
+
+        mock_litellm.assert_not_called()
+        assert result == ""  # transient — retry decision deferred to think()'s attempts loop
+
+    @patch("agentnexus.core.llm.get_settings")
+    @patch("agentnexus.core.llm.trace_manager")
+    def test_provider_non_transient_failure_falls_back_to_litellm(self, mock_trace, mock_settings):
+        mock_settings.return_value.llm_model_id = "gpt-4"
+        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
+        mock_settings.return_value.llm_base_url = "https://api.openai.com"
+        mock_settings.return_value.llm_timeout = 60
+        mock_trace.active = None
+
+        from agentnexus.core.llm import AgentLLM
+
+        llm = AgentLLM()
+
+        mock_provider = MagicMock()
+        mock_provider.stream_chat.side_effect = ValueError("unsupported payload")
 
         delta = MagicMock(
             content="fallback", tool_calls=[], reasoning_content=None,

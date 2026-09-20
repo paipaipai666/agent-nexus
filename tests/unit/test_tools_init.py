@@ -11,7 +11,7 @@ class TestRegisterCount:
         executor = ToolRegistry()
         register_all_tools(executor)
         names = executor.list_tools()
-        assert len(names) == 41
+        assert len(names) == 42
 
     def test_registers_correct_tool_names(self):
         executor = ToolRegistry()
@@ -31,6 +31,7 @@ class TestRegisterCount:
             "computer_list_windows", "computer_scroll", "computer_select",
             "computer_snapshot", "computer_switch_window", "computer_toggle",
             "computer_type",
+            "express_reaction",
         }
         assert set(names) == expected
 

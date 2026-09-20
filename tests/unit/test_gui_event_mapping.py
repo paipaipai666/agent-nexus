@@ -19,17 +19,23 @@ class TestGuiEventMapping:
     def test_run_finished_maps_to_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": "final answer", "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": "final answer", "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": "final answer", "error": "", "run_id": None, "seq": 0}
 
     def test_run_finished_with_empty_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": "", "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": "", "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": "", "error": "", "run_id": None, "seq": 0}
 
     def test_run_finished_with_none_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": None, "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": None, "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": None, "error": "", "run_id": None, "seq": 0}
+
+    def test_run_finished_passes_through_error(self):
+        """空答案 + 错误（限流/配额）必须透传给前端渲染错误提示。"""
+        event = AgentEvent(type="run_finished", payload={"answer": "", "status": "finished", "error": "rate limited"})
+        result = _map_to_gui_event(event, MagicMock(), 0)
+        assert result["error"] == "rate limited"
 
     def test_run_persisted_maps_to_done(self):
         event = AgentEvent(type="run_persisted", payload={"status": "finished"})
