@@ -47,11 +47,19 @@ class TurnRuntime:
         self._journal: list[str] = []
         self._record = TurnRecord(run_id=run_id, session_id=session_id, question=question, status="running")
         self._persisted = False
-        # Snapshot STM length at turn start so we can journal new messages later
+        # Snapshot STM boundary at turn start so we can journal new messages
+        # later. Identity-based (last message before this turn), NOT a count:
+        # journal row count and STM index only coincide when STM mirrors the
+        # journal, which fails after a restart (fresh STM) or with injected
+        # context rows — the count-based slice then silently drops the turn's
+        # assistant entries from the durable journal.
         self._stm_start_count = 0
+        self._stm_boundary: dict | None = None
         if self._memory is not None:
             try:
-                self._stm_start_count = len(self._memory.short_term.get_all())
+                existing = self._memory.short_term.get_all()
+                self._stm_start_count = len(existing)
+                self._stm_boundary = dict(existing[-1]) if existing else None
             except Exception:
                 pass
         self.record("user", f"用户请求: {question}")
@@ -133,12 +141,48 @@ class TurnRuntime:
         # causes a duplicate that displays as thinking in history.
         if self._version is not None and self._memory is not None:
             try:
-                # Re-read STM at persist time — _stm_start_count may be stale
+                # Re-read STM at persist time — the start snapshot may be stale
                 # if STM was cleared/compacted during the turn.
                 all_msgs = self._memory.short_term.get_all()
-                journal_count = self._version.get_message_count()
-                new_msgs = all_msgs[journal_count:]
-                messages = list(new_msgs)
+                # Slice AFTER the turn-start boundary message (identity match,
+                # scanning from the end). Count-based slicing by journal row
+                # count is wrong whenever STM doesn't mirror the journal
+                # (fresh STM after restart, injected context rows): it chops
+                # leading real messages and the turn's entries never reach the
+                # durable history.
+                boundary_idx = -1
+                if self._stm_boundary is not None:
+                    br = self._stm_boundary.get("role")
+                    bc = self._stm_boundary.get("content")
+                    # The boundary existed at turn start, so its index is below
+                    # the start count (compaction can only shift it lower). The
+                    # bound also disambiguates duplicate (role, content) pairs —
+                    # e.g. the user resending the identical question.
+                    scan_hi = min(self._stm_start_count, len(all_msgs)) - 1
+                    for i in range(scan_hi, -1, -1):
+                        if all_msgs[i].get("role") == br and all_msgs[i].get("content") == bc:
+                            boundary_idx = i
+                            break
+                if boundary_idx >= 0:
+                    new_msgs = all_msgs[boundary_idx + 1:]
+                elif self._stm_boundary is None:
+                    new_msgs = all_msgs  # STM was empty at turn start
+                else:
+                    # Boundary row was archived mid-turn (compaction); fall
+                    # back to the count snapshot, clamped to current length.
+                    start = min(self._stm_start_count, len(all_msgs))
+                    new_msgs = all_msgs[start:]
+                messages = [dict(m) for m in new_msgs]
+                # Drop blank rows — empty assistant appends (e.g. a JSON-retry
+                # with an empty response) render as empty thinking cards in
+                # history. Writers are guarded too; this is the durable net.
+                messages = [m for m in messages if str(m.get("content", "")).strip()]
+                # The turn-start commit already persisted the user question and
+                # the agent appends it to STM as well — drop our own copy so
+                # the journal doesn't gain a duplicate user row.
+                if (messages and messages[0].get("role") == "user"
+                        and messages[0].get("content") == record.question):
+                    messages = messages[1:]
                 # 决策 5: cancelled/failed turns leave an explicit marker in
                 # the message journal so a reopened session shows what
                 # happened — the answer itself is checkpoint metadata, not a

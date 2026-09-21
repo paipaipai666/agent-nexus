@@ -153,7 +153,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
             ) or workspace
         ),
     )
-    messages = version.get_messages(limit=limit)
+    messages = version.get_messages_with_answers(limit=limit)
     result = []
     for m in messages:
         role = m.get("role", "")

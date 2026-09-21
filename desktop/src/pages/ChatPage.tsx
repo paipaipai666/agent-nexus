@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
+import { transformHistoryMessages } from '../utils/historyTransform'
 import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
 import ModelPicker from '../components/chat/ModelPicker'
@@ -252,15 +253,6 @@ export default function ChatPage() {
     })
   }, [])
 
-  const cleanToolContent = (content: string): { name: string; display: string } => {
-    const actionMatch = content.match(/^Action:\s*(\w+)\[/)
-    const name = actionMatch ? actionMatch[1] : 'tool'
-    const obsIdx = content.indexOf('\nObservation:')
-    let display = obsIdx >= 0 ? content.slice(obsIdx + 13).trim() : content
-    if (display.length > 500) display = display.slice(0, 500) + '\n...(truncated)'
-    return { name, display }
-  }
-
   const loadAndDisplayMessages = useCallback(async (forceSessionId?: string) => {
     const currentSid = forceSessionId || currentSessionIdRef.current
     console.log('[loadAndDisplayMessages] sid:', currentSid)
@@ -299,62 +291,7 @@ export default function ChatPage() {
         return
       }
 
-      const transformed: Message[] = []
-      let idx = 0
-      const ts = (m: any) => new Date(m.ts || Date.now())
-      let pendingTools: Message[] = []
-
-      const flushPendingTools = () => {
-        for (const t of pendingTools) { t.id = `h-${idx++}`; transformed.push(t) }
-        pendingTools = []
-      }
-
-      for (const m of stm) {
-        const role = m.role
-        const content = (m.content || '').trim()
-
-        if (role === 'system' && content.startsWith('[上下文已裁剪]')) continue
-        if (role === 'system' && content.startsWith('[恢复文件]')) continue
-
-        if (role === 'system' && content.startsWith('[思考过程]')) {
-          const reasoning = content.replace(/^\[思考过程\]\s*/, '').trim()
-          if (reasoning) {
-            flushPendingTools()
-            transformed.push({ id: `h-${idx++}`, role: 'system', content: reasoning, timestamp: ts(m) })
-          }
-          continue
-        }
-
-        if (role === 'system' && content.startsWith('[最终答案]')) {
-          const answer = content.replace(/^\[最终答案\]\s*/, '').trim()
-          if (answer) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'assistant', content: answer, timestamp: ts(m) }) }
-          continue
-        }
-
-        if (role === 'system' && content.startsWith('[会话摘要]')) {
-          const summary = content.replace(/^\[会话摘要\]\s*/, '').trim()
-          if (summary) {
-            flushPendingTools()
-            const display = summary.length > 300 ? summary.slice(0, 300) + '…' : summary
-            transformed.push({ id: `h-${idx++}`, role: 'system', content: `[Context compacted] ${display}`, timestamp: ts(m) })
-          }
-          continue
-        }
-
-        if (role === 'user') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'user', content, timestamp: ts(m) }); continue }
-
-        if (role === 'tool') {
-          const { name, display } = cleanToolContent(m.content)
-          pendingTools.push({ id: '', role: 'tool', content: display, toolName: name, toolStatus: 'done', timestamp: ts(m) })
-          continue
-        }
-
-        if (role === 'assistant') { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }); continue }
-
-        if (role === 'system' && content.length > 0) { flushPendingTools(); transformed.push({ id: `h-${idx++}`, role: 'system', content, timestamp: ts(m) }) }
-      }
-
-      flushPendingTools()
+      const transformed = transformHistoryMessages(stm)
       console.log('[loadAndDisplayMessages] Transformed:', transformed.length, 'messages. Setting on active session.')
       // Mark all restored messages as already animated
       for (const m of transformed) animatedIds.add(m.id)

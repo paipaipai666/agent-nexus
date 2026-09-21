@@ -823,7 +823,9 @@ class ReActAgent:
                 f"你的上一次回复不是合法的 JSON。错误: {detail or reason}。\n"
                 f"{self._build_json_format_section()}"})
             memory_manager = ctx.memory_state.memory_manager
-            if memory_manager:
+            if memory_manager and ctx.last_response_text:
+                # Skip empty appends — a blank assistant row renders as an
+                # empty thinking card in history (and pollutes the journal).
                 memory_manager.append("assistant", ctx.last_response_text)
             if ctx.run_state.json_retries >= ctx.run_state.max_json_retries:
                 if ctx.run_state.strategy == CallingStrategy.JSON_MODE:

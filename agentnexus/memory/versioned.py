@@ -268,6 +268,48 @@ class ConversationVersionManager:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_messages_with_answers(self, limit: int = 0) -> list[dict]:
+        """Journal messages with missing per-turn answers backfilled from checkpoints.
+
+        Turns written before the identity-boundary journal fix (and turns
+        whose STM/journal mirrors diverged) have user rows but no
+        ``[最终答案]`` row — the answer exists only as checkpoint metadata.
+        Synthesize the marker row right after the user message so restored
+        history shows the reply (and prompt rebuilding sees it as assistant).
+        """
+        messages = self.get_messages(limit=limit)
+        with self._lock:
+            out: list[dict] = []
+            for i, m in enumerate(messages):
+                out.append(m)
+                if m.get("role") != "user":
+                    continue
+                # Does this turn already have a final-answer marker before the
+                # next user message?
+                has_answer = False
+                for r in messages[i + 1:]:
+                    if r.get("role") == "user":
+                        break
+                    if r.get("role") == "system" and str(r.get("content", "")).startswith("[最终答案]"):
+                        has_answer = True
+                        break
+                if has_answer:
+                    continue
+                question = str(m.get("content", ""))
+                row = self._conn.execute(
+                    "SELECT answer FROM conversation_checkpoints "
+                    "WHERE session_id = ? AND question = ? AND answer != '' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (self.session_id, question),
+                ).fetchone()
+                if row and row["answer"]:
+                    out.append({
+                        "role": "system",
+                        "content": f"[最终答案] {row['answer']}",
+                        "ts": m.get("ts"),
+                    })
+            return out
+
     def get_message_count(self) -> int:
         """Return total message count for this session's journal."""
         with self._lock:
