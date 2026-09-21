@@ -49,6 +49,8 @@ class AgentEvent:
     run_id: str | None = None
     session_id: str | None = None
     seq: int = 0  # per-run monotonic sequence for reconnect resume
+    tok_seq: int = 0  # per-run monotonic index over stream_token events only;
+                      # absolute (queue-position independent) reconnect skip key
 
 
 class ChatService:
@@ -90,6 +92,13 @@ class ChatService:
         # Per-session token buffers for WS reconnect snapshot (R8)
         self._token_buffers: dict[str, str] = {}
         self._token_cursors: dict[str, int] = {}
+        # Char offset into _token_buffers where the CURRENT step started
+        # (advanced on TOOL_START). Snapshot content is buffer[base:] so a
+        # mid-run reconnect never replays earlier steps' text into the
+        # current step's draft.
+        self._token_step_base: dict[str, int] = {}
+        # Per-run monotonic index over stream_token events (reconnect skip key)
+        self._run_token_seq: dict[str, int] = {}
         # Per-session version managers — each session gets its own journal + checkpoints
         self._version_managers: dict[str, Any] = {}
         # Per-session short-term memories — each session gets its own STM deque
@@ -235,6 +244,7 @@ class ChatService:
         with self._get_session_lock(session_id):
             self._token_buffers[session_id] = ""
             self._token_cursors[session_id] = 0
+            self._token_step_base[session_id] = 0
         # Mark this session as processing
         self.mark_processing(True, session_id=session_id)
         # Persist user question BEFORE the run starts so it is durable the
@@ -361,6 +371,7 @@ class ChatService:
             with self._get_session_lock(session_id):
                 self._token_buffers.pop(session_id, None)
                 self._token_cursors.pop(session_id, None)
+                self._token_step_base.pop(session_id, None)
             self._put_event(run.id, None)
         return run
 
@@ -409,6 +420,7 @@ class ChatService:
             self._async_run_events.pop(prev_run, None)
             self._turns.pop(prev_run, None)
             self._run_event_seq.pop(prev_run, None)
+            self._run_token_seq.pop(prev_run, None)
             self._run_snapshots.pop(prev_run, None)
         run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
         events: queue.Queue[AgentEvent | None] = queue.Queue()
@@ -416,6 +428,7 @@ class ChatService:
         self._run_events[run.id] = events
         self._async_run_events[run.id] = async_events
         self._run_event_seq[run.id] = 0
+        self._run_token_seq[run.id] = 0
         self._session_last_run[session_id] = run.id
         version_mgr = self._get_version_manager(session_id)
         turn = TurnRuntime(
@@ -534,27 +547,41 @@ class ChatService:
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
 
-            # STREAM_TOKEN events are sent directly as token events for real-time streaming
+            # STREAM_TOKEN feeds the reconnect snapshot (content only) and gets
+            # an absolute per-run tok_seq (reconnect skip key). STREAM_REASONING
+            # is resumed via seq-based replay — it must NOT pollute the answer
+            # buffer, the token cursor, or the token skip counter: mixing the
+            # two channels desynced client/server cursors and rendered
+            # reasoning text as answer content (see experiments/verify_reconnect_resume.py).
             if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
                 token = payload.get("token", "")
                 if token:
-                    if event_type == "STREAM_REASONING":
+                    if event_type == "STREAM_TOKEN":
+                        tok_seq = self._run_token_seq.get(run_id, 0) + 1
+                        self._run_token_seq[run_id] = tok_seq
+                        token_event = AgentEvent(
+                            "stream_token",
+                            {"token": token},
+                            run_id=run_id,
+                            session_id=session_id,
+                            tok_seq=tok_seq,
+                        )
+                        self._put_event(run_id, token_event)
+                        # Update token buffer + cursor atomically (R8)
+                        # Same lock as snapshot read — ensures content/cursor consistency
+                        with self._get_session_lock(session_id):
+                            self._token_buffers[session_id] = \
+                                self._token_buffers.get(session_id, "") + token
+                            self._token_cursors[session_id] = \
+                                self._token_cursors.get(session_id, 0) + 1
+                    else:
                         has_reasoning = True
-                    evt_type = "stream_reasoning" if event_type == "STREAM_REASONING" else "stream_token"
-                    token_event = AgentEvent(
-                        evt_type,
-                        {"token": token},
-                        run_id=run_id,
-                        session_id=session_id,
-                    )
-                    self._put_event(run_id, token_event)
-                    # Update token buffer + cursor atomically (R8)
-                    # Same lock as snapshot read — ensures content/cursor consistency
-                    with self._get_session_lock(session_id):
-                        self._token_buffers[session_id] = \
-                            self._token_buffers.get(session_id, "") + token
-                        self._token_cursors[session_id] = \
-                            self._token_cursors.get(session_id, 0) + 1
+                        self._put_event(run_id, AgentEvent(
+                            "stream_reasoning",
+                            {"token": token},
+                            run_id=run_id,
+                            session_id=session_id,
+                        ))
                 return
 
             self._record_agent_event(turn, event)
@@ -566,6 +593,12 @@ class ChatService:
 
             # TOOL_START/TOOL_DONE: carry payload directly to avoid journal-parsing bugs
             if event_type == "TOOL_START":
+                # The current LLM step ends here: everything buffered so far
+                # belongs to PREVIOUS steps. Advance the snapshot baseline so
+                # reconnect_snapshot only ever carries the CURRENT step's text.
+                with self._get_session_lock(session_id):
+                    self._token_step_base[session_id] = \
+                        len(self._token_buffers.get(session_id, ""))
                 self._put_event(run_id, AgentEvent(
                     "tool_start",
                     {"name": payload.get("name", ""), "arguments": payload.get("arguments", {})},
@@ -646,6 +679,23 @@ class ChatService:
             if event is None:
                 break
             yield event
+
+    def get_run_token_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Current-step token text + absolute token cursor for WS reconnect (R8).
+
+        content is scoped to the CURRENT step (buffer[_token_step_base:]) so a
+        mid-run reconnect never injects earlier steps' raw text into the
+        in-flight answer draft; cursor counts content tokens only (reasoning
+        resumes via seq-based replay, not the snapshot).
+        """
+        lock = self._get_session_lock(session_id)
+        with lock:
+            buffer = self._token_buffers.get(session_id, "")
+            base = self._token_step_base.get(session_id, 0)
+            return {
+                "content": buffer[base:],
+                "cursor": self._token_cursors.get(session_id, 0),
+            }
 
     def is_run_active(self, run_id: str) -> bool:
         """True while the run is still executing (not finished/failed/cancelled).

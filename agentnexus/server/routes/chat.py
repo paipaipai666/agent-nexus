@@ -110,7 +110,8 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         return None
 
     elif event_type == "stream_token":
-        return {"type": "token", "content": payload.get("token", ""), "run_id": run_id, "seq": seq}
+        return {"type": "token", "content": payload.get("token", ""), "run_id": run_id, "seq": seq,
+                "tok_seq": getattr(event, "tok_seq", 0)}
 
     elif event_type == "stream_reasoning":
         return {"type": "reasoning", "content": payload.get("token", ""), "run_id": run_id, "seq": seq}
@@ -260,18 +261,13 @@ def get_run_snapshot(run_id: str):
 
 @router.get("/sessions/{session_id}/run-snapshot")
 def run_snapshot(session_id: str):
-    """Return current run's accumulated tokens + cursor for WS reconnect (R8).
+    """Return current step's accumulated tokens + cursor for WS reconnect (R8).
     MUST be sync def — threading.Lock inside async def would block the event loop.
     FastAPI runs sync handlers in a thread pool automatically."""
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    chat = runtime.services.chat
-    lock = chat._get_session_lock(session_id)
-    with lock:
-        content = chat._token_buffers.get(session_id, "")
-        cursor = chat._token_cursors.get(session_id, 0)
-    return {"content": content, "cursor": cursor}
+    return runtime.services.chat.get_run_token_snapshot(session_id)
 
 
 @router.get("/sessions")
@@ -460,14 +456,11 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         seq_cursor_offset = resumeEventsFrom
     if resumeFrom is not None and resumeFrom > 0:
         token_cursor_offset = resumeFrom
-        lock = chat._get_session_lock(session_id)
-        with lock:
-            content = chat._token_buffers.get(session_id, "")
-            cursor = chat._token_cursors.get(session_id, 0)
+        snapshot = chat.get_run_token_snapshot(session_id)
         await ws.send_json({
             "type": "reconnect_snapshot",
-            "content": content,
-            "cursor": cursor,
+            "content": snapshot["content"],
+            "cursor": snapshot["cursor"],
         })
 
     current_run_id: str | None = None
@@ -541,11 +534,12 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
 
     async def stream_events(run_id: str):
         """Stream events from chat service to WebSocket.
-        R8: Skips token events before resumeFrom cursor for reconnect."""
+        R8: Skips token events the client already received (absolute per-run
+        tok_seq — immune to how much of the queue prior consumers drained);
+        structural events resume via the seq cursor."""
         nonlocal current_run_id, token_cursor_offset
         current_run_id = run_id
         seq = seq_cursor_offset
-        local_token_count = 0
         try:
             async for event in chat.astream_events(run_id):
                 # Reconnect resume: skip events the client already received.
@@ -554,10 +548,12 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                 gui_event = _map_to_gui_event(event, chat, seq)
                 if gui_event is not None:
                     gui_event["seq"] = getattr(event, "seq", 0)
-                    # R8: Skip token events that the client already has
-                    if gui_event.get("type") in ("stream_token", "stream_reasoning"):
-                        local_token_count += 1
-                        if local_token_count <= token_cursor_offset:
+                    # R8: Skip content tokens the client already has
+                    # (tok_seq is absolute within the run — no queue-position
+                    # dependence, so partial consumption can't misalign it).
+                    if gui_event.get("type") == "token":
+                        tok_seq = getattr(event, "tok_seq", 0)
+                        if tok_seq and tok_seq <= token_cursor_offset:
                             continue
                     await ws.send_json(gui_event)
                     seq = max(seq, getattr(event, "seq", 0))

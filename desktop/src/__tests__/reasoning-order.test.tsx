@@ -145,10 +145,30 @@ describe('Reasoning/answer display order (desktop)', () => {
     expect(sysIdx).toBeGreaterThanOrEqual(0)
     expect(ansIdx).toBeGreaterThanOrEqual(0)
     expect(sysIdx).toBeLessThan(ansIdx)
+    // Content integrity: both tokens accumulated into ONE draft, reasoning kept.
+    const ans = latestMessages[ansIdx]
+    expect(ans.content).toBe('The answer is 42.')
+    expect(latestMessages[sysIdx].content).toBe('Thinking first. ')
     // Every thinking card must precede the answer message.
     for (let i = 0; i < latestMessages.length; i++) {
       if (latestMessages[i].role === 'system') expect(i).toBeLessThan(ansIdx)
     }
+  })
+
+  it('multiple content tokens accumulate into a single draft (no re-creation)', async () => {
+    await act(async () => {
+      ws._receive({ type: 'run_started', run_id: 'run-1' })
+      ws._receive({ type: 'token', content: 'The ', tok_seq: 1 })
+      await sleep(30)
+      ws._receive({ type: 'token', content: 'answer ', tok_seq: 2 })
+      await sleep(30)
+      ws._receive({ type: 'token', content: 'is 42.', tok_seq: 3 })
+      await sleep(30)
+    })
+
+    const assistants = latestMessages.filter(m => m.role === 'assistant')
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].content).toBe('The answer is 42.')
   })
 
   it('reasoning-first order (normal case) is unchanged', async () => {
@@ -195,6 +215,8 @@ describe('Reasoning/answer display order (desktop)', () => {
     for (let i = 0; i < latestMessages.length; i++) {
       if (latestMessages[i].role === 'system') expect(i).toBeLessThan(aIdx)
     }
+    // Content integrity: step-2 tokens accumulated into one draft.
+    expect(latestMessages[aIdx].content).toBe('Final answer.')
   })
 
   it('interleaved stream cut short by a tool call keeps thinking above and drops the partial draft', async () => {
