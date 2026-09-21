@@ -161,9 +161,14 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           <ToolCard msg={msg} />
         ) : msg.role === 'user' ? (
           <div className="flex justify-end">
-            <div className="flex flex-col items-end">
+            {/* w-full: give the column a definite width so the bubble's
+                max-w-[85%] resolves against the chat column, not against
+                this shrink-to-fit container — the circular reference used
+                to squeeze every bubble to 85% of its own text width,
+                wrapping lines that should fit on one. */}
+            <div className="flex flex-col items-end w-full">
               <div
-                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%] whitespace-pre-wrap break-words"
+                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 w-fit max-w-[85%] whitespace-pre-wrap break-words"
                 style={{
                   color: 'var(--fg-secondary)',
                   background: 'var(--surface-1)',
