@@ -162,7 +162,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           <div className="flex justify-end">
             <div className="flex flex-col items-end">
               <div
-                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%]"
+                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 max-w-[85%] whitespace-pre-wrap break-words"
                 style={{
                   color: 'var(--fg-secondary)',
                   background: 'var(--surface-1)',
