@@ -237,7 +237,7 @@ export default function ChatPage() {
   const {
     sessionId, cwd, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
-    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveSessionState,
+    sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveDisplayMessages,
   } = useSession()
 
   const scrollRafRef = useRef<number>(0)
@@ -269,14 +269,14 @@ export default function ChatPage() {
     // Use getLiveSessionState (reads from sessionsRef) to avoid stale closure:
     // this function has empty deps and must always read the latest Map.
     if (currentSid) {
-      const cachedState = getLiveSessionState(currentSid)
-      if (cachedState && cachedState.messages.length > 0) {
-        // The provider passes activeState.messages straight from the Map, so
-        // the UI already reflects live state — no setMessages here. Writing
-        // the snapshot back would clobber events that landed after the read
+      const cachedMessages = getLiveDisplayMessages(currentSid)
+      if (cachedMessages && cachedMessages.length > 0) {
+        // The provider already exposes the flattened display view (committed +
+        // in-flight step), so the UI reflects live state — no setMessages here.
+        // Writing the snapshot back would clobber events that landed after the read
         // (replace-with-stale-array race while a run is streaming).
-        console.log('[loadAndDisplayMessages] Using Map cache:', cachedState.messages.length, 'messages')
-        for (const m of cachedState.messages) animatedIds.add(m.id)
+        console.log('[loadAndDisplayMessages] Using Map cache:', cachedMessages.length, 'messages')
+        for (const m of cachedMessages) animatedIds.add(m.id)
         return
       }
     }
@@ -292,8 +292,8 @@ export default function ChatPage() {
       if (!stm || stm.length === 0) {
         // Backend returned no messages. Only clear if the Map also has nothing.
         if (currentSid) {
-          const existingState = getLiveSessionState(currentSid)
-          if (existingState && existingState.messages.length > 0) return
+          const existingMessages = getLiveDisplayMessages(currentSid)
+          if (existingMessages && existingMessages.length > 0) return
         }
         setMessages([])
         return
