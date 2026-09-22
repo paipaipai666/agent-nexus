@@ -81,8 +81,8 @@ class TestParseReactionArguments:
 
 class TestReactionProvider:
     def _register(self):
-        from agentnexus.tools.providers.reaction_provider import ReactionToolProvider
         from agentnexus.tools.providers.base import ToolProviderContext
+        from agentnexus.tools.providers.reaction_provider import ReactionToolProvider
 
         executor = MagicMock()
         executor.list_tools.return_value = []

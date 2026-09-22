@@ -417,6 +417,7 @@ class TestChatService:
     def test_skill_current_isolated_between_threads(self):
         """并发会话共享 SkillService：A 线程选中的技能不得泄漏到 B 线程。"""
         import threading
+
         from agentnexus.services.skill import SkillService
         from agentnexus.skills.registry import SkillEntry, SkillRegistry
         from agentnexus.skills.workflow import Workflow

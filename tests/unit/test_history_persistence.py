@@ -5,10 +5,7 @@ Driven by the screenshot session b629e0f2f995: turns "hello" and
 "hello, what's your name?" have checkpoints with answers but the journal only
 contains the user rows — [思考过程]/[最终答案]/tool entries never landed.
 """
-import queue
 from unittest.mock import MagicMock
-
-import pytest
 
 from agentnexus.services.chat import ChatService
 
@@ -130,8 +127,8 @@ def test_checkpoint_backfill_synthesizes_missing_answers(tmp_path, monkeypatch):
     """Sessions damaged by the count-based slice have user rows without
     [最终答案]; the answer lives in checkpoint metadata. The history reader
     must synthesize the marker row."""
-    from agentnexus.memory.versioned import ConversationVersionManager
     from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
     monkeypatch.setattr(get_settings(), "memory_db_path", str(tmp_path / "mem.db"))
 
     vm = ConversationVersionManager("sess_x", str(tmp_path / "mem.db"))
