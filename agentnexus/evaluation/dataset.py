@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -18,8 +17,6 @@ import yaml
 from agentnexus.evaluation.task import (
     EvalSuite,
     EvalTask,
-    TaskCategory,
-    _parse_task,
     load_suite_from_yaml,
     load_task_from_yaml,
 )
@@ -229,85 +226,3 @@ class EvalDataset:
         return file_path
 
 
-# ---------------------------------------------------------------------------
-# Legacy JSONL 迁移
-# ---------------------------------------------------------------------------
-
-def migrate_jsonl_to_yaml(
-    jsonl_path: str | Path,
-    output_dir: str | Path,
-    category: str = TaskCategory.GENERAL.value,
-) -> list[EvalTask]:
-    """将旧版 JSONL 数据集迁移为 YAML task 格式。
-
-    支持的 JSONL 格式:
-      - agent_eval.jsonl: {trace_id, question, expected_answer, tools_used}
-      - humaneval.jsonl: {trace_id, question, expected_answer, language, test_cases}
-    """
-    tasks: list[EvalTask] = []
-    jsonl_path = Path(jsonl_path)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if not jsonl_path.exists():
-        return tasks
-
-    with open(jsonl_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            task_id = data.get("trace_id", f"migrated_{len(tasks)}")
-            question = data.get("question", "")
-            expected = data.get("expected_answer", "")
-            tools_used = data.get("tools_used", [])
-            test_cases = data.get("test_cases", [])
-
-            graders = []
-            if test_cases:
-                graders.append({
-                    "type": "code_execution",
-                    "test_files": test_cases,
-                    "weight": 0.6,
-                })
-            if expected:
-                graders.append({
-                    "type": "llm_rubric",
-                    "name": "correctness",
-                    "assertions": [f"答案应包含: {expected}"],
-                    "weight": 0.4,
-                })
-            if not graders:
-                graders.append({
-                    "type": "llm_rubric",
-                    "name": "quality",
-                    "weight": 1.0,
-                })
-
-            task_dict = {
-                "id": task_id,
-                "description": question[:100],
-                "category": category,
-                "difficulty": "medium",
-                "eval_type": "capability",
-                "input": {"prompt": question},
-                "graders": graders,
-            }
-            if expected:
-                task_dict["reference_solution"] = expected
-
-            task = _parse_task(task_dict)
-            tasks.append(task)
-
-            # 保存 YAML
-            file_path = output_dir / f"{task.id}.yaml"
-            with open(file_path, "w", encoding="utf-8") as f:
-                yaml.dump(task.to_dict(), f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-
-    logger.info("Migrated %d tasks from %s to %s", len(tasks), jsonl_path, output_dir)
-    return tasks

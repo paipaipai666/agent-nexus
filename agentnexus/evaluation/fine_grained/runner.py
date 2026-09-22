@@ -266,7 +266,7 @@ class FineGrainedRunner:
         mgr._settings = SimpleNamespace(
             offload_enabled=False, time_microcompact_interval=0, transcript_enabled=False,
         )
-        mgr._compact_threshold = 10**9  # 多轮评测不触发压缩
+        mgr.compact_threshold = 10**9  # 多轮评测不触发压缩
 
         turns_out: list[str] = []
         turn_keyword_rates: list[float] = []

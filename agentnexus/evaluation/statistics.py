@@ -1,9 +1,9 @@
-"""统计引擎 — pass@k / pass^k / bootstrap CI 计算。
+"""统计引擎 — pass@k / pass^k / trial 一致性计算。
 
 对应 Anthropic 方法论中的非确定性评估指标:
   - pass@k: 至少一次成功的概率
   - pass^k: 全部成功的概率
-  - bootstrap CI: 置信区间
+  - trial consistency: 多次运行的一致性统计
 """
 
 from __future__ import annotations
@@ -113,51 +113,6 @@ def compute_pass_metrics(n_trials: int, n_success: int) -> dict[str, Any]:
         result[f"pass_hat_{k}"] = pass_hat_k(success_rate, k)
 
     return result
-
-
-def bootstrap_ci(
-    values: list[float],
-    n_resample: int = 1000,
-    ci: float = 0.95,
-    statistic: str = "mean",
-) -> tuple[float, float]:
-    """Bootstrap 置信区间。
-
-    Args:
-        values: 观测值列表
-        n_resample: 重采样次数
-        ci: 置信水平 (如 0.95)
-        statistic: 统计量 ("mean" 或 "median")
-
-    Returns:
-        (lower, upper) 置信区间
-    """
-    if not values:
-        return (0.0, 0.0)
-    if len(values) == 1:
-        return (values[0], values[0])
-
-    rng = random.Random(42)  # 固定种子以保证可复现
-    stats: list[float] = []
-
-    for _ in range(n_resample):
-        sample = [rng.choice(values) for _ in range(len(values))]
-        if statistic == "median":
-            sample.sort()
-            mid = len(sample) // 2
-            stat = sample[mid] if len(sample) % 2 else (sample[mid - 1] + sample[mid]) / 2
-        else:
-            stat = sum(sample) / len(sample)
-        stats.append(stat)
-
-    stats.sort()
-    alpha = (1 - ci) / 2
-    lower_idx = int(alpha * n_resample)
-    upper_idx = int((1 - alpha) * n_resample) - 1
-    lower_idx = max(0, min(lower_idx, n_resample - 1))
-    upper_idx = max(0, min(upper_idx, n_resample - 1))
-
-    return (stats[lower_idx], stats[upper_idx])
 
 
 def compute_trial_consistency(scores: list[float]) -> dict[str, float]:
