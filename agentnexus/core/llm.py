@@ -144,6 +144,24 @@ class AgentLLM:
         except Exception:
             return False
 
+    @staticmethod
+    def _litellm_model(model: str) -> str:
+        """Map the project's provider-prefixed model id to a litellm-safe one.
+
+        ``self.model`` carries OUR provider namespace (``zhipu/glm-4.7-flash``,
+        ``agnes/agnes-3.0-flash``, ``deepseek-ai/DeepSeek-V4-Flash``), which
+        exists for the direct-provider layer and the capability registry.
+        LiteLLM's provider-prefix world is incompatible with it: ``zhipu/``
+        resolves to a broken/absent Zhipu provider and dies with
+        "LLM Provider NOT provided", even though every endpoint we talk to is
+        OpenAI-compatible behind a custom ``api_base``. Rewrite to
+        ``openai/<bare-name>`` so litellm's openai provider routes via
+        ``api_base`` — correct for all our OpenAI-compatible endpoints
+        (bigmodel, siliconflow, agnes, deepseek-official, openrouter...).
+        """
+        _, sep, bare = model.rpartition("/")
+        return f"openai/{bare}" if sep else model
+
     def _cs(self):
         """Per-thread scratch space for the in-flight call's side-channel results."""
         s = self._call_state
@@ -460,11 +478,11 @@ class AgentLLM:
             # litellm 路由不了的模型（OpenRouter 的 *:free / stealth / 第三方
             # 命名）走 litellm 必然失败并掩盖原始 provider 错误——保留原错误
             # 交给外层重试分类。
-            if provider_err is not None and not self._litellm_can_route(model):
+            if provider_err is not None and not self._litellm_can_route(self._litellm_model(model)):
                 raise provider_err
             result = self._call_via_litellm(
                 messages, temperature, silent, tools,
-                response_format, thinking, on_token, model,
+                response_format, thinking, on_token, self._litellm_model(model),
             )
 
             if ctx and span:
