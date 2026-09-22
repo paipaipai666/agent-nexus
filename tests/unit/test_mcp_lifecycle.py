@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_lifecycle import close_all, connect_all, disconnect_server
-from agentnexus.tools.mcp_schema import MCPServerState
+from agentnexus.tools.mcp.lifecycle import close_all, connect_all, disconnect_server
+from agentnexus.tools.mcp.schema import MCPServerState
 
 
 def _make_config(name="test_server"):

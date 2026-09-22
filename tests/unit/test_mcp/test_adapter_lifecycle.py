@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import (
+from agentnexus.tools.mcp.adapter import (
     MCPToolManager,
 )
 

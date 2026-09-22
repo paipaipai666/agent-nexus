@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import (
+from agentnexus.tools.mcp.adapter import (
     MCPServerState,
     MCPToolDescriptor,
     MCPToolManager,

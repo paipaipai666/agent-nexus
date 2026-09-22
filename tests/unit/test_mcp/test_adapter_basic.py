@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentnexus.tools.mcp_adapter import (
+from agentnexus.tools.mcp.adapter import (
     _content_block_to_text,
     _normalize_tool_result,
     _sanitize_name,
@@ -127,7 +127,7 @@ class TestContentBlockToTextEdgeCases:
                 text=None, resource=SimpleNamespace(text=None, blob=b"img", mimeType="image/png")
             ),
         ]
-        from agentnexus.tools.mcp_adapter import _normalize_tool_result
+        from agentnexus.tools.mcp.adapter import _normalize_tool_result
 
         result = SimpleNamespace(
             content=blocks,
@@ -141,7 +141,7 @@ class TestContentBlockToTextEdgeCases:
 
     def test_structured_content_with_text_mixed(self):
         """Both structuredContent and content blocks should appear."""
-        from agentnexus.tools.mcp_adapter import _normalize_tool_result
+        from agentnexus.tools.mcp.adapter import _normalize_tool_result
 
         result = SimpleNamespace(
             structuredContent={"summary": "structured data"},
@@ -193,7 +193,7 @@ class TestContentBlockToTextEdgeCases:
 
     def test_complex_mcp_result_with_binary_content(self):
         """MCP result containing binary content blocks."""
-        from agentnexus.tools.mcp_adapter import _normalize_tool_result
+        from agentnexus.tools.mcp.adapter import _normalize_tool_result
 
         result = SimpleNamespace(
             content=[

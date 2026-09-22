@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentnexus.tools.mcp_adapter import MCPToolDescriptor
+from agentnexus.tools.mcp.adapter import MCPToolDescriptor
 
 
 class FakeExitStack:

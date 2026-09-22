@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentnexus.tools.mcp_connection import build_http_client_kwargs, ensure_sdk_available
+from agentnexus.tools.mcp.connection import build_http_client_kwargs, ensure_sdk_available
 
 
 def _make_config(**overrides):

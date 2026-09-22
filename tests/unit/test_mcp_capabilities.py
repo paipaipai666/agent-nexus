@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_capabilities import (
+from agentnexus.tools.mcp.capabilities import (
     build_prompt_tool_descriptors,
     build_resource_tool_descriptors,
     import_prompts,
     import_resources,
     import_server_capabilities,
 )
-from agentnexus.tools.mcp_schema import (
+from agentnexus.tools.mcp.schema import (
     MCPToolDescriptor,
 )
 

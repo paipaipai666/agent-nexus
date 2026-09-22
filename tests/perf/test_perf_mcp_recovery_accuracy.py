@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import time
 
-from agentnexus.tools.mcp_schema import MCPServerState
+from agentnexus.tools.mcp.schema import MCPServerState
 
 # ── Thresholds ──────────────────────────────────────────────────────
 

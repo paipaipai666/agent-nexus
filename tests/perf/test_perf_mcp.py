@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import MCPToolDescriptor, MCPToolManager
+from agentnexus.tools.mcp.adapter import MCPToolDescriptor, MCPToolManager
 from agentnexus.tools.registry import ToolRegistry
 
 BUILD_DESCRIPTOR_P95_MAX_MS = 50
@@ -190,7 +190,7 @@ def test_mcp_register_tools_with_filter(benchmark):
 
 
 def test_mcp_sanitize_name_many(benchmark):
-    from agentnexus.tools.mcp_adapter import _sanitize_name
+    from agentnexus.tools.mcp.adapter import _sanitize_name
 
     names = [f"Hello World! {i} @#$%" for i in range(100)]
 
@@ -205,7 +205,7 @@ def test_mcp_sanitize_name_many(benchmark):
 
 
 def test_mcp_normalize_result_many(benchmark):
-    from agentnexus.tools.mcp_adapter import _normalize_tool_result
+    from agentnexus.tools.mcp.adapter import _normalize_tool_result
 
     results = []
     for i in range(200):

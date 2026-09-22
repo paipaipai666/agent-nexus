@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import (
+from agentnexus.tools.mcp.adapter import (
     MCPToolDescriptor,
     MCPToolManager,
     _sanitize_name,
@@ -359,7 +359,7 @@ class TestSdkAvailability:
 class TestToolResultSafety:
     def test_normalize_result_handles_large_content(self):
         """Very large tool results must not crash."""
-        from agentnexus.tools.mcp_adapter import _normalize_tool_result
+        from agentnexus.tools.mcp.adapter import _normalize_tool_result
 
         large_text = "x" * 100000
         result = SimpleNamespace(

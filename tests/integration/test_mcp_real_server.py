@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import MCPToolManager
+from agentnexus.tools.mcp.adapter import MCPToolManager
 
 pytest.importorskip("mcp.server.fastmcp")
 

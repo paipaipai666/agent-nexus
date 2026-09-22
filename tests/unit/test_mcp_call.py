@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentnexus.tools.mcp_call import call_descriptor, run_with_limiter
-from agentnexus.tools.mcp_schema import MCPToolDescriptor
+from agentnexus.tools.mcp.call import call_descriptor, run_with_limiter
+from agentnexus.tools.mcp.schema import MCPToolDescriptor
 
 
 def _make_descriptor(**overrides):

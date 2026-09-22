@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.mcp_adapter import MCPToolDescriptor
+from agentnexus.tools.mcp.adapter import MCPToolDescriptor
 from agentnexus.tools.registry import ToolRegistry
 
 

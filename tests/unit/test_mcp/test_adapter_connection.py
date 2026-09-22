@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import MCPToolManager
+from agentnexus.tools.mcp.adapter import MCPToolManager
 
 # ── HTTP transport connection tests ──────────────────────────────
 

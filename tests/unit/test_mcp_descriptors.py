@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentnexus.tools.mcp_descriptors import (
+from agentnexus.tools.mcp.descriptors import (
     build_local_tool_name,
     build_tool_descriptor,
     normalize_param_schema,

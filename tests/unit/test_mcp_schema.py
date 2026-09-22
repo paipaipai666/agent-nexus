@@ -4,7 +4,7 @@ import asyncio
 from contextlib import AsyncExitStack
 from unittest.mock import MagicMock
 
-from agentnexus.tools.mcp_schema import (
+from agentnexus.tools.mcp.schema import (
     MCPPromptDescriptor,
     MCPResourceDescriptor,
     MCPServerState,

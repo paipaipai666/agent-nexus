@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentnexus.tools.mcp_result import (
+from agentnexus.tools.mcp.result import (
     content_block_to_text,
     dump_sdk_object,
     get_sdk_attr,

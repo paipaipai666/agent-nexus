@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.tools.mcp_adapter import MCPToolDescriptor
+from agentnexus.tools.mcp.adapter import MCPToolDescriptor
 
 # ── Thresholds ──────────────────────────────────────────────────────
 
