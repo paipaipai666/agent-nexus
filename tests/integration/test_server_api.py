@@ -17,9 +17,6 @@ class _FakeChatService:
         return self._Handle()
 
 
-class _FakeServices:
-    chat = _FakeChatService()
-
 
 class _FakeLLM:
     api_key = "test-key"
@@ -28,7 +25,8 @@ class _FakeLLM:
 
 
 class _FakeRuntime:
-    services = _FakeServices()
+    chat = _FakeChatService()
+    skill = None
     llm = _FakeLLM()
     mcp_manager = None
     memory_manager = None

@@ -36,7 +36,7 @@ def runtime_chat_session():
     )
     session = chat.start_session()
     runtime = MagicMock()
-    runtime.services.chat = chat
+    runtime.chat = chat
     runtime.subagent_confirm = ConfirmBridge()
     return runtime, chat, session, agent
 

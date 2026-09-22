@@ -8,18 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentnexus.services import AppServices, ChatService, ConfigService, EvalService, KnowledgeBaseService, SkillService
+from agentnexus.services import ChatService, SkillService
 
 if TYPE_CHECKING:
     from agentnexus.agents.re_act_agent import ReActAgent
     from agentnexus.capabilities.runtime import CapabilityRuntime
     from agentnexus.core.config import Settings
     from agentnexus.core.llm import AgentLLM
-    from agentnexus.extensions import ExtensionManager
     from agentnexus.memory.manager import MemoryManager
     from agentnexus.memory.versioned import ConversationVersionManager
     from agentnexus.tools.confirm_bridge import ConfirmBridge
-    from agentnexus.tools.mcp_adapter import MCPManager
+    from agentnexus.tools.mcp.adapter import MCPManager
     from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -34,9 +33,9 @@ class AppRuntime:
     memory_manager: "MemoryManager"
     version_manager: "ConversationVersionManager"
     mcp_manager: "MCPManager | None"
-    extension_manager: "ExtensionManager"
     capability_runtime: "CapabilityRuntime"
-    services: AppServices
+    chat: ChatService
+    skill: SkillService
     subagent_confirm: "ConfirmBridge"
     session_id: str
 
@@ -60,14 +59,13 @@ class AppRuntime:
         from agentnexus.capabilities.runtime import CapabilityRuntime
         from agentnexus.core.config import get_settings
         from agentnexus.core.llm import AgentLLM
-        from agentnexus.extensions import ExtensionManager
         from agentnexus.memory.manager import MemoryManager
         from agentnexus.memory.versioned import ConversationVersionManager
         from agentnexus.observability.tracer import trace_manager
         from agentnexus.skills import SkillRegistry
         from agentnexus.tools import register_all_tools
         from agentnexus.tools.confirm_bridge import ConfirmBridge
-        from agentnexus.tools.mcp_adapter import create_mcp_manager_from_settings
+        from agentnexus.tools.mcp.adapter import create_mcp_manager_from_settings
         from agentnexus.tools.registry import ToolRegistry
 
         settings = get_settings()
@@ -85,10 +83,6 @@ class AppRuntime:
             session_id=session_id,
             db_path=settings.memory_db_path,
         )
-
-        extension_manager = ExtensionManager(settings)
-        extension_manager.discover()
-        extension_manager.load_enabled(runtime=None)
 
         register_all_tools(
             executor,
@@ -194,7 +188,6 @@ class AppRuntime:
             agent=build_agent,
             skill_service=skill_service,
             mcp_manager=mcp_manager,
-            extension_manager=extension_manager,
             register_tools=register_all_tools,
             llm_client=llm,
             subagent_confirm=subagent_confirm,
@@ -218,26 +211,20 @@ class AppRuntime:
         _stm_store: dict = {}
 
         def _resolve_session_workspace(sid: str) -> str | None:
-            """Late-binding lookup of a session's workspace (services assigned below)."""
+            """Late-binding lookup of a session's workspace (chat assigned below)."""
             try:
-                handle = services.chat._sessions.get(sid)
+                handle = chat_service._sessions.get(sid)
                 return handle.workspace if handle else None
             except Exception:
                 return None
 
-        services = AppServices(
-            chat=ChatService(
-                agent_factory=agent_factory,
-                memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid, workspace_resolver=_resolve_session_workspace),
-                version_manager=version,
-                skill_service=skill_service,
-                tool_executor=executor,
-                capability_runtime=capability_runtime,
-            ),
-            skill=skill_service,
-            knowledge_base=KnowledgeBaseService(settings),
-            eval=EvalService(settings),
-            config=ConfigService(settings, extension_manager),
+        chat_service = ChatService(
+            agent_factory=agent_factory,
+            memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid, workspace_resolver=_resolve_session_workspace),
+            version_manager=version,
+            skill_service=skill_service,
+            tool_executor=executor,
+            capability_runtime=capability_runtime,
         )
 
         # Restore existing sessions from database into chat._sessions
@@ -251,8 +238,8 @@ class AppRuntime:
             restored_count = 0
             for s in recent:
                 sid = s.get("session_id")
-                if sid and sid not in services.chat._sessions:
-                    services.chat._sessions[sid] = SessionHandle(
+                if sid and sid not in chat_service._sessions:
+                    chat_service._sessions[sid] = SessionHandle(
                         id=sid, skill=None, profile=s.get("profile"),
                         workspace=s.get("workspace_path") or None,
                     )
@@ -270,9 +257,9 @@ class AppRuntime:
             memory_manager=memory,
             version_manager=version,
             mcp_manager=mcp_manager,
-            extension_manager=extension_manager,
             capability_runtime=capability_runtime,
-            services=services,
+            chat=chat_service,
+            skill=skill_service,
             subagent_confirm=subagent_confirm,
             session_id=session_id,
         )

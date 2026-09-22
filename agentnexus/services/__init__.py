@@ -1,20 +1,14 @@
-"""Stable service interfaces used by CLI, TUI, and future UI adapters."""
+"""Stable service interfaces used by CLI, TUI, and server routes."""
 
 from agentnexus.services.chat import AgentEvent, ChatService, RunHandle, SessionHandle
-from agentnexus.services.config import ConfigService
-from agentnexus.services.container import AppServices
 from agentnexus.services.eval import EvalService
-from agentnexus.services.knowledge import KnowledgeBaseService
 from agentnexus.services.skill import SkillService, SkillStatus
 from agentnexus.services.turn import TurnRecord, TurnRuntime
 
 __all__ = [
     "AgentEvent",
-    "AppServices",
     "ChatService",
-    "ConfigService",
     "EvalService",
-    "KnowledgeBaseService",
     "RunHandle",
     "SessionHandle",
     "SkillService",

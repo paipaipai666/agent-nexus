@@ -25,7 +25,7 @@ class TestTuiCommand:
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
              patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
-             patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
+             patch("agentnexus.tools.mcp.adapter.create_mcp_manager_from_settings", return_value=None), \
              patch("agentnexus.tools.register_all_tools") as mock_reg, \
              patch("agentnexus.memory.manager.MemoryManager", return_value=mock_memory), \
              patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=mock_version), \
@@ -130,7 +130,7 @@ class TestTuiCommand:
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
              patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
-             patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
+             patch("agentnexus.tools.mcp.adapter.create_mcp_manager_from_settings", return_value=None), \
              patch("agentnexus.tools.register_all_tools"), \
              patch("agentnexus.memory.manager.MemoryManager", return_value=mock_memory), \
              patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=mock_version), \
@@ -162,7 +162,7 @@ class TestTuiCommand:
         with patch("agentnexus.core.llm.AgentLLM", return_value=mock_llm), \
              patch("agentnexus.tools.registry.ToolRegistry", return_value=mock_executor), \
              patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=mock_confirm), \
-             patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=mock_manager), \
+             patch("agentnexus.tools.mcp.adapter.create_mcp_manager_from_settings", return_value=mock_manager), \
              patch("agentnexus.tools.register_all_tools"), \
              patch("agentnexus.memory.manager.MemoryManager", return_value=mock_memory), \
              patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=mock_version), \

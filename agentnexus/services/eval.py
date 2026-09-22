@@ -199,24 +199,6 @@ class EvalService:
         return regression.to_dict()
 
     # ------------------------------------------------------------------
-    # RAG Evaluation (保留原有功能)
-    # ------------------------------------------------------------------
-
-    def run_rag_eval(self, *args: Any, **kwargs: Any) -> Any:
-        from agentnexus.rag.evaluator import RAGEvaluator
-
-        return RAGEvaluator(*args, **kwargs)
-
-    def list_reports(self) -> list[Path]:
-        traces_dir = Path(self.traces_dir)
-        if not traces_dir.exists():
-            return []
-        return sorted(traces_dir.glob("*.jsonl"))
-
-    def compare_reports(self, left: str | Path, right: str | Path) -> dict[str, str]:
-        return {"left": str(left), "right": str(right)}
-
-    # ------------------------------------------------------------------
     # Stats
     # ------------------------------------------------------------------
 

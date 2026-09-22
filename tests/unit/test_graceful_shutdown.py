@@ -50,7 +50,7 @@ def test_shutdown_endpoint_cancels_runs_and_schedules_exit():
     session = chat.start_session()
     run, _events, _turn = chat.begin_turn(session.id, "hello")
     runtime = MagicMock()
-    runtime.services.chat = chat
+    runtime.chat = chat
 
     app = create_app(runtime)
     with TestClient(app) as client:
@@ -66,7 +66,7 @@ def test_shutdown_endpoint_cancels_runs_and_schedules_exit():
 def test_lifespan_teardown_cancels_runs_before_close():
     chat = MagicMock()
     runtime = MagicMock()
-    runtime.services.chat = chat
+    runtime.chat = chat
 
     app = create_app(runtime)
     with TestClient(app):

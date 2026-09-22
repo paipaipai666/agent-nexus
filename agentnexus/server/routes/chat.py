@@ -183,7 +183,7 @@ def create_session(req: CreateSessionRequest | None = None):
     skill = req.skill if req else None
     profile = req.profile if req else None
     workspace = _resolve_workspace_dir(req.workspace) if req and req.workspace else None
-    handle = runtime.services.chat.start_session(skill=skill, profile=profile, workspace=workspace)
+    handle = runtime.chat.start_session(skill=skill, profile=profile, workspace=workspace)
     return {
         "session_id": handle.id, "skill": handle.skill, "profile": handle.profile,
         "workspace": handle.workspace,
@@ -196,8 +196,8 @@ def send_message(req: SendMessageRequest):
 
     runtime = _get_runtime()
     try:
-        run = runtime.services.chat.send_message(req.session_id, req.content)
-        snapshot = runtime.services.chat.get_run_snapshot(run.id)
+        run = runtime.chat.send_message(req.session_id, req.content)
+        snapshot = runtime.chat.get_run_snapshot(run.id)
         return {
             "run_id": run.id,
             "session_id": run.session_id,
@@ -215,7 +215,7 @@ def cancel_run(req: CancelRequest):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.chat.cancel_run(req.run_id, reason=req.reason)
+    runtime.chat.cancel_run(req.run_id, reason=req.reason)
     return {"status": "cancelled", "run_id": req.run_id}
 
 
@@ -224,7 +224,7 @@ def confirm_tool(req: ConfirmRequest):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.chat.confirm_tool_call(req.run_id, req.approved)
+    runtime.chat.confirm_tool_call(req.run_id, req.approved)
     return {"status": "confirmed" if req.approved else "denied", "run_id": req.run_id}
 
 
@@ -233,7 +233,7 @@ def cancel_run_path(run_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.chat.cancel_run(run_id)
+    runtime.chat.cancel_run(run_id)
     return {"status": "cancelled", "run_id": run_id}
 
 
@@ -242,7 +242,7 @@ def confirm_tool_path(run_id: str, approved: bool = True):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.chat.confirm_tool_call(run_id, approved)
+    runtime.chat.confirm_tool_call(run_id, approved)
     return {"status": "confirmed" if approved else "denied", "run_id": run_id}
 
 
@@ -251,7 +251,7 @@ def get_run_snapshot(run_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    record = runtime.services.chat.get_run_snapshot(run_id)
+    record = runtime.chat.get_run_snapshot(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     if hasattr(record, "__dict__"):
@@ -267,7 +267,7 @@ def run_snapshot(session_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    return runtime.services.chat.get_run_token_snapshot(session_id)
+    return runtime.chat.get_run_token_snapshot(session_id)
 
 
 @router.get("/sessions")
@@ -275,7 +275,7 @@ def list_sessions():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    chat = runtime.services.chat
+    chat = runtime.chat
     sessions = []
     for sid, handle in chat._sessions.items():
         sessions.append({
@@ -319,7 +319,7 @@ def restore_session(req: CreateSessionRequest):
     from agentnexus.services.chat import SessionHandle
 
     runtime = _get_runtime()
-    chat = runtime.services.chat
+    chat = runtime.chat
 
     # If session already exists in memory, just return it
     if session_id and session_id in chat._sessions:
@@ -393,7 +393,7 @@ def get_session(session_id: str):
 
     runtime = _get_runtime()
     try:
-        snapshot = runtime.services.chat.get_session_snapshot(session_id)
+        snapshot = runtime.chat.get_session_snapshot(session_id)
         session = snapshot["session"]
         return {
             "session_id": session.id,
@@ -421,7 +421,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
 
     await ws.accept()
     runtime = _get_runtime()
-    chat = runtime.services.chat
+    chat = runtime.chat
 
     if session_id not in chat._sessions:
         # Try to restore from database on-demand

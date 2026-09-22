@@ -103,7 +103,7 @@ def clear_short_term_memory(session_id: str | None = None):
 
     runtime = _get_runtime()
     if session_id:
-        runtime.services.chat._stms.pop(session_id, None)
+        runtime.chat._stms.pop(session_id, None)
     else:
         runtime.memory_manager.short_term.clear()
     return {"status": "cleared"}
@@ -132,7 +132,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
 
     # Use provided session_id, or fall back to first active session, or find latest
     if not session_id:
-        chat = runtime.services.chat
+        chat = runtime.chat
         if chat._sessions:
             session_id = next(iter(chat._sessions.keys()))
 

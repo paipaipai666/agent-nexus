@@ -13,7 +13,7 @@ def test_runtime_build_assembles_core_services():
          patch("agentnexus.core.llm.AgentLLM", return_value=MagicMock()), \
          patch("agentnexus.tools.registry.ToolRegistry", return_value=MagicMock()), \
          patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=MagicMock()), \
-         patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
+         patch("agentnexus.tools.mcp.adapter.create_mcp_manager_from_settings", return_value=None), \
          patch("agentnexus.tools.register_all_tools"), \
          patch("agentnexus.memory.manager.MemoryManager", return_value=MagicMock()), \
          patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=MagicMock()), \
@@ -28,11 +28,8 @@ def test_runtime_build_assembles_core_services():
         runtime = AppRuntime.build(profile="tui")
 
     assert runtime.session_id.startswith("tui_")
-    assert runtime.services.chat is not None
-    assert runtime.services.skill is not None
-    assert runtime.services.knowledge_base is not None
-    assert runtime.services.eval is not None
-    assert runtime.services.config is not None
+    assert runtime.chat is not None
+    assert runtime.skill is not None
     mock_trace.configure.assert_called_once_with("/tmp/traces")
 
 
@@ -59,7 +56,7 @@ def test_runtime_build_uses_supplied_session_id_and_restores_stm():
          patch("agentnexus.core.llm.AgentLLM", return_value=MagicMock()), \
          patch("agentnexus.tools.registry.ToolRegistry", return_value=MagicMock()), \
          patch("agentnexus.tools.confirm_bridge.ConfirmBridge", return_value=MagicMock()), \
-         patch("agentnexus.tools.mcp_adapter.create_mcp_manager_from_settings", return_value=None), \
+         patch("agentnexus.tools.mcp.adapter.create_mcp_manager_from_settings", return_value=None), \
          patch("agentnexus.tools.register_all_tools"), \
          patch("agentnexus.memory.manager.MemoryManager", return_value=memory) as mock_memory_cls, \
          patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=version) as mock_version_cls, \
@@ -97,9 +94,9 @@ def test_close_method(mocker):
         memory_manager=mocker.MagicMock(),
         version_manager=mocker.MagicMock(),
         mcp_manager=mock_mcp,
-        extension_manager=mocker.MagicMock(),
         capability_runtime=mocker.MagicMock(),
-        services=mocker.MagicMock(),
+        chat=mocker.MagicMock(),
+        skill=mocker.MagicMock(),
         subagent_confirm=mocker.MagicMock(),
         session_id="test-close",
     )
@@ -119,9 +116,9 @@ def test_close_method_no_mcp(mocker):
         memory_manager=mocker.MagicMock(),
         version_manager=mocker.MagicMock(),
         mcp_manager=None,
-        extension_manager=mocker.MagicMock(),
         capability_runtime=mocker.MagicMock(),
-        services=mocker.MagicMock(),
+        chat=mocker.MagicMock(),
+        skill=mocker.MagicMock(),
         subagent_confirm=mocker.MagicMock(),
         session_id="test-close-noop",
     )

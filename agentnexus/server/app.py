@@ -76,7 +76,7 @@ def create_app(runtime: Any | None = None) -> FastAPI:
         # 决策 1/6: 关闭前取消所有活跃 run（落盘 + 终态事件），再释放 runtime。
         try:
             rt = _get_runtime()
-            chat = getattr(getattr(rt, "services", None), "chat", None)
+            chat = getattr(rt, "chat", None)
             if chat is not None and hasattr(chat, "cancel_all_runs"):
                 chat.cancel_all_runs(reason="server_shutdown")
         except Exception:

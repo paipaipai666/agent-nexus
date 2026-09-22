@@ -24,7 +24,7 @@ class _FakeAgent:
 
 class _FakeMemoryManager:
     """Simulates a per-session memory manager with STM tokens."""
-    _ctx_max = 128000
+    ctx_max = 128000
     _stm_tokens = 0
 
     def __init__(self, stm_tokens=0):
@@ -45,12 +45,6 @@ class _FakeChatService:
         self._memory_managers[session_id] = memory
 
 
-class _FakeServices:
-    def __init__(self, chat=None):
-        self.chat = chat
-        self.skill = None
-
-
 class _FakeSettings:
     llm_model_id = "test-model"
     max_context_tokens = 128000
@@ -58,10 +52,11 @@ class _FakeSettings:
 
 class _FakeRuntime:
     """Simulates AppRuntime with build-time agent (zero stats) and per-session agents."""
-    def __init__(self, build_agent, memory_manager, services):
+    def __init__(self, build_agent, memory_manager, chat):
         self.agent = build_agent  # build-time agent, never runs queries
         self.memory_manager = memory_manager  # build-time memory manager, empty STM
-        self.services = services
+        self.chat = chat
+        self.skill = None
         self.settings = _FakeSettings()
         self.mcp_manager = None
 
@@ -92,8 +87,7 @@ def server_app(temp_agentnexus_home):
         memory=_FakeMemoryManager(stm_tokens=9800),
     )
 
-    services = _FakeServices(chat=chat)
-    runtime = _FakeRuntime(build_agent, build_mm, services)
+    runtime = _FakeRuntime(build_agent, build_mm, chat)
     set_runtime(runtime)
     app = create_app(runtime=runtime)
     yield app

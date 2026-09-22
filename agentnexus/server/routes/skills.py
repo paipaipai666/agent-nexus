@@ -21,7 +21,7 @@ def list_skills():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    service = runtime.services.skill
+    service = runtime.skill
     entries = service.list()
     return {
         "skills": [
@@ -45,7 +45,7 @@ def skill_status():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    snapshot = runtime.services.skill.snapshot()
+    snapshot = runtime.skill.snapshot()
     if hasattr(snapshot, "__dict__"):
         return snapshot.__dict__
     return snapshot
@@ -57,7 +57,7 @@ def use_skill(req: UseSkillRequest):
 
     runtime = _get_runtime()
     try:
-        entry = runtime.services.skill.use(req.skill_id)
+        entry = runtime.skill.use(req.skill_id)
         return {
             "id": entry.qualified_id,
             "display_name": entry.display_name,
@@ -72,7 +72,7 @@ def reset_skill():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.skill.reset()
+    runtime.skill.reset()
     return {"status": "reset"}
 
 
@@ -81,7 +81,7 @@ def get_skill(skill_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    service = runtime.services.skill
+    service = runtime.skill
     entry = service.registry.get(skill_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
@@ -101,7 +101,7 @@ def validate_skills(skill_id: str | None = None):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    errors = runtime.services.skill.validate(target=skill_id)
+    errors = runtime.skill.validate(target=skill_id)
     return {"valid": len(errors) == 0, "errors": errors}
 
 
@@ -110,7 +110,7 @@ def refresh_skills():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    entries = runtime.services.skill.refresh()
+    entries = runtime.skill.refresh()
     return {"count": len(entries), "refreshed": True}
 
 
@@ -123,7 +123,7 @@ def bulk_toggle_skills(req: BulkToggleRequest):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.skill.set_enabled_map(req.enabled)
+    runtime.skill.set_enabled_map(req.enabled)
     return {"status": "updated", "count": len(req.enabled)}
 
 
@@ -132,7 +132,7 @@ def get_skill_context():
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    context = runtime.services.skill.available_skill_context()
+    context = runtime.skill.available_skill_context()
     return {"context": context}
 
 
@@ -141,7 +141,7 @@ def recommend_skill(req: RecommendRequest):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    routes = runtime.services.skill.get_recommendations(req.text)
+    routes = runtime.skill.get_recommendations(req.text)
     return {
         "recommendations": [
             {
@@ -162,7 +162,7 @@ def enable_skill(skill_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.skill.set_enabled(skill_id, True)
+    runtime.skill.set_enabled(skill_id, True)
     return {"status": "enabled", "skill_id": skill_id}
 
 
@@ -171,5 +171,5 @@ def disable_skill(skill_id: str):
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    runtime.services.skill.set_enabled(skill_id, False)
+    runtime.skill.set_enabled(skill_id, False)
     return {"status": "disabled", "skill_id": skill_id}

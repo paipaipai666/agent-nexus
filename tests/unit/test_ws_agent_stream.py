@@ -31,7 +31,7 @@ class TestWebSocketAgentStream:
         session = chat.start_session()
 
         runtime = MagicMock()
-        runtime.services.chat = chat
+        runtime.chat = chat
         runtime.subagent_confirm = ConfirmBridge()
         return runtime, chat, session, agent
 
@@ -280,7 +280,7 @@ class TestWebSocketAgentStream:
         other_session = chat.start_session()
         other_run, _events, _turn = chat.begin_turn(other_session.id, "other")
         runtime = MagicMock()
-        runtime.services.chat = chat
+        runtime.chat = chat
         sent_events: list[dict] = []
         ws = AsyncMock()
         ws.accept = AsyncMock()

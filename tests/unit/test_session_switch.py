@@ -45,7 +45,7 @@ def mock_runtime():
 
     chat = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=memory_factory_builder)
     runtime = MagicMock()
-    runtime.services.chat = chat
+    runtime.chat = chat
     runtime.subagent_confirm = ConfirmBridge()
     return runtime, chat, agent, memory
 

@@ -68,7 +68,7 @@ class _FakeAgent:
 
 
 class _FakeMemoryManager:
-    _ctx_max = 128000
+    ctx_max = 128000
     def estimate_stm_tokens(self):
         return 0
 
@@ -80,22 +80,17 @@ class _FakeChatService:
         self._sessions = {}
 
 
-class _FakeServices:
-    def __init__(self, chat=None):
-        self.chat = chat
-        self.skill = None
-
-
 class _FakeSettings:
     llm_model_id = "test-model"
     max_context_tokens = 128000
 
 
 class _FakeRuntime:
-    def __init__(self, build_agent, memory_manager, services, settings=None, db_path=None):
+    def __init__(self, build_agent, memory_manager, chat, settings=None, db_path=None):
         self.agent = build_agent
         self.memory_manager = memory_manager
-        self.services = services
+        self.chat = chat
+        self.skill = None
         self.settings = settings or _FakeSettings()
         self.mcp_manager = None
         self._db_path = db_path
@@ -139,8 +134,7 @@ def server_app(temp_agentnexus_home, db_dir):
     chat._memory_managers["active-1"] = _FakeMemoryManager()
     chat._sessions["active-1"] = type("Handle", (), {"id": "active-1", "skill": None, "profile": None})()
 
-    services = _FakeServices(chat=chat)
-    runtime = _FakeRuntime(build_agent, build_mm, services, db_path=db_dir)
+    runtime = _FakeRuntime(build_agent, build_mm, chat, db_path=db_dir)
     set_runtime(runtime)
     app = create_app(runtime=runtime)
     yield app

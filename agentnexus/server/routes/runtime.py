@@ -34,7 +34,7 @@ def _resolve_session_refs(runtime, session_id: str | None):
     mm = runtime.memory_manager
 
     if session_id:
-        chat = getattr(runtime.services, "chat", None)
+        chat = runtime.chat
         if chat:
             per_session_agent = getattr(chat, "_agents", {}).get(session_id)
             per_session_mm = getattr(chat, "_memory_managers", {}).get(session_id)
@@ -65,8 +65,9 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
 
     # Context window
     ctx_max = 128000
-    if mm and hasattr(mm, "_ctx_max"):
-        ctx_max = mm._ctx_max
+    resolved = getattr(mm, "ctx_max", None) if mm is not None else None
+    if resolved:
+        ctx_max = resolved
     elif hasattr(settings, "max_context_tokens"):
         ctx_max = settings.max_context_tokens
 
@@ -92,7 +93,7 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
 
     # Skill info
     skill_id = None
-    skill_service = getattr(runtime.services, "skill", None)
+    skill_service = runtime.skill
     if skill_service:
         snapshot = skill_service.snapshot() if hasattr(skill_service, "snapshot") else {}
         skill_id = getattr(snapshot, "current_skill_id", None) or (snapshot.get("current_skill_id") if isinstance(snapshot, dict) else None)
