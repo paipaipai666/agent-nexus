@@ -28,11 +28,3 @@ __all__ = [
     "make_module_qualname",
     "build_embedding_text",
 ]
-
-
-def init_hooks() -> None:
-    """Initialize codegraph hooks. Called lazily when hooks are needed."""
-    try:
-        import agentnexus.codegraph.hooks  # noqa: F401
-    except Exception:
-        pass

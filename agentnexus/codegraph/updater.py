@@ -15,10 +15,13 @@ from pathlib import Path
 from agentnexus.codegraph import embeddings as codegraph_embeddings
 from agentnexus.codegraph import vector_store
 from agentnexus.codegraph.models import NodeData
-from agentnexus.codegraph.parser import auto_register_parsers, get_parser_for_file
+from agentnexus.codegraph.parsers.python_parser import PythonParser
 from agentnexus.codegraph.store import CodeGraphStore, detect_project_root, get_db_path
 
 logger = logging.getLogger(__name__)
+
+# Single built-in parser — Python only.
+_PARSER = PythonParser()
 
 # File extensions to scan
 _SUPPORTED_EXTENSIONS = {".py"}
@@ -142,8 +145,6 @@ def build_graph(
         project_path = detect_project_root()
     project_path = Path(project_path)
 
-    auto_register_parsers()
-
     db_path = get_db_path(project_path)
     store = CodeGraphStore(db_path)
     store.init_schema()
@@ -249,13 +250,12 @@ def _process_single_file(
     store.wal_begin(rel_path, content_hash)
 
     # Parse
-    parser = get_parser_for_file(fpath)
-    if parser is None:
+    if fpath.suffix.lower() not in _SUPPORTED_EXTENSIONS:
         store.wal_clear(rel_path)
         result.files_skipped += 1
         return
 
-    parse_result = parser.parse_file(fpath, content)
+    parse_result = _PARSER.parse_file(fpath, content)
 
     # Handle parse errors
     if parse_result.partial:
@@ -302,7 +302,7 @@ def _process_single_file(
             store.upsert_file(
                 path=rel_path,
                 content_hash=content_hash,
-                language=parser.language,
+                language=_PARSER.language,
                 size=file_size,
                 modified_at=modified_at,
                 node_count=len(new_nodes),
@@ -437,8 +437,6 @@ def sync_file(file_path: str | Path, project_root: Path | None = None) -> None:
         file_path = Path(file_path)
         if project_root is None:
             project_root = detect_project_root()
-
-        auto_register_parsers()
 
         db_path = get_db_path(project_root)
         store = CodeGraphStore(db_path)

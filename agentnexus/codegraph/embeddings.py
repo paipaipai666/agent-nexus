@@ -9,20 +9,7 @@ Reuses the existing sentence-transformers infrastructure from rag/embeddings.py.
 from __future__ import annotations
 
 from agentnexus.codegraph.models import NodeData, build_embedding_text
-from agentnexus.rag.embeddings import embed_texts, embedding_to_list, get_embedding_model
-
-
-def generate_embedding(node: NodeData) -> list[float] | None:
-    """Generate embedding vector for a single code entity.
-
-    Returns None for variable/import nodes (no embedding).
-    """
-    text = build_embedding_text(node)
-    if not text:
-        return None
-    model = get_embedding_model()
-    vec = model.encode(text, normalize_embeddings=True)
-    return embedding_to_list(vec)
+from agentnexus.rag.embeddings import embed_texts
 
 
 def generate_embeddings_batch(nodes: list[NodeData]) -> list[list[float] | None]:
@@ -54,4 +41,4 @@ def generate_embeddings_batch(nodes: list[NodeData]) -> list[list[float] | None]
     return result
 
 
-__all__ = ["generate_embedding", "generate_embeddings_batch"]
+__all__ = ["generate_embeddings_batch"]
