@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -125,6 +126,7 @@ def execute_command_hook(
             text=True,
             cwd=str(workspace),
             env=_build_subprocess_env(),
+            start_new_session=(sys.platform != "win32"),
         )
         try:
             stdout, stderr = process.communicate(
@@ -177,6 +179,14 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
                 capture_output=True, timeout=10,
             )
         except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        # POSIX: grandchildren (shell wrappers that didn't exec) inherit the
+        # pipe handles and would block communicate() until they exit — kill
+        # the whole process group (spawned with start_new_session).
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (OSError, ProcessLookupError):
             pass
     try:
         process.kill()

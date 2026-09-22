@@ -23,8 +23,10 @@ class _SleepyExecutor:
 
     def __init__(self):
         self.proc: subprocess.Popen | None = None
+        self.invoked = threading.Event()
 
     def invoke(self, *, name, params, caller, hitl_approver, tool_policy=None):
+        self.invoked.set()
         self.proc = process_tracker.run_tracked(
             [sys.executable, "-c", "import time; time.sleep(30)"],
             capture_output=True,
@@ -39,6 +41,10 @@ def test_cancel_kills_tool_process_tree_immediately():
     cancel = threading.Event()
 
     def trigger_cancel():
+        # 高负载 runner 上 run 线程可能 0.5s 内都拿不到调度——必须等
+        # invoke 真正开始后再触发取消，否则 cancel 先于 invoke 命中，
+        # execute_tool 直接返回 CANCELLED 而 executor.proc 仍是 None。
+        assert executor.invoked.wait(timeout=5), "工具未被调用"
         time.sleep(0.5)
         cancel.set()
 
