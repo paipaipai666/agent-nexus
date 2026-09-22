@@ -144,67 +144,6 @@ def chunk_records(request: pytest.FixtureRequest) -> list[Any]:
 
 
 @pytest.fixture
-def ltm_entries(request: pytest.FixtureRequest) -> list[dict[str, Any]]:
-    """Generate N LTM entry dicts for perf tests."""
-    count = getattr(request, "param", 50)
-    categories = ["entity_fact", "preference", "task_result", "conversation_summary"]
-    return [
-        {
-            "id": i,
-            "content": f"Long term memory entry #{i} with some sample text that would be embedded and searched.",
-            "category": random.choice(categories),
-            "importance": round(random.uniform(0.1, 1.0), 2),
-        }
-        for i in range(count)
-    ]
-
-
-@pytest.fixture
-def traces_dir(perf_env: Path) -> Path:
-    """Create traces dir with 50 sample spans for agent perf tests."""
-    import json
-    import time
-
-    d = perf_env / "traces"
-    d.mkdir(parents=True, exist_ok=True)
-    now = time.time()
-
-    with open(d / "perf.jsonl", "w", encoding="utf-8") as f:
-        for i in range(50):
-            span = {
-                "trace_id": f"perf_trace_{i // 5}",
-                "span_id": f"span_{i:04d}",
-                "parent_span_id": "",
-                "name": "llm" if i % 3 != 0 else "task",
-                "start_time": now - (50 - i) * 0.5,
-                "end_time": now - (50 - i) * 0.5 + 0.2,
-                "latency_ms": 200.0,
-                "metadata": {
-                    "model": "deepseek-v4-flash",
-                    "input_tokens": random.randint(100, 2000),
-                    "output_tokens": random.randint(50, 1000),
-                    "status": "ok",
-                    "tool_calls": ["web_search"] if i % 4 == 0 else [],
-                },
-            }
-            f.write(json.dumps(span, ensure_ascii=False) + "\n")
-    return d
-
-
-# ── Observability / Reranker helpers ─────────────────────────────
-
-
-class MockCrossEncoder:
-    """Mock CrossEncoder for reranker perf tests — simulates predict latency."""
-
-    def __init__(self, model_name: str = ""):
-        self.model_name = model_name
-
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
-        return [random.uniform(0.0, 1.0) for _ in pairs]
-
-
-@pytest.fixture
 def generate_spans(perf_env: Path):
     """Factory: returns a callable(count) that writes N spans to traces/perf.jsonl.
 

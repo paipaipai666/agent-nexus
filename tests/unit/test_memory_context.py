@@ -2,6 +2,8 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -23,6 +25,8 @@ class TestInitSessionWithContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "test"
             mgr.short_term = stm
             mgr.long_term = mock_ltm
@@ -49,6 +53,8 @@ class TestInitSessionWithContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "test"
             mgr.short_term = stm
             mgr.long_term = mock_ltm
@@ -64,6 +70,8 @@ class TestInitSessionWithContext:
 
     def test_init_session_returns_empty_without_ltm(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.long_term = None
         mgr.short_term = ShortTermMemory()
         result = mgr.init_session("test")
@@ -81,6 +89,8 @@ class TestInitSessionWithContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "test"
             mgr.short_term = ShortTermMemory()
             mgr.long_term = mock_ltm
@@ -104,6 +114,8 @@ class TestInitSessionWithContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "test"
             mgr.short_term = ShortTermMemory()
             mgr.long_term = mock_ltm
@@ -137,16 +149,15 @@ class TestReActAgentConversationMode:
         mock_llm = MagicMock()
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
 
-        result = agent._build_prompt("tools", "question", "history", "memory", "conversation")
-        expected = REACT_PROMPT_TEMPLATE.format(
-            tools="tools",
-            question="question",
-            history="history",
-            memory_context="memory",
-            conversation_context="conversation",
-        )
+        messages = agent._build_messages("tools", "question", "memory", "conversation")
+        expected_rules = REACT_PROMPT_TEMPLATE.split("== 可用工具 ==")[0].rstrip()
 
-        assert result == expected
+        assert messages[0] == {"role": "system", "content": expected_rules}
+        assert messages[-1]["role"] == "user"
+        assert "question" in messages[-1]["content"]
+        all_content = "\n".join(m["content"] for m in messages)
+        assert "memory" in all_content
+        assert "conversation" in all_content
 
     def test_build_prompt_includes_available_skill_context(self):
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -318,9 +329,10 @@ class TestReActAgentConversationMode:
 
         assert agent.session_profile is None
         assert agent.compiled_session_profile is None
-        prompt = agent._build_prompt("tools", "question", "", "", "")
-        assert "安全原则" not in prompt
-        assert "Skill Workflow" not in prompt
+        messages = agent._build_messages("tools", "question", "", "", "")
+        all_content = "\n".join(m["content"] for m in messages)
+        assert "安全原则" not in all_content
+        assert "Skill Workflow" not in all_content
 
     def test_conversation_mode_false_creates_new_local_history(self):
         """In non-conversation mode, history is a local variable re-created each run."""
@@ -901,8 +913,10 @@ class TestBuildProjection:
 
     def _make_mgr(self, stm, ctx_max=128000, buffer_tokens=8000):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = stm
-        mgr._ctx_max = ctx_max
+        mgr._engine.ctx_max = ctx_max
         mgr._settings = MagicMock()
         mgr._settings.autocompact_buffer_tokens = buffer_tokens
         return mgr
@@ -1025,6 +1039,8 @@ class TestMicroCompactKeepLast:
         from agentnexus.memory.manager import MemoryManager
 
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._settings = MagicMock()
         mgr._settings.time_microcompact_interval = 0
@@ -1047,38 +1063,42 @@ class TestBridgeRead:
         transcript_dir = temp_agentnexus_home / "transcripts"
         transcript_dir.mkdir()
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._settings = MagicMock()
-        mgr._recent_reads = []
+        mgr._engine.recent_reads = []
         mgr._settings.post_compact_max_files = 5
         mgr._settings.post_compact_token_per_file = 5000
         mgr._settings.post_compact_token_budget = 50000
-        mgr._on_compact = None
-        mgr._transcript_dir = str(transcript_dir)
+        mgr._engine.on_compact = None
+        mgr._engine.transcript_dir = str(transcript_dir)
         mgr._settings.transcript_enabled = False
         mgr.session_id = "test"
 
         mgr.bridge_read("/tmp/test.py", "print('hello')")
         mgr.bridge_read("/tmp/test2.py", "x = 1")
-        assert len(mgr._recent_reads) == 2
-        assert mgr._recent_reads[0][0] == "/tmp/test.py"
+        assert len(mgr._engine.recent_reads) == 2
+        assert mgr._engine.recent_reads[0][0] == "/tmp/test.py"
 
     def test_bridge_read_deduplication(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._settings = MagicMock()
-        mgr._recent_reads = []
+        mgr._engine.recent_reads = []
         mgr._settings.post_compact_max_files = 3
         mgr._settings.post_compact_token_per_file = 5000
         mgr._settings.post_compact_token_budget = 50000
-        mgr._transcript_dir = "."
+        mgr._engine.transcript_dir = "."
         mgr._settings.transcript_enabled = False
         mgr.session_id = "test"
 
         for _ in range(3):
             mgr.bridge_read("/tmp/a.py", "a")
         mgr.bridge_read("/tmp/b.py", "b")
-        assert len(mgr._recent_reads) == 4
+        assert len(mgr._engine.recent_reads) == 4
 
 
 class TestTranscriptBackup:
@@ -1086,14 +1106,16 @@ class TestTranscriptBackup:
         transcript_dir = temp_agentnexus_home / "transcripts"
         transcript_dir.mkdir()
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr.short_term.append("user", "hello")
         mgr.short_term.append("assistant", "world")
         mgr.session_id = "test"
-        mgr._transcript_dir = str(transcript_dir)
+        mgr._engine.transcript_dir = str(transcript_dir)
         mgr._settings = MagicMock()
         mgr._settings.transcript_enabled = True
-        mgr._on_compact = None
+        mgr._engine.on_compact = None
 
         mgr._write_transcript()
         files = list(transcript_dir.glob("*.jsonl"))
@@ -1106,10 +1128,12 @@ class TestTranscriptBackup:
         transcript_dir = temp_agentnexus_home / "transcripts"
         transcript_dir.mkdir()
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr.short_term.append("user", "hello")
         mgr.session_id = "test"
-        mgr._transcript_dir = str(transcript_dir)
+        mgr._engine.transcript_dir = str(transcript_dir)
         mgr._settings = MagicMock()
         mgr._settings.transcript_enabled = False
 
@@ -1122,6 +1146,8 @@ class TestHasNewMemories:
 
     def test_returns_true_after_new_ltm_write(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.long_term = MagicMock()
         mgr.long_term.write_counter = 5
         mgr._last_write_count = 3
@@ -1129,6 +1155,8 @@ class TestHasNewMemories:
 
     def test_returns_false_when_no_new_writes(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.long_term = MagicMock()
         mgr.long_term.write_counter = 3
         mgr._last_write_count = 3
@@ -1136,6 +1164,8 @@ class TestHasNewMemories:
 
     def test_returns_false_when_ltm_disabled(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.long_term = None
         assert mgr.has_new_memories() is False
 
@@ -1152,6 +1182,8 @@ class TestRefreshLtmContext:
         mock_ltm.write_counter = 0
 
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.session_id = "test"
         mgr.short_term = ShortTermMemory()
         mgr.long_term = mock_ltm
@@ -1170,6 +1202,8 @@ class TestConclude:
     def _make_mgr(self):
         from agentnexus.memory.circuit_breaker import CircuitBreaker
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._llm = MagicMock()
         mgr._embed_model = MagicMock()
@@ -1178,7 +1212,7 @@ class TestConclude:
         mgr.long_term.write_counter = 0
         mgr._settings = MagicMock()
         mgr.session_id = "test"
-        mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+        mgr._pipeline.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
         return mgr
 
     def test_calls_llm_with_extract_prompt(self):

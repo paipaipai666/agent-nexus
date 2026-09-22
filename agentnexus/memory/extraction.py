@@ -33,22 +33,6 @@ CATEGORY_LABELS = {
     "note": "笔记",
 }
 
-# Backward-compatible mapping from old categories to new
-_CATEGORY_MIGRATION = {
-    "entity_fact": "fact",
-    "conclusion": "fact",
-    "user_preference": "preference",
-    "tool_preference": "preference",
-    "task_progress": "note",
-    "error_pattern": "note",
-    "conversation": "note",
-}
-
-
-def migrate_category(cat: str) -> str:
-    """Map old 6-category names to new 3-category names."""
-    return _CATEGORY_MIGRATION.get(cat, cat)
-
 
 def _embed_text(content: str, context: str | None) -> str:
     """Build the text used for embedding a memory.

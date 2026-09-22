@@ -2,6 +2,8 @@
 from unittest.mock import MagicMock, patch
 
 from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -18,23 +20,25 @@ class TestMemoryCompactionIntegration:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "compact_test"
             mgr.short_term = ShortTermMemory()
             mgr.long_term = mock_ltm
             mgr._llm = MagicMock()
             mgr._embed_model = mock_embed
             mgr._enable_long_term = True
-            mgr._ctx_max = ctx_max
-            mgr._compact_threshold = ctx_max - 8000
-            mgr._compact_circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
-            mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
-            mgr._microcompacts_since_open = 0
-            mgr._compacting = False
-            mgr._snip_freed_tokens = 0
-            mgr._recent_reads = []
-            mgr._last_api_call_ts = 0.0
-            mgr._on_compact = None
-            mgr._on_after_compact = None
+            mgr._engine.ctx_max = ctx_max
+            mgr._engine.compact_threshold = ctx_max - 8000
+            mgr._engine.circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
+            mgr._pipeline.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+            mgr._engine.microcompacts_since_open = 0
+            mgr._engine.compacting = False
+            mgr._engine.snip_freed_tokens = 0
+            mgr._engine.recent_reads = []
+            mgr._engine.last_api_call_ts = 0.0
+            mgr._engine.on_compact = None
+            mgr._engine.on_after_compact = None
             mgr._settings = MagicMock()
             mgr._settings.snip_enabled = True
             mgr._settings.time_microcompact_interval = 0

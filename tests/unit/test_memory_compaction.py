@@ -2,6 +2,8 @@ import time
 from unittest.mock import MagicMock
 
 from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import (
     MemoryManager,
     _contains_pii,
@@ -95,13 +97,15 @@ class TestSnipInManager:
 
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._settings = MagicMock()
         mgr._settings.snip_enabled = True
         mgr._settings.time_microcompact_interval = 0
-        mgr._snip_freed_tokens = 0
-        mgr._on_compact = None
-        mgr._on_after_compact = None
+        mgr._engine.snip_freed_tokens = 0
+        mgr._engine.on_compact = None
+        mgr._engine.on_after_compact = None
         return mgr
 
     def test_removes_oldest_messages_beyond_keep_recent_plus_4(self):
@@ -133,16 +137,18 @@ class TestSnipInManager:
         for i in range(20):
             mgr.short_term.append("user", f"msg{i}" + " content" * 50)
         mgr.snip(keep_recent=5)
-        assert mgr._snip_freed_tokens > 0
+        assert mgr._engine.snip_freed_tokens > 0
 
 
 class TestMicroCompact:
 
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._settings = MagicMock()
-        mgr._on_compact = None
+        mgr._engine.on_compact = None
         return mgr
 
     def test_clears_recoverable_tool_results(self):
@@ -198,20 +204,22 @@ class TestMicroCompactTimeBased:
 
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         # Reset incremental counter so microcompact_time_based falls back
         # to estimate_tokens() for before/after comparison
         mgr.short_term._token_count = 0
         mgr._settings = MagicMock()
         mgr._settings.time_microcompact_interval = 60
-        mgr._last_api_call_ts = 0.0
-        mgr._on_compact = None
-        mgr._on_after_compact = None
+        mgr._engine.last_api_call_ts = 0.0
+        mgr._engine.on_compact = None
+        mgr._engine.on_after_compact = None
         return mgr
 
     def test_triggers_when_elapsed_exceeds_interval(self):
         mgr = self._make_mgr()
-        mgr._last_api_call_ts = time.time() - 120
+        mgr._engine.last_api_call_ts = time.time() - 120
         mgr.short_term.append("assistant", "x" * 3000)
         # Reset incremental counter so before/after comparison uses estimate_tokens()
         mgr.short_term._token_count = 0
@@ -220,26 +228,26 @@ class TestMicroCompactTimeBased:
 
     def test_noop_when_interval_not_elapsed(self):
         mgr = self._make_mgr()
-        mgr._last_api_call_ts = time.time() - 10
+        mgr._engine.last_api_call_ts = time.time() - 10
         result = mgr.microcompact_time_based(interval=60)
         assert result is False
 
     def test_returns_false_when_no_previous_api_call(self):
         mgr = self._make_mgr()
-        mgr._last_api_call_ts = 0.0
+        mgr._engine.last_api_call_ts = 0.0
         result = mgr.microcompact_time_based(interval=60)
         assert result is False
 
     def test_returns_false_when_no_messages_exist(self):
         mgr = self._make_mgr()
-        mgr._last_api_call_ts = time.time() - 120
+        mgr._engine.last_api_call_ts = time.time() - 120
         result = mgr.microcompact_time_based(interval=60)
         assert result is False
 
     def test_triggers_with_default_interval_from_settings(self):
         mgr = self._make_mgr()
         mgr._settings.time_microcompact_interval = 30
-        mgr._last_api_call_ts = time.time() - 60
+        mgr._engine.last_api_call_ts = time.time() - 60
         mgr.short_term.append("assistant", "x" * 3000)
         # Reset incremental counter so before/after comparison uses estimate_tokens()
         mgr.short_term._token_count = 0
@@ -251,6 +259,8 @@ class TestOffloadLargeResult:
 
     def test_writes_content_to_disk(self, tmp_path):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.session_id = "test-session"
         mgr._offload_dir = str(tmp_path)
         content = "A" * 2000
@@ -263,6 +273,8 @@ class TestOffloadLargeResult:
 
     def test_returns_stub_with_preview(self, tmp_path):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.session_id = "test"
         mgr._offload_dir = str(tmp_path)
         long_content = "Hello " * 200
@@ -275,6 +287,8 @@ class TestMaybeCompactCircuitBreaker:
 
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._llm = MagicMock()
         mgr._embed_model = MagicMock()
@@ -288,20 +302,20 @@ class TestMaybeCompactCircuitBreaker:
         mgr._settings.post_compact_token_per_file = 0
         mgr._settings.post_compact_token_budget = 0
         mgr._settings.offload_enabled = False
-        mgr._ctx_max = 128000
-        mgr._compact_threshold = 120000
-        mgr._compact_circuit = CircuitBreaker(
+        mgr._engine.ctx_max = 128000
+        mgr._engine.compact_threshold = 120000
+        mgr._engine.circuit = CircuitBreaker(
             failure_threshold=3,
             exponential_backoff=True,
         )
-        mgr._microcompacts_since_open = 0
-        mgr._compacting = False
-        mgr._snip_freed_tokens = 0
-        mgr._recent_reads = []
-        mgr._last_api_call_ts = 0.0
-        mgr._on_compact = None
-        mgr._on_after_compact = None
-        mgr._transcript_dir = "/tmp"
+        mgr._engine.microcompacts_since_open = 0
+        mgr._engine.compacting = False
+        mgr._engine.snip_freed_tokens = 0
+        mgr._engine.recent_reads = []
+        mgr._engine.last_api_call_ts = 0.0
+        mgr._engine.on_compact = None
+        mgr._engine.on_after_compact = None
+        mgr._engine.transcript_dir = "/tmp"
         mgr.session_id = "test"
         return mgr
 
@@ -318,15 +332,15 @@ class TestMaybeCompactCircuitBreaker:
         mgr._llm.think.return_value = ""
         for _ in range(3):
             mgr.maybe_compact()
-        assert mgr._compact_circuit.is_open is True
-        assert mgr._compact_circuit.failure_count == 3
+        assert mgr._engine.circuit.is_open is True
+        assert mgr._engine.circuit.failure_count == 3
 
     def test_circuit_open_only_microcompact_runs(self):
         mgr = self._make_mgr()
-        mgr._compact_circuit.record_failure()
-        mgr._compact_circuit.record_failure()
-        mgr._compact_circuit.record_failure()
-        assert mgr._compact_circuit.is_open
+        mgr._engine.circuit.record_failure()
+        mgr._engine.circuit.record_failure()
+        mgr._engine.circuit.record_failure()
+        assert mgr._engine.circuit.is_open
         for i in range(10):
             mgr.short_term.append(
                 "tool", f"Action: read[file=f{i}.py]\nObservation: content of file {i}"
@@ -344,29 +358,31 @@ class TestMaybeCompactCircuitBreaker:
         )
         mgr = self._make_mgr()
         # Simulate circuit in OPEN state with expired backoff (will transition to HALF_OPEN)
-        mgr._compact_circuit.record_failure()
-        mgr._compact_circuit.record_failure()
-        mgr._compact_circuit.record_failure()
-        assert mgr._compact_circuit.is_open
+        mgr._engine.circuit.record_failure()
+        mgr._engine.circuit.record_failure()
+        mgr._engine.circuit.record_failure()
+        assert mgr._engine.circuit.is_open
         # Force backoff to expire by setting opened_at to past
-        mgr._compact_circuit._opened_at = time.time() - 9999
-        mgr._microcompacts_since_open = 4
+        mgr._engine.circuit._opened_at = time.time() - 9999
+        mgr._engine.microcompacts_since_open = 4
         for i in range(10):
             mgr.short_term.append("user", f"msg{i}")
         mgr.short_term._token_count = 0  # force fallback to monkeypatched estimate_tokens
         mgr._llm.think.return_value = "<summary>Compacted summary of conversation.</summary>"
         mgr.maybe_compact()
-        assert mgr._compact_circuit.is_closed is True
-        assert mgr._compact_circuit.failure_count == 0
-        assert mgr._microcompacts_since_open == 0
+        assert mgr._engine.circuit.is_closed is True
+        assert mgr._engine.circuit.failure_count == 0
+        assert mgr._engine.microcompacts_since_open == 0
 
 
 class TestBuildProjection:
 
     def _make_mgr(self, stm, ctx_max=128000):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = stm
-        mgr._ctx_max = ctx_max
+        mgr._engine.ctx_max = ctx_max
         mgr._settings = MagicMock()
         mgr._settings.autocompact_buffer_tokens = 8000
         return mgr

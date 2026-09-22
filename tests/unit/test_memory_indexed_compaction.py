@@ -6,7 +6,8 @@
 from unittest.mock import MagicMock
 
 from agentnexus.memory.circuit_breaker import CircuitBreaker
-from agentnexus.memory.compaction_engine import segment_summarize
+from agentnexus.memory.compaction_engine import CompactionEngine, segment_summarize
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -113,6 +114,8 @@ class TestSegmentSummarize:
 class TestEngineIndexedCompaction:
     def _make_mgr(self, llm):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
         mgr._llm = llm
         mgr._embed_model = None
@@ -126,17 +129,17 @@ class TestEngineIndexedCompaction:
         mgr._settings.post_compact_token_per_file = 0
         mgr._settings.post_compact_token_budget = 0
         mgr._settings.offload_enabled = False
-        mgr._ctx_max = 128000
-        mgr._compact_threshold = 120000
-        mgr._compact_circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
-        mgr._microcompacts_since_open = 0
-        mgr._compacting = False
-        mgr._snip_freed_tokens = 0
-        mgr._recent_reads = []
-        mgr._last_api_call_ts = 0.0
-        mgr._on_compact = None
-        mgr._on_after_compact = None
-        mgr._transcript_dir = "/tmp"
+        mgr._engine.ctx_max = 128000
+        mgr._engine.compact_threshold = 120000
+        mgr._engine.circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
+        mgr._engine.microcompacts_since_open = 0
+        mgr._engine.compacting = False
+        mgr._engine.snip_freed_tokens = 0
+        mgr._engine.recent_reads = []
+        mgr._engine.last_api_call_ts = 0.0
+        mgr._engine.on_compact = None
+        mgr._engine.on_after_compact = None
+        mgr._engine.transcript_dir = "/tmp"
         mgr.session_id = "test"
         return mgr
 
@@ -198,7 +201,7 @@ class TestEngineIndexedCompaction:
         result = mgr.maybe_compact()
         assert result == 0
         assert len(mgr.short_term.get_all()) == 20, "全部失败时上下文不得被破坏"
-        assert mgr._compact_circuit.failure_count == 1
+        assert mgr._engine.circuit.failure_count == 1
 
     def test_archive_written_and_index_folded(self, monkeypatch, tmp_path):
         """归档先行：折叠后原文仍在 history 文件里，且序号与索引区间一致。"""
@@ -208,7 +211,7 @@ class TestEngineIndexedCompaction:
         llm = MagicMock()
         llm.think.side_effect = lambda msgs, silent=True: "段小结内容" * 30  # 长条目逼出折叠
         mgr = self._make_mgr(llm)
-        mgr._history_dir = str(tmp_path)
+        mgr._engine.history_dir = str(tmp_path)
         mgr._settings.memory_index_max_tokens = 60  # 极小预算 → 折叠
         for i in range(20):
             mgr.short_term.append("user", f"重要消息{i} " + "内容" * 20)
@@ -234,7 +237,7 @@ class TestEngineIndexedCompaction:
         llm = MagicMock()
         llm.think.side_effect = lambda msgs, silent=True: "段小结" + "字" * 40
         mgr = self._make_mgr(llm)
-        mgr._history_dir = str(tmp_path)
+        mgr._engine.history_dir = str(tmp_path)
         mgr._settings.memory_index_max_tokens = 80
         for i in range(20):
             mgr.short_term.append("user", f"第一批{i} " + "内容" * 20)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.project import ProjectMemory
 
@@ -113,6 +115,8 @@ class TestFormatContext:
 class TestManagerIntegration:
     def _mgr_with_project(self, tmp_path):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.session_id = "test"
         mgr.long_term = None
         mgr.project = ProjectMemory(tmp_path)
@@ -127,6 +131,8 @@ class TestManagerIntegration:
 
     def test_init_session_without_project_unchanged(self):
         mgr = MemoryManager.__new__(MemoryManager)
+        mgr._engine = CompactionEngine(mgr)
+        mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.session_id = "test"
         mgr.long_term = None
         assert mgr.init_session("问题") == ""

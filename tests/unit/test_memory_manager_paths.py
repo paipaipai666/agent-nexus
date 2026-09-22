@@ -87,13 +87,13 @@ class TestMicrocompactTimeBased:
 
     def test_returns_false_when_interval_not_elapsed(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
-        mm._last_api_call_ts = time.time()
+        mm._engine.last_api_call_ts = time.time()
         result = mm.microcompact_time_based(interval=9999)
         assert result is False
 
     def test_returns_false_when_no_api_call(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
-        mm._last_api_call_ts = 0.0
+        mm._engine.last_api_call_ts = 0.0
         result = mm.microcompact_time_based(interval=1)
         assert result is False
 
@@ -123,15 +123,15 @@ class TestBridgeRead:
     def test_tracks_files(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         mm.bridge_read("/path/to/file.py", "print('hello')")
-        assert len(mm._recent_reads) == 1
-        assert mm._recent_reads[0][0] == "/path/to/file.py"
+        assert len(mm._engine.recent_reads) == 1
+        assert mm._engine.recent_reads[0][0] == "/path/to/file.py"
 
     def test_caps_at_20(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         for i in range(25):
             mm.bridge_read(f"/file_{i}.py", f"content {i}")
-        assert len(mm._recent_reads) == 20
-        assert mm._recent_reads[0][0] == "/file_5.py"
+        assert len(mm._engine.recent_reads) == 20
+        assert mm._engine.recent_reads[0][0] == "/file_5.py"
 
 
 class TestWriteTranscript:
@@ -143,7 +143,7 @@ class TestWriteTranscript:
 
         mm._write_transcript()
 
-        transcript_dir = Path(mm._transcript_dir)
+        transcript_dir = Path(mm._engine.transcript_dir)
         jsonl_files = list(transcript_dir.glob("*.jsonl"))
         assert len(jsonl_files) == 1
         assert "test_session" not in jsonl_files[0].name  # session_id is "s1"

@@ -76,6 +76,8 @@ def _run_gate_dry_run() -> dict[str, str]:
     Returns {question+answer: predicted_label}.
     This is a baseline smoke test — the full eval also tests the LLM gate.
     """
+    from agentnexus.memory.compaction_engine import CompactionEngine
+    from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
     from agentnexus.memory.manager import MemoryManager
 
     # Create a minimal instance just for rule testing
@@ -84,6 +86,8 @@ def _run_gate_dry_run() -> dict[str, str]:
             return "no"
 
     mgr = MemoryManager.__new__(MemoryManager)
+    mgr._engine = CompactionEngine(mgr)
+    mgr._pipeline = MemoryExtractionPipeline(mgr)
     mgr._llm = _FakeLLM()
     mgr._gate_state = None  # won't be used in rules-only path
 

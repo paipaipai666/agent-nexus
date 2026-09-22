@@ -7,6 +7,8 @@ in later turns.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
 
@@ -26,14 +28,16 @@ class TestMultiTurnContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "multi_turn_test"
             mgr.short_term = ShortTermMemory()
             mgr.long_term = mock_ltm
             mgr._llm = MagicMock()
             mgr._embed_model = mock_embed
             mgr._enable_long_term = True
-            mgr._ctx_max = 8000
-            mgr._gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+            mgr._engine.ctx_max = 8000
+            mgr._pipeline.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
             # Opt into the LLM gate: these tests exercise the gate+extraction path.
             # MagicMock attribute access yields a truthy memory_llm_gate.
             mgr._settings = MagicMock()
@@ -141,6 +145,8 @@ class TestMultiTurnContext:
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
+            mgr._engine = CompactionEngine(mgr)
+            mgr._pipeline = MemoryExtractionPipeline(mgr)
             mgr.session_id = "multi_turn"
             mgr.short_term = ShortTermMemory()
             mgr.long_term = mock_ltm

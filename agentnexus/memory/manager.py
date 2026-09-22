@@ -5,12 +5,9 @@ Responsibilities kept here:
   - append orchestration (offload large tool results, compaction trigger)
   - LTM context retrieval (init_session / has_new_memories / refresh)
 
-Compaction lives in ``compaction_engine.CompactionEngine``; extraction lives
-in ``extraction_pipeline.MemoryExtractionPipeline``. Both borrow the manager
-as their shared context. State attributes historically set directly on the
-manager (``_compact_circuit``, ``_on_compact``, …) are forwarded to the
-owning sub-component via __getattr__/__setattr__, so existing callers and
-tests that construct via ``MemoryManager.__new__`` keep working.
+Compaction state and logic live in ``compaction_engine.CompactionEngine``;
+extraction lives in ``extraction_pipeline.MemoryExtractionPipeline``. Both
+borrow the manager as their shared context (STM/LTM/LLM/settings/session).
 """
 
 import logging
@@ -36,31 +33,9 @@ logger = logging.getLogger(__name__)
 class MemoryManager:
     """Session-scoped memory manager combining STM, LTM, compaction, and extraction.
 
-    Facade: owns shared resources (STM, LTM, LLM, embed model, settings) and
+    Owns shared resources (STM, LTM, LLM, embed model, settings) and
     delegates compaction to ``_engine`` and extraction to ``_pipeline``.
     """
-
-    # Private state attributes that live on the sub-components. Reads go
-    # through __getattr__ (only fired when normal lookup fails), writes
-    # through __setattr__ — both lazily create the sub-component so
-    # __new__-constructed test instances work without __init__.
-    _FORWARD_TO_ENGINE = {
-        "_history_dir": "history_dir",
-        "_compact_circuit": "circuit",
-        "_microcompacts_since_open": "microcompacts_since_open",
-        "_compacting": "compacting",
-        "_snip_freed_tokens": "snip_freed_tokens",
-        "_recent_reads": "recent_reads",
-        "_last_api_call_ts": "last_api_call_ts",
-        "_on_compact": "on_compact",
-        "_on_after_compact": "on_after_compact",
-        "_ctx_max": "ctx_max",
-        "_compact_threshold": "compact_threshold",
-        "_transcript_dir": "transcript_dir",
-    }
-    _FORWARD_TO_PIPELINE = {
-        "_gate_circuit": "gate_circuit",
-    }
 
     def __init__(self, session_id: str, llm=None, enable_long_term: bool = True,
                  workspace_path: str | None = None):
@@ -96,6 +71,40 @@ class MemoryManager:
         # without a threshold until resolution lands (same as the None path).
         threading.Thread(target=self._resolve_ctx_max_async, daemon=True, name="mem-ctx-resolve").start()
 
+    # ── Compaction state properties (delegating to the engine) ───────
+
+    @property
+    def ctx_max(self) -> int:
+        return self._engine.ctx_max
+
+    @ctx_max.setter
+    def ctx_max(self, value: int) -> None:
+        self._engine.ctx_max = value
+
+    @property
+    def compact_threshold(self) -> int:
+        return self._engine.compact_threshold
+
+    @compact_threshold.setter
+    def compact_threshold(self, value: int) -> None:
+        self._engine.compact_threshold = value
+
+    @property
+    def on_compact(self):
+        return self._engine.on_compact
+
+    @on_compact.setter
+    def on_compact(self, callback) -> None:
+        self._engine.on_compact = callback
+
+    @property
+    def on_after_compact(self):
+        return self._engine.on_after_compact
+
+    @on_after_compact.setter
+    def on_after_compact(self, callback) -> None:
+        self._engine.on_after_compact = callback
+
     def _resolve_ctx_max_async(self) -> None:
         """Background thread: fill in compaction thresholds once litellm is up."""
         try:
@@ -104,47 +113,8 @@ class MemoryManager:
             logger.debug("ctx_max resolution failed: %s", exc)
             return
         if ctx_max:
-            engine = self.__dict__.get("_engine")
-            if engine is not None:
-                engine.ctx_max = ctx_max
-                engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
-
-    # ── Sub-component access + attribute forwarding ──────────────────
-
-    def _get_engine(self) -> CompactionEngine:
-        engine = self.__dict__.get("_engine")
-        if engine is None:
-            engine = CompactionEngine(self)
-            self.__dict__["_engine"] = engine
-        return engine
-
-    def _get_pipeline(self) -> MemoryExtractionPipeline:
-        pipeline = self.__dict__.get("_pipeline")
-        if pipeline is None:
-            pipeline = MemoryExtractionPipeline(self)
-            self.__dict__["_pipeline"] = pipeline
-        return pipeline
-
-    def __setattr__(self, name, value):
-        engine_attr = self._FORWARD_TO_ENGINE.get(name)
-        if engine_attr is not None:
-            setattr(self._get_engine(), engine_attr, value)
-            return
-        pipeline_attr = self._FORWARD_TO_PIPELINE.get(name)
-        if pipeline_attr is not None:
-            setattr(self._get_pipeline(), pipeline_attr, value)
-            return
-        object.__setattr__(self, name, value)
-
-    def __getattr__(self, name):
-        # Only fired when normal lookup fails (i.e. forwarded state attrs).
-        engine_attr = self._FORWARD_TO_ENGINE.get(name)
-        if engine_attr is not None:
-            return getattr(self._get_engine(), engine_attr)
-        pipeline_attr = self._FORWARD_TO_PIPELINE.get(name)
-        if pipeline_attr is not None:
-            return getattr(self._get_pipeline(), pipeline_attr)
-        raise AttributeError(f"{type(self).__name__} has no attribute {name!r}")
+            self._engine.ctx_max = ctx_max
+            self._engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
 
     # ── Embedding model lifecycle ────────────────────────────────────
 
@@ -287,7 +257,7 @@ class MemoryManager:
                 content = self._offload_large_result(content)
         self.short_term.append(role, content, metadata=metadata)
         # Recursive guard: don't trigger compaction from within compaction
-        if not self._compacting:
+        if not self._engine.compacting:
             self.maybe_compact()
 
         # ── after memory hook ────────────────────────────────────
@@ -303,7 +273,7 @@ class MemoryManager:
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
                       is_auto: bool = True) -> int:
-        saved = self._get_engine().maybe_compact(threshold, custom_instructions, is_auto)
+        saved = self._engine.maybe_compact(threshold, custom_instructions, is_auto)
         project = getattr(self, "project", None)
         if saved > 0 and project is not None:
             try:
@@ -316,39 +286,39 @@ class MemoryManager:
         return saved
 
     def snip(self, keep_recent: int = 10) -> int:
-        return self._get_engine().snip(keep_recent)
+        return self._engine.snip(keep_recent)
 
     def microcompact(self) -> None:
-        self._get_engine().microcompact()
+        self._engine.microcompact()
 
     def microcompact_time_based(self, interval: int | None = None) -> bool:
-        return self._get_engine().microcompact_time_based(interval)
+        return self._engine.microcompact_time_based(interval)
 
     def build_projection(self, messages: list[dict]) -> list[dict]:
-        return self._get_engine().build_projection(messages)
+        return self._engine.build_projection(messages)
 
     def mark_api_call(self) -> None:
-        self._get_engine().mark_api_call()
+        self._engine.mark_api_call()
 
     def bridge_read(self, filepath: str, content_preview: str = "") -> None:
-        self._get_engine().bridge_read(filepath, content_preview)
+        self._engine.bridge_read(filepath, content_preview)
 
     def _fire_compact(self, event_type: str, **kwargs):
-        self._get_engine()._fire_compact(event_type, **kwargs)
+        self._engine._fire_compact(event_type, **kwargs)
 
     def _write_transcript(self):
-        self._get_engine()._write_transcript()
+        self._engine._write_transcript()
 
     def _restore_files(self):
-        self._get_engine()._restore_files()
+        self._engine._restore_files()
 
     def _drain_to_ltm(self, messages: list[dict]):
-        self._get_engine()._drain_to_ltm(messages)
+        self._engine._drain_to_ltm(messages)
 
     # ── Extraction delegates (see MemoryExtractionPipeline) ──────────
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
-        self._get_pipeline().run(question, answer, allow_memory)
+        self._pipeline.run(question, answer, allow_memory)
         project = getattr(self, "project", None)
         if allow_memory and project is not None:
             try:
@@ -357,7 +327,7 @@ class MemoryManager:
                 logger.debug("Project memory worklog failed: %s", e)
 
     def _should_extract_rules(self, question: str, answer: str) -> str:
-        return self._get_pipeline().should_extract_rules(question, answer)
+        return self._pipeline.should_extract_rules(question, answer)
 
     def _should_extract(self, question: str, answer: str) -> bool:
-        return self._get_pipeline().should_extract(question, answer)
+        return self._pipeline.should_extract(question, answer)

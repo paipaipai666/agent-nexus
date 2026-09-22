@@ -10,9 +10,13 @@ import pytest
 
 
 def _make_mgr(memory_llm_gate: bool = False, llm=None):
+    from agentnexus.memory.compaction_engine import CompactionEngine
+    from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
     from agentnexus.memory.manager import MemoryManager
 
     mgr = MemoryManager.__new__(MemoryManager)
+    mgr._engine = CompactionEngine(mgr)
+    mgr._pipeline = MemoryExtractionPipeline(mgr)
     mgr.session_id = "test"
     mgr._settings = SimpleNamespace(memory_llm_gate=memory_llm_gate)
     mgr._llm = llm or MagicMock()
@@ -59,7 +63,7 @@ class TestDefaultDeny:
     def test_uncertain_denied_without_llm_call(self):
         llm = MagicMock()
         mgr = _make_mgr(memory_llm_gate=False, llm=llm)
-        pipeline = mgr._get_pipeline()
+        pipeline = mgr._pipeline
         assert pipeline.should_extract("部署这个服务", "已完成部署，共 3 个实例") is False
         llm.think.assert_not_called()
 
@@ -67,14 +71,14 @@ class TestDefaultDeny:
         llm = MagicMock()
         llm.think.return_value = "yes"
         mgr = _make_mgr(memory_llm_gate=True, llm=llm)
-        pipeline = mgr._get_pipeline()
+        pipeline = mgr._pipeline
         assert pipeline.should_extract("部署这个服务", "已完成部署，共 3 个实例") is True
         llm.think.assert_called_once()
 
     def test_strong_signal_never_touches_gate(self):
         llm = MagicMock()
         mgr = _make_mgr(memory_llm_gate=False, llm=llm)
-        pipeline = mgr._get_pipeline()
+        pipeline = mgr._pipeline
         assert pipeline.should_extract("我喜欢简洁的回答", "好的") is True
         llm.think.assert_not_called()
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
+from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.projection import project_aggressive, project_mild
 from agentnexus.memory.short_term import ShortTermMemory, compute_importance
@@ -16,16 +18,18 @@ _RECOVERABLE_TOOLS = frozenset({
 
 def _make_mgr():
     mgr = MemoryManager.__new__(MemoryManager)
+    mgr._engine = CompactionEngine(mgr)
+    mgr._pipeline = MemoryExtractionPipeline(mgr)
     mgr.short_term = ShortTermMemory()
     mgr._settings = MagicMock()
     mgr._settings.snip_enabled = True
     mgr._settings.time_microcompact_interval = 0
     mgr._settings.large_result_threshold = 100000
-    mgr._snip_freed_tokens = 0
-    mgr._on_compact = None
-    mgr._on_after_compact = None
-    mgr._ctx_max = 128000
-    mgr._compact_threshold = 120000
+    mgr._engine.snip_freed_tokens = 0
+    mgr._engine.on_compact = None
+    mgr._engine.on_after_compact = None
+    mgr._engine.ctx_max = 128000
+    mgr._engine.compact_threshold = 120000
     return mgr
 
 
@@ -61,7 +65,7 @@ class TestMicroCompactBenchmark:
 class TestBuildProjectionBenchmark:
     def test_build_projection_500_messages_90pct(self, benchmark):
         mgr = _make_mgr()
-        mgr._ctx_max = 500
+        mgr._engine.ctx_max = 500
         _populate_messages(mgr, 500, "assistant", 200)
         messages = mgr.short_term.get_all()
         result = benchmark(mgr.build_projection, messages)
