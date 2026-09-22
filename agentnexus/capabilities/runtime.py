@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-CAPABILITY_KINDS = ("tools", "skills", "mcp", "plugins")
+CAPABILITY_KINDS = ("tools", "skills", "mcp")
 
 
 @dataclass
@@ -20,12 +20,11 @@ class CapabilityState:
 class CapabilitySnapshot:
     states: dict[str, CapabilityState] = field(default_factory=dict)
     skill_enabled: dict[str, bool] = field(default_factory=dict)
-    plugin_enabled: dict[str, bool] = field(default_factory=dict)
     mcp_enabled: dict[str, bool] = field(default_factory=dict)
 
 
 class CapabilityRuntime:
-    """Coordinate runtime reloads for tools, skills, MCP, and plugins."""
+    """Coordinate runtime reloads for tools, skills, and MCP."""
 
     def __init__(
         self,
@@ -35,7 +34,6 @@ class CapabilityRuntime:
         agent: Any = None,
         skill_service: Any = None,
         mcp_manager: Any = None,
-        extension_manager: Any = None,
         register_tools: Any = None,
         llm_client: Any = None,
         subagent_confirm: Any = None,
@@ -45,7 +43,6 @@ class CapabilityRuntime:
         self.agent = agent
         self.skill_service = skill_service
         self.mcp_manager = mcp_manager
-        self.extension_manager = extension_manager
         self.register_tools = register_tools
         self.llm_client = llm_client
         self.subagent_confirm = subagent_confirm
@@ -56,7 +53,6 @@ class CapabilityRuntime:
         return CapabilitySnapshot(
             states={key: CapabilityState(**vars(value)) for key, value in self.states.items()},
             skill_enabled=dict(cfg.get("skills", {})),
-            plugin_enabled=dict(cfg.get("plugins", {})),
             mcp_enabled=dict(cfg.get("mcp_servers", {})),
         )
 
@@ -110,8 +106,6 @@ class CapabilityRuntime:
                 result = self.reload_skills()
             elif kind == "mcp":
                 result = self.reload_mcp()
-            elif kind == "plugins":
-                result = self.reload_plugins()
             else:
                 raise ValueError(f"Unknown capability kind: {kind}")
             state = self.states[kind]
@@ -133,8 +127,6 @@ class CapabilityRuntime:
             self.executor.unregister_source_prefix("mcp:", source_type="mcp")
             if self.mcp_manager is not None:
                 self.mcp_manager.close()
-        elif kind == "plugins":
-            self.executor.unregister_source_prefix("plugin:", source_type="plugin")
         self.states[kind].loaded_generation = -1
         self._persist_states()
         return "unloaded"
@@ -178,36 +170,6 @@ class CapabilityRuntime:
         self._refresh_mcp_context()
         return "reloaded"
 
-    def reload_plugins(self) -> str:
-        if self.extension_manager is None:
-            return "no extension manager"
-        self.extension_manager.discover()
-        self.extension_manager.load_enabled(runtime=self)
-        enabled_map = self._capability_config().get("plugins", {})
-        self.executor.registry.unregister_source_prefix("plugin:", source_type="plugin")
-        count = 0
-        for descriptor in self.extension_manager.status().load_report.loaded:
-            if enabled_map.get(descriptor.name, False) is not True:
-                continue
-            for provider in descriptor.providers:
-                provider.register(self.executor, self._plugin_provider_context(descriptor.name, provider))
-                count += 1
-        return f"reloaded {count} plugin providers"
-
-    def _plugin_provider_context(self, plugin_name: str, provider: Any):
-        from agentnexus.tools.providers import ToolProviderContext
-
-        provider_name = provider.metadata().name
-        return ToolProviderContext(
-            llm_client=self.llm_client,
-            subagent_confirm=self.subagent_confirm,
-            mcp_manager=self.mcp_manager,
-            runtime=self,
-            source_type="plugin",
-            source_id=f"plugin:{plugin_name}:{provider_name}",
-            generation=self.states["plugins"].generation,
-        )
-
     def _refresh_mcp_context(self) -> None:
         if self.agent is not None and self.mcp_manager is not None and hasattr(self.agent, "set_mcp_context"):
             self.agent.set_mcp_context(self.mcp_manager.auto_context())
@@ -216,7 +178,6 @@ class CapabilityRuntime:
         cfg = self._capability_config()
         bucket = {
             "skills": "skills",
-            "plugins": "plugins",
             "mcp": "mcp_servers",
             "tools": "tools",
         }[kind]
@@ -246,7 +207,7 @@ class CapabilityRuntime:
     @staticmethod
     def _normalize_kind(kind: str) -> str:
         normalized = (kind or "").strip().lower()
-        aliases = {"plugin": "plugins", "skill": "skills", "tool": "tools", "mcp_server": "mcp"}
+        aliases = {"skill": "skills", "tool": "tools", "mcp_server": "mcp"}
         normalized = aliases.get(normalized, normalized)
         if normalized not in CAPABILITY_KINDS:
             raise ValueError(f"Unknown capability kind: {kind}")

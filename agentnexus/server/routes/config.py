@@ -59,8 +59,7 @@ SETTABLE_KEYS = {
     "shell_execution_docker_image",
     # File Operations
     "file_read_max_mb",
-    # Extensions & Skills
-    "extensions_enabled", "extensions_dirs", "plugins_auto_discover",
+    # Skills
     "skills_default_namespace", "default_skill",
     "skill_auto_route", "skill_auto_route_llm_fallback",
     "skill_auto_route_min_score", "skill_auto_route_margin",
@@ -402,15 +401,3 @@ def update_persona(req: PersonaUpdateRequest):
     _reset_settings_cache()
 
     return {"status": "updated", "persona": persona_data}
-
-
-@router.get("/extensions")
-def get_extensions():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
-    em = runtime.extension_manager
-    if em is None:
-        return {"extensions": [], "count": 0}
-    status = em.status() if hasattr(em, "status") else {}
-    return status if isinstance(status, dict) else {"status": str(status)}

@@ -58,14 +58,12 @@ COMMAND_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("/switch", "切换到指定会话"),
     ("/skill", "管理 Skill"),
     ("/mcp", "管理 MCP server"),
-    ("/plugin", "管理插件"),
     ("/exit", "退出 TUI"),
 )
 
 COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
     "/skill": ("status", "list", "use", "enable", "disable", "default", "validate", "reset"),
     "/mcp": ("status", "tools", "resources", "prompts", "failures", "retry", "enable", "disable", "reload"),
-    "/plugin": ("status", "list", "enable", "disable", "reload"),
     "/clear": ("--all",),
 }
 
@@ -275,8 +273,7 @@ class ChatScreen(Screen):
             f"[dim]命令:[/] {commands}\n"
             "       /skill [status|list|use <id> [--default]|enable <id>|disable <id>|"
             "default <id>|validate [id]|reset]\n"
-            "       /mcp [status|tools|resources|prompts|failures|retry|enable|disable|reload]\n"
-            "       /plugin [status|list|enable|disable|reload]"
+            "       /mcp [status|tools|resources|prompts|failures|retry|enable|disable|reload]"
         )
 
     def action_focus_input(self):
@@ -400,8 +397,6 @@ class ChatScreen(Screen):
             self._handle_switch(arg)
         elif cmd == "/mcp":
             self._handle_mcp_command(arg)
-        elif cmd == "/plugin":
-            self._handle_plugin_command(arg)
         elif cmd == "/skill":
             self._handle_skill_command(arg)
         else:
@@ -1087,42 +1082,6 @@ class ChatScreen(Screen):
             self._side_panel.update_mcp(snapshot)
         except Exception as e:
             logger.debug("Failed to refresh MCP panel: %s", e)
-
-    def _handle_plugin_command(self, arg: str):
-        if self._capability_runtime is None:
-            self._chat_area.add_system("[dim]Plugin runtime unavailable.[/]")
-            return
-        parts = arg.strip().split()
-        subcmd = parts[0] if parts else "status"
-        name = parts[1] if len(parts) > 1 else None
-        try:
-            if subcmd in {"status", "list"}:
-                status = self._capability_runtime.extension_manager.status()
-                lines = ["[bold]Plugins[/]"]
-                enabled = self._capability_runtime.snapshot().plugin_enabled
-                for descriptor in status.discovered:
-                    state = "enabled" if enabled.get(descriptor.name, False) else "disabled"
-                    errors = f" errors={len(descriptor.errors)}" if descriptor.errors else ""
-                    lines.append(f"- {descriptor.name}: {state}{errors}")
-                if not status.discovered:
-                    lines.append("[dim]No plugins discovered.[/]")
-                self._chat_area.add_system("\n".join(lines))
-            elif subcmd == "enable" and name:
-                result = self._capability_runtime.enable("plugins", name)
-                self._chat_area.add_system(f"[dim]Plugin enabled: {name} - {result.get('plugins')}[/]")
-                self._refresh_tools_panel()
-            elif subcmd == "disable" and name:
-                result = self._capability_runtime.disable("plugins", name)
-                self._chat_area.add_system(f"[dim]Plugin disabled: {name} - {result.get('plugins')}[/]")
-                self._refresh_tools_panel()
-            elif subcmd == "reload":
-                result = self._capability_runtime.reload("plugins")
-                self._chat_area.add_system(f"[dim]Plugins reloaded: {result.get('plugins')}[/]")
-                self._refresh_tools_panel()
-            else:
-                self._chat_area.add_system("[dim]用法: /plugin [status|list|enable <name>|disable <name>|reload][/]")
-        except Exception as exc:
-            self._chat_area.add_system(f"[dim]Plugin command failed: {exc}[/]")
 
     def _refresh_tools_panel(self):
         try:

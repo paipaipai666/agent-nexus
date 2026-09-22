@@ -975,24 +975,6 @@ class TestSkillCommandHelpers:
         assert palette.styles.display == "block"
         palette.scroll_home.assert_called_once_with(animate=False)
 
-class TestPluginCommands:
-    def test_handle_plugin_enable_uses_capability_runtime(self):
-        runtime = MagicMock()
-        runtime.enable.return_value = {"plugins": "reloaded 1 plugin providers"}
-        screen = ChatScreen(
-            agent=MagicMock(),
-            memory=None,
-            version=None,
-            capability_runtime=runtime,
-        )
-        screen._chat_area = MagicMock()
-        screen._side_panel = MagicMock()
-
-        screen._handle_plugin_command("enable demo")
-
-        runtime.enable.assert_called_once_with("plugins", "demo")
-        assert "Plugin enabled" in screen._chat_area.add_system.call_args[0][0]
-
 
 class TestExitAndInterruptCommands:
     def test_double_escape_interrupts_agent(self):
