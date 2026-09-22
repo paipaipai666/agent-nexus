@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING, Callable, Iterable
 
 if TYPE_CHECKING:
-    from agentnexus.tools.mcp_adapter import MCPToolManager
+    from agentnexus.tools.mcp.adapter import MCPToolManager
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.llm import AgentLLM

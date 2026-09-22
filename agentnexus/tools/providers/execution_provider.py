@@ -11,7 +11,6 @@ class ExecutionToolProvider:
         return ProviderSpec(
             "execution",
             description="High-risk Python and shell execution tools.",
-            exposed_agents=("react_agent", "subagent_executor"),
         )
 
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:

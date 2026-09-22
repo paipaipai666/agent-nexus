@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from agentnexus.tools.registry import ToolRegistry
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from agentnexus.core.llm import AgentLLM
     from agentnexus.memory.todo import SessionTodoList
     from agentnexus.tools.confirm_bridge import ConfirmBridge
-    from agentnexus.tools.mcp_adapter import MCPManager
+    from agentnexus.tools.mcp.adapter import MCPManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,6 @@ class ProviderSpec:
     """Metadata describing a group of tools that can be registered together."""
 
     name: str
-    version: str = "1.0"
-    default_enabled: bool = True
-    required_config: tuple[str, ...] = ()
-    exposed_agents: tuple[str, ...] = ("*",)
     description: str = ""
 
 
@@ -39,8 +35,6 @@ class ToolProviderContext:
     enable_subagent: bool = True
     subagent_confirm: "ConfirmBridge | None" = None
     mcp_manager: "MCPManager | None" = None
-    runtime: Any = None
-    extension_context: Any = None
     source_type: str = "builtin"
     source_id: str = ""
     generation: int = 0
@@ -77,8 +71,6 @@ class ToolProviderContext:
             enable_subagent=self.enable_subagent,
             subagent_confirm=self.subagent_confirm,
             mcp_manager=self.mcp_manager,
-            runtime=self.runtime,
-            extension_context=self.extension_context,
             source_type=source_type or self.source_type,
             source_id=provider_name,
             generation=self.generation if generation is None else generation,
