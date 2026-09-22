@@ -36,8 +36,3 @@ def select_provider(model: str, base_url: str) -> BaseLLMProvider | None:
 
     # Everything else — OpenAI-compatible
     return _get_openai_provider()
-
-
-def get_provider(model: str, base_url: str) -> BaseLLMProvider | None:
-    """Alias for select_provider."""
-    return select_provider(model, base_url)

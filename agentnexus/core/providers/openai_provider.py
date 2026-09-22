@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+import queue
+import threading
+import time
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from openai import OpenAI
@@ -12,6 +15,20 @@ from openai import OpenAI
 from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
 logger = logging.getLogger(__name__)
+
+# Watchdog for hung streams. Free-tier gateways are observed to accept the
+# request, return response headers, then hold the SSE connection open forever
+# (keep-alive traffic defeats httpx's read timeout, which only fires on *idle*
+# sockets). Without a guard, a single hung stream pins its worker thread
+# indefinitely and the whole eval batch deadlocks (observed twice in the
+# wild). We therefore bound both the gap between chunks and the total stream
+# duration; on violation the underlying connection is closed so the pump
+# thread unblocks and exits, and the caller gets a normal exception it can
+# retry.
+_CHUNK_GAP_S = 60
+_TOTAL_BUDGET_MULT = 10  # total cap = per-call timeout × this
+
+_SENTINEL = object()
 
 # LiteLLM-style provider prefixes that must be stripped before calling an
 # OpenAI-compatible endpoint (the endpoint expects the bare model name).
@@ -51,6 +68,51 @@ class OpenAIProvider(BaseLLMProvider):
                 stream.close()
             except Exception:
                 pass
+
+    def _guarded_iter(self, response: Any, *, timeout: int) -> Iterator[Any]:
+        """Yield stream chunks with hung-connection watchdogs.
+
+        A daemon pump thread owns the blocking ``next()``; the consumer side
+        enforces (a) no gap between chunks longer than _CHUNK_GAP_S and
+        (b) a total budget of timeout × _TOTAL_BUDGET_MULT. On either
+        violation the connection is closed (unblocking the pump, which then
+        exits) and TimeoutError propagates to the caller for retry.
+        """
+        q: queue.Queue[Any] = queue.Queue()
+
+        def _pump() -> None:
+            try:
+                for item in response:
+                    q.put(item)
+                q.put(_SENTINEL)
+            except BaseException as exc:  # noqa: BLE001 — re-raised on consumer side
+                q.put(exc)
+
+        threading.Thread(target=_pump, daemon=True).start()
+        total_budget = float(timeout) * _TOTAL_BUDGET_MULT
+        deadline = time.monotonic() + total_budget
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.abort_active_stream()
+                raise TimeoutError(
+                    f"stream exceeded total budget {total_budget:.0f}s — treating as hung"
+                )
+            try:
+                item = q.get(timeout=min(_CHUNK_GAP_S, remaining))
+            except queue.Empty:
+                self.abort_active_stream()
+                if deadline - time.monotonic() <= 0:
+                    raise TimeoutError(
+                        f"stream exceeded total budget {total_budget:.0f}s — treating as hung"
+                    )
+                raise TimeoutError(f"no stream chunk for {_CHUNK_GAP_S}s — treating as hung")
+            if item is _SENTINEL:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
 
     def stream_chat(
         self,
@@ -106,7 +168,7 @@ class OpenAIProvider(BaseLLMProvider):
         tool_call_bufs: dict[int, dict[str, Any]] = {}
 
         try:
-            for chunk in response:
+            for chunk in self._guarded_iter(response, timeout=timeout):
                 # Capture usage from any chunk (may appear with empty choices)
                 if hasattr(chunk, "usage") and chunk.usage:
                     result.usage = {
