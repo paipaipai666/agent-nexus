@@ -19,19 +19,29 @@ from agentnexus.tools.errors import ToolError, ToolErrorCode
 
 
 class _SleepyExecutor:
-    """Fake tool executor that runs a long sleep via the tracked-process helper."""
+    """Fake tool executor that runs a long sleep as a tracked process."""
 
     def __init__(self):
         self.proc: subprocess.Popen | None = None
-        self.invoked = threading.Event()
 
     def invoke(self, *, name, params, caller, hitl_approver, tool_policy=None):
-        self.invoked.set()
-        self.proc = process_tracker.run_tracked(
+        # 等价于 run_tracked 的登记语义，但把 Popen 句柄暴露出来：
+        # cancel 触发点需要等「进程已 spawn 且已 track」这一时刻可见，
+        # 否则 cancel 会先于登记命中，execute_tool 直接返回 CANCELLED，
+        # 进程从未被 track、也就从未被杀死。
+        proc = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(30)"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            start_new_session=(sys.platform != "win32"),
         )
+        process_tracker.track(proc)
+        self.proc = proc
+        try:
+            proc.wait()
+        finally:
+            process_tracker.untrack(proc)
         return "slept"
 
 
@@ -41,10 +51,12 @@ def test_cancel_kills_tool_process_tree_immediately():
     cancel = threading.Event()
 
     def trigger_cancel():
-        # 高负载 runner 上 run 线程可能 0.5s 内都拿不到调度——必须等
-        # invoke 真正开始后再触发取消，否则 cancel 先于 invoke 命中，
-        # execute_tool 直接返回 CANCELLED 而 executor.proc 仍是 None。
-        assert executor.invoked.wait(timeout=5), "工具未被调用"
+        # 高负载 runner 上 worker 线程拿到调度前 cancel 就可能触发——
+        # execute_tool 直接返回 CANCELLED 而 run_tracked 还没登记进程。
+        # 必须等 proc 真正赋值（进程已被 track，cancel 才能杀掉它）。
+        deadline = time.time() + 10
+        while executor.proc is None and time.time() < deadline:
+            time.sleep(0.05)
         time.sleep(0.5)
         cancel.set()
 
@@ -73,9 +85,13 @@ def test_cancel_kills_tool_process_tree_immediately():
     result = result_box[0]
     assert isinstance(result, ToolError)
     assert result.error_code == ToolErrorCode.CANCELLED
-    # run_tracked 返回 CompletedProcess —— communicate() 已返回本身即证明
-    # 进程已退出（未被杀时 sleep(30) 不可能结束）。
     assert executor.proc is not None
+    # tool_runner 的 cancel 路径刻意不 join 工具线程——被杀进程的回收
+    # （wait() 返回、returncode 落定）发生在 worker 线程里，给短暂窗口。
+    deadline = time.time() + 5
+    while executor.proc.returncode is None and time.time() < deadline:
+        time.sleep(0.05)
+    # 未被杀时 sleep(30) 不可能已结束——returncode 落定即证明进程被杀死。
     assert executor.proc.returncode is not None
 
 
