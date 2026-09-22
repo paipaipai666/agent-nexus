@@ -3,6 +3,7 @@
 Verifies that file operations and shell commands execute within a
 sandbox directory and do not leak across test boundaries.
 """
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -50,10 +51,12 @@ class TestToolSandboxIsolation:
             with patch("agentnexus.tools.shell.get_settings") as mock_settings:
                 mock_settings.return_value.shell_enabled = True
                 mock_settings.return_value.shell_execution_backend = "local_unsafe"
-                with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
-                    mock_run.return_value.stdout = "test.txt\n"
-                    mock_run.return_value.stderr = ""
-                    mock_run.return_value.returncode = 0
+                mock_run = patch(
+                    "agentnexus.tools.shell.process_tracker.run_tracked",
+                    return_value=subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout="test.txt\n", stderr=""),
+                )
+                with mock_run:
                     result = shell_exec("dir", cwd="inner", timeout=5)
                     assert "test.txt" in result
 
