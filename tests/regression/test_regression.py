@@ -44,7 +44,7 @@ def test_long_term_memory(temp_agentnexus_home):
 
 
 def test_ingestion_clean_text():
-    from agentnexus.rag.ingestion import clean_text
+    from agentnexus.rag.loaders import clean_text
 
     assert len(clean_text("这是一个  \n\n测试文档  \x00")) > 0
 

@@ -139,37 +139,6 @@ class TestRAGEvaluatorScoreContextRelevancy:
         assert 0.0 < score < 1.0
 
 
-class TestRAGEvaluatorScoreKeyword:
-    def test_precision_empty_retrieved(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
-        assert evaluator._score_precision_keyword(sample, []) == 0.0
-
-    def test_precision_empty_reference(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=[])
-        assert evaluator._score_precision_keyword(sample, ["chunk"]) == 0.0
-
-    def test_precision_some_hits(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
-        assert evaluator._score_precision_keyword(sample, ["ref chunk", "other"]) == 0.5
-
-    def test_recall_empty_retrieved(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
-        assert evaluator._score_recall_keyword(sample, []) == 0.0
-
-    def test_recall_empty_reference(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=[])
-        assert evaluator._score_recall_keyword(sample, ["chunk"]) == 0.0
-
-    def test_recall_some_hits(self):
-        evaluator = RAGEvaluator([], [])
-        sample = EvalSample(question="q", ground_truth="gt", reference_contexts=["ref"])
-        assert evaluator._score_recall_keyword(sample, ["ref chunk"]) == 1.0
-
 
 class TestRAGEvaluatorChunkAll:
     def test_returns_chunks(self):

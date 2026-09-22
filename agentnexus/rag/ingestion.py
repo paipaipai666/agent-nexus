@@ -6,16 +6,12 @@ from agentnexus.prompts import load_prompt
 
 from .chunking import ChunkStrategy, chunk_structured_document
 from .chunking import chunk_text as _chunk_text
-from .loaders import clean_text, load_document, load_structured_document
+from .loaders import load_structured_document
 from .models import IngestedDocument
 
 CONTEXTUAL_RETRIEVAL_PROMPT = load_prompt("contextual_retrieval")
 CONTEXTUAL_GENERATION_PROMPT = load_prompt("contextual_generation")
 chunk_text = _chunk_text
-
-
-def load_and_clean(file_path: str) -> str:
-    return clean_text(load_document(file_path))
 
 
 def ingest_document(
@@ -52,25 +48,6 @@ def ingest_document(
             chunk.metadata["retrieval_text"] = retrieval_text
 
     return IngestedDocument(document=document, chunks=chunks)
-
-
-def ingest(
-    file_path: str,
-    strategy: ChunkStrategy = ChunkStrategy.RECURSIVE,
-    chunk_size: int = 512,
-    chunk_overlap: int = 50,
-    enable_contextual: bool = False,
-    llm_client=None,
-) -> list[str]:
-    artifacts = ingest_document(
-        file_path,
-        strategy=strategy,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        enable_contextual=enable_contextual,
-        llm_client=llm_client,
-    )
-    return artifacts.legacy_chunks()
 
 
 def generate_chunk_context(document: str, chunk: str, llm_client, *, mode: str) -> str:

@@ -15,6 +15,8 @@ from agentnexus.storage.chroma import search as chroma_search
 from . import ranking as _ranking
 from .ids import make_chunk_id, make_document_version, make_source_id
 from .models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
+from .ranking import matches_metadata_filters as _matches_metadata_filters
+from .ranking import structural_score_boost as _structural_score_boost
 from .store import get_knowledge_base_catalog
 
 warnings.filterwarnings("ignore", message=".*pkg_resources.*")
@@ -85,53 +87,6 @@ def _looks_like_question(query: str) -> bool:
     )
     lowered = normalized.casefold()
     return any(token in normalized or token in lowered for token in question_tokens)
-
-
-def _matches_metadata_filters(
-    chunk: ChunkRecord,
-    metadata_filters: dict[str, object] | None = None,
-) -> bool:
-    if not metadata_filters:
-        return True
-
-    metadata = chunk.metadata or {}
-    for key, expected in metadata_filters.items():
-        if expected is None:
-            continue
-        if key == "page_number":
-            actual = chunk.page_number
-        elif key == "section_index":
-            actual = chunk.section_index
-        else:
-            actual = metadata.get(key)
-        if actual != expected:
-            return False
-    return True
-
-
-def _structural_score_boost(query: str, chunk: ChunkRecord) -> float:
-    metadata = chunk.metadata or {}
-    normalized_query = query.casefold()
-    boost = 0.0
-
-    code_terms = ("代码", "示例", "sample", "code", "snippet", "实现", "函数", "脚本", "命令")
-    list_terms = ("步骤", "清单", "列表", "排查", "检查", "要点", "总结", "事项")
-    heading_terms = ("概述", "介绍", "是什么", "总览", "目录", "章节", "section", "overview")
-
-    if metadata.get("block_type") == "code" or metadata.get("has_code") is True:
-        if any(term in normalized_query for term in code_terms):
-            boost += 0.02
-    if metadata.get("block_type") == "list" or metadata.get("has_list") is True:
-        if any(term in normalized_query for term in list_terms):
-            boost += 0.015
-    if metadata.get("block_type") == "heading":
-        if any(term in normalized_query for term in heading_terms):
-            boost += 0.01
-        heading_depth = metadata.get("heading_depth")
-        if isinstance(heading_depth, int) and heading_depth > 0:
-            boost += max(0.0, 0.005 - ((heading_depth - 1) * 0.001))
-
-    return boost
 
 
 def result_display_text(result: SearchResult) -> str:

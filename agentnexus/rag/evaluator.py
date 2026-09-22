@@ -603,35 +603,6 @@ class RAGEvaluator:
             scores.append(_parse_score(result))
         return sum(scores) / len(scores) if scores else 0.0
 
-    def _score_precision_keyword(self, sample: EvalSample, retrieved: list[str]) -> float:
-        """Legacy keyword-matching precision (kept for reference)."""
-        if not sample.reference_contexts or not retrieved:
-            return 0.0
-        relevant = set(sample.reference_contexts)
-        hits = sum(1 for r in retrieved if any(ref in r for ref in relevant))
-        return hits / len(retrieved) if retrieved else 0.0
-
-    def _score_recall(self, sample: EvalSample, retrieved: list[str], _timeout: int = 0) -> float:
-        """Text-matching context recall: what fraction of references are covered.
-
-        Uses substring / token-overlap matching instead of LLM calls.
-        """
-        if not sample.reference_contexts or not retrieved:
-            return 0.0
-        hits = sum(
-            1 for ref in sample.reference_contexts
-            if _text_contains_reference(retrieved, ref)
-        )
-        return hits / len(sample.reference_contexts)
-
-    def _score_recall_keyword(self, sample: EvalSample, retrieved: list[str]) -> float:
-        """Legacy keyword-matching recall (kept for reference)."""
-        if not sample.reference_contexts or not retrieved:
-            return 0.0
-        relevant = set(sample.reference_contexts)
-        hits = sum(1 for ref in relevant if any(ref in r for r in retrieved))
-        return hits / len(relevant) if relevant else 0.0
-
     def _score_context_relevancy(self, query: str, retrieved: list[str]) -> float:
         """Score what fraction of retrieved chunks are relevant to the query.
 

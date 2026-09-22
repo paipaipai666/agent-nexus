@@ -3,11 +3,10 @@ from pathlib import Path
 from agentnexus.rag.ingestion import (
     ChunkStrategy,
     chunk_text,
-    clean_text,
-    ingest,
     ingest_document,
     load_structured_document,
 )
+from agentnexus.rag.loaders import clean_text
 
 
 class FakePdfPage:
@@ -124,7 +123,8 @@ class TestRagIngestion:
         path = temp_agentnexus_home / "legacy.md"
         path.write_text("# Overview\n\nLegacy API body.\n", encoding="utf-8")
 
-        chunks = ingest(str(path), chunk_size=80, chunk_overlap=0)
+        artifacts = ingest_document(str(path), chunk_size=80, chunk_overlap=0)
+        chunks = artifacts.legacy_chunks()
 
         assert chunks
         assert all(isinstance(chunk, str) for chunk in chunks)
