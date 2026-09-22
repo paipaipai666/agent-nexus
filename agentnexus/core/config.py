@@ -84,19 +84,6 @@ class MCPServerConfig(BaseModel):
         return self
 
 
-class LLMSettings(BaseModel):
-    api_key: SecretStr
-    model_id: str
-    base_url: str
-    timeout: int
-    model_tool_calling: bool | None
-    model_json_mode: bool | None
-    model_thinking: bool | None
-    model_thinking_budget: int
-    max_output_tokens: int = 8192
-    judge_model_id: str
-    judge_api_key: SecretStr
-    judge_base_url: str
 
 class ModelOverride(BaseModel):
     """Per-model capability overrides. All-None = fully auto-detect."""
@@ -156,69 +143,8 @@ class ResolvedModel:
     entry: ModelEntry
 
 
-class RAGSettings(BaseModel):
-    enable_contextual_retrieval: bool
-    enable_query_rewrite: bool
-    enable_multi_query: bool
-    enable_hyde: bool
-    hyde_question_only: bool
-    enable_context_expansion: bool
-    multi_query_count: int
-    context_window: int
-    context_max_chunks: int
-    embedding_model: str
-    reranker_model: str
-    chroma_persist_dir: str
-    catalog_db_path: str
-    default_namespace: str
-    collection_prefix: str
 
 
-class MemorySettings(BaseModel):
-    db_path: str
-    max_memories: int
-    ttl_days: int
-    autocompact_buffer_tokens: int
-    memory_index_segment_size: int = 20
-    memory_index_max_tokens: int = 4000
-    large_result_threshold: int
-    offload_enabled: bool
-    snip_enabled: bool
-    time_microcompact_interval: int
-    post_compact_max_files: int
-    post_compact_token_per_file: int
-    post_compact_token_budget: int
-    transcript_enabled: bool
-
-
-class RuntimeSettings(BaseModel):
-    max_agent_steps: int
-    traces_dir: str
-    trace_retention_days: int
-    shell_enabled: bool
-    shell_confirm: bool
-    shell_timeout: int
-    code_execution_backend: str
-    code_execution_timeout: int
-    code_execution_memory_mb: int
-    code_execution_docker_image: str
-    code_execution_allow_unsafe_local: bool
-    shell_execution_backend: str
-    shell_execution_memory_mb: int
-    shell_execution_docker_image: str
-    file_read_max_mb: float
-    shell_blacklist: list[str]
-    runtime_profile: str
-    budget_simple_max_tokens: int = 5000
-    budget_complex_max_tokens: int = 50000
-    budget_high_value_max_tokens: int = 200000
-    budget_exceed_strategy: str = "compress"
-
-
-class MCPSettings(BaseModel):
-    enabled: bool
-    startup_timeout: int
-    servers: list[MCPServerConfig]
 
 
 class CapabilitiesSettings(BaseModel):
@@ -253,73 +179,14 @@ class PersonaConfig(BaseModel):
     projects: list[PersonaProject] = Field(default_factory=list)
 
 
-class BrowserSettings(BaseModel):
-    """Browser automation configuration."""
 
-    mode: str = "isolated"
-    cdp_endpoint: str = "http://localhost:9222"
-    headless: bool = False
-    viewport_width: int = 1280
-    viewport_height: int = 720
-    default_timeout: int = 30000
-    networkidle_timeout: int = 5000
-    screenshot_dir: str = ""
-    context_ttl: int = 600
-    allow_js_execution: bool = False
-    snapshot_max_nodes: int = 100
-    hitl_rules: list[dict[str, str]] = Field(default_factory=list)
-
-
-class ComputerUseSettings(BaseModel):
-    """Desktop automation configuration."""
-
-    enabled: bool = False
-    backend: str = "auto"
-    snapshot_max_nodes: int = 100
-    hitl_rules: list[dict[str, str]] = Field(default_factory=list)
-    allowed_apps: list[str] = Field(default_factory=list)
-    blocked_apps: list[str] = Field(
-        default_factory=lambda: ["taskmgr", "regedit", "cmd", "powershell", "terminal"]
-    )
-
-
-class WikiSettings(BaseModel):
-    """Wiki knowledge system configuration."""
-
-    enabled: bool = False
-    namespace: str = "wiki"
-    review_sla_p1_days: int = 7
-    review_sla_p2_days: int = 14
-    review_sla_p3_days: int = 30
-    propagation_max_depth: int = 3
-    calibration_retrigger_pct: float = 0.5
-    jaccard_direct_quote: float = 0.6
-    jaccard_paraphrase: float = 0.4
-    cosine_paraphrase: float = 0.7
-    cosine_source: float = 0.35
-    drift_threshold: float = 0.5
-
-
-class ExtensionSettings(BaseModel):
-    """Extensions, plugins, and skills configuration."""
-
-    enabled: bool = True
-    dirs: list[str] = Field(default_factory=list)
-    plugins_auto_discover: bool = True
-    skills_default_namespace: str = "default"
-    default_skill: str = ""
-    skill_auto_route: bool = True
-    skill_auto_route_llm_fallback: bool = True
-    skill_auto_route_min_score: float = 2.0
-    skill_auto_route_margin: float = 0.75
 
 
 class Settings(BaseSettings):
     """Application-wide settings loaded from config.yaml + environment variables.
 
-    Grouped into logical sections with comment headers for navigation.
-    Use the ``.llm``, ``.rag``, ``.memory``, ``.mcp``, ``.runtime`` properties
-    to get typed sub-settings objects.
+    Flat fields grouped under comment headers for navigation. Typed views
+    remain only where consumers need them: ``.capabilities`` and ``.persona``.
     """
 
     model_config = SettingsConfigDict(env_prefix="AGENTNEXUS_", extra="ignore")
@@ -557,22 +424,6 @@ class Settings(BaseSettings):
             raise ValueError(f"Unsupported shell execution backend: {value}")
         return normalized
 
-    @property
-    def llm(self) -> LLMSettings:
-        model_id, base_url, api_key, timeout = self.get_active_llm_profile()
-        return LLMSettings(
-            api_key=api_key,
-            model_id=model_id,
-            base_url=base_url,
-            timeout=timeout,
-            model_tool_calling=self.model_tool_calling,
-            model_json_mode=self.model_json_mode,
-            model_thinking=self.model_thinking,
-            model_thinking_budget=self.model_thinking_budget,
-            judge_model_id=self.judge_model_id,
-            judge_api_key=self.judge_api_key,
-            judge_base_url=self.judge_base_url,
-        )
     def get_active_llm_profile(self) -> tuple[str, str, SecretStr, int]:
         """Resolve (model_id, base_url, api_key, timeout) of the active model.
 
@@ -680,79 +531,6 @@ class Settings(BaseSettings):
             self.active_model = f"default/{providers[0].models[0].model_id}"
 
     @property
-    def rag(self) -> RAGSettings:
-        return RAGSettings(
-            enable_contextual_retrieval=self.enable_contextual_retrieval,
-            enable_query_rewrite=self.enable_query_rewrite,
-            enable_multi_query=self.enable_multi_query,
-            enable_hyde=self.enable_hyde,
-            hyde_question_only=self.hyde_question_only,
-            enable_context_expansion=self.enable_context_expansion,
-            multi_query_count=self.rag_multi_query_count,
-            context_window=self.rag_context_window,
-            context_max_chunks=self.rag_context_max_chunks,
-            embedding_model=self.embedding_model,
-            reranker_model=self.reranker_model,
-            chroma_persist_dir=self.chroma_persist_dir,
-            catalog_db_path=self.rag_catalog_db_path,
-            default_namespace=self.rag_default_namespace,
-            collection_prefix=self.rag_collection_prefix,
-        )
-
-    @property
-    def memory(self) -> MemorySettings:
-        return MemorySettings(
-            db_path=self.memory_db_path,
-            max_memories=self.max_memories,
-            ttl_days=self.memory_ttl_days,
-            autocompact_buffer_tokens=self.autocompact_buffer_tokens,
-            memory_index_segment_size=self.memory_index_segment_size,
-            memory_index_max_tokens=self.memory_index_max_tokens,
-            large_result_threshold=self.large_result_threshold,
-            offload_enabled=self.offload_enabled,
-            snip_enabled=self.snip_enabled,
-            time_microcompact_interval=self.time_microcompact_interval,
-            post_compact_max_files=self.post_compact_max_files,
-            post_compact_token_per_file=self.post_compact_token_per_file,
-            post_compact_token_budget=self.post_compact_token_budget,
-            transcript_enabled=self.transcript_enabled,
-        )
-
-    @property
-    def mcp(self) -> MCPSettings:
-        return MCPSettings(
-            enabled=self.mcp_enabled,
-            startup_timeout=self.mcp_startup_timeout,
-            servers=self.mcp_servers,
-        )
-
-    @property
-    def runtime(self) -> RuntimeSettings:
-        return RuntimeSettings(
-            max_agent_steps=self.max_agent_steps,
-            traces_dir=self.traces_dir,
-            trace_retention_days=self.trace_retention_days,
-            shell_enabled=self.shell_enabled,
-            shell_confirm=self.shell_confirm,
-            shell_timeout=self.shell_timeout,
-            code_execution_backend=self.code_execution_backend,
-            code_execution_timeout=self.code_execution_timeout,
-            code_execution_memory_mb=self.code_execution_memory_mb,
-            code_execution_docker_image=self.code_execution_docker_image,
-            code_execution_allow_unsafe_local=self.code_execution_allow_unsafe_local,
-            shell_execution_backend=self.shell_execution_backend,
-            shell_execution_memory_mb=self.shell_execution_memory_mb,
-            shell_execution_docker_image=self.shell_execution_docker_image,
-            file_read_max_mb=self.file_read_max_mb,
-            shell_blacklist=self.shell_blacklist,
-            runtime_profile=self.runtime_profile,
-            budget_simple_max_tokens=self.budget_simple_max_tokens,
-            budget_complex_max_tokens=self.budget_complex_max_tokens,
-            budget_high_value_max_tokens=self.budget_high_value_max_tokens,
-            budget_exceed_strategy=self.budget_exceed_strategy,
-        )
-
-    @property
     def capabilities(self) -> CapabilitiesSettings:
         """Return typed capabilities settings."""
         raw = getattr(self, "_raw_capabilities", None) or {}
@@ -763,69 +541,6 @@ class Settings(BaseSettings):
         """Return typed persona settings."""
         raw = getattr(self, "_raw_persona", None) or {}
         return PersonaConfig(**raw)
-
-    @property
-    def browser(self) -> BrowserSettings:
-        """Return typed browser automation settings."""
-        return BrowserSettings(
-            mode=self.browser_mode,
-            cdp_endpoint=self.browser_cdp_endpoint,
-            headless=self.browser_headless,
-            viewport_width=self.browser_viewport_width,
-            viewport_height=self.browser_viewport_height,
-            default_timeout=self.browser_default_timeout,
-            networkidle_timeout=self.browser_networkidle_timeout,
-            screenshot_dir=self.browser_screenshot_dir,
-            context_ttl=self.browser_context_ttl,
-            allow_js_execution=self.browser_allow_js_execution,
-            snapshot_max_nodes=self.browser_snapshot_max_nodes,
-            hitl_rules=self.browser_hitl_rules,
-        )
-
-    @property
-    def computer_use(self) -> ComputerUseSettings:
-        """Return typed desktop automation settings."""
-        return ComputerUseSettings(
-            enabled=self.computer_use_enabled,
-            backend=self.computer_use_backend,
-            snapshot_max_nodes=self.computer_use_snapshot_max_nodes,
-            hitl_rules=self.computer_use_hitl_rules,
-            allowed_apps=self.computer_use_allowed_apps,
-            blocked_apps=self.computer_use_blocked_apps,
-        )
-
-    @property
-    def wiki(self) -> WikiSettings:
-        """Return typed wiki settings."""
-        return WikiSettings(
-            enabled=self.wiki_enabled,
-            namespace=self.wiki_namespace,
-            review_sla_p1_days=self.wiki_review_sla_p1_days,
-            review_sla_p2_days=self.wiki_review_sla_p2_days,
-            review_sla_p3_days=self.wiki_review_sla_p3_days,
-            propagation_max_depth=self.wiki_propagation_max_depth,
-            calibration_retrigger_pct=self.wiki_calibration_retrigger_pct,
-            jaccard_direct_quote=self.wiki_jaccard_direct_quote,
-            jaccard_paraphrase=self.wiki_jaccard_paraphrase,
-            cosine_paraphrase=self.wiki_cosine_paraphrase,
-            cosine_source=self.wiki_cosine_source,
-            drift_threshold=self.wiki_drift_threshold,
-        )
-
-    @property
-    def extensions(self) -> ExtensionSettings:
-        """Return typed extension and skill settings."""
-        return ExtensionSettings(
-            enabled=self.extensions_enabled,
-            dirs=self.extensions_dirs,
-            plugins_auto_discover=self.plugins_auto_discover,
-            skills_default_namespace=self.skills_default_namespace,
-            default_skill=self.default_skill,
-            skill_auto_route=self.skill_auto_route,
-            skill_auto_route_llm_fallback=self.skill_auto_route_llm_fallback,
-            skill_auto_route_min_score=self.skill_auto_route_min_score,
-            skill_auto_route_margin=self.skill_auto_route_margin,
-        )
 
 
 class AgentNexusDumper(yaml.SafeDumper):

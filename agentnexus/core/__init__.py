@@ -1,24 +1,4 @@
-from .config import (
-    BrowserSettings,
-    ComputerUseSettings,
-    ExtensionSettings,
-    Settings,
-    WikiSettings,
-    get_settings,
-)
-from .hooks import SLOW_HOOK_THRESHOLD_MS, HookContext, HookManager, HookType, get_hook_manager, on
+"""AgentNexus 核心模块。
 
-__all__ = [
-    "BrowserSettings",
-    "ComputerUseSettings",
-    "ExtensionSettings",
-    "Settings",
-    "WikiSettings",
-    "get_settings",
-    "HookContext",
-    "HookManager",
-    "HookType",
-    "SLOW_HOOK_THRESHOLD_MS",
-    "get_hook_manager",
-    "on",
-]
+消费者请直 import 子模块 (agentnexus.core.config 等)。
+"""

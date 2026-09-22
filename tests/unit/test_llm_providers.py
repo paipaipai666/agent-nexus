@@ -206,11 +206,12 @@ class TestActiveProfileLegacy:
         s = self._settings(active_provider="ghost")
         assert s.get_active_llm_profile()[0] == "deepseek/deepseek-chat"
 
-    def test_llm_property_uses_active_profile(self):
+    def test_active_profile_resolution_matches_flat_fallback(self):
         s = self._settings(active_provider="work")
-        assert s.llm.model_id == "openai/gpt-4o"
-        assert s.llm.base_url == "https://api.openai.com"
-        assert s.llm.timeout == 30
+        model_id, base_url, api_key, timeout = s.get_active_llm_profile()
+        assert model_id == "openai/gpt-4o"
+        assert base_url == "https://api.openai.com"
+        assert timeout == 30
 
     def test_provider_base_url_requires_scheme(self):
         with pytest.raises(Exception):

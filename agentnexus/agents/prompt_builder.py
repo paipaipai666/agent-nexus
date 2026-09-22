@@ -11,42 +11,12 @@ N_TURNS_NO_SUMMARY = 3         # turns to show when no compressed summary exists
 N_TURNS_WITH_SUMMARY = 2       # turns to show alongside compressed summary
 
 
-def build_react_prompt(
-    *,
-    template: str,
-    tools_desc: str,
-    question: str,
-    history_str: str,
-    memory_context: str,
-    conversation_context: str,
-    available_skill_context: str = "",
-    mcp_context: str = "",
-    compiled_profile: Any = None,
-    todo_context: str = "",
-) -> str:
-    blocks = [available_skill_context, mcp_context]
-    if compiled_profile:
-        blocks.extend([compiled_profile.fragments_text, compiled_profile.workflow_guidance])
-    if todo_context:
-        blocks.append(todo_context)
-    extra_context = "\n\n".join(block for block in blocks if block)
-    if extra_context:
-        extra_context += "\n\n"
-    return template.format(
-        tools=tools_desc,
-        question=question,
-        history=history_str,
-        memory_context=memory_context,
-        conversation_context=conversation_context + extra_context,
-    )
-
-
 # ── Section model ────────────────────────────────────────────────
 # Context blocks are named sections in a dict, not anonymous text
-# concatenated into one message. Naming makes rebuilds diffable:
-# rendering is deterministic, so a group whose sections all stayed
-# the same re-renders byte-identical and the provider's prefix cache
-# keeps hitting up to the first changed group.
+# concatenated into one message. Naming keeps rendering deterministic:
+# a group whose sections all stayed the same re-renders byte-identical
+# and the provider's prefix cache keeps hitting up to the first
+# changed group.
 #
 # Groups are ordered stable → volatile: memory and conversation
 # change only on compaction; the static group is fixed for the run;
@@ -114,21 +84,6 @@ def build_react_sections(
     if todo_context:
         sections[SECTION_TODO] = todo_context
     return sections
-
-
-def diff_sections(
-    previous: dict[str, str] | None,
-    current: dict[str, str],
-) -> set[str]:
-    """Names of sections added, removed, or modified since `previous`.
-
-    `previous=None` (first build) counts every section as changed.
-    """
-    if previous is None:
-        return set(current)
-    changed = {name for name, text in current.items() if previous.get(name) != text}
-    changed.update(name for name in previous if name not in current)
-    return changed
 
 
 def _join_group(sections: dict[str, str], names: tuple[str, ...]) -> str:

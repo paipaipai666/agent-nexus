@@ -17,9 +17,7 @@ from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
 from agentnexus.agents.prompt_builder import (
     assemble_react_messages,
     build_conversation_context,
-    build_react_prompt,
     build_react_sections,
-    diff_sections,
 )
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
@@ -149,10 +147,6 @@ class ReActAgent:
         # context — highest-priority user instruction surface, still
         # subordinate to the safety rules in the fixed rules prefix.
         self._append_system_prompt: str = (settings.append_system_prompt or "").strip()
-        # Last-rendered prompt sections, for diff-based rebuilds: groups
-        # whose sections all stayed unchanged re-render byte-identical,
-        # keeping the provider's prefix cache valid up to the first change.
-        self._last_sections: dict[str, str] | None = None
 
     # ================================================================
     # Public API (unchanged)
@@ -390,7 +384,7 @@ class ReActAgent:
                 # Replace exactly the initial block; keep accumulated messages after it
                 ctx.messages[:ctx.initial_count] = new_messages
                 ctx.initial_count = len(new_messages)
-            memory_manager._on_after_compact = rebuild
+            memory_manager.on_after_compact = rebuild
 
         return [ReActEvent(ReActEventType.STRATEGY_READY,
                            {"strategy": run_state.strategy.name})]
@@ -1068,24 +1062,6 @@ class ReActAgent:
         except (EOFError, OSError):
             return False
 
-    def _build_prompt(self, tools_desc: str, question: str, history_str: str,
-                       memory_context: str, conversation_context: str) -> str:
-        compiled = self._compiled_session_profile
-        template = compiled.prompt_template if compiled else self._react_template
-        todo_context = self._todo_list.format_context() if self._todo_list else ""
-        return build_react_prompt(
-            template=template,
-            tools_desc=tools_desc,
-            question=question,
-            history_str=history_str,
-            memory_context=memory_context,
-            conversation_context=conversation_context,
-            available_skill_context=self._available_skill_context,
-            mcp_context=self._mcp_context,
-            compiled_profile=compiled,
-            todo_context=todo_context,
-        )
-
     def _build_messages(self, tools_desc: str, question: str,
                          memory_context: str, conversation_context: str,
                          workflow_context: str = "",
@@ -1116,10 +1092,6 @@ class ReActAgent:
             project_instructions=load_project_instructions(),
             append_system_prompt=self._append_system_prompt,
         )
-        changed = diff_sections(self._last_sections, sections)
-        self._last_sections = sections
-        if changed:
-            logger.debug("prompt sections rebuilt: %s", ",".join(sorted(changed)))
         return assemble_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
             tools_desc=tools_desc,

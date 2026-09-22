@@ -471,67 +471,6 @@ class HookManager:
         self._check_slow(ctx, hook_type)
         return ctx
 
-    # ── dispatch (async) ───────────────────────────────────────────
-
-    async def afire(self, hook_type: HookType, payload: dict[str, Any]) -> HookContext:
-        """Fire all hooks for *hook_type* asynchronously.  Returns the context."""
-        from agentnexus.observability.tracer import get_trace_manager
-
-        trace_mgr = get_trace_manager()
-        ctx = HookContext(hook_type, dict(payload))
-        self._validate_payload(hook_type, ctx.payload)
-        mutable = hook_type in _MUTABLE_HOOKS
-        records: list[dict] = []
-        t0 = time.perf_counter()
-        with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
-            for entry in self._sorted(hook_type):
-                if not entry.enabled:
-                    continue
-                record = {"event": hook_type.value, "hook": entry.name,
-                          "kind": "inprocess", "outcome": "ok", "duration_ms": 0.0}
-                before = dict(ctx.payload) if not mutable else None
-                started = time.perf_counter()
-                exc: Exception | None = None
-                with trace_mgr.span("hook_call", {"hook": entry.name}):
-                    try:
-                        if asyncio.iscoroutinefunction(entry.callback):
-                            await entry.callback(ctx)
-                        else:
-                            entry.callback(ctx)
-                    except Exception as err:  # noqa: BLE001 — isolation by design
-                        exc = err
-                record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
-                if exc is not None:
-                    entry.fail_count += 1
-                    record["outcome"] = "raised"
-                    if entry.fail_count == 1:
-                        logger.warning("Hook %r raised (suppressed)", entry.name, exc_info=True)
-                    else:
-                        logger.debug("Hook %r raised again (x%d)", entry.name, entry.fail_count)
-                if before is not None and ctx.payload != before:
-                    changed = sorted(
-                        k for k in set(before) | set(ctx.payload)
-                        if before.get(k) != ctx.payload.get(k)
-                    )
-                    record["changed_keys"] = changed
-                    logger.warning(
-                        "Hook %r mutated read-only %s payload (changed keys: %s)",
-                        entry.name, hook_type.value, changed,
-                    )
-                records.append(record)
-                if ctx.aborted:
-                    break
-            if not ctx.aborted:
-                records.extend(self._run_command_hooks(ctx))
-            elif ctx.aborted:
-                records.append({"event": hook_type.value, "hook": "(chain)",
-                                "kind": "chain", "outcome": "aborted",
-                                "abort_code": ctx.abort_code, "duration_ms": 0.0})
-        ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
-        write_hook_journal(records)
-        self._check_slow(ctx, hook_type)
-        return ctx
-
     # ── internals ──────────────────────────────────────────────────
 
     def _sorted(self, hook_type: HookType) -> list[_HookEntry]:

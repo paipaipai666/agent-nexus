@@ -106,7 +106,7 @@ class TestRoleBoundaryEnforcement:
     def test_system_message_has_role_system(self):
         """System prompt must have role='system'."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        assert hasattr(ReActAgent, "_build_prompt")
+        assert hasattr(ReActAgent, "_build_messages")
 
     @patch.object(AgentLLM, "think")
     def test_user_message_not_injected_into_system_role(self, mock_think):

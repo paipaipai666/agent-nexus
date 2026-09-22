@@ -4,93 +4,8 @@ from agentnexus.agents.prompt_builder import (
     assemble_react_messages,
     build_conversation_context,
     build_react_messages,
-    build_react_prompt,
     build_react_sections,
-    diff_sections,
 )
-
-
-class TestBuildReactPrompt:
-    TEMPLATE = "tools={tools}\nq={question}\nh={history}\nmem={memory_context}\nctx={conversation_context}"
-
-    def test_basic_template_substitution(self):
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="tool_list",
-            question="what is 2+2",
-            history_str="prev_turn",
-            memory_context="mem_data",
-            conversation_context="conv_data",
-        )
-        assert "tool_list" in result
-        assert "what is 2+2" in result
-        assert "prev_turn" in result
-        assert "mem_data" in result
-        assert "conv_data" in result
-
-    def test_with_skill_context(self):
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="t",
-            question="q",
-            history_str="h",
-            memory_context="m",
-            conversation_context="base",
-            available_skill_context="skill_info",
-        )
-        assert "skill_info" in result
-        assert "base" in result
-
-    def test_with_mcp_context(self):
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="t",
-            question="q",
-            history_str="h",
-            memory_context="m",
-            conversation_context="base",
-            mcp_context="mcp_stuff",
-        )
-        assert "mcp_stuff" in result
-
-    def test_with_compiled_profile(self):
-        profile = MagicMock()
-        profile.fragments_text = "frag_text"
-        profile.workflow_guidance = "wf_guide"
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="t",
-            question="q",
-            history_str="h",
-            memory_context="m",
-            conversation_context="base",
-            compiled_profile=profile,
-        )
-        assert "frag_text" in result
-        assert "wf_guide" in result
-
-    def test_with_todo_context(self):
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="t",
-            question="q",
-            history_str="h",
-            memory_context="m",
-            conversation_context="base",
-            todo_context="todo_items",
-        )
-        assert "todo_items" in result
-
-    def test_empty_extras_no_double_newlines(self):
-        result = build_react_prompt(
-            template=self.TEMPLATE,
-            tools_desc="t",
-            question="q",
-            history_str="h",
-            memory_context="m",
-            conversation_context="conv",
-        )
-        assert "conv" in result
 
 
 class TestBuildConversationContext:
@@ -348,7 +263,7 @@ class TestDisplayOnlyAndFinalAnswerContext:
 
 
 class TestSectionModel:
-    """Named-section assembly, diffing, and byte-stable rebuilds."""
+    """Named-section assembly and byte-stable rebuilds."""
 
     def _sections_v1(self) -> dict[str, str]:
         return build_react_sections(
@@ -364,23 +279,6 @@ class TestSectionModel:
     def test_sections_drop_empty_blocks(self):
         sections = build_react_sections(memory_context="M", conversation_context="")
         assert sections == {"memory": "M"}
-
-    def test_diff_first_build_marks_everything_changed(self):
-        changed = diff_sections(None, self._sections_v1())
-        assert changed == set(self._sections_v1())
-
-    def test_diff_detects_modified_added_removed(self):
-        previous = self._sections_v1()
-        current = dict(previous)
-        current["todo"] = "TODO_V2"                      # modified
-        current["mcp"] = "MCP"                           # added
-        del current["project_instructions"]              # removed
-        changed = diff_sections(previous, current)
-        assert changed == {"todo", "mcp", "project_instructions"}
-
-    def test_diff_unchanged_is_empty(self):
-        previous = self._sections_v1()
-        assert diff_sections(previous, dict(previous)) == set()
 
     def test_groups_render_in_stable_to_volatile_order(self):
         sections = self._sections_v1()
