@@ -261,3 +261,112 @@ def compare_with_baseline(suite_name: str):
 def eval_stats():
     service = _get_eval_service()
     return service.get_eval_stats()
+
+
+# ------------------------------------------------------------------
+# Public benchmark endpoints (BEIR / MultiHop-RAG track)
+# ------------------------------------------------------------------
+
+class BenchmarkRunRequest(BaseModel):
+    suite: str = "multihop"
+    mode: str = "dense"
+    datasets: list[str] = []
+    limit: int = 0
+    top_k: int = 10
+    embedding_model: str = ""
+
+
+@router.get("/benchmark/suites")
+def list_benchmark_suites():
+    from agentnexus.eval.benchmarks import list_suites
+
+    return {
+        "suites": [
+            {
+                "name": s.name,
+                "description": s.description,
+                "datasets": [ref.display for ref in s.datasets],
+            }
+            for s in list_suites()
+        ]
+    }
+
+
+@router.post("/benchmark/run")
+def run_benchmark(req: BenchmarkRunRequest | None = None):
+    """Run a retrieval benchmark. Retrieval-only — zero LLM calls, safe to
+    expose; a full beir-lite pass is minutes, multihop is ~2 minutes."""
+    req = req or BenchmarkRunRequest()
+    try:
+        from agentnexus.eval.benchmarks import get_suite, load_suite_datasets, run_retrieval
+        from agentnexus.eval.benchmarks.schema import RETRIEVAL_MODES
+
+        if req.mode not in RETRIEVAL_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown mode '{req.mode}'")
+        suite = get_suite(req.suite)
+        loaded = load_suite_datasets(suite, only=tuple(req.datasets), offline=False)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # optional embedding switch for this run
+    settings = original = None
+    if req.embedding_model:
+        from agentnexus.core.config import get_settings
+        from agentnexus.rag.embeddings import reset_embedding_model
+
+        settings = get_settings()
+        original = settings.embedding_model
+        if original != req.embedding_model:
+            settings.embedding_model = req.embedding_model
+            reset_embedding_model()
+    try:
+        results = []
+        for item in loaded:
+            run = run_retrieval(item.data, mode=req.mode, depth=max(100, req.top_k), k=req.top_k)
+            results.append({
+                "dataset": run.dataset,
+                "mode": run.mode,
+                "embedding_model": run.embedding_model,
+                "n_docs": run.n_docs,
+                "n_queries": run.n_queries,
+                "metrics": run.metrics,
+                "elapsed_s": round(run.elapsed_s, 1),
+            })
+        return {"suite": suite.name, "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if settings is not None and original and settings.embedding_model != original:
+            from agentnexus.rag.embeddings import reset_embedding_model
+
+            settings.embedding_model = original
+            reset_embedding_model()
+
+
+@router.get("/benchmark/reports")
+def list_benchmark_reports():
+    import json
+    from pathlib import Path
+
+    from agentnexus.core.config import get_settings
+
+    report_dir = Path(get_settings().traces_dir) / "evals"
+    reports = []
+    if report_dir.exists():
+        for path in sorted(report_dir.glob("benchmark-*.json"), reverse=True)[:20]:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                first = (payload.get("results") or [{}])[0]
+                reports.append({
+                    "file": path.name,
+                    "suite": payload.get("suite"),
+                    "kind": payload.get("kind", "retrieval-benchmark"),
+                    "datasets": [r.get("dataset") for r in payload.get("results", [])],
+                    "run_at": payload.get("run_at"),
+                    "ndcg_at_10": first.get("metrics", {}).get("ndcg@10"),
+                })
+            except Exception:
+                continue
+    return {"reports": reports}

@@ -32,6 +32,36 @@ All evaluators read from JSONL Traces (except Coherence, which does not depend o
 | HitRate | Hit rate @k |
 | MRR | Mean reciprocal rank |
 
+## Public Benchmarks (Benchmark Track)
+
+Alongside the built-in 60-question track (chunked knowledge base + Judge LLM), `eval benchmark` provides a second **standard-IR track**: public corpora with qrels and exact doc-id matching, zero LLM calls — for leaderboard comparison and retriever regression detection.
+
+| Command | Description |
+|------|------|
+| `eval benchmark list` | List suites and datasets |
+| `eval benchmark run -s beir-lite` | Run BEIR-lite (NFCorpus / SciFact / ArguAna) |
+| `eval benchmark run --mode hybrid` | RRF(dense+BM25), this project's own stack |
+| `eval benchmark run -e <model>` | Temporarily switch the embedding model |
+| `eval benchmark run --ci` | Write report to `traces/evals/benchmark-*.json` |
+| `eval benchmark run-rgb --lang zh --task noise` | RGB end-to-end (retrieve+generate+judge); `-t rejection` for negative-rejection |
+| `eval benchmark run-rgb -m agnes/agnes-3.0-flash -n 50` | Pick generator model, 50-query smoke run |
+| `eval benchmark run-rgb -j <report.json>` | Skip generation; re-judge stored answers (off-peak / cross-judge agreement) |
+| `eval benchmark run-rgb -g` | Generate-only; defer judging to a later `-j` pass (e.g. deepseek off-peak window) |
+| `eval benchmark run -e BAAI/bge-small-en-v1.5` | Per-task embedding switch (English tasks want an English model) |
+| `eval benchmark run -s multihop` | MultiHop-RAG multi-hop retrieval (609-doc corpus / 2556 queries; retrieval genuinely matters; dense vs hybrid quantifies the production stack's lift) |
+| `eval benchmark gate -s multihop --min 0.66` | CI gate: exit 1 when the latest report's metric falls below the floor (hand-captured baselines auto-excluded) |
+
+API: `GET /api/eval/benchmark/suites` / `POST /api/eval/benchmark/run` / `GET /api/eval/benchmark/reports`.
+
+Protocol notes:
+
+- `dense` mode = official BEIR protocol (document-level indexing, single dense retriever, NDCG@10 primary) — comparable with leaderboard.mteb.org
+- `hybrid` mode = this project's RRF stack, reported alongside, never mixed into the official number
+- Default embedding is the Chinese model; use `-e BAAI/bge-small-en-v1.5` for meaningful English-benchmark scores
+- Data cached under `~/.cache/agentnexus/benchmarks/`, `--offline` supported
+- RGB protocol: 5 docs per query (positive+negative sampled by noise rate, official passage_num=5), official instruction template; noise tasks are LLM-judged (>=0.5 = correct), rejection tasks use the official keyword rules — no judge LLM needed
+- All LLM calls serialize through one rate limiter (`--rpm`, default 18) with exponential backoff on 429; keep <=18 for free tiers (Agnes RPM 20)
+
 ## Production Layer
 
 | Command | Description |
