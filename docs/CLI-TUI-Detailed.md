@@ -59,17 +59,6 @@ nexus
 │   ├── reset                        -- 清除默认 Skill
 │   └── status                       -- 显示 Skill 状态
 │
-├── codegraph                        -- 代码知识图谱
-│   ├── build [--force]              -- 构建/更新图谱
-│   ├── search <query> [--kind]      -- 语义搜索代码实体
-│   ├── callers <symbol> [--depth]   -- 查找调用者
-│   ├── callees <symbol> [--depth]   -- 查找调用目标
-│   ├── inherits <cls>               -- 查看继承树
-│   ├── imports <module>             -- 查看导入关系
-│   ├── context <symbol>             -- 获取实体上下文
-│   ├── stats                        -- 图谱统计
-│   └── verify [--fix]               -- 一致性诊断
-│
 └── eval                             -- 评估系统（最复杂）
     ├── list                         -- 列出评估数据集
     ├── run [--ci] [--top-k]         -- 运行 RAG 评估

@@ -16,7 +16,6 @@ from agentnexus.tools.providers.base import (
     ToolProviderContext,
 )
 from agentnexus.tools.providers.browser_provider import BrowserToolProvider
-from agentnexus.tools.providers.codegraph_provider import CodeGraphToolProvider
 from agentnexus.tools.providers.computer_use_provider import ComputerUseToolProvider
 from agentnexus.tools.providers.execution_provider import ExecutionToolProvider
 from agentnexus.tools.providers.filesystem_provider import FilesystemToolProvider
@@ -42,7 +41,6 @@ def default_tool_providers() -> list[ToolProvider]:
         McpBridgeToolProvider(),
         SubagentToolProvider(),
         TodoToolProvider(),
-        CodeGraphToolProvider(),
         BrowserToolProvider(),
         ComputerUseToolProvider(),
         ReactionToolProvider(),
@@ -64,7 +62,6 @@ def register_tool_providers(
 
 __all__ = [
     "BrowserToolProvider",
-    "CodeGraphToolProvider",
     "ComputerUseToolProvider",
     "ExecutionToolProvider",
     "FilesystemToolProvider",

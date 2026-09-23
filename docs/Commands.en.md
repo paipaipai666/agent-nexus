@@ -77,20 +77,6 @@
 | `skill reset` | Clear default skill |
 | `skill status` | Current skill status |
 
-## Code Graph `nexus codegraph`
-
-| Command | Description |
-|------|------|
-| `codegraph build [--force] [--path]` | Build/update code graph |
-| `codegraph search <query> [--kind] [--limit]` | Semantic search for code entities |
-| `codegraph callers <symbol> [--depth]` | Find who calls a specific entity |
-| `codegraph callees <symbol> [--depth]` | Find what a specific entity calls |
-| `codegraph inherits <cls>` | View inheritance tree |
-| `codegraph imports <module>` | View import relationships |
-| `codegraph context <symbol>` | Get entity full context |
-| `codegraph stats` | Display graph statistics |
-| `codegraph verify [--fix]` | Consistency diagnostics |
-
 ## Wiki `nexus wiki`
 
 Knowledge base management with confidence-based routing for RAG queries and health checks.

@@ -48,9 +48,9 @@
       "sources": [{ "path": "agentnexus/tools/mcp_adapter.py", "label": "MCP 适配器" }]
     },
     {
-      "id": "tools", "type": "backend", "label": "内置工具 ×18", "sublabel": "code·shell·file·web·browser·computer·subagent·wiki·codegraph",
+      "id": "tools", "type": "backend", "label": "内置工具 ×15", "sublabel": "code·shell·file·web·browser·computer·subagent·wiki",
       "pos": [540, 284], "size": [290, 96],
-      "sources": [{ "path": "agentnexus/tools/registry.py", "label": "18 个内置工具" }]
+      "sources": [{ "path": "agentnexus/tools/registry.py", "label": "15 个内置工具" }]
     },
     {
       "id": "sandbox", "type": "security", "label": "Code Sandbox", "sublabel": "E2B → bwrap/Seatbelt → Docker → 本地",

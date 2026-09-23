@@ -87,7 +87,6 @@ class ProviderSpec:
 | `SubagentToolProvider` | subagent_run | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | todo_add, todo_update, todo_list | 待办事项管理 |
-| `CodeGraphToolProvider` | codegraph_search, codegraph_relations, codegraph_context | 代码知识图谱 |
 | `BrowserToolProvider` | browser_navigate, browser_snapshot, browser_click, ... | 浏览器自动化 |
 | `ComputerUseToolProvider` | computer_snapshot, computer_click, computer_type, ... | 桌面自动化 |
 
@@ -160,7 +159,6 @@ ToolRegistry (registry.py)
          ├── SubagentToolProvider
          ├── McpBridgeToolProvider
          ├── TodoToolProvider
-         ├── CodeGraphToolProvider
          ├── BrowserToolProvider
          └── ComputerUseToolProvider
 ```

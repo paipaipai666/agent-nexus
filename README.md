@@ -81,7 +81,6 @@ nexus health                     # Run system health checks
 nexus alerts --days 7            # View alert history
 nexus audit --limit 20           # View tool audit log
 nexus eval agent --days 1        # Run agent quality evaluation
-nexus codegraph build            # Build code knowledge graph
 ```
 
 ## Documentation
@@ -135,7 +134,7 @@ nexus codegraph build            # Build code knowledge graph
 │                     Tool Execution Layer                         │
 │  code_executor · shell · file_ops · web_search · kb_search      │
 │  memory_save · subagent · grep_search · web_fetch · browser     │
-│  computer_* · wiki · codegraph_* · todo · ...                   │
+│  computer_* · wiki · todo · ...                               │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
 │ (vectors)│  (relational)│  (observability)                      │

@@ -77,20 +77,6 @@
 | `skill reset` | 清除默认 skill |
 | `skill status` | 当前 skill 状态 |
 
-## 代码图谱 `nexus codegraph`
-
-| 命令 | 说明 |
-|------|------|
-| `codegraph build [--force] [--path]` | 构建/更新代码图谱 |
-| `codegraph search <query> [--kind] [--limit]` | 语义搜索代码实体 |
-| `codegraph callers <symbol> [--depth]` | 查找谁调用了指定实体 |
-| `codegraph callees <symbol> [--depth]` | 查找指定实体调用了谁 |
-| `codegraph inherits <cls>` | 查看继承树 |
-| `codegraph imports <module>` | 查看导入关系 |
-| `codegraph context <symbol>` | 获取实体完整上下文 |
-| `codegraph stats` | 显示图谱统计信息 |
-| `codegraph verify [--fix]` | 一致性诊断 |
-
 ## Wiki `nexus wiki`
 
 知识库管理，提供基于置信度路由的 RAG 查询与健康检查。

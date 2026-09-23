@@ -9,7 +9,7 @@
 │              CLI 层 (Typer + Rich)                          │
 │  6 顶层命令 + 7 子命令组 = 40+ 入口                         │
 │  nexus init / config / tui / stats / audit / ver           │
-│  nexus kb / wiki / memory / logs / eval / skill / codegraph│
+│  nexus kb / wiki / memory / logs / eval / skill           │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -50,7 +50,6 @@ agentnexus/
 ├── cli/                      ── Typer CLI 层
 ├── agents/                   ── ReActAgent + FSM
 ├── core/                     ── Settings + LLM
-├── codegraph/                ── 代码知识图谱 (AST 解析/语义搜索)
 ├── evaluation/               ── 8 个评估器
 ├── extensions/               ── 插件系统
 ├── memory/                   ── STM/LTM/版本控制/压缩/反射/卸载/投影/提取
@@ -80,7 +79,6 @@ agentnexus/
 | `SubagentToolProvider` | `subagent_run` | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | 待办事项管理 |
-| `CodeGraphToolProvider` | `codegraph_search`, `codegraph_relations`, `codegraph_context` | 代码知识图谱 |
 | `BrowserToolProvider` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_read`, `browser_screenshot`, `browser_evaluate`, `browser_wait`, `browser_scroll`, `browser_scroll_to` | 浏览器自动化 |
 | `ComputerUseToolProvider` | `computer_snapshot`, `computer_list_windows`, `computer_switch_window`, `computer_launch`, `computer_click`, `computer_type`, `computer_key`, `computer_select`, `computer_toggle`, `computer_scroll` | 桌面自动化 (OS 无障碍 API) |
 
@@ -119,7 +117,7 @@ agentnexus/
 | Observability | [Observability-Detailed.md](Observability-Detailed.md) | Trace/Token 统计/审计/告警 |
 | Extensions 扩展 | [Extensions-Detailed.md](Extensions-Detailed.md) | 插件系统、能力运行时 |
 | Server + Services | [Server-Services-Detailed.md](Server-Services-Detailed.md) | FastAPI 服务器、服务外观层 |
-| Storage + CodeGraph | [Storage-Codegraph-Detailed.md](Storage-Codegraph-Detailed.md) | ChromaDB、代码知识图谱 |
+| Storage | [Storage-Detailed.md](Storage-Detailed.md) | ChromaDB、SQLite 存储抽象 |
 | CLI + TUI | [CLI-TUI-Detailed.md](CLI-TUI-Detailed.md) | 40+ CLI 命令、Textual TUI |
 | 浏览器自动化 | [Browser-Automation.md](Browser-Automation.md) | Playwright 集成 |
 | 桌面自动化 | [Computer-Use.md](Computer-Use.md) | OS 无障碍 API |
@@ -146,7 +144,6 @@ agentnexus/
 | `/api/stats` | stats | 统计信息 |
 | `/api/config` | config | 配置管理 |
 | `/api/audit` | audit | 审计日志 |
-| `/api/codegraph` | codegraph | 代码知识图谱 |
 | `/api/eval` | eval_routes | RAG 评估 |
 | `/api/mcp` | mcp | MCP 工具管理 |
 | `/api/version` | version | 版本信息 |

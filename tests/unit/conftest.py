@@ -16,5 +16,4 @@ def _mock_embedding_model():
 
     with patch("agentnexus.rag.embeddings.get_embedding_model", return_value=mock_model):
         with patch("agentnexus.rag.embeddings.embed_texts", side_effect=_mock_embed):
-            with patch("agentnexus.codegraph.embeddings.embed_texts", side_effect=_mock_embed):
-                yield
+            yield

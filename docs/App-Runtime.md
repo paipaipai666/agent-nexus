@@ -120,7 +120,6 @@ Settings ───────────────────────�
     │        ├──→ SubagentToolProvider                  │
     │        ├──→ McpBridgeToolProvider                 │
     │        ├──→ TodoToolProvider                      │
-    │        ├──→ CodeGraphToolProvider                 │
     │        ├──→ BrowserToolProvider                   │
     │        └──→ ComputerUseToolProvider               │
     │                                                   │

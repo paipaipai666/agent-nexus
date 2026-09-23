@@ -51,7 +51,6 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🎯 **技能系统** | 可复用工作流模板，TF-IDF + 学习型重排序路由 |
 | 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理 |
 | 🤖 **子代理委派** | Agent-in-Agent 隔离执行子任务 |
-| 🕸️ **代码知识图谱** | 语义搜索、关系查询、上下文检索 |
 
 ## 快速开始
 
@@ -81,7 +80,6 @@ nexus health                     # 运行系统健康检查
 nexus alerts --days 7            # 查看告警历史
 nexus audit --limit 20           # 查看工具审计日志
 nexus eval agent --days 1        # 运行 Agent 质量评估
-nexus codegraph build            # 构建代码知识图谱
 ```
 
 ## 文档
@@ -135,7 +133,7 @@ nexus codegraph build            # 构建代码知识图谱
 │                     工具执行层                                   │
 │  code_executor · shell · file_ops · web_search · kb_search      │
 │  memory_save · subagent · grep_search · web_fetch · browser     │
-│  computer_* · wiki · codegraph_* · todo · ...                   │
+│  computer_* · wiki · todo · ...                               │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace 日志                     │
 │ (向量)   │  (关系型)    │  (可观测性)                           │

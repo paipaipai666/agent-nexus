@@ -44,7 +44,6 @@ ExecutionToolProvider    → python_execute, shell_exec
 SubagentToolProvider     → subagent_run
 McpBridgeToolProvider    → MCP 动态导入
 TodoToolProvider         → todo_add, todo_update, todo_list
-CodeGraphToolProvider    → codegraph_search, codegraph_relations, codegraph_context
 BrowserToolProvider      → browser_navigate, browser_snapshot, browser_click, browser_type,
                            browser_read, browser_screenshot, browser_evaluate, browser_wait,
                            browser_scroll, browser_scroll_to, browser_wait_navigation,
@@ -73,9 +72,6 @@ ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_
 | `todo_add` | `description` | 无限 | LOW |
 | `todo_update` | `item_id`, `status` | 无限 | LOW |
 | `todo_list` | 无参数 | 无限 | LOW |
-| `codegraph_search` | `query`, `kind?`, `limit?` | 20/min | LOW |
-| `codegraph_relations` | `symbol`, `relation` | 20/min | LOW |
-| `codegraph_context` | `symbol` | 20/min | LOW |
 | `browser_navigate` | `url`, `wait_until?`, `task_id?` | 10/min | LOW |
 | `browser_snapshot` | `scope?`, `mode?`, `include_offscreen?`, `task_id?` | 20/min | LOW |
 | `browser_click` | `ref?`, `role?`, `name?`, `selector?`, `double_click?`, `pos?`, `task_id?` | 20/min | MEDIUM |

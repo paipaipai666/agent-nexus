@@ -33,7 +33,6 @@
 | `/api/stats` | stats | 统计信息 |
 | `/api/config` | config | 配置管理 |
 | `/api/audit` | audit | 审计日志 |
-| `/api/codegraph` | codegraph | 代码知识图谱 |
 | `/api/eval` | eval_routes | RAG 评估 |
 | `/api/mcp` | mcp | MCP 工具管理 |
 | `/api/version` | version | 版本信息 |

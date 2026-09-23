@@ -33,7 +33,6 @@
 | `nexus memory` | list, clear | Long-term memory management |
 | `nexus logs` | list, view | Trace log viewer |
 | `nexus skill` | list, init, validate, use, reset, status | Skill/workflow management |
-| `nexus codegraph` | build, search, callers, callees, inherits, imports, context, stats, verify | Code knowledge graph |
 | `nexus eval` | 14 direct commands + task/suite/transcript subgroups | Evaluation system (most complex) |
 
 ## TUI Architecture

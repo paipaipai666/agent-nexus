@@ -103,7 +103,6 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     from agentnexus.server.routes.alerts import router as alerts_router
     from agentnexus.server.routes.audit import router as audit_router
     from agentnexus.server.routes.chat import router as chat_router
-    from agentnexus.server.routes.codegraph import router as codegraph_router
     from agentnexus.server.routes.config import router as config_router
     from agentnexus.server.routes.eval_routes import router as eval_router
     from agentnexus.server.routes.hooks import router as hooks_router
@@ -123,7 +122,6 @@ def create_app(runtime: Any | None = None) -> FastAPI:
     app.include_router(stats_router, prefix="/api")
     app.include_router(config_router, prefix="/api/config")
     app.include_router(audit_router, prefix="/api/audit")
-    app.include_router(codegraph_router, prefix="/api/codegraph")
     app.include_router(eval_router, prefix="/api/eval")
     app.include_router(mcp_router, prefix="/api/mcp")
     app.include_router(version_router, prefix="/api/version")

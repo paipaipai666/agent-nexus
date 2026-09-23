@@ -9,7 +9,7 @@
 │              CLI Layer (Typer + Rich)                       │
 │  6 top-level commands + 7 subcommand groups = 40+          │
 │  nexus init / config / tui / stats / audit / ver           │
-│  nexus kb / wiki / memory / logs / eval / skill / codegraph│
+│  nexus kb / wiki / memory / logs / eval / skill           │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -53,7 +53,6 @@ agentnexus/
 ├── cli/                      ── Typer CLI layer
 ├── agents/                   ── ReActAgent + FSM
 ├── core/                     ── Settings + LLM
-├── codegraph/                ── Code knowledge graph (AST parsing/semantic search)
 ├── evaluation/               ── 8 evaluators
 ├── extensions/               ── plugin system
 ├── memory/                   ── STM/LTM/version control/compaction/reflection/offload/projection/extraction
@@ -83,7 +82,6 @@ The system uses `ToolProvider` protocol with 11 providers registered in order:
 | `SubagentToolProvider` | `subagent_run` | Sub-agent delegation |
 | `McpBridgeToolProvider` | MCP dynamic import | External tool integration |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | Todo list management |
-| `CodeGraphToolProvider` | `codegraph_search`, `codegraph_relations`, `codegraph_context` | Code knowledge graph |
 | `BrowserToolProvider` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_read`, `browser_screenshot`, `browser_evaluate`, `browser_wait`, `browser_scroll`, `browser_scroll_to` | Browser automation |
 | `ComputerUseToolProvider` | `computer_snapshot`, `computer_list_windows`, `computer_switch_window`, `computer_launch`, `computer_click`, `computer_type`, `computer_key`, `computer_select`, `computer_toggle`, `computer_scroll` | Desktop automation (OS accessibility APIs) |
 
@@ -119,7 +117,6 @@ The server exposes the following REST routes (FastAPI, prefix `/api`):
 | `/api/stats` | stats | Statistics |
 | `/api/config` | config | Configuration |
 | `/api/audit` | audit | Audit logs |
-| `/api/codegraph` | codegraph | Code knowledge graph |
 | `/api/eval` | eval_routes | RAG evaluation |
 | `/api/mcp` | mcp | MCP tool management |
 | `/api/version` | version | Version info |

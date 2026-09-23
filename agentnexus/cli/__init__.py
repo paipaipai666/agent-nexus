@@ -30,9 +30,6 @@ app.add_typer(eval_app, name="eval")
 skill_app = typer.Typer(help="技能 / 工作流管理")
 app.add_typer(skill_app, name="skill")
 
-codegraph_app = typer.Typer(help="代码知识图谱管理")
-app.add_typer(codegraph_app, name="codegraph")
-
 hooks_app = typer.Typer(help="命令钩子管理")
 app.add_typer(hooks_app, name="hooks")
 
@@ -41,7 +38,6 @@ import agentnexus.cli.eval  # noqa: E402,F401
 from agentnexus.cli import (
     alerts_cmd,  # noqa: E402
     audit,  # noqa: E402
-    codegraph,  # noqa: E402
     config,  # noqa: E402
     eval_cmd,  # noqa: E402
     health_cmd,  # noqa: E402
