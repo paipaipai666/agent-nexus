@@ -70,6 +70,9 @@ eval = ["pytest>=8", "ruff>=0.3", "pyinstaller>=6"]
 include = ["agentnexus*"]
 exclude = ["blog*"]
 
+[tool.setuptools.package-data]
+"agentnexus.eval.memory" = ["data/*.jsonl"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

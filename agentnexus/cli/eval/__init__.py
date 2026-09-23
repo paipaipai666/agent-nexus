@@ -8,6 +8,7 @@ from agentnexus.cli.eval import (  # noqa: F401
     code_bench,
     fine_grained,
     memory,
+    memory_bench,
     rag,
     task,
     trace,

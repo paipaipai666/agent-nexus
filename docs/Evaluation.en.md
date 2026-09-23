@@ -62,6 +62,29 @@ Protocol notes:
 - RGB protocol: 5 docs per query (positive+negative sampled by noise rate, official passage_num=5), official instruction template; noise tasks are LLM-judged (>=0.5 = correct), rejection tasks use the official keyword rules — no judge LLM needed
 - All LLM calls serialize through one rate limiter (`--rpm`, default 18) with exponential backoff on 429; keep <=18 for free tiers (Agnes RPM 20)
 
+## Memory Layer (Memory Track)
+
+| Command | Description |
+|------|------|
+| `eval memory [--judge]` | Deterministic probes (`agentnexus/evaluation/memory_eval.py`): recall, freshness, forgetting, isolation, write integrity, etc. across 10 dimensions — offline, zero LLM; `--judge` adds LLM quality probes |
+| `eval memory-bench list` | List the built-in conversational memory suite (3 conversations × 5 questions) |
+| `eval memory-bench run -b nexus` | End-to-end conversational memory QA: replay dialogue → answer → char-F1 (optional `--judge`); report to `traces/evals/memory-bench-*.json` |
+| `eval memory-bench run -b naive` | Full-context baseline (no memory, whole history in prompt) — the reference point for the nexus backend |
+| `eval memory-bench run -d suite.jsonl` | Custom suite (LOCOMO/LongMemEval-shaped JSONL); `--min-f1` works as a CI gate |
+| `eval memory-bench convert locomo -o suite.jsonl` | Download + convert the public LoCoMo10 benchmark (CC BY-NC 4.0, research/internal use only) |
+| `eval memory-bench convert longmemeval-s -o suite.jsonl` | Download + convert LongMemEval-S (500 questions, ICLR 2025) |
+
+Data format: one conversation per line — `{"id", "turns": [{"role","content"}], "questions": [{"id","question","answer","qa_type"}]}` with `qa_type ∈ single_hop / multi_session / knowledge_update / temporal / distractor_filter / abstention / open_domain`.
+
+Protocol notes:
+
+- The `nexus` backend drives the production write path (`append` → `conclude` admission + extraction → LTM); each conversation runs in an isolated MemorySandbox (temp AGENTNEXUS_HOME + real SQLite/Chroma)
+- Primary metric: char-F1 (punctuation/case-insensitive character-multiset F1, fair for Chinese); abstention gold is "无法确定"
+- **Retrieval-level metric (model-free)**: `retrieval_hit` = whether the gold appears in the memory context the backend actually injected (gold-coverage / LongMemEval answerability check). Not applicable for abstention/open_domain (recorded as None). This is the fair cross-model / cross-vendor comparison axis — QA F1 = memory × generator, retrieval rate measures the memory layer alone
+- `retrieval_hit` drill-down: per-question ✓/✗ (Ctx column). Write-side failure (admission rejected the fact, LTM never stored it) and read-side failure (retrieval missed) look identical on ✗ — separating them needs provenance; LoCoMo `evidence` dia_ids already flow into the suite, and true evidence-Recall@k becomes computable once LTM writes carry provenance
+- `temporal` / `knowledge_update` cover short-term state tracking and fact supersession — the WorkMemEval/StateMemBench axes our research identified as missing from the in-house suite
+- Public-benchmark relation: the `convert` subcommand downloads/caches official data (via hf-mirror, under `~/.cache/agentnexus/benchmarks/memory/`) and converts it to suite JSONL; LoCoMo category mapping: single-hop→single_hop, multi-hop→multi_session, temporal→temporal, adversarial→abstention (gold canonicalized to "无法确定"), open-domain→open_domain
+
 ## Production Layer
 
 | Command | Description |

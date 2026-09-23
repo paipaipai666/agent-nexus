@@ -62,6 +62,29 @@ API:`GET /api/eval/benchmark/suites` / `POST /api/eval/benchmark/run` / `GET /ap
 - RGB 协议：每题 5 篇文档（positive+negative 按噪声率采样，官方 passage_num=5），官方指令模板生成；noise 任务用 LLM judge 判正确性（≥0.5 算对），rejection 任务用官方关键词规则判拒答，**无需 judge LLM**
 - LLM 调用走单实例限速器（`--rpm`，默认 18），429 指数退避；免费档（Agnes RPM 20）建议不高于 18
 
+## 记忆层（Memory Track）
+
+| 命令 | 说明 |
+|------|------|
+| `eval memory [--judge]` | 确定性探针（`agentnexus/evaluation/memory_eval.py`）：LTM/STM/项目记忆的召回、保鲜、遗忘、隔离、写入完整性等 10 个维度，离线零 LLM；`--judge` 追加 LLM 质量探针 |
+| `eval memory-bench list` | 列出内置会话记忆基准套件（3 段对话 × 5 题） |
+| `eval memory-bench run -b nexus` | 端到端会话记忆 QA：回放对话 → 逐题回答 → char-F1 打分（可选 `--judge` 独立 judge 判分），报告写 `traces/evals/memory-bench-*.json` |
+| `eval memory-bench run -b naive` | 全量上下文基线（无记忆，全部历史塞进 prompt），作为 nexus 后端的参照点 |
+| `eval memory-bench run -d suite.jsonl` | 自定义套件（LOCOMO/LongMemEval 式 JSONL），`--min-f1` 可做 CI 门禁 |
+| `eval memory-bench convert locomo -o suite.jsonl` | 下载并转换公开榜 LoCoMo10（CC BY-NC 4.0，限研究/内部评测） |
+| `eval memory-bench convert longmemeval-s -o suite.jsonl` | 下载并转换 LongMemEval-S（500 题，ICLR 2025） |
+
+数据格式：每行一段对话 `{"id", "turns": [{"role","content"}], "questions": [{"id","question","answer","qa_type"}]}`，`qa_type ∈ single_hop / multi_session / knowledge_update / temporal / distractor_filter / abstention / open_domain`。
+
+口径说明：
+
+- `nexus` 后端走生产写入路径（`append` → `conclude` 准入+提取 → LTM），每段对话跑在隔离的 MemorySandbox（临时 AGENTNEXUS_HOME + 真实 SQLite/Chroma）里
+- 主指标 char-F1（标点/大小写不敏感的字多重集合 F1，中文公平）；abstention 题 gold 为「无法确定」
+- **检索级指标（与模型无关）**：`retrieval_hit` = gold 是否出现在后端实际注入的记忆上下文中（gold 覆盖检查，LongMemEval answerability 口径）。abstention/open_domain 不适用记 None。这是跨底座模型/跨厂商对拍的公平口径——QA 分 = 记忆 × 生成器，retrieval 分只测记忆层
+- `retrieval_hit` 的下钻：✓/✗ 逐题展示（Ctx 列）。写入侧失败（准入拒绝导致 LTM 没有该事实）与读取侧失败（检索没召回）在 ✗ 上表现相同，区分需 evidence 溯源——LoCoMo `evidence` dia_id 已透传进套件，等 LTM 写入带 provenance 后可算真正的 evidence Recall@k
+- `temporal` / `knowledge_update` 覆盖短期状态跟踪与事实取代，对应调研结论里自有评测缺口的 WorkMemEval/StateMemBench 维度
+- 与公开榜的关系：`convert` 子命令负责下载/缓存官方数据（hf-mirror，缓存于 `~/.cache/agentnexus/benchmarks/memory/`）并转成套件 JSONL；LoCoMo 题型映射：single-hop→single_hop、multi-hop→multi_session、temporal→temporal、adversarial→abstention（gold 规范为「无法确定」）、open-domain→open_domain
+
 ## 生产层
 
 | 命令 | 说明 |
