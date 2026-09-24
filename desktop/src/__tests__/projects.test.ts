@@ -18,16 +18,12 @@ function mockElectronBridge(overrides: Partial<ElectronAPI>) {
     minimize: vi.fn(),
     maximize: vi.fn(),
     close: vi.fn(),
-    isMaximized: vi.fn().mockResolvedValue(false),
-    openExternal: vi.fn(),
     pickDirectory: vi.fn().mockResolvedValue(null),
     getProjects: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     addProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     removeProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     setLastProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     getBackendStatus: vi.fn().mockResolvedValue({ ready: true, port: 0 }),
-    onBackendReady: vi.fn(),
-    onBackendError: vi.fn(),
     ...overrides,
   }
 }

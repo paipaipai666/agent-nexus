@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { api, setApiKey } from '../services/api'
+import { api } from '../services/api'
 
 const mockFetch = vi.fn()
 global.fetch = mockFetch
@@ -16,29 +16,6 @@ function mockJsonResponse(data: any, ok = true, status = 200) {
 describe('api service', () => {
   beforeEach(() => {
     mockFetch.mockReset()
-    setApiKey(null as unknown as string)
-  })
-
-  describe('setApiKey', () => {
-    it('sets API key header on subsequent requests', async () => {
-      setApiKey('test-key-123')
-      mockFetch.mockReturnValue(mockJsonResponse({ session_id: 's1' }))
-
-      await api.createSession()
-
-      const [, options] = mockFetch.mock.calls[0]
-      expect(options.headers['X-API-Key']).toBe('test-key-123')
-    })
-
-    it('does not send API key header when key is null', async () => {
-      setApiKey(null as unknown as string)
-      mockFetch.mockReturnValue(mockJsonResponse({ session_id: 's1' }))
-
-      await api.createSession()
-
-      const [, options] = mockFetch.mock.calls[0]
-      expect(options.headers['X-API-Key']).toBeUndefined()
-    })
   })
 
   describe('createSession', () => {
@@ -74,54 +51,6 @@ describe('api service', () => {
       expect(result.sessions).toHaveLength(1)
       const [url] = mockFetch.mock.calls[0]
       expect(url).toContain('/api/sessions')
-    })
-  })
-
-  describe('sendMessage', () => {
-    it('sends POST with session_id and content', async () => {
-      mockFetch.mockReturnValue(mockJsonResponse({ run_id: 'r1', answer: 'hi', status: 'done' }))
-
-      const result = await api.sendMessage('s1', 'hello')
-
-      expect(result.answer).toBe('hi')
-      const [, options] = mockFetch.mock.calls[0]
-      const body = JSON.parse(options.body)
-      expect(body.session_id).toBe('s1')
-      expect(body.content).toBe('hello')
-    })
-  })
-
-  describe('cancelRun', () => {
-    it('sends POST with run_id', async () => {
-      mockFetch.mockReturnValue(mockJsonResponse({ status: 'cancelled' }))
-
-      await api.cancelRun('run-123')
-
-      const [, options] = mockFetch.mock.calls[0]
-      const body = JSON.parse(options.body)
-      expect(body.run_id).toBe('run-123')
-    })
-  })
-
-  describe('confirmTool', () => {
-    it('sends POST with approved=true', async () => {
-      mockFetch.mockReturnValue(mockJsonResponse({ status: 'confirmed' }))
-
-      await api.confirmTool('run-1', true)
-
-      const [, options] = mockFetch.mock.calls[0]
-      const body = JSON.parse(options.body)
-      expect(body.approved).toBe(true)
-    })
-
-    it('sends POST with approved=false', async () => {
-      mockFetch.mockReturnValue(mockJsonResponse({ status: 'rejected' }))
-
-      await api.confirmTool('run-1', false)
-
-      const [, options] = mockFetch.mock.calls[0]
-      const body = JSON.parse(options.body)
-      expect(body.approved).toBe(false)
     })
   })
 

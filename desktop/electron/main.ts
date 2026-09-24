@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'path'
 import os from 'os'
 import { spawn, ChildProcess } from 'child_process'
@@ -160,9 +160,6 @@ function startBackend(): Promise<boolean> {
       console.log(`Backend exited with code ${code}`)
       backendProcess = null
       backendReady = false
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('backend-error', `Backend exited with code ${code}`)
-      }
     })
 
     // Wait for the backend to be healthy
@@ -261,10 +258,9 @@ async function createWindow() {
 
     const ready = await startBackend()
     if (ready) {
-      mainWindow.webContents.send('backend-ready')
       mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
     } else {
-      mainWindow.webContents.send('backend-error', 'Failed to start backend')
+      console.error('Failed to start backend')
     }
   }
 
@@ -311,8 +307,6 @@ ipcMain.on('window-maximize', () => {
   }
 })
 ipcMain.on('window-close', () => mainWindow?.close())
-
-ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized() ?? false)
 
 // Backend status IPC
 ipcMain.handle('get-backend-status', () => ({
@@ -363,14 +357,3 @@ ipcMain.handle('set-last-project', (_, projectPath: string) => {
   return store
 })
 
-// Open external links in browser (http/https only)
-ipcMain.on('open-external', (_, url: string) => {
-  try {
-    const parsed = new URL(url)
-    if (['http:', 'https:'].includes(parsed.protocol)) {
-      shell.openExternal(url)
-    }
-  } catch {
-    // Invalid URL, ignore
-  }
-})

@@ -5,61 +5,6 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
-      colors: {
-        // Tonal surface stack (darker = deeper)
-        surface: {
-          0: 'var(--surface-0)',
-          1: 'var(--surface-1)',
-          2: 'var(--surface-2)',
-          3: 'var(--surface-3)',
-          4: 'var(--surface-4)',
-        },
-        // Foreground text
-        fg: {
-          DEFAULT: 'var(--fg)',
-          secondary: 'var(--fg-secondary)',
-          muted: 'var(--fg-muted)',
-          faint: 'var(--fg-faint)',
-        },
-        // Accent — Electric Blue
-        accent: {
-          DEFAULT: 'var(--accent)',
-          hover: 'var(--accent-hover)',
-          muted: 'var(--accent-muted)',
-          subtle: 'var(--accent-subtle)',
-        },
-        // Semantic colors
-        green: {
-          DEFAULT: 'var(--green)',
-          muted: 'var(--green-muted)',
-        },
-        red: {
-          DEFAULT: 'var(--red)',
-          muted: 'var(--red-muted)',
-        },
-        amber: {
-          DEFAULT: 'var(--amber)',
-          muted: 'var(--amber-muted)',
-        },
-        blue: {
-          DEFAULT: 'var(--blue)',
-          muted: 'var(--blue-muted)',
-        },
-        purple: {
-          DEFAULT: 'var(--purple)',
-          muted: 'var(--purple-muted)',
-        },
-        cyan: {
-          DEFAULT: 'var(--cyan)',
-          muted: 'var(--cyan-muted)',
-        },
-        // Border
-        border: {
-          DEFAULT: 'var(--border)',
-          subtle: 'var(--border-subtle)',
-          strong: 'var(--border-strong)',
-        },
-      },
       fontFamily: {
         sans: ['DM Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
         serif: ['Source Serif 4', 'Georgia', 'serif'],
@@ -79,12 +24,6 @@ export default {
         md: '6px',
         lg: '8px',
         xl: '12px',
-      },
-      boxShadow: {
-        'glow': '0 0 20px var(--accent-muted)',
-        'glow-sm': '0 0 10px var(--accent-subtle)',
-        'elevated': '0 8px 32px rgba(0,0,0,0.4)',
-        'card': '0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px var(--border-subtle)',
       },
       animation: {
         'fade-in': 'fadeIn 0.2s ease-out',

@@ -11,8 +11,6 @@ interface ElectronAPI {
   minimize: () => void
   maximize: () => void
   close: () => void
-  isMaximized: () => Promise<boolean>
-  openExternal: (url: string) => void
   // Projects (per-session workspace folders)
   pickDirectory: () => Promise<string | null>
   getProjects: () => Promise<ElectronProjectStore>
@@ -22,8 +20,6 @@ interface ElectronAPI {
 
   // Backend status
   getBackendStatus: () => Promise<BackendStatus>
-  onBackendReady: (callback: () => void) => () => void
-  onBackendError: (callback: (message: string) => void) => () => void
 }
 
 interface Window {

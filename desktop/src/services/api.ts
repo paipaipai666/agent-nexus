@@ -1,5 +1,4 @@
 const BASE_URL = 'http://127.0.0.1:18765'
-let apiKey: string | null = null
 
 // ── LLM provider profile types ──────────────────────────────────────────
 export interface ModelOverrideDraft {
@@ -52,17 +51,10 @@ export interface ProviderSaveInput {
   models: ModelDraft[]
 }
 
-export function setApiKey(key: string) {
-  apiKey = key
-}
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
-  }
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey
   }
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
@@ -77,9 +69,6 @@ async function requestWithSignal<T>(path: string, signal?: AbortSignal): Promise
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey
-  }
 
   const res = await fetch(`${BASE_URL}${path}`, { headers, signal })
   if (!res.ok) {
@@ -90,17 +79,11 @@ async function requestWithSignal<T>(path: string, signal?: AbortSignal): Promise
 }
 
 async function uploadRequest<T>(path: string, file: File): Promise<T> {
-  const headers: Record<string, string> = {}
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey
-  }
-
   const formData = new FormData()
   formData.append('file', file)
 
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers,
     body: formData,
   })
   if (!res.ok) {
@@ -136,25 +119,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ skill: sessionId }),  // backend reuses skill field for session_id
     }),
-  // Chat
-  sendMessage: (sessionId: string, content: string) =>
-    request<{ run_id: string; answer: string; status: string }>('/api/chat', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, content }),
-    }),
-
-  cancelRun: (runId: string) =>
-    request<{ status: string }>('/api/chat/cancel', {
-      method: 'POST',
-      body: JSON.stringify({ run_id: runId }),
-    }),
-
-  confirmTool: (runId: string, approved: boolean) =>
-    request<{ status: string }>('/api/chat/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ run_id: runId, approved }),
-    }),
-
   // Todos
   getTodos: (sessionId: string) =>
     request<{ items: Array<{ id: number; description: string; status: string }>; count: number }>(
@@ -170,9 +134,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ query, top_k: topK }),
     }),
-
-  uploadDocument: (file: File) =>
-    uploadRequest<{ status: string; filename: string; result: any }>('/api/kb/documents', file),
 
   uploadDocumentWithProgress: (file: File) =>
     uploadRequest<{ status: string; run_id: string; filename: string }>('/api/kb/documents', file),

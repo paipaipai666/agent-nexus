@@ -130,8 +130,8 @@ class AppRuntime:
                 a._todo_list = SessionTodoList(session_id=session_id, db_path=settings.memory_db_path)
             return a
 
-        def make_memory_factory(stm_store: dict, session_id: str, workspace_resolver=None):
-            """R7: Closure-based factory — absorbs STM on first call, then gone.
+        def make_memory_factory(session_id: str, workspace_resolver=None):
+            """Closure-based factory for a session MemoryManager.
 
             workspace_resolver: optional callable(session_id) -> str | None, used
             to bind project memory to the session's workspace (falls back to the
@@ -147,14 +147,7 @@ class AppRuntime:
                     except Exception:
                         pass
                 mm = MemoryManager(session_id, llm=llm, workspace_path=ws)
-                # One-time STM migration from legacy _stms dict
-                if session_id in stm_store:
-                    from agentnexus.memory.short_term import ShortTermMemory
-                    restored = ShortTermMemory.from_json(stm_store.pop(session_id))
-                    mm.short_term._messages = restored._messages
-                    mm.short_term._summary = restored._summary
-                # Restore from version manager if this is the build-time session
-                elif _restore is not None and _version_for_restore is not None:
+                if _restore is not None and _version_for_restore is not None:
                     _restore(mm, _version_for_restore)
                 return mm
             return factory
@@ -206,10 +199,6 @@ class AppRuntime:
             "mcp_enabled": mcp_manager is not None,
         })
 
-        # Capture _stms reference for closure-based factory migration (R7)
-        # ChatService will be created with factories; _stms is populated lazily
-        _stm_store: dict = {}
-
         def _resolve_session_workspace(sid: str) -> str | None:
             """Late-binding lookup of a session's workspace (chat assigned below)."""
             try:
@@ -220,7 +209,7 @@ class AppRuntime:
 
         chat_service = ChatService(
             agent_factory=agent_factory,
-            memory_factory_builder=lambda sid: make_memory_factory(_stm_store, sid, workspace_resolver=_resolve_session_workspace),
+            memory_factory_builder=lambda sid: make_memory_factory(sid, workspace_resolver=_resolve_session_workspace),
             version_manager=version,
             skill_service=skill_service,
             tool_executor=executor,

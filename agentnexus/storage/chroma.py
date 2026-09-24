@@ -13,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Protocol
+from typing import Any
 
 from agentnexus.core.config import get_settings
 
@@ -23,52 +23,6 @@ def _get_embedding_service():
     return embedding_service
 
 logger = logging.getLogger(__name__)
-
-
-class StorageBackend(Protocol):
-    """Protocol defining the storage interface for vector stores.
-
-    Any storage backend (ChromaDB, FAISS, in-memory, etc.) should implement
-    these methods to be usable by the RAG retriever and memory system.
-    """
-
-    def query(
-        self,
-        query_embeddings: list[list[float]],
-        n_results: int,
-        include: list[str],
-        where: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Query the vector store for similar embeddings."""
-        ...
-
-    def add(
-        self,
-        ids: list[str],
-        embeddings: list[list[float]],
-        documents: list[str],
-        metadatas: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Add documents with embeddings to the store."""
-        ...
-
-    def upsert(
-        self,
-        ids: list[str],
-        embeddings: list[list[float]],
-        documents: list[str],
-        metadatas: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Insert or update documents with embeddings."""
-        ...
-
-    def delete(
-        self,
-        ids: list[str] | None = None,
-        where: dict[str, Any] | None = None,
-    ) -> None:
-        """Delete documents by IDs or metadata filter."""
-        ...
 
 COLLECTION_NAME = "documents"
 DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
@@ -141,16 +95,6 @@ def get_collection(
             )
             _collections[collection_name] = ThreadSafeChromaCollection(collection)
         return _collections[collection_name]
-
-
-def check_health() -> bool:
-    """Return True if the ChromaDB client heartbeat succeeds."""
-    try:
-        client = get_chroma_client()
-        client.heartbeat()
-        return True
-    except Exception:
-        return False
 
 
 def normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
@@ -359,7 +303,6 @@ __all__ = [
     "COLLECTION_NAME",
     "DEFAULT_COLLECTION_METADATA",
     "ThreadSafeChromaCollection",
-    "check_health",
     "chroma_operation_lock",
     "chunk_metadata_to_chroma",
     "delete_collection",

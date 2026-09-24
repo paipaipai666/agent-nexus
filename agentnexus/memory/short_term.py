@@ -14,14 +14,11 @@ _tiktoken_loaded = False
 
 def _get_tiktoken_encoding():
     global _tiktoken_encoding, _tiktoken_loaded
-    if _tiktoken_loaded:
-        return _tiktoken_encoding
-    _tiktoken_loaded = True
-    try:
+    if not _tiktoken_loaded:
         import tiktoken
+
         _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
-    except Exception:
-        _tiktoken_encoding = None
+        _tiktoken_loaded = True
     return _tiktoken_encoding
 
 
@@ -257,31 +254,17 @@ class ShortTermMemory:
     def estimate_tokens(self) -> int:
         with self._lock:
             enc = _get_tiktoken_encoding()
-            if enc is None:
-                return self._estimate_tokens_fallback()
             total = 0
             for m in self._messages:
                 content = m.get("content", "")
                 total += len(enc.encode(content))
             return total
 
-    def _estimate_tokens_fallback(self) -> int:
-        total = 0
-        for m in self._messages:
-            total += self._estimate_msg_tokens(m)
-        return total
-
     def _estimate_msg_tokens(self, msg: dict) -> int:
-        """Fast token estimate for a single message."""
+        """Token estimate for a single message."""
         content = msg.get("content", "")
         enc = _get_tiktoken_encoding()
-        if enc is not None:
-            return len(enc.encode(content))
-        import re
-        chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', content))
-        ascii_chars = len(re.findall(r'[a-zA-Z0-9]', content))
-        other_chars = len(content) - chinese_chars - ascii_chars
-        return int(chinese_chars * 1.8 + ascii_chars * 0.75 + other_chars * 0.3)
+        return len(enc.encode(content))
 
     @property
     def token_count(self) -> int:
