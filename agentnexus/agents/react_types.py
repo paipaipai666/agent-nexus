@@ -33,64 +33,66 @@ class AgentStep:
 
 
 # ============================================================
-# ReActState — FSM states
+# ReActState — FSM states（FSM 重设计 Step 3，2026-09-24）
+#
+# 6 个状态，只做真正的决策点；流水线步骤（准备参数、解析 JSON 等）
+# 全部收进 handler / decisions.py，不再占状态位。
 # ============================================================
 
 class ReActState(Enum):
-    INIT = auto()              # entry: build prompt, messages, memory
-    SELECT_STRATEGY = auto()   # choose CallingStrategy from caps + session
-    PREPARE_LLM_CALL = auto()  # set tools/response_format, inject JSON hint
-    CALL_LLM = auto()          # blocking llm_client.think()
-    RECEIVE_RESPONSE = auto()  # record AgentStep, route by strategy
-    CHECK_TOOL_CALLS = auto()  # NATIVE: check last_tool_calls
-    EXECUTE_TOOL = auto()      # run tool, collect observation
-    CHECK_EMPTY = auto()       # non-NATIVE: is response_text empty?
-    JSON_PARSE = auto()        # _robust_json_parse()
-    CLASSIFY = auto()          # _classify_parsed() → tool_call / answer / error
-    RETRY_GATE = auto()        # should we retry, degrade, or fallback?
-    DEGRADE = auto()           # mark_failed + re-select strategy
-    EMIT_ANSWER = auto()       # output final answer, save memory, conclude
-    ERROR_ABORT = auto()       # unrecoverable error
-    DONE = auto()              # terminal state
+    INIT = auto()         # 入口：建上下文、选协议档位
+    AWAIT_MODEL = auto()  # 一轮模型往返 + 解释成标准化决策（auto-advance 循环）
+    EXECUTE_TOOL = auto() # 执行工具批次
+    RECOVER = auto()      # 所有"出问题了怎么办"的收口：重试 / 降档 / 兜底 / 终止
+    ANSWER = auto()       # 交最终答案（可被 AGENT_STOP 钩子打回）
+    DONE = auto()         # 终态
 
 
 # ============================================================
 # ReActEventType — events that drive state transitions
+# （FSM 重设计 Step 3：收敛到 8 个队列事件 + 5 个旁路观测；
+#   旧名保留为 alias，一个发布周期后删除）
 # ============================================================
 
 class ReActEventType(Enum):
-    START = auto()             # user calls run(question)
-    STRATEGY_READY = auto()    # _select_strategy() completed
-    LLM_PARAMS_READY = auto()  # think parameters prepared
-    LLM_RESPONSE = auto()      # LLM returned successfully
-    LLM_ERROR = auto()         # LLM call failed
-    TOOLS_FOUND = auto()       # NATIVE: last_tool_calls non-empty
-    NO_TOOLS = auto()          # NATIVE: no tool_calls, has text → answer
-    NO_TOOLS_NO_TEXT = auto()  # NATIVE: no tool_calls, no text → degrade
-    TOOL_DONE = auto()         # single tool execution completed
-    ALL_TOOLS_DONE = auto()    # all tools in batch executed
-    ANSWER_READY = auto()      # bookkeeping-only batch carried terminal answer text
-    EMPTY_RESPONSE = auto()    # non-NATIVE: response_text is empty
-    HAS_CONTENT = auto()       # non-NATIVE: response_text has content
-    PARSE_SUCCESS = auto()     # _robust_json_parse returned valid data
-    PARSE_ERROR = auto()       # _robust_json_parse returned error
-    CLASSIFIED_TOOL = auto()   # _classify_parsed → tool_call
-    CLASSIFIED_ANSWER = auto() # _classify_parsed → answer
-    CLASSIFIED_ERROR = auto()  # _classify_parsed → error
-    RETRIES_LEFT = auto()      # json_retries < MAX
-    NO_RETRIES = auto()        # json_retries exhausted
-    DEGRADED = auto()          # strategy degraded successfully
-    ABORT = auto()             # unrecoverable, terminate
-    ROUTE_NATIVE = auto()      # internal: route to CHECK_TOOL_CALLS path
-    ROUTE_JSON = auto()        # internal: route to CHECK_EMPTY path
-    FALLBACK_TEXT = auto()     # internal: PROMPT_JSON exhausted → use raw text as answer
-    THOUGHT_MISSING = auto()   # NATIVE: model returned tool_calls without Thought text
-    TRUNCATED_RESPONSE = auto()  # NATIVE: response cut by output token limit, no tool_calls
-    STOP_VETOED = auto()       # AGENT_STOP hook vetoed the final answer → re-enter LLM loop
-    TOOL_START = auto()        # direct emit: tool about to execute (TUI spinner)
-    ANSWER_THOUGHT = auto()    # direct emit: thought shown before final answer after tool usage
-    STREAM_TOKEN = auto()      # direct emit: LLM streaming token (real-time text)
-    STREAM_REASONING = auto()  # direct emit: LLM streaming reasoning content
+    # ── 队列事件：驱动状态机。决策函数返回值封闭于这几种，
+    #    转移表因此是全函数（totality 在测试里断言）。──
+    START = auto()          # 用户调用 run(question)
+    TOOLS_REQUESTED = auto()  # 解释器：模型要调工具（payload: tool_calls/thought/terminal_answer）
+    ANSWER_READY = auto()   # 解释器：这是最终答案（payload 可带 text）
+    FAULT = auto()          # 本轮输出不可用 / 致命错误（payload: reason/detail/fatal）
+    TOOLS_DONE = auto()     # 整批工具执行完成
+    ROUND_READY = auto()    # recover 决策：再来一轮模型调用
+    ABORT = auto()          # 终止
+    ANSWER_VETOED = auto()  # AGENT_STOP 钩子否决了最终答案（payload: reason）
+    # ── 旁路观测：ctx.emit，不进队列，只给 TUI 实时展示 ──
+    TOOL_DONE = auto()      # 单工具完成
+    TOOL_START = auto()     # 工具即将执行
+    STREAM_TOKEN = auto()   # LLM 流式 token
+    STREAM_REASONING = auto()  # LLM 流式 reasoning
+    ANSWER_THOUGHT = auto() # 答案前的思考展示
+    # ── 旧名 alias（兼容 TUI / 下游测试，勿在新代码中使用）──
+    TOOLS_FOUND = TOOLS_REQUESTED
+    CLASSIFIED_TOOL = TOOLS_REQUESTED
+    ALL_TOOLS_DONE = TOOLS_DONE
+    LLM_PARAMS_READY = ROUND_READY
+    RETRIES_LEFT = ROUND_READY
+    DEGRADED = ROUND_READY
+    NO_TOOLS = ANSWER_READY
+    CLASSIFIED_ANSWER = ANSWER_READY
+    FALLBACK_TEXT = ANSWER_READY
+    STOP_VETOED = ANSWER_VETOED
+    LLM_ERROR = FAULT
+    EMPTY_RESPONSE = FAULT
+    PARSE_ERROR = FAULT
+    TRUNCATED_RESPONSE = FAULT
+    CLASSIFIED_ERROR = FAULT
+    NO_TOOLS_NO_TEXT = FAULT
+    THOUGHT_MISSING = FAULT
+    ROUTE_NATIVE = FAULT
+    ROUTE_JSON = FAULT
+    STRATEGY_READY = ROUND_READY
+    NO_RETRIES = FAULT
 
 
 # ============================================================
@@ -139,7 +141,7 @@ class RunState:
     current_step: int = 0
     json_retries: int = 0
     strategy: CallingStrategy = CallingStrategy.PROMPT_JSON
-    max_steps: int = 10
+    max_steps: int | None = None    # None = 不设上限（决策3，2026-09-24 拍板）
     max_json_retries: int = 2
     stop_vetoes: int = 0       # consecutive AGENT_STOP hook vetoes (cap prevents loops)
     thinking_enabled: bool = False
@@ -229,7 +231,7 @@ class ExecutionContext:
         current_step: int = 0,
         json_retries: int = 0,
         strategy: CallingStrategy = CallingStrategy.PROMPT_JSON,
-        max_steps: int = 10,
+        max_steps: int | None = None,
         max_json_retries: int = 2,
         session_caps: Any = None,
         memory_manager: Any = None,

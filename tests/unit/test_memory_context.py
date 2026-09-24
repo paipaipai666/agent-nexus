@@ -2,10 +2,30 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from agentnexus.agents.re_act_agent import ReActAgent
+from agentnexus.agents.react_types import (
+    AgentStep,
+    ExecutionContext,
+    ReActEvent,
+    ReActEventType,
+)
 from agentnexus.memory.compaction_engine import CompactionEngine
 from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.short_term import ShortTermMemory
+
+
+@pytest.fixture(autouse=True)
+def _mock_agent_trace_manager():
+    """避免 agent 的 span 记录把 MagicMock 写进真实 tracer（会污染后续测试的序列化）。
+
+    与 tests/unit/test_realtime_events.py 的 _mock_trace_manager 同款做法。
+    """
+    mock_tm = MagicMock()
+    with patch("agentnexus.agents.re_act_agent.trace_manager", mock_tm):
+        yield
 
 
 class TestInitSessionWithContext:
@@ -553,103 +573,90 @@ class TestReActAgentConversationMode:
         assert result.answer == "done"
         assert calls == [(ReActEventType.TOOL_START, None, None, "read")]
 
+    # ── 以下用例在 FSM 重设计（Step 3）后改走新入口 _on_round / _on_tools_requested
+    #    / _on_recover；验证目标不变：UI 侧事件流与对话内容不回归。──
+
+    def _run_round(self, agent, ctx, monkeypatch, emitted=None):
+        """驱动 _on_round：call_llm 直接返回预设的 ctx.last_response_text。"""
+        monkeypatch.setattr(
+            "agentnexus.agents.re_act_agent.call_llm",
+            lambda llm, ctx, json_format_section="", on_token=None: ctx.last_response_text,
+        )
+        if emitted is not None:
+            ctx._on_emit = lambda event, f, t: emitted.append((event.type, event.payload))
+        return agent._on_round(ctx, ReActEvent(ReActEventType.ROUND_READY))
+
+    def _make_ctx(self, question, strategy, response_text, reasoning=""):
+        from agentnexus.agents.react_types import AgentStep, ExecutionContext
+        ctx = ExecutionContext(question=question, strategy=strategy)
+        ctx.steps.append(AgentStep(step_id=0))
+        ctx.last_response_text = response_text
+        ctx.last_reasoning = reasoning
+        return ctx
+
+    def _make_llm(self, **attrs):
+        mock_llm = MagicMock()
+        mock_llm.capabilities.supports_thinking = attrs.get("supports_thinking", False)
+        mock_llm.last_reasoning_content = attrs.get("reasoning", "")
+        mock_llm.last_error = ""
+        mock_llm.last_truncated = False
+        mock_llm.last_tool_calls = attrs.get("tool_calls", [])
+        mock_llm.last_usage = {"input_tokens": 0, "output_tokens": 0}
+        return mock_llm
+
     def test_classified_tool_emits_thought_event_from_reasoning(self, monkeypatch):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.agents.react_types import CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = True
-        mock_llm.last_reasoning_content = "Need fresh information before answering"
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
+        agent = ReActAgent(
+            self._make_llm(supports_thinking=True, reasoning="Need fresh information before answering"),
+            ToolRegistry(), conversation_mode=False)
+        monkeypatch.setattr(agent, "_execute_tool",
+                            lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
+        ctx = self._make_ctx(
+            "latest news", CallingStrategy.PROMPT_JSON,
+            '{"tool": "web_search", "params": {"query": "latest news"}}',
+            reasoning="Need fresh information before answering")
 
-        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
+        returned = self._run_round(agent, ctx, monkeypatch)
 
-        emitted = []
-        ctx = ExecutionContext(question="latest news")
-        ctx.steps.append(AgentStep(step_id=0))
-        ctx.last_reasoning = "Need fresh information before answering"
-        ctx.last_response_text = '{"tool": "web_search", "params": {"query": "latest news"}}'
-        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
-
-        agent._on_classified_tool(
-            ctx,
-            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
-                "parsed": {"tool": "web_search", "params": {"query": "latest news"}}
-            }),
-        )
-
-        assert emitted[0] == (
-            ReActEventType.TOOLS_FOUND,
-            {
-                "thought": "Need fresh information before answering",
-                "tool_calls": [{"name": "web_search", "arguments": {"query": "latest news"}}],
-            },
-        )
+        assert [e.type for e in returned] == [ReActEventType.TOOLS_REQUESTED]
+        assert returned[0].payload["thought"] == "Need fresh information before answering"
+        assert returned[0].payload["tool_calls"] == [
+            {"id": "", "name": "web_search", "arguments": {"query": "latest news"}}]
 
     def test_classified_tool_falls_back_to_json_thought_without_reasoning(self, monkeypatch):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.agents.react_types import CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = False
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
-        monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
-
-        emitted = []
-        ctx = ExecutionContext(question="latest news")
-        ctx.steps.append(AgentStep(step_id=0))
-        ctx.last_reasoning = ""
-        ctx.last_response_text = (
+        agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
+        monkeypatch.setattr(agent, "_execute_tool",
+                            lambda name, arguments: "[1] Result\nURL: https://example.com\nBody")
+        ctx = self._make_ctx(
+            "latest news", CallingStrategy.PROMPT_JSON,
             '{"thought": "Need latest info first.", '
-            '"tool": "web_search", "params": {"query": "latest news"}}'
-        )
-        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+            '"tool": "web_search", "params": {"query": "latest news"}}')
 
-        agent._on_classified_tool(
-            ctx,
-            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
-                "parsed": {"tool": "web_search", "params": {"query": "latest news"}}
-            }),
-        )
+        returned = self._run_round(agent, ctx, monkeypatch)
 
-        assert emitted[0] == (
-            ReActEventType.TOOLS_FOUND,
-            {
-                "thought": "Need latest info first.",
-                "tool_calls": [{"name": "web_search", "arguments": {"query": "latest news"}}],
-            },
-        )
+        assert [e.type for e in returned] == [ReActEventType.TOOLS_REQUESTED]
+        assert returned[0].payload["thought"] == "Need latest info first."
 
     def test_classified_tool_emits_tool_done_side_channel_for_ui(self, monkeypatch):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.agents.react_types import CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = False
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
+        agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         observation = "[1] Tavily result\nURL: https://example.com\nSnippet"
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: observation)
 
         emitted = []
-        ctx = ExecutionContext(question="search")
-        ctx.steps.append(AgentStep(step_id=0))
-        ctx.last_response_text = '{"tool": "web_search", "params": {"query": "search"}}'
-        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+        ctx = self._make_ctx(
+            "search", CallingStrategy.PROMPT_JSON,
+            '{"tool": "web_search", "params": {"query": "search"}}')
+        returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
-        returned = agent._on_classified_tool(
-            ctx,
-            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
-                "parsed": {"tool": "web_search", "params": {"query": "search"}}
-            }),
-        )
+        followup = agent._on_tools_requested(ctx, returned[0])
 
         assert [event_type for event_type, _payload in emitted] == [
             ReActEventType.TOOL_START,
@@ -664,112 +671,94 @@ class TestReActAgentConversationMode:
                 "id": "",
             },
         )
-        assert [event.type for event in returned] == [ReActEventType.ALL_TOOLS_DONE]
+        assert [event.type for event in followup] == [ReActEventType.TOOLS_DONE]
 
-    def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+    def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self, monkeypatch):
+        from agentnexus.agents.react_types import AgentStep, CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = True
-        mock_llm.last_truncated = False
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
+        agent = ReActAgent(
+            self._make_llm(reasoning="The tool result is sufficient to answer now."),
+            ToolRegistry(), conversation_mode=False)
         emitted = []
-        ctx = ExecutionContext(question="latest news")
-        ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "web_search", "output": "result"}]))
-        ctx.last_reasoning = "The tool result is sufficient to answer now."
-        ctx.last_response_text = "Final answer"
-        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+        ctx = self._make_ctx(
+            "latest news", CallingStrategy.NATIVE_TOOLS, "Final answer",
+            reasoning="The tool result is sufficient to answer now.")
+        ctx.steps[0].tool_outputs.append({"tool": "web_search", "output": "result"})
 
-        returned = agent._on_receive_native(ctx, ReActEvent(ReActEventType.ROUTE_NATIVE))
+        returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
         assert emitted == [
             (ReActEventType.ANSWER_THOUGHT, {"thought": "The tool result is sufficient to answer now."})
         ]
-        assert [event.type for event in returned] == [ReActEventType.NO_TOOLS]
+        assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]
         assert returned[0].payload["text"] == "Final answer"
         assert ctx.last_answer == "Final answer"
 
-    def test_classified_answer_emits_answer_thought_after_tool_use(self):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+    def test_classified_answer_emits_answer_thought_after_tool_use(self, monkeypatch):
+        from agentnexus.agents.react_types import CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = True
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
+        agent = ReActAgent(
+            self._make_llm(reasoning="The search result is enough to answer now."),
+            ToolRegistry(), conversation_mode=False)
         emitted = []
-        ctx = ExecutionContext(question="latest news")
-        ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "web_search", "output": "result"}]))
-        ctx.last_reasoning = "The search result is enough to answer now."
-        ctx.last_response_text = '{"answer": "Final answer"}'
-        ctx._on_emit = lambda event, from_state, to_state: emitted.append((event.type, event.payload))
+        ctx = self._make_ctx(
+            "latest news", CallingStrategy.PROMPT_JSON, '{"answer": "Final answer"}',
+            reasoning="The search result is enough to answer now.")
+        ctx.steps[0].tool_outputs.append({"tool": "web_search", "output": "result"})
 
-        returned = agent._on_classified_answer(
-            ctx,
-            ReActEvent(ReActEventType.CLASSIFIED_ANSWER, {"parsed": {"text": "Final answer"}}),
-        )
+        returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
         assert emitted == [
             (ReActEventType.ANSWER_THOUGHT, {"thought": "The search result is enough to answer now."})
         ]
-        assert returned == []
+        assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]
         assert ctx.last_answer == "Final answer"
 
     def test_fallback_text_extracts_answer_from_malformed_json(self):
-        from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.agents.react_types import (
+            AgentStep, CallingStrategy, ReActEvent, ReActEventType, RetryReason)
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
-        ctx = ExecutionContext(question="readme")
+        agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
+        ctx = ExecutionContext(question="readme", strategy=CallingStrategy.PROMPT_JSON)
         ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "file_read", "output": "result"}]))
+        ctx.memory_state.session_caps = agent.llm_client.session_tracker
+        ctx.run_state.json_retries = 2  # 预算耗尽 → salvage
         ctx.last_response_text = '{"answer"："最终答案"}'
 
-        returned = agent._on_fallback_text(
-            ctx,
-            ReActEvent(ReActEventType.FALLBACK_TEXT, {"reason": "JSON parse failed"}),
-        )
+        returned = agent._on_recover(ctx, ReActEvent(ReActEventType.FAULT, {
+            "reason": RetryReason.PARSE_ERROR, "detail": "broken"}))
 
-        assert returned == []
+        assert [e.type for e in returned] == [ReActEventType.ANSWER_READY]
         assert ctx.last_answer == "最终答案"
 
     def test_prompt_json_tool_followup_does_not_append_duplicate_thought_prompt(self, monkeypatch):
-        from agentnexus.agents.re_act_agent import CallingStrategy, ReActAgent
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext, ReActEvent, ReActEventType
+        from agentnexus.agents.react_types import (
+            AgentStep, CallingStrategy, ReActEvent, ReActEventType)
         from agentnexus.tools.registry import ToolRegistry
 
-        mock_llm = MagicMock()
-        mock_llm.capabilities.supports_thinking = False
-        executor = ToolRegistry()
-        agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-
+        agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "README content")
 
-        ctx = ExecutionContext(question="readme")
-        ctx.strategy = CallingStrategy.PROMPT_JSON
+        ctx = ExecutionContext(question="readme", strategy=CallingStrategy.PROMPT_JSON)
         ctx.steps.append(AgentStep(step_id=0))
-        ctx.last_response_text = '{"tool": "file_read", "params": {"file_path": "README.md"}}'
 
-        returned = agent._on_classified_tool(
-            ctx,
-            ReActEvent(ReActEventType.CLASSIFIED_TOOL, {
-                "parsed": {"tool": "file_read", "params": {"file_path": "README.md"}}
-            }),
-        )
-        assert [event.type for event in returned] == [ReActEventType.ALL_TOOLS_DONE]
+        returned = agent._on_tools_requested(ctx, ReActEvent(ReActEventType.TOOLS_REQUESTED, {
+            "tool_calls": [{"id": "", "name": "file_read", "arguments": {"file_path": "README.md"}}],
+            "thought": "", "terminal_answer": None,
+            "strategy": CallingStrategy.PROMPT_JSON.name,
+        }))
+        assert [event.type for event in returned] == [ReActEventType.TOOLS_DONE]
 
         followup_before = len(ctx.messages)
-        returned = agent._on_all_tools_done(ctx, ReActEvent(ReActEventType.ALL_TOOLS_DONE))
-        assert [event.type for event in returned] == [ReActEventType.LLM_PARAMS_READY]
+        ctx.run_state.strategy = CallingStrategy.PROMPT_JSON
+        returned = agent._on_tools_requested(ctx, ReActEvent(ReActEventType.TOOLS_REQUESTED, {
+            "tool_calls": [], "thought": "", "terminal_answer": None,
+            "strategy": CallingStrategy.PROMPT_JSON.name,
+        }))
+        assert [event.type for event in returned] == [ReActEventType.TOOLS_DONE]
         assert len(ctx.messages) == followup_before
 
     def test_get_summary_method(self):

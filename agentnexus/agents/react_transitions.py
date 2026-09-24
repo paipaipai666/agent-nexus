@@ -1,4 +1,12 @@
-"""Transfer table for ReActAgent FSM — 26 transition rules."""
+"""Transfer table for the redesigned ReAct FSM — 13 transition rules.
+
+形态：6 状态 × 封闭事件集。决策函数（agentnexus.agents.decisions）的
+返回值只有几种，因此这张表是全函数——任何 handler 返回值都能在落点
+状态找到对应的行，"no transition" 崩溃在结构上不可能发生
+（totality 由 tests/unit/test_fsm_table_totality.py 断言）。
+
+行语义：handler 在**落点状态**执行（见 fsm.py run_loop）。
+"""
 
 from agentnexus.agents.react_types import ReActEventType as E
 from agentnexus.agents.react_types import ReActState as S
@@ -6,74 +14,30 @@ from agentnexus.agents.react_types import Transition
 
 TRANSFER_TABLE: list[Transition] = [
     # ── INIT ──
-    Transition(S.INIT, E.START, S.SELECT_STRATEGY, "_on_init"),
+    Transition(S.INIT, E.START, S.AWAIT_MODEL, "_on_init"),
 
-    # ── SELECT_STRATEGY ──
-    Transition(S.SELECT_STRATEGY, E.STRATEGY_READY, S.PREPARE_LLM_CALL, "_on_strategy_ready"),
-
-    # ── PREPARE_LLM_CALL ──
-    Transition(S.PREPARE_LLM_CALL, E.LLM_PARAMS_READY, S.CALL_LLM, "_on_llm_params_ready"),
-    # 步数上限在 _on_llm_params_ready 递增处检查，超限直接发 ABORT
-    Transition(S.PREPARE_LLM_CALL, E.ABORT, S.DONE, "_on_max_steps_abort"),
-
-    # ── CALL_LLM ──
-    Transition(S.CALL_LLM, E.LLM_RESPONSE, S.RECEIVE_RESPONSE, "_on_llm_response"),
-    Transition(S.CALL_LLM, E.LLM_ERROR, S.ERROR_ABORT, "_on_llm_error"),
-    # 步数上限：_on_llm_params_ready 在 CALL_LLM 态发 ABORT（handler 在目标态执行）
-    Transition(S.CALL_LLM, E.ABORT, S.DONE, "_on_max_steps_abort"),
-
-    # ── RECEIVE_RESPONSE → routing ──
-    Transition(S.RECEIVE_RESPONSE, E.ROUTE_NATIVE, S.CHECK_TOOL_CALLS, "_on_receive_native"),
-    Transition(S.RECEIVE_RESPONSE, E.ROUTE_JSON, S.CHECK_EMPTY, "_on_receive_json"),
-
-    # ── CHECK_TOOL_CALLS ──
-    Transition(S.CHECK_TOOL_CALLS, E.TOOLS_FOUND, S.EXECUTE_TOOL, "_on_tools_found"),
-    Transition(S.CHECK_TOOL_CALLS, E.NO_TOOLS, S.EMIT_ANSWER, "_on_no_tools_answer"),
-    Transition(S.CHECK_TOOL_CALLS, E.NO_TOOLS_NO_TEXT, S.DEGRADE, "_on_no_tools_degrade"),
-    Transition(S.CHECK_TOOL_CALLS, E.THOUGHT_MISSING, S.RETRY_GATE, "_on_thought_missing"),
-    # native 截断：整批 tool call 标错后直接重入 LLM（_on_receive_native 组装观察）
-    Transition(S.CHECK_TOOL_CALLS, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
-    # native 截断且无 tool_calls → 走重试门
-    Transition(S.CHECK_TOOL_CALLS, E.TRUNCATED_RESPONSE, S.RETRY_GATE, "_on_truncated_response"),
+    # ── AWAIT_MODEL ──
+    # auto-advance（event=None）：一轮模型往返 + 解释。handler 返回
+    # TOOLS_REQUESTED / ANSWER_READY / FAULT 之一时转出本状态；
+    # 返回 ROUND_READY（截断整批失败等"直接再来一轮"的情形）自环。
+    Transition(S.AWAIT_MODEL, None, S.AWAIT_MODEL, "_on_round"),
+    Transition(S.AWAIT_MODEL, E.ROUND_READY, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.AWAIT_MODEL, E.TOOLS_REQUESTED, S.EXECUTE_TOOL, "_on_tools_requested"),
+    Transition(S.AWAIT_MODEL, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
+    Transition(S.AWAIT_MODEL, E.FAULT, S.RECOVER, "_on_recover"),
 
     # ── EXECUTE_TOOL ──
-    Transition(S.EXECUTE_TOOL, E.TOOL_DONE, S.EXECUTE_TOOL, "_on_tool_done"),
-    Transition(S.EXECUTE_TOOL, E.ALL_TOOLS_DONE, S.PREPARE_LLM_CALL, "_on_all_tools_done"),
-    # Fast path: bookkeeping-only batch (todo_*) with terminal answer text —
-    # _on_all_tools_done stashes the answer and re-emits ANSWER_READY from
-    # PREPARE_LLM_CALL (handlers run in the landing state), skipping one LLM round.
-    Transition(S.PREPARE_LLM_CALL, E.ANSWER_READY, S.EMIT_ANSWER, "_on_answer_ready"),
+    Transition(S.EXECUTE_TOOL, E.TOOLS_DONE, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.EXECUTE_TOOL, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
 
-    # ── CHECK_EMPTY ──
-    Transition(S.CHECK_EMPTY, E.EMPTY_RESPONSE, S.RETRY_GATE, "_on_empty_response"),
-    Transition(S.CHECK_EMPTY, E.HAS_CONTENT, S.JSON_PARSE, "_on_has_content"),
+    # ── RECOVER ──
+    # _on_recover 的决策封闭于 {ROUND_READY, ANSWER_READY, ABORT}。
+    Transition(S.RECOVER, E.ROUND_READY, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.RECOVER, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
+    Transition(S.RECOVER, E.ABORT, S.DONE, "_on_error_abort"),
 
-    # ── JSON_PARSE ──
-    Transition(S.JSON_PARSE, E.PARSE_SUCCESS, S.CLASSIFY, "_on_parse_success"),
-    Transition(S.JSON_PARSE, E.PARSE_ERROR, S.RETRY_GATE, "_on_parse_error"),
-
-    # ── CLASSIFY ──
-    Transition(S.CLASSIFY, E.CLASSIFIED_TOOL, S.EXECUTE_TOOL, "_on_classified_tool"),
-    Transition(S.CLASSIFY, E.CLASSIFIED_ANSWER, S.EMIT_ANSWER, "_on_classified_answer"),
-    Transition(S.CLASSIFY, E.CLASSIFIED_ERROR, S.RETRY_GATE, "_on_classified_error"),
-
-    # ── RETRY_GATE ──
-    Transition(S.RETRY_GATE, E.RETRIES_LEFT, S.PREPARE_LLM_CALL, "_on_retries_left"),
-    Transition(S.RETRY_GATE, E.NO_RETRIES, S.DEGRADE, "_on_no_retries_degrade"),
-    Transition(S.RETRY_GATE, E.FALLBACK_TEXT, S.EMIT_ANSWER, "_on_fallback_text"),
-    # thought 重试耗尽：_on_thought_missing 在 RETRY_GATE 态发 DEGRADED
-    Transition(S.RETRY_GATE, E.DEGRADED, S.DEGRADE, "_on_degraded"),
-
-    # ── DEGRADE ──
-    Transition(S.DEGRADE, E.DEGRADED, S.PREPARE_LLM_CALL, "_on_degraded"),
-
-    # ── ERROR_ABORT ──
-    Transition(S.ERROR_ABORT, E.ABORT, S.DONE, "_on_error_abort"),
-
-    # ── EMIT_ANSWER ──
-    # AGENT_STOP hook veto: re-enter the LLM loop with feedback instead of
-    # concluding. Explicit rule wins over the unconditional fallback below.
-    Transition(S.EMIT_ANSWER, E.STOP_VETOED, S.PREPARE_LLM_CALL, "_on_stop_vetoed"),
+    # ── ANSWER ──
+    Transition(S.ANSWER, E.ANSWER_VETOED, S.AWAIT_MODEL, "_on_vetoed"),
     # (unconditional: always → DONE)
-    Transition(S.EMIT_ANSWER, None, S.DONE, "_on_emit_answer"),
+    Transition(S.ANSWER, None, S.DONE, "_on_emit_answer"),
 ]

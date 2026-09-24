@@ -209,7 +209,8 @@ class TestNativeThoughtAnswerSplit:
         result = agent.run("杭州天气")
 
         tools_found = [e.payload.get("thought", "") for e in emitted
-                       if getattr(getattr(e, "type", None), "name", "") == "TOOLS_FOUND"]
+                       if getattr(e, "type", None) is not None
+                       and e.type.name in ("TOOLS_REQUESTED", "TOOLS_FOUND")]
         assert tools_found and tools_found[0] == "先查天气再回答。", f"工具轮思考未剥离前缀: {tools_found!r}"
         assert result.answer == "杭州今天晴。"
 

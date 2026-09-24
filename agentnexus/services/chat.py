@@ -603,7 +603,7 @@ class ChatService:
             self._record_agent_event(turn, event)
 
             # Skip thought events when reasoning is available
-            if event_type in ("TOOLS_FOUND", "ANSWER_THOUGHT") and has_reasoning:
+            if event_type in ("TOOLS_REQUESTED", "ANSWER_THOUGHT") and has_reasoning:
                 has_reasoning = False
                 return
 
@@ -655,7 +655,7 @@ class ChatService:
     def _record_agent_event(turn: TurnRuntime, event) -> None:
         event_type = getattr(getattr(event, "type", None), "name", "")
         payload = getattr(event, "payload", {}) or {}
-        if event_type in {"TOOLS_FOUND", "ANSWER_THOUGHT"}:
+        if event_type in {"TOOLS_REQUESTED", "ANSWER_THOUGHT"}:
             thought = payload.get("thought")
             if thought:
                 turn.record("thought", thought)

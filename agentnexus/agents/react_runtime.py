@@ -65,7 +65,8 @@ def record_native_tool_calls(
     tool_state = ctx.tool_state
     step = ctx.steps[-1]
     step.tool_calls = list(tool_state.pending_tool_calls)
-    output(f"思考: {thought}")
+    if thought:
+        output(f"思考: {thought}")
     if memory_state.memory_manager:
         memory_state.memory_manager.append("assistant", thought)
 
@@ -284,8 +285,14 @@ def execute_json_tool_call(
 def retry_gate(ctx: ExecutionContext, reason: RetryReason, detail: str = "") -> list[ReActEvent]:
     run_state = ctx.run_state
     payload = {"reason": reason, "detail": detail}
-    if run_state.json_retries < run_state.max_json_retries:
+    from agentnexus.agents import decisions
+    kind = decisions.retry_gate_decision(
+        json_retries=run_state.json_retries,
+        max_json_retries=run_state.max_json_retries,
+        strategy=run_state.strategy,
+    )
+    if kind == "round":
         return [ReActEvent(ReActEventType.RETRIES_LEFT, payload)]
-    if run_state.strategy == CallingStrategy.JSON_MODE:
+    if kind == "degrade":
         return [ReActEvent(ReActEventType.NO_RETRIES, payload)]
     return [ReActEvent(ReActEventType.FALLBACK_TEXT, payload)]

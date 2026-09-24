@@ -7,10 +7,9 @@ Each decision point is an explicit state; each transition is a handler method.
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Callable
 
-from agentnexus.agents import json_helpers, react_runtime
+from agentnexus.agents import decisions, json_helpers, react_runtime
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
@@ -51,56 +50,18 @@ from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Native 模式下部分模型（如 OpenRouter stealth 系列）习惯在可见文本里写
-# "Thought: <分析> <答案>" 或 "Thought: <分析> 最终答案: <答案>"。
-_THOUGHT_MARKER_RE = re.compile(
-    r"^\s*[*_]{0,2}\s*(?:thought|thinking|分析思考|思考过程|思考|想法|分析)\s*[*_]{0,2}\s*[:：]\s*",
-    re.IGNORECASE,
-)
-_FINAL_ANSWER_RE = re.compile(
-    r"[*_]{0,2}\s*(?:最终答案|final\s*answer)\s*[*_]{0,2}\s*[:：]\s*",
-    re.IGNORECASE,
-)
-
-
-def _split_native_thought_answer(text: str) -> tuple[str, str]:
-    """把模型的可见文本拆成 (thought, answer)。
-
-    - 无 Thought 标记 → ("", 原文)，整段视为答案。
-    - 含显式答案标记（最终答案:/Final Answer:）→ 在标记处切分。
-    - 只有 Thought 标记 → 首句为思考、其余为答案；若首句后没有余文，
-      则整段都是思考、答案为空（调用方回退为去标记原文，避免重复展示）。
-    """
-    t = (text or "").strip()
-    if not t:
-        return "", ""
-    m = _THOUGHT_MARKER_RE.match(t)
-    if not m:
-        return "", t
-    body = t[m.end():]
-    am = _FINAL_ANSWER_RE.search(body)
-    if am:
-        return body[:am.start()].strip(), body[am.end():].strip()
-    sm = re.search(r"[。！？!?]", body)
-    if sm:
-        head = body[:sm.end()].strip()
-        rest = body[sm.end():].strip()
-        if rest:
-            return head, rest
-    return body, ""
+# ── FSM redesign Step 1: decision logic + shared constants live in
+#    agentnexus.agents.decisions (pure functions).  Names re-exported here
+#    for backward compatibility with internal call sites. ──
+_split_native_thought_answer = decisions.split_native_thought_answer
+_THOUGHT_MARKER_RE = decisions._THOUGHT_MARKER_RE
+_BOOKKEEPING_TOOLS = decisions._BOOKKEEPING_TOOLS
+_TERMINAL_TEXT_MIN_CHARS = decisions._TERMINAL_TEXT_MIN_CHARS
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
 
 MAX_JSON_RETRIES = 2
-# Tools whose results are pure side effects — their observations can never
-# change the final answer, so a batch containing ONLY these can fast-path
-# to EMIT_ANSWER when the response already carries substantive text.
-_BOOKKEEPING_TOOLS = frozenset({"todo_add", "todo_update"})
-
-# Minimum visible-text length for the terminal fast path. Short notes like
-# "我先更新下待办" stay on the normal loop; only answer-grade text qualifies.
-_TERMINAL_TEXT_MIN_CHARS = 30
 
 # Re-export for backward compatibility
 __all__ = ["ReActAgent", "CallingStrategy", "AgentStep"]
@@ -120,8 +81,10 @@ class ReActAgent:
                  agent_id: str = "react_agent"):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
-        configured_max_steps = max_steps if max_steps is not None else get_settings().max_agent_steps
-        self.max_steps = configured_max_steps if isinstance(configured_max_steps, int) else 5
+        # 决策3（2026-09-24 拍板）：默认不设步数上限。
+        # max_steps=None 表示无限（跑飞兜底见 docs/fsm-redesign-proposal.md §9，
+        # 靠闭环检测 + 软提示 + 用户取消，不再靠硬性步数终止）。
+        self.max_steps = max_steps
         self._output = output or print
         self._confirm = confirm_fn or self._default_confirm
         self._async_confirm = async_confirm
@@ -138,7 +101,6 @@ class ReActAgent:
         self._cancel_checker: Callable[[], bool] | None = None
         self._todo_list = None  # Set externally after construction
         self._degrade_count = 0
-        self._thought_retries = 0
         # Persona and behavioral fragments — loaded once, stable across sessions
         settings = get_settings()
         self._persona_text: str = compile_persona_fragment(settings.persona)
@@ -215,7 +177,6 @@ class ReActAgent:
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
         self._step_count = 0
         self._degrade_count = 0
-        self._thought_retries = 0
 
         # ── user prompt submit hook (root agent only; subagent task text
         #    is internal, not a user prompt) ─────────────────────
@@ -234,7 +195,9 @@ class ReActAgent:
             question = prompt_ctx.payload.get("prompt", question)
         self._drift_detector = DriftDetector(
             original_goal=question,
-            max_steps=self.max_steps,
+            # DriftDetector 用 max_steps 算子任务超支比例；None（不设上限）
+            # 时传 0，其内部 `<= 0` 守卫会跳过该检查（drift_detector.py:237）
+            max_steps=self.max_steps if isinstance(self.max_steps, int) else 0,
         )
 
         # Publish the cancel checker so subagent tool closures (running on
@@ -293,35 +256,14 @@ class ReActAgent:
         """Return mapping of handler_name -> bound method for the FSM engine."""
         return {
             "_on_init": self._on_init,
-            "_on_strategy_ready": self._on_strategy_ready,
-            "_on_llm_params_ready": self._on_llm_params_ready,
-            "_on_llm_response": self._on_llm_response,
-            "_on_llm_error": self._on_llm_error,
-            "_on_receive_native": self._on_receive_native,
-            "_on_receive_json": self._on_receive_json,
-            "_on_tools_found": self._on_tools_found,
-            "_on_thought_missing": self._on_thought_missing,
-            "_on_truncated_response": self._on_truncated_response,
-            "_on_no_tools_answer": self._on_no_tools_answer,
-            "_on_no_tools_degrade": self._on_no_tools_degrade,
-            "_on_tool_done": self._on_tool_done,
-            "_on_all_tools_done": self._on_all_tools_done,
+            "_on_round": self._on_round,
+            "_on_round_advance": self._on_round_advance,
+            "_on_tools_requested": self._on_tools_requested,
             "_on_answer_ready": self._on_answer_ready,
-            "_on_empty_response": self._on_empty_response,
-            "_on_has_content": self._on_has_content,
-            "_on_parse_success": self._on_parse_success,
-            "_on_parse_error": self._on_parse_error,
-            "_on_classified_tool": self._on_classified_tool,
-            "_on_classified_answer": self._on_classified_answer,
-            "_on_classified_error": self._on_classified_error,
-            "_on_retries_left": self._on_retries_left,
-            "_on_no_retries_degrade": self._on_no_retries_degrade,
-            "_on_fallback_text": self._on_fallback_text,
-            "_on_degraded": self._on_degraded,
-            "_on_max_steps_abort": self._on_max_steps_abort,
+            "_on_recover": self._on_recover,
+            "_on_vetoed": self._on_vetoed,
             "_on_error_abort": self._on_error_abort,
             "_on_emit_answer": self._on_emit_answer,
-            "_on_stop_vetoed": self._on_stop_vetoed,
         }
 
     # ================================================================
@@ -386,18 +328,28 @@ class ReActAgent:
                 ctx.initial_count = len(new_messages)
             memory_manager.on_after_compact = rebuild
 
-        return [ReActEvent(ReActEventType.STRATEGY_READY,
-                           {"strategy": run_state.strategy.name})]
+        return []  # 落点 AWAIT_MODEL，由 auto-advance 触发第一轮 _on_round
 
-    def _on_strategy_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """SELECT_STRATEGY + STRATEGY_READY -> advance to PREPARE_LLM_CALL."""
-        return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
+    # ── AWAIT_MODEL 循环体 ──
 
-    def _on_llm_params_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """PREPARE_LLM_CALL + LLM_PARAMS_READY -> set params, call LLM."""
-        # 步数上限必须在递增处检查——此前只在 _on_init（step=0）检查，是死代码
-        if ctx.run_state.current_step >= ctx.run_state.max_steps:
-            return [ReActEvent(ReActEventType.ABORT)]
+    def _on_round(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """一轮模型往返 + 解释成决策事件。
+
+        返回封闭于 {TOOLS_REQUESTED, ANSWER_READY, FAULT, ROUND_READY}，
+        与 TRANSFER_TABLE 的 AWAIT_MODEL 行一一对应（totality 由测试断言）。
+        """
+        # 步数上限（决策3：默认 None 不设上限；配置时软收尾给出诚实答案，不强制）
+        if (ctx.run_state.max_steps is not None
+                and ctx.run_state.current_step >= ctx.run_state.max_steps):
+            self._output("已达到最大步数，流程终止。")
+            if not ctx.last_answer:
+                ctx.last_answer = (
+                    f"（已达到最大步数 {ctx.run_state.max_steps}，共执行 "
+                    f"{ctx.run_state.current_step} 步，任务未完成。"
+                    "请缩小问题范围或分步提问。）"
+                )
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
+
         # 关闭上一步的 plan_node span（如果存在）
         prev_span = ctx.run_state._current_step_span
         if prev_span is not None:
@@ -451,121 +403,133 @@ class ReActAgent:
                         "content": f"[系统提示] 检测到任务可能偏离原始目标。原始目标: {self._drift_detector.original_goal[:200]}。请重新聚焦于原始目标。",
                     })
 
+        streamed_reasoning = {"flag": False}
+
         def _stream_token(token: str, is_reasoning: bool = False):
             # 检查取消信号——流式输出期间也能响应 ESC 中断
             checker = ctx.run_state.cancel_checker
             if checker is not None and checker():
                 raise AgentCancelled("cancelled")
             if is_reasoning:
+                streamed_reasoning["flag"] = True
                 ctx.emit(ReActEventType.STREAM_REASONING, token=token)
             else:
                 ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
-
-        on_token = _stream_token
 
         response_text = call_llm(
             self.llm_client,
             ctx,
             json_format_section=self._build_json_format_section(),
-            on_token=on_token,
+            on_token=_stream_token,
         )
 
         if self.llm_client.last_error and not response_text:
-            return [ReActEvent(ReActEventType.LLM_ERROR,
-                               {"error": self.llm_client.last_error})]
+            err = self.llm_client.last_error
+            self._output(f"错误: {err}")
+            return [ReActEvent(ReActEventType.FAULT,
+                               {"fatal": True, "detail": err})]
 
-        return [ReActEvent(ReActEventType.LLM_RESPONSE,
-                           {"response_text": response_text})]
-
-    def _on_llm_response(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CALL_LLM + LLM_RESPONSE -> record AgentStep, route to native or JSON path."""
-        return react_runtime.record_llm_response(
-            ctx,
-            response_text=event.payload.get("response_text", ""),
-            llm_client=self.llm_client,
+        # ── 记录本轮 step（替代旧 RECEIVE_RESPONSE 态的 record_llm_response）──
+        # reasoning_streamed 必须反映"是否真流式展示过"，而不是"有没有 reasoning
+        # 内容"——否则未流式时 ANSWER_THOUGHT 补展示路径会被永久压死。
+        step = AgentStep(
+            step_id=ctx.run_state.current_step,
+            strategy_used=ctx.run_state.strategy,
+            reasoning_content=self.llm_client.last_reasoning_content,
+            reasoning_streamed=streamed_reasoning["flag"],
+            content=response_text,
         )
+        ctx.steps.append(step)
+        cur = getattr(self.llm_client, "last_usage", {})
+        if isinstance(cur, dict):
+            ctx._total_usage["input_tokens"] += cur.get("input_tokens", 0)
+            ctx._total_usage["output_tokens"] += cur.get("output_tokens", 0)
+        if ctx.memory_state.memory_manager:
+            ctx.memory_state.memory_manager.mark_api_call()
+        ctx.last_response_text = response_text
+        ctx.last_reasoning = self.llm_client.last_reasoning_content or ""
 
-    def _on_llm_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CALL_LLM + LLM_ERROR -> abort."""
-        err = event.payload.get("error", "LLM call failed")
-        self._output(f"错误: {err}")
-        return [ReActEvent(ReActEventType.ABORT)]
+        # ── 解释成决策（decisions.py 纯函数）──
+        if ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+            d = decisions.interpret_native(
+                response_text=ctx.last_response_text,
+                reasoning_text=ctx.last_reasoning,
+                tool_calls=self.llm_client.last_tool_calls,
+                truncated=self.llm_client.last_truncated,
+                streamed=any(s.reasoning_streamed for s in ctx.steps),
+                tool_exists=lambda name: self.tool_executor.get_tool(name) is not None,
+            )
+        else:
+            d = decisions.interpret_json(
+                response_text=ctx.last_response_text,
+                truncated=self.llm_client.last_truncated,
+            )
+
+        # ── fault → RECOVER ──
+        if d.kind == "fault":
+            if d.fail_pending_calls:
+                # 截断 + 待执行调用：整批标错、不执行，直接再来一轮
+                # （原 _fail_truncated_tool_calls → ALL_TOOLS_DONE → 下一轮的语义）
+                return self._fail_truncated_tool_calls(ctx)
+            return [ReActEvent(ReActEventType.FAULT, {
+                "reason": d.reason,
+                "detail": d.detail,
+                "no_tools_no_text": d.no_tools_no_text,
+            })]
+
+        # ── answer → ANSWER ──
+        if d.kind == "answer":
+            memory_manager = ctx.memory_state.memory_manager
+            if d.recovered_protocol_json or ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
+                # JSON 协议答案 / 协议 JSON 还原：沿用旧 _on_classified_answer 的思考展示
+                self._emit_answer_thought(ctx)
+            elif d.persist_reasoning:
+                # 推理已通过流式逐 token 展示；只把推理落盘以便会话恢复。
+                if memory_manager:
+                    memory_manager.append("system", f"[思考过程] {d.persist_reasoning}")
+            elif d.display_thought:
+                # 思考与答案分通道/可拆分 → 补展示思考。
+                if memory_manager:
+                    memory_manager.append("assistant", d.display_thought,
+                                          metadata={"display_only": True})
+                ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=d.display_thought)
+            ctx.last_answer = d.text
+            return [ReActEvent(ReActEventType.ANSWER_READY, {"text": d.text})]
+
+        # ── tools → EXECUTE_TOOL ──
+        if d.recovered_protocol_json:
+            ctx.tool_state.pending_tool_calls = [{
+                "id": f"recovered_{ctx.run_state.current_step}",
+                "name": tc["name"],
+                "arguments": tc["arguments"],
+            } for tc in d.tool_calls]
+            self._on_native_tool_calls(ctx, "")
+        elif ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+            if d.terminal_answer is not None:
+                # Fast path: bookkeeping-only batch carrying answer-grade text.
+                ctx.run_state.terminal_answer = d.terminal_answer
+            ctx.tool_state.pending_tool_calls = list(d.tool_calls)
+            self._on_native_tool_calls(ctx, d.thought)
+        else:
+            ctx.tool_state.pending_tool_calls = [
+                {"id": "", "name": tc["name"], "arguments": tc["arguments"]}
+                for tc in d.tool_calls
+            ]
+            if not d.thought:
+                d.thought = self._select_visible_thought(ctx.last_response_text,
+                                                         ctx.last_reasoning)
+        return [ReActEvent(ReActEventType.TOOLS_REQUESTED, {
+            "tool_calls": list(ctx.tool_state.pending_tool_calls),
+            "thought": d.thought,
+            "terminal_answer": d.terminal_answer,
+            "strategy": ctx.run_state.strategy.name,
+        })]
+
+    def _on_round_advance(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """TOOLS_DONE / ROUND_READY 的接收态：无需副作用，auto-advance 继续。"""
+        return []
 
     # ── NATIVE_TOOLS path ──
-
-    def _on_receive_native(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """RECEIVE_RESPONSE + ROUTE_NATIVE -> check tool_calls."""
-        # Truncation (finish_reason=length): never execute possibly-broken calls.
-        if self.llm_client.last_truncated:
-            if ctx.pending_tool_calls:
-                return self._fail_truncated_tool_calls(ctx)
-            return [ReActEvent(ReActEventType.TRUNCATED_RESPONSE)]
-        if ctx.pending_tool_calls:
-            thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
-            if not thought:
-                ctx.messages.append(
-                    {"role": "user",
-                     "content": "你必须先用 Thought 分析当前情况、说明意图，然后才能调用工具。"})
-                return [ReActEvent(ReActEventType.THOUGHT_MISSING,
-                                   {"reason": "missing_thought"})]
-            # Fast path: a bookkeeping-only batch (todo_add/todo_update — pure
-            # side effects, observations cannot change the answer) carrying a
-            # substantive visible text. Stash the text as the terminal answer;
-            # _on_all_tools_done will emit it instead of paying one more LLM
-            # round-trip that would just re-write the same answer.
-            # Only last_response_text counts (reasoning content is never an
-            # answer); the length floor keeps interim progress notes eligible
-            # for the normal loop.
-            terminal_text = (ctx.last_response_text or "").strip()
-            if (
-                len(terminal_text) >= _TERMINAL_TEXT_MIN_CHARS
-                and all(tc.get("name") in _BOOKKEEPING_TOOLS for tc in ctx.pending_tool_calls)
-            ):
-                ctx.run_state.terminal_answer = terminal_text
-            self._on_native_tool_calls(ctx, thought)
-            evt = ReActEvent(ReActEventType.TOOLS_FOUND,
-                             {"tool_calls": list(ctx.pending_tool_calls),
-                              "thought": thought})
-            return [evt]
-
-        text = ctx.last_response_text or ctx.last_reasoning
-        if text:
-            recovered = self._recover_protocol_json(ctx)
-            if recovered is not None:
-                return recovered
-
-            memory_manager = ctx.memory_state.memory_manager
-            reasoning = (ctx.last_reasoning or "").strip()
-            response_text = (ctx.last_response_text or "").strip()
-            streamed = any(step.reasoning_streamed for step in ctx.steps)
-
-            if streamed:
-                # 推理已通过流式逐 token 展示；只把推理落盘以便会话恢复。
-                if reasoning and memory_manager:
-                    memory_manager.append("system", f"[思考过程] {reasoning}")
-            elif reasoning and response_text:
-                # 思考在推理通道、答案在正文（推理未流式展示过）→ 补展示思考。
-                if memory_manager:
-                    memory_manager.append("assistant", reasoning, metadata={"display_only": True})
-                ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=reasoning)
-            else:
-                thought, answer = _split_native_thought_answer(text)
-                if thought and answer:
-                    # 思考与答案拆开后两者都不同才单独展示思考；
-                    # 仅一句思考时答案即全文（去标记），避免重复显示。
-                    if memory_manager:
-                        memory_manager.append("assistant", thought, metadata={"display_only": True})
-                    ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=thought)
-
-            if reasoning and not streamed and response_text:
-                ctx.last_answer = response_text
-            else:
-                _, ans = _split_native_thought_answer(text)
-                ctx.last_answer = ans or _THOUGHT_MARKER_RE.sub("", text, count=1).strip() or text
-            return [ReActEvent(ReActEventType.NO_TOOLS,
-                               {"text": ctx.last_answer})]
-
-        return [ReActEvent(ReActEventType.NO_TOOLS_NO_TEXT)]
 
     def _fail_truncated_tool_calls(self, ctx: ExecutionContext) -> list[ReActEvent]:
         """Fail every pending tool call from a truncated response (pi semantics).
@@ -593,36 +557,7 @@ class ReActAgent:
                 "id": tc.get("id", ""),
             })
         ctx.pending_tool_calls = []
-        return [ReActEvent(ReActEventType.ALL_TOOLS_DONE)]
-
-    def _recover_protocol_json(self, ctx: ExecutionContext) -> list[ReActEvent] | None:
-        """模型把 ReAct 协议 JSON 写进正文（native 通道漏接）时还原语义。
-
-        - {"tool": ..., "params": ...} 且工具存在 → 还原为真实工具调用继续执行
-        - 显式 {"answer": ...} → 提取答案文本
-        返回 None 表示正文不是协议 JSON（含普通 JSON 数据），按原样作答。
-        """
-        text = ctx.last_response_text
-        if not text or "{" not in text:
-            return None
-        parsed = json_helpers.robust_json_parse(text)
-        ptype = parsed.get("type")
-        if ptype == "tool_call" and self.tool_executor.get_tool(parsed["tool"]) is not None:
-            ctx.tool_state.pending_tool_calls = [{
-                "id": f"recovered_{ctx.run_state.current_step}",
-                "name": parsed["tool"],
-                "arguments": parsed["params"],
-            }]
-            self._on_native_tool_calls(ctx, "")
-            return [ReActEvent(ReActEventType.TOOLS_FOUND,
-                               {"tool_calls": list(ctx.tool_state.pending_tool_calls),
-                                "thought": ""})]
-        # 仅接受显式 "answer" 键——单键/多键数据 JSON（如 {"温度": "26°C"}）原样保留
-        if ptype == "answer" and '"answer"' in text:
-            self._emit_answer_thought(ctx)
-            ctx.last_answer = parsed["text"]
-            return [ReActEvent(ReActEventType.NO_TOOLS, {"text": parsed["text"]})]
-        return None
+        return [ReActEvent(ReActEventType.ROUND_READY)]
 
     def _on_native_tool_calls(self, ctx: ExecutionContext, thought: str = None):
         """Record tool_calls into step, append assistant message."""
@@ -633,127 +568,54 @@ class ReActAgent:
             output=self._output,
         )
 
-    def _on_tools_found(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_TOOL_CALLS + TOOLS_FOUND -> start executing first tool."""
-        return [self._exec_next_tool(ctx)]
+    def _on_tools_requested(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """EXECUTE_TOOL 落地：执行整批工具，发 TOOLS_DONE 或 ANSWER_READY（fast path）。
 
-    def _on_thought_missing(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_TOOL_CALLS + THOUGHT_MISSING -> route to retry gate."""
-        self._thought_retries += 1
-        if self._thought_retries > 2:
-            ctx.memory_state.session_caps.mark_failed("tool_calling")
-            return [ReActEvent(ReActEventType.DEGRADED)]
-        return self._check_retry_gate(ctx, RetryReason.THOUGHT_MISSING)
-
-    def _on_tool_done(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """EXECUTE_TOOL + TOOL_DONE -> execute next tool or finish."""
-        # 记录工具调用到漂移检测器
+        返回封闭于 {TOOLS_DONE, ANSWER_READY}。
+        """
         payload = event.payload
-        tool_name = payload.get("name", "")
-        if tool_name and hasattr(self, "_drift_detector"):
-            import hashlib
-            params_str = str(payload.get("arguments", ""))
-            params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
-            self._drift_detector.record_step(
-                step_index=ctx.run_state.current_step,
-                tool_name=tool_name,
-                params_hash=params_hash,
-                tool_result=str(payload.get("result", ""))[:500],
-            )
-        react_runtime.record_tool_done(ctx, event.payload)
-        return [self._exec_next_tool(ctx)]
-
-    def _exec_next_tool(self, ctx: ExecutionContext) -> ReActEvent:
-        """Execute the next pending tool call. Emits TOOL_DONE or ALL_TOOLS_DONE."""
-        # Batch dispatch when multiple tool calls — read-only tools run concurrently
-        if len(ctx.tool_state.pending_tool_calls) > 1:
-            return react_runtime.execute_pending_tools_batch(
-                ctx,
-                registry=self.tool_executor,
-                execute_tool=self._execute_tool,
-                output=self._output,
-            )
-        return react_runtime.execute_pending_tool(
+        thought = payload.get("thought", "")
+        is_native = payload.get("strategy") == CallingStrategy.NATIVE_TOOLS.name
+        # JSON 协议路径的 thinking 展示（原生路径已在 _on_native_tool_calls 输出）
+        if thought and not is_native:
+            self._output(f"思考: {thought}")
+        # 漂移记录（旧 _on_tool_done 职责；batch 合并后逐调用记录）
+        for tc in list(ctx.tool_state.pending_tool_calls):
+            self._record_tool_drift(ctx, tc)
+        react_runtime.execute_pending_tools_batch(
             ctx,
+            registry=self.tool_executor,
             execute_tool=self._execute_tool,
             output=self._output,
         )
-
-    def _on_no_tools_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_TOOL_CALLS + NO_TOOLS -> plain text is the final answer."""
-        reason = self._fire_agent_stop(ctx)
-        if reason:
-            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
-        return []  # EMIT_ANSWER handler will read ctx.last_answer
-
-    def _on_no_tools_degrade(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_TOOL_CALLS + NO_TOOLS_NO_TEXT -> degrade from NATIVE_TOOLS."""
-        ctx.memory_state.session_caps.mark_failed("tool_calling")
-        return [ReActEvent(ReActEventType.DEGRADED)]
-
-    # ── Non-NATIVE (JSON) path ──
-
-    def _on_receive_json(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """RECEIVE_RESPONSE + ROUTE_JSON -> check if response is empty."""
-        if not ctx.last_response_text:
-            return [ReActEvent(ReActEventType.EMPTY_RESPONSE)]
-        return [ReActEvent(ReActEventType.HAS_CONTENT)]
-
-    def _on_empty_response(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_EMPTY + EMPTY_RESPONSE -> retry or abort."""
-        return self._check_retry_gate(ctx, RetryReason.EMPTY_RESPONSE)
-
-    def _on_truncated_response(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_TOOL_CALLS + TRUNCATED_RESPONSE -> retry gate (native truncation, no tools)."""
-        return self._check_retry_gate(ctx, RetryReason.TRUNCATED)
-
-    def _on_has_content(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """CHECK_EMPTY + HAS_CONTENT -> JSON parse the response."""
-        if self.llm_client.last_truncated:
-            return [ReActEvent(ReActEventType.PARSE_ERROR, {
-                "reason": RetryReason.TRUNCATED,
-                "detail": "finish_reason=length",
-            })]
-        parsed = self._robust_json_parse(ctx.last_response_text)
-        if parsed["type"] == "error":
-            ctx.last_answer = None  # signal parse error for retry gate
-            return [ReActEvent(ReActEventType.PARSE_ERROR, {
-                "reason": RetryReason.PARSE_ERROR,
-                "detail": parsed.get("reason", ""),
-            })]
-        return [ReActEvent(ReActEventType.PARSE_SUCCESS, {"parsed": parsed})]
-
-    def _on_parse_success(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """JSON_PARSE + PARSE_SUCCESS -> classify parsed data."""
-        parsed = event.payload["parsed"]
-        if parsed["type"] == "tool_call":
-            return [ReActEvent(ReActEventType.CLASSIFIED_TOOL, {"parsed": parsed})]
-        elif parsed["type"] == "answer":
-            return [ReActEvent(ReActEventType.CLASSIFIED_ANSWER, {"parsed": parsed})]
-        return [ReActEvent(ReActEventType.CLASSIFIED_ERROR, {"parsed": parsed})]
-
-    def _on_parse_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """JSON_PARSE + PARSE_ERROR -> check retry gate."""
-        return self._check_retry_gate(
-            ctx,
-            event.payload.get("reason", RetryReason.PARSE_ERROR),
-            event.payload.get("detail", ""),
-        )
-
-    # ── CLASSIFY ──
-
-    def _on_all_tools_done(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """EXECUTE_TOOL + ALL_TOOLS_DONE -> emit stashed answer or continue the loop."""
+        ctx.run_state.json_retries = 0  # 成功的工具轮重置 JSON 重试预算
         terminal = ctx.run_state.terminal_answer
         if terminal:
             ctx.run_state.terminal_answer = None
             ctx.last_answer = terminal
             return [ReActEvent(ReActEventType.ANSWER_READY)]
-        if ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+        if is_native:
             ctx.messages.append(
                 {"role": "user",
                  "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
-        return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
+        return [ReActEvent(ReActEventType.TOOLS_DONE)]
+
+    def _record_tool_drift(self, ctx: ExecutionContext, tool_call: dict):
+        """记录工具调用到漂移检测器（原 _on_tool_done 的职责）。"""
+        tool_name = tool_call.get("name", "")
+        if tool_name and hasattr(self, "_drift_detector"):
+            import hashlib
+            params_hash = hashlib.md5(
+                str(tool_call.get("arguments", "")).encode()).hexdigest()[:8]
+            self._drift_detector.record_step(
+                step_index=ctx.run_state.current_step,
+                tool_name=tool_name,
+                params_hash=params_hash,
+            )
+
+    # ── Non-NATIVE (JSON) path ──
+    # （Step 3 起 JSON 协议的 empty/parse/classify 全部收进 _on_round 的
+    #   decisions.interpret_json，以下中间态 handler 已删除）
 
     def _on_answer_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + ANSWER_READY -> terminal answer already in ctx.last_answer."""
@@ -762,45 +624,58 @@ class ReActAgent:
             return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
         return []  # EMIT_ANSWER handler will read ctx.last_answer
 
-    def _on_classified_tool(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CLASSIFY + CLASSIFIED_TOOL -> execute tool from JSON-parsed data."""
-        parsed = event.payload["parsed"]
-        thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
-        return react_runtime.execute_json_tool_call(
-            ctx,
-            parsed=parsed,
-            thought=thought,
-            execute_tool=self._execute_tool,
-            output=self._output,
-        )
+    # ── RECOVER ──
 
-    def _on_classified_answer(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CLASSIFY + CLASSIFIED_ANSWER -> set final answer."""
-        self._emit_answer_thought(ctx)
-        ctx.last_answer = event.payload["parsed"]["text"]
-        reason = self._fire_agent_stop(ctx)
-        if reason:
-            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
-        return []  # EMIT_ANSWER reads ctx.last_answer
+    def _on_recover(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """RECOVER 落地：统一的重试 / 降档 / 兜底 / 终止策略。
 
-    def _on_classified_error(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """CLASSIFY + CLASSIFIED_ERROR -> check retry gate."""
-        parsed = event.payload.get("parsed", {})
-        return self._check_retry_gate(ctx, RetryReason.CLASSIFY_ERROR, parsed.get("reason", "unknown"))
+        合并了旧 RETRY_GATE / DEGRADE / ERROR_ABORT 三个状态的全部策略。
+        返回封闭于 {ROUND_READY, ANSWER_READY, ABORT}。
+        """
+        payload = event.payload
 
-    # ── RETRY_GATE ──
+        # ── 致命错误（LLM 调用失败等）→ 终止 ──
+        if payload.get("fatal"):
+            detail = payload.get("detail") or "LLM call failed"
+            self._output(f"错误: {detail}")
+            return [ReActEvent(ReActEventType.ABORT)]
 
-    def _check_retry_gate(self, ctx: ExecutionContext, reason: RetryReason,
-                          detail: str = "") -> list[ReActEvent]:
-        """Shared logic: decide whether to retry, degrade, or fallback."""
-        return react_runtime.retry_gate(ctx, reason, detail)
+        # ── 原生"无工具无文本" → 直接降档工具能力 ──
+        if payload.get("no_tools_no_text"):
+            ctx.memory_state.session_caps.mark_failed("tool_calling")
+            return self._degrade_and_continue(ctx)
 
-    def _on_retries_left(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """RETRY_GATE + RETRIES_LEFT -> increment retries, add hint, retry."""
-        ctx.json_retries += 1
-        reason = event.payload.get("reason")
-        detail = event.payload.get("detail", "")
+        reason = payload.get("reason")
+        detail = payload.get("detail", "")
 
+        # ── JSON 类故障：重试预算 → 降档 → 兜底提取 ──
+        if reason in (RetryReason.EMPTY_RESPONSE, RetryReason.PARSE_ERROR,
+                      RetryReason.CLASSIFY_ERROR, RetryReason.TRUNCATED):
+            kind = decisions.retry_gate_decision(
+                json_retries=ctx.run_state.json_retries,
+                max_json_retries=ctx.run_state.max_json_retries,
+                strategy=ctx.run_state.strategy,
+            )
+            if kind == "round":
+                ctx.json_retries += 1
+                self._emit_retry_nudge(ctx, reason, detail)
+                return [ReActEvent(ReActEventType.ROUND_READY)]
+            if kind == "degrade":
+                ctx.memory_state.session_caps.mark_failed("json_mode")
+                return self._degrade_and_continue(ctx)
+            # salvage：从原文里硬提取答案，交 ANSWER 态统一处理
+            # （stop hook 否决在 ANSWER 落点的 _on_answer_ready 里执行；
+            #   这里不能直接发 ANSWER_VETOED——RECOVER 没有这一行会 FSMError）
+            if ctx.steps:
+                ctx.steps[-1].error_message = f"JSON parse failed: {detail or reason}"
+            ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
+
+        logger.warning("RECOVER got unhandled fault payload: %s", payload)
+        return [ReActEvent(ReActEventType.ABORT)]
+
+    def _emit_retry_nudge(self, ctx: ExecutionContext, reason: RetryReason, detail: str):
+        """重试时向对话注入提示（保留旧 _on_retries_left 的分原因文案）。"""
         if reason == RetryReason.EMPTY_RESPONSE:
             err_hint = ""
             if self.llm_client.last_error:
@@ -827,32 +702,9 @@ class ReActAgent:
                 # Skip empty appends — a blank assistant row renders as an
                 # empty thinking card in history (and pollutes the journal).
                 memory_manager.append("assistant", ctx.last_response_text)
-            if ctx.run_state.json_retries >= ctx.run_state.max_json_retries:
-                if ctx.run_state.strategy == CallingStrategy.JSON_MODE:
-                    ctx.memory_state.session_caps.mark_failed("json_mode")
-                    return [ReActEvent(ReActEventType.DEGRADED)]
 
-        return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
-
-    def _on_no_retries_degrade(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """RETRY_GATE + NO_RETRIES -> degrade from JSON_MODE."""
-        ctx.memory_state.session_caps.mark_failed("json_mode")
-        return [ReActEvent(ReActEventType.DEGRADED)]
-
-    def _on_fallback_text(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """RETRY_GATE + FALLBACK_TEXT -> salvage answer text before falling back to raw output."""
-        step = ctx.steps[-1]
-        step.error_message = f"JSON parse failed: {event.payload.get('detail') or event.payload.get('reason', 'unknown')}"
-        ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
-        reason = self._fire_agent_stop(ctx)
-        if reason:
-            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
-        return []  # EMIT_ANSWER reads ctx.last_answer
-
-    # ── DEGRADE ──
-
-    def _on_degraded(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """DEGRADE + DEGRADED -> re-select strategy, continue loop."""
+    def _degrade_and_continue(self, ctx: ExecutionContext) -> list[ReActEvent]:
+        """降档协议档位并继续（原 DEGRADE 态 + _on_degraded/_on_no_retries_degrade）。"""
         self._degrade_count += 1
         if self._degrade_count > 3:
             self._output("[策略降级] 超过最大降级次数，终止流程。")
@@ -874,20 +726,9 @@ class ReActAgent:
             )
             ctx.messages[:ctx.initial_count] = new_messages
             ctx.initial_count = len(new_messages)
-        return [ReActEvent(ReActEventType.LLM_PARAMS_READY,
-                           {"strategy": new_strategy})]
+        return [ReActEvent(ReActEventType.ROUND_READY, {"strategy": new_strategy})]
 
     # ── Terminal states ──
-
-    def _on_max_steps_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
-        """达到步数上限 -> 提示并给出诚实的兜底答案， terminate."""
-        self._output("已达到最大步数，流程终止。")
-        if not ctx.last_answer:
-            ctx.last_answer = (
-                f"（已达到最大步数 {ctx.run_state.max_steps}，共执行 {ctx.run_state.current_step} 步，"
-                "任务未完成。请缩小问题范围或分步提问。）"
-            )
-        return []
 
     def _on_error_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """ERROR_ABORT + ABORT -> terminate."""
@@ -958,27 +799,21 @@ class ReActAgent:
             }
         return []
 
-    def _on_stop_vetoed(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
-        """EMIT_ANSWER + STOP_VETOED -> inject hook feedback, re-enter LLM loop."""
+    def _on_vetoed(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """ANSWER + ANSWER_VETOED -> 注入钩子反馈，落回 AWAIT_MODEL 由 auto-advance 进下一轮。"""
         reason = event.payload.get("reason", "")
         ctx.messages.append({"role": "user", "content": (
             f"你的最终答案被 agent_stop 钩子拦截：{reason}\n"
             "请针对拦截原因修正或补充你的回答，然后重新给出最终答案。"
         )})
-        return [ReActEvent(ReActEventType.LLM_PARAMS_READY)]
+        return []
 
     # ================================================================
     # Static / helper methods (unchanged from original)
     # ================================================================
 
     def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
-        caps = self.llm_client.capabilities
-        if session_caps.is_available("tool_calling", caps.supports_tool_calling):
-            return CallingStrategy.NATIVE_TOOLS
-        elif session_caps.is_available("json_mode", caps.supports_json_mode):
-            return CallingStrategy.JSON_MODE
-        else:
-            return CallingStrategy.PROMPT_JSON
+        return decisions.select_strategy(session_caps, self.llm_client.capabilities)
 
     @staticmethod
     def _robust_json_parse(raw_text: str) -> dict:
@@ -1031,30 +866,7 @@ class ReActAgent:
 
     @staticmethod
     def _select_visible_thought(response_text: str, reasoning_text: str) -> str:
-        reasoning = (reasoning_text or "").strip()
-        if reasoning:
-            return reasoning
-
-        text = (response_text or "").strip()
-        if not text:
-            return ""
-
-        parsed = ReActAgent._try_fix_json(text)
-        if isinstance(parsed, dict):
-            thought = str(parsed.get("thought", "")).strip()
-            if thought:
-                return thought
-            if "tool" in parsed or "answer" in parsed or "params" in parsed:
-                return ""
-
-        m = _THOUGHT_MARKER_RE.match(text)
-        if m:
-            body = text[m.end():]
-            am = _FINAL_ANSWER_RE.search(body)
-            if am:
-                return body[:am.start()].strip()
-            return body
-        return text
+        return decisions.select_visible_thought(response_text, reasoning_text)
 
     @staticmethod
     def _build_json_format_section() -> str:

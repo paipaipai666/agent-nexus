@@ -96,7 +96,7 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
     if event_type == "turn_journal":
         agent_event_name = payload.get("event", "")
 
-        if agent_event_name in ("TOOLS_FOUND", "ANSWER_THOUGHT"):
+        if agent_event_name in ("TOOLS_REQUESTED", "ANSWER_THOUGHT"):
             turn = chat_service._turns.get(run_id)
             thought = ""
             if turn:

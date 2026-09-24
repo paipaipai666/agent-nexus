@@ -42,7 +42,7 @@ class TestStateMachineDispatch:
     def test_matching_transition_found_and_handler_invoked(self):
         handler = MagicMock(return_value=[])
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "my_handler"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "my_handler"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
@@ -63,7 +63,7 @@ class TestStateMachineDispatch:
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
-        event = ReActEvent(ReActEventType.LLM_ERROR)
+        event = ReActEvent(ReActEventType.TOOLS_REQUESTED)
 
         with pytest.raises(FSMError):
             fsm.run_loop(event, ctx, {"my_handler": handler})
@@ -75,21 +75,21 @@ class TestStateMachineDispatch:
         """A transition with event=None fires regardless of the incoming event type."""
         handler = MagicMock(return_value=[])
         table = [
-            Transition(ReActState.INIT, None, ReActState.SELECT_STRATEGY, "catch_all"),
+            Transition(ReActState.INIT, None, ReActState.AWAIT_MODEL, "catch_all"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
         # Fire with an arbitrary event type
-        fsm.run_loop(ReActEvent(ReActEventType.LLM_ERROR), ctx, {"catch_all": handler})
+        fsm.run_loop(ReActEvent(ReActEventType.TOOLS_REQUESTED), ctx, {"catch_all": handler})
 
         handler.assert_called_once()
-        assert fsm.current_state == ReActState.SELECT_STRATEGY
+        assert fsm.current_state == ReActState.AWAIT_MODEL
 
     def test_missing_handler_raises(self):
         """A transition whose handler name is absent from the handlers dict is a bug."""
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "missing"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "missing"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
@@ -101,7 +101,7 @@ class TestStateMachineDispatch:
         """Duplicate (state, event) rows are a table bug — rejected at construction."""
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.INIT, "handler_a"),
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.ERROR_ABORT, "handler_b"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.RECOVER, "handler_b"),
         ]
         with pytest.raises(FSMError):
             StateMachine(table=table)
@@ -115,33 +115,33 @@ class TestStateMachineRunLoop:
     """
 
     def test_simple_three_step_chain(self):
-        """INIT -> SELECT_STRATEGY -> EMIT_ANSWER -> DONE."""
+        """INIT -> AWAIT_MODEL -> ANSWER -> DONE."""
         calls = []
 
-        def to_strategy(ctx, event):
-            calls.append("strategy")
+        def to_await(ctx, event):
+            calls.append("await")
             ctx.current_step = 1
-            return [ReActEvent(ReActEventType.STRATEGY_READY)]
+            return [ReActEvent(ReActEventType.ROUND_READY)]
 
         def to_answer(ctx, event):
             calls.append("answer")
             ctx.last_answer = "hello"
-            return [ReActEvent(ReActEventType.FALLBACK_TEXT)]
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "to_strategy"),
-            Transition(ReActState.SELECT_STRATEGY, ReActEventType.STRATEGY_READY, ReActState.EMIT_ANSWER, "to_answer"),
-            Transition(ReActState.EMIT_ANSWER, ReActEventType.FALLBACK_TEXT, ReActState.DONE, "nop"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "to_await"),
+            Transition(ReActState.AWAIT_MODEL, ReActEventType.ROUND_READY, ReActState.ANSWER, "to_answer"),
+            Transition(ReActState.ANSWER, ReActEventType.ANSWER_READY, ReActState.DONE, "nop"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
         answer, steps = fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"to_strategy": to_strategy, "to_answer": to_answer, "nop": lambda c, e: []},
+            {"to_await": to_await, "to_answer": to_answer, "nop": lambda c, e: []},
         )
 
-        assert calls == ["strategy", "answer"]
+        assert calls == ["await", "answer"]
         assert ctx.current_step == 1
         assert answer == "hello"
         assert steps == []
@@ -150,7 +150,7 @@ class TestStateMachineRunLoop:
         """run_loop returns (ctx.last_answer, ctx.steps) so it matches ReActAgent contract."""
         handler = MagicMock(return_value=[])
         # Non-DONE so handler is actually called
-        table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "h")]
+        table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "h")]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test", last_answer="final result", steps=["s1", "s2"])
 
@@ -166,23 +166,23 @@ class TestStateMachineRunLoop:
         def first_handler(ctx, event):
             events.append("first")
             # Enqueue two events consumed in FIFO order
-            return [ReActEvent(ReActEventType.STRATEGY_READY), ReActEvent(ReActEventType.STRATEGY_READY)]
+            return [ReActEvent(ReActEventType.ROUND_READY), ReActEvent(ReActEventType.ROUND_READY)]
 
         def second_handler(ctx, event):
             events.append("second")
-            return [ReActEvent(ReActEventType.FALLBACK_TEXT)]
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         def final_handler(ctx, event):
             events.append("final")
             ctx.last_answer = "done"
-            return [ReActEvent(ReActEventType.FALLBACK_TEXT)]
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "first"),
-            # Loop back so both STRATEGY_READY events are consumed by second_handler
-            Transition(ReActState.SELECT_STRATEGY, ReActEventType.STRATEGY_READY, ReActState.SELECT_STRATEGY, "second"),
-            Transition(ReActState.SELECT_STRATEGY, ReActEventType.FALLBACK_TEXT, ReActState.EMIT_ANSWER, "final"),
-            Transition(ReActState.EMIT_ANSWER, ReActEventType.FALLBACK_TEXT, ReActState.DONE, "nop"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "first"),
+            # Loop back so both ROUND_READY events are consumed by second_handler
+            Transition(ReActState.AWAIT_MODEL, ReActEventType.ROUND_READY, ReActState.AWAIT_MODEL, "second"),
+            Transition(ReActState.AWAIT_MODEL, ReActEventType.ANSWER_READY, ReActState.ANSWER, "final"),
+            Transition(ReActState.ANSWER, ReActEventType.ANSWER_READY, ReActState.DONE, "nop"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
@@ -193,7 +193,7 @@ class TestStateMachineRunLoop:
              "nop": lambda c, e: []},
         )
 
-        # first -> second (1st SR) -> second (2nd SR) -> final (1st FT) -> DONE (2nd FT, handler skipped)
+        # first -> second (1st RR) -> second (2nd RR) -> final (1st AR) -> DONE (2nd AR, handler skipped)
         assert events == ["first", "second", "second", "final"]
         assert answer == "done"
 
@@ -203,39 +203,39 @@ class TestStateMachineRunLoop:
             return None  # explicit None
 
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "nop"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "nop"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
         answer, steps = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"nop": nop_handler})
-        assert fsm.current_state == ReActState.SELECT_STRATEGY
+        assert fsm.current_state == ReActState.AWAIT_MODEL
         # FSM now returns an error message when exiting in non-terminal state
         assert answer is not None
         assert "exited in state" in answer
 
     def test_event_step_id_set_automatically(self):
         """Enqueued events get their step_id set to ctx.current_step."""
-        def strategy_handler(ctx, event):
+        def await_handler(ctx, event):
             ctx.current_step = 42
-            return [ReActEvent(ReActEventType.STRATEGY_READY)]
+            return [ReActEvent(ReActEventType.ROUND_READY)]
 
         def answer_handler(ctx, event):
             assert event.step_id == 42
             ctx.last_answer = "ok"
-            return [ReActEvent(ReActEventType.FALLBACK_TEXT)]
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "strategy"),
-            Transition(ReActState.SELECT_STRATEGY, ReActEventType.STRATEGY_READY, ReActState.EMIT_ANSWER, "answer"),
-            Transition(ReActState.EMIT_ANSWER, ReActEventType.FALLBACK_TEXT, ReActState.DONE, "nop"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "await"),
+            Transition(ReActState.AWAIT_MODEL, ReActEventType.ROUND_READY, ReActState.ANSWER, "answer"),
+            Transition(ReActState.ANSWER, ReActEventType.ANSWER_READY, ReActState.DONE, "nop"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
         fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"strategy": strategy_handler, "answer": answer_handler, "nop": lambda c, e: []},
+            {"await": await_handler, "answer": answer_handler, "nop": lambda c, e: []},
         )
         assert ctx.last_answer == "ok"
 
@@ -246,8 +246,8 @@ class TestStateMachineObserver:
     def test_observer_called_on_each_transition(self):
         observer = MagicMock()
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "h1"),
-            Transition(ReActState.SELECT_STRATEGY, ReActEventType.STRATEGY_READY, ReActState.DONE, "h2"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "h1"),
+            Transition(ReActState.AWAIT_MODEL, ReActEventType.ROUND_READY, ReActState.DONE, "h2"),
         ]
         fsm = StateMachine(table=table)
         fsm.subscribe(observer)
@@ -255,10 +255,10 @@ class TestStateMachineObserver:
         ctx = ExecutionContext(question="test")
         fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"h1": lambda c, e: [ReActEvent(ReActEventType.STRATEGY_READY)], "h2": lambda c, e: []},
+            {"h1": lambda c, e: [ReActEvent(ReActEventType.ROUND_READY)], "h2": lambda c, e: []},
         )
 
-        # Called twice: INIT->SELECT_STRATEGY and SELECT_STRATEGY->DONE
+        # Called twice: INIT->AWAIT_MODEL and AWAIT_MODEL->DONE
         assert observer.call_count == 2
 
     def test_observer_receives_correct_args(self):
@@ -268,8 +268,8 @@ class TestStateMachineObserver:
             calls.append((event.type, from_state, to_state))
 
         table = [
-            Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "h"),
-            Transition(ReActState.SELECT_STRATEGY, None, ReActState.DONE, "done"),
+            Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "h"),
+            Transition(ReActState.AWAIT_MODEL, None, ReActState.DONE, "done"),
         ]
         fsm = StateMachine(table=table)
         fsm.subscribe(observer)
@@ -277,12 +277,12 @@ class TestStateMachineObserver:
         ctx = ExecutionContext(question="test")
         fsm.run_loop(
             ReActEvent(ReActEventType.START), ctx,
-            {"h": lambda c, e: [ReActEvent(ReActEventType.STRATEGY_READY)], "done": lambda c, e: []},
+            {"h": lambda c, e: [ReActEvent(ReActEventType.ROUND_READY)], "done": lambda c, e: []},
         )
 
         assert len(calls) == 2
-        assert calls[0] == (ReActEventType.START, ReActState.INIT, ReActState.SELECT_STRATEGY)
-        assert calls[1] == (ReActEventType.STRATEGY_READY, ReActState.SELECT_STRATEGY, ReActState.DONE)
+        assert calls[0] == (ReActEventType.START, ReActState.INIT, ReActState.AWAIT_MODEL)
+        assert calls[1] == (ReActEventType.ROUND_READY, ReActState.AWAIT_MODEL, ReActState.DONE)
 
     def test_observer_exception_does_not_crash_fsm(self):
         """An observer that raises is silently caught so the FSM keeps running."""
@@ -348,7 +348,7 @@ class TestStateMachineDone:
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.DONE, "done"),
             # This transition would only match if DONE didn't terminate:
-            Transition(ReActState.DONE, ReActEventType.START, ReActState.SELECT_STRATEGY, "extra"),
+            Transition(ReActState.DONE, ReActEventType.START, ReActState.AWAIT_MODEL, "extra"),
         ]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
@@ -386,7 +386,7 @@ class TestStateMachineDone:
 class TestStateMachineCancellation:
     def test_cancel_checker_stops_before_handler(self):
         handler = MagicMock(return_value=[])
-        table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.SELECT_STRATEGY, "h")]
+        table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "h")]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
         ctx.cancel_checker = lambda: True
@@ -443,20 +443,21 @@ class TestRealTransferTable:
         unreachable = states - seen
         assert not unreachable, f"unreachable states: {sorted(s.name for s in unreachable)}"
 
-    def test_real_table_max_steps_abort_reaches_done(self):
-        """Regression: ABORT emitted from CALL_LLM (max-steps) must reach DONE.
+    def test_real_table_fatal_fault_reaches_done(self):
+        """Regression: fatal FAULT from _on_round must reach DONE via RECOVER.
 
-        Before the CALL_LLM+ABORT transition existed, the event was silently
-        dropped and the loop exited non-terminal with a placeholder answer.
+        （旧表 ABORT 从 CALL_LLM 发出直达 DONE；新表 fatal FAULT 经
+        RECOVER + ABORT 两跳到达，行为等价但路径显式化。）
         """
         from agentnexus.agents.react_transitions import TRANSFER_TABLE
 
-        on_max_steps_abort = MagicMock(return_value=[])
+        on_error_abort = MagicMock(return_value=[])
         handlers = self._stub_handlers(
-            _on_init=MagicMock(return_value=[ReActEvent(ReActEventType.STRATEGY_READY)]),
-            _on_strategy_ready=MagicMock(return_value=[ReActEvent(ReActEventType.LLM_PARAMS_READY)]),
-            _on_llm_params_ready=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
-            _on_max_steps_abort=on_max_steps_abort,
+            _on_init=MagicMock(return_value=[]),  # auto-advance 进 _on_round
+            _on_round=MagicMock(return_value=[ReActEvent(ReActEventType.FAULT,
+                                                         {"fatal": True, "detail": "boom"})]),
+            _on_recover=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
+            _on_error_abort=on_error_abort,
         )
         fsm = StateMachine(table=TRANSFER_TABLE)
         ctx = ExecutionContext(question="test")
@@ -464,7 +465,7 @@ class TestRealTransferTable:
         fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
 
         assert fsm.current_state == ReActState.DONE
-        on_max_steps_abort.assert_called_once()
+        on_error_abort.assert_called_once()
 
     def test_event_seq_strictly_increasing(self):
         """FSM-queued and emit-side-channel events share one monotonic seq."""
@@ -476,12 +477,13 @@ class TestRealTransferTable:
 
         ctx = ExecutionContext(question="test")
         handlers = self._stub_handlers(
-            _on_init=MagicMock(return_value=[ReActEvent(ReActEventType.STRATEGY_READY)]),
-            _on_strategy_ready=MagicMock(return_value=[ReActEvent(ReActEventType.LLM_PARAMS_READY)]),
-            _on_llm_params_ready=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
+            _on_init=MagicMock(return_value=[]),  # auto-advance 进 _on_round
+            _on_round=MagicMock(return_value=[ReActEvent(ReActEventType.FAULT,
+                                                         {"fatal": True, "detail": "boom"})]),
+            _on_recover=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
         )
         fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
 
-        assert len(observed) == 4  # START, STRATEGY_READY, LLM_PARAMS_READY, ABORT
+        assert len(observed) == 3  # START, FAULT, ABORT（auto-advance 的 None 事件不进 seq）
         assert observed == sorted(observed)
         assert len(set(observed)) == len(observed)
