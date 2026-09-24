@@ -486,6 +486,28 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           },
         }))
       }),
+      wsPool.on(sid, 'workflow_step', (data) => {
+        const stepType = data?.step_type || 'step'
+        const stepId = data?.step_id ? `:${data.step_id}` : ''
+        const status = data?.status || ''
+        const summary = data?.summary ? ` — ${data.summary}` : ''
+        const mark = status === 'error' ? 'error' : 'run'
+        updateSession(sid, prev => ({
+          ...prev,
+          step: {
+            process: [
+              ...(prev.step?.process ?? []),
+              {
+                id: `wf-${getSessionCounter(sid)}`,
+                role: 'system' as const,
+                content: `[${mark}] ${stepType}${stepId} ${status}${summary}`,
+                timestamp: new Date(),
+              },
+            ],
+            answer: prev.step?.answer ?? null,
+          },
+        }))
+      }),
       wsPool.on(sid, 'tool_call', (data) => {
         // 本轮可见文本已经作为思考卡展示（thinking 事件先于 tool_call 到达），
         // 流式累积的原文 answer 草稿（通常带 "Thought:" 前缀）是重复内容，丢弃。

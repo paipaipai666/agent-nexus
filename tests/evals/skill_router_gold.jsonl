@@ -1,0 +1,9 @@
+{"query": "帮我写一份word文档", "skill_id": "default/docx"}
+{"query": "创建一份 docx 报告", "skill_id": "default/docx"}
+{"query": "编辑这份 Word 文件", "skill_id": "default/docx"}
+{"query": "部署应用到服务器", "skill_id": "default/deploy"}
+{"query": "发布 docker 容器到线上", "skill_id": "default/deploy"}
+{"query": "上线这个服务", "skill_id": "default/deploy"}
+{"query": "搜索代码中的函数", "skill_id": "default/search"}
+{"query": "查找技术文档", "skill_id": "default/search"}
+{"query": "检索一下资料", "skill_id": "default/search"}

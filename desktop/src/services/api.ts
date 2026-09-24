@@ -166,6 +166,13 @@ export const api = {
   listSkills: () =>
     request<{ skills: Array<{ id: string; display_name: string; description: string; enabled: boolean }>; count: number }>('/api/skills'),
 
+  getSkillContext: (query?: string) =>
+    request<{ context: string; recommendations?: Array<{ skill_id: string; score: number; reason: string }> }>(
+      query && query.trim()
+        ? `/api/skills/context?query=${encodeURIComponent(query)}`
+        : '/api/skills/context'
+    ),
+
   enableSkill: (skillId: string) =>
     request<{ status: string; skill_id: string }>(`/api/skills/${skillId}/enable`, {
       method: 'POST',

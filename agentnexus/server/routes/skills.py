@@ -128,12 +128,33 @@ def bulk_toggle_skills(req: BulkToggleRequest):
 
 
 @router.get("/context")
-def get_skill_context():
+def get_skill_context(query: str | None = None):
+    """Skill catalog block for prompts.
+
+    When ``query`` is set, rank skills for that text and inject a budget-bounded
+    shortlist (same path as chat). Without query, returns the unranked catalog.
+    """
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
-    context = runtime.skill.available_skill_context()
-    return {"context": context}
+    service = runtime.skill
+    recommendations = None
+    if query and query.strip():
+        recommendations = service.get_recommendations(query) or None
+    context = service.available_skill_context(recommendations=recommendations)
+    payload: dict = {"context": context}
+    if recommendations:
+        payload["recommendations"] = [
+            {
+                "skill_id": r.entry.qualified_id,
+                "display_name": r.entry.display_name,
+                "score": r.score,
+                "reason": r.reason,
+                "source": r.source,
+            }
+            for r in recommendations
+        ]
+    return payload
 
 
 @router.post("/recommend")
