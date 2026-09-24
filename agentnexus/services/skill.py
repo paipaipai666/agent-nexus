@@ -171,9 +171,29 @@ class SkillService:
             return None
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         llm_client = self.llm_client if self.auto_route_llm_fallback else None
+        candidates = self.router.rank(text, entries)
+        if not candidates:
+            return None
         route = self.router.route_with_llm(text, entries, llm_client=llm_client)
         if route is None:
-            return None
+            # Near-tie with no LLM: keep a soft recommendation only when there is
+            # a lexical leader. Pure-semantic blips and true ties stay abstain.
+            top = candidates[0]
+            has_lexical = any(
+                not t.startswith("semantic_match(") for t in top.matched_terms
+            )
+            if not has_lexical:
+                return None
+            if len(candidates) >= 2 and (top.score - candidates[1].score) < 0.15:
+                return None
+            self.last_route = top
+            self.selection_source = "recommend"
+            return top
+        # P1: only hard-activate on high confidence. Near-ties stay recommendations.
+        if not self._should_hard_activate(route, candidates):
+            self.last_route = route
+            self.selection_source = "recommend"
+            return route
         try:
             self.use(route.entry.qualified_id)
         except Exception as exc:
@@ -183,6 +203,15 @@ class SkillService:
         self.last_route = route
         self.selection_source = "auto"
         return route
+
+    def _should_hard_activate(self, route: SkillRoute, candidates: list[SkillRoute]) -> bool:
+        """Raise the auto-activate bar so soft matches do not lock a session profile."""
+        if getattr(route, "source", "") == "llm":
+            return True
+        if len(candidates) == 1:
+            return route.score >= self.router.min_score
+        margin = route.score - candidates[1].score
+        return route.score >= self.router.min_score * 1.25 and margin >= self.router.min_score * 0.5
 
     def get_recommendations(self, text: str) -> list[SkillRoute]:
         """Get ranked skill recommendations for the given text.
@@ -194,7 +223,10 @@ class SkillService:
         if not self.auto_route_enabled or self.current is not None:
             return []
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
-        return self.router.rank(text, entries)
+        ranked = self.router.rank(text, entries)
+        if len(ranked) >= 2 and self.llm_client is not None and self.auto_route_llm_fallback:
+            ranked = self.router.llm_rerank(text, ranked, self.llm_client)
+        return ranked
 
     def _rebuild_router_index(self) -> None:
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
@@ -278,32 +310,89 @@ class SkillService:
         self,
         limit: int = 20,
         recommendations: list[SkillRoute] | None = None,
+        *,
+        inject_all_max: int = 8,
+        top_k: int = 5,
     ) -> str:
+        """Build the skill catalog block for the system prompt.
+
+        Few skills (≤ inject_all_max): inject the full catalog.
+        Many skills: inject only the router shortlist (ranked top_k) so the
+        prompt stays bounded and high-signal skills are not truncated away.
+        """
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         if not entries:
             return ""
+
+        rec_list = list(recommendations or [])
+        rec_ids = {r.entry.qualified_id for r in rec_list}
+        by_id = {entry.qualified_id: entry for entry in entries}
+
         lines = [
             "== Available Skills ==",
             "The following local skills may be selected automatically or invoked with /<skill-id>-skill <request>.",
         ]
 
-        # Highlight recommended skills
-        rec_ids = {r.entry.qualified_id for r in (recommendations or [])}
-        if recommendations:
+        if rec_list:
             lines.append("")
             lines.append("Recommended for your request (ranked by relevance):")
-            for i, rec in enumerate(recommendations[:3], 1):
+            for i, rec in enumerate(rec_list[:3], 1):
                 lines.append(
                     f"  {i}. {rec.entry.qualified_id}: {rec.entry.display_name} "
                     f"(score={rec.score:.1f}) — {', '.join(rec.matched_terms[:3]) or 'semantic match'}"
                 )
-            lines.append("")
-            lines.append("All available skills:")
 
-        for entry in entries[:limit]:
+        def _line(entry) -> str:
             desc = " ".join((entry.description or "").split())[:180]
             marker = " [recommended]" if entry.qualified_id in rec_ids else ""
-            lines.append(f"- {entry.qualified_id}: {entry.display_name} — {desc}{marker}")
-        if len(entries) > limit:
-            lines.append(f"- ... {len(entries) - limit} more skills available via /skill list")
+            return f"- {entry.qualified_id}: {entry.display_name} — {desc}{marker}"
+
+        few = len(entries) <= inject_all_max
+        if few:
+            ordered: list = []
+            seen: set[str] = set()
+            for rec in rec_list:
+                if rec.entry.qualified_id in by_id and rec.entry.qualified_id not in seen:
+                    ordered.append(by_id[rec.entry.qualified_id])
+                    seen.add(rec.entry.qualified_id)
+            for entry in entries:
+                if entry.qualified_id not in seen:
+                    ordered.append(entry)
+                    seen.add(entry.qualified_id)
+            if rec_list:
+                lines.append("")
+                lines.append("All available skills:")
+            for entry in ordered:
+                lines.append(_line(entry))
+            return "\n".join(lines) + "\n\n"
+
+        # Many skills: rank-ordered shortlist only (do not dump registry order).
+        shortlist: list = []
+        seen = set()
+        if rec_list:
+            from agentnexus.skills.router.rank import adaptive_shortlist_len
+
+            keep_n = adaptive_shortlist_len(
+                [r.score for r in rec_list],
+                min_k=min(3, top_k),
+                max_k=max(top_k, 12),
+            )
+        else:
+            keep_n = top_k
+        for rec in rec_list[:keep_n]:
+            entry = by_id.get(rec.entry.qualified_id) or rec.entry
+            if entry.qualified_id not in seen:
+                shortlist.append(entry)
+                seen.add(entry.qualified_id)
+        if not shortlist:
+            # No ranking for this turn — keep a tiny stable sample and point at /skill list.
+            shortlist = entries[:top_k]
+
+        lines.append("")
+        lines.append("Skills matching this request:")
+        for entry in shortlist:
+            lines.append(_line(entry))
+        remaining = len(entries) - len(shortlist)
+        if remaining > 0:
+            lines.append(f"- ... {remaining} more skills available via /skill list")
         return "\n".join(lines) + "\n\n"

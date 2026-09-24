@@ -440,6 +440,12 @@ class ReActAgent:
                 # 如果检测到 critical 漂移，注入提示让 Agent 重新聚焦
                 critical = [s for s in drift_signals if s.severity.value == "critical"]
                 if critical:
+                    try:
+                        from agentnexus.observability.alerting import emit_drift_alerts
+
+                        emit_drift_alerts(critical, trace_id=getattr(trace_ctx, "trace_id", "") or "")
+                    except Exception as alert_exc:
+                        logger.debug("Drift alert emit failed: %s", alert_exc)
                     ctx.messages.append({
                         "role": "user",
                         "content": f"[系统提示] 检测到任务可能偏离原始目标。原始目标: {self._drift_detector.original_goal[:200]}。请重新聚焦于原始目标。",

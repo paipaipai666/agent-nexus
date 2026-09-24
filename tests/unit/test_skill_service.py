@@ -166,7 +166,8 @@ def test_skill_router_builds_cached_index_and_routes_from_it():
     assert route is not None
     assert route.entry == entry
     assert router.index.signature == (
-        "default/draft-writer\0Draft Writer\0Write concise product release notes and drafts.\0\0\0",
+        "default/draft-writer\0Draft Writer\0Write concise product release notes and drafts.\0\0\0"
+        "\0Use Draft Writer.\nDone.",
     )
 
 
@@ -225,6 +226,135 @@ def test_skill_service_available_skill_context_lists_metadata():
     assert "Available Skills" in context
     assert "default/docx" in context
     assert "Create and edit Word documents" in context
+
+
+def test_available_skill_context_injects_all_when_few_skills():
+    entries = [
+        _skill_entry(f"skill-{i}", f"Skill {i}", f"Capability number {i}.")
+        for i in range(4)
+    ]
+    registry = SkillRegistry([])
+    registry._entries = entries
+    service = SkillService(registry, agent=MagicMock())
+
+    context = service.available_skill_context()
+
+    for entry in entries:
+        assert entry.qualified_id in context
+    assert "more skills available" not in context
+
+
+def test_available_skill_context_shortlist_when_many_skills():
+    entries = [
+        _skill_entry(f"skill-{i:02d}", f"Skill {i:02d}", f"Capability number {i}.")
+        for i in range(12)
+    ]
+    registry = SkillRegistry([])
+    registry._entries = entries
+    service = SkillService(registry, agent=MagicMock())
+    from agentnexus.skills.router import SkillRoute
+
+    picks = [
+        SkillRoute(entry=entries[7], score=4.0, matched_terms=("deploy",), reason="r"),
+        SkillRoute(entry=entries[3], score=3.0, matched_terms=("k8s",), reason="r"),
+    ]
+
+    context = service.available_skill_context(recommendations=picks, top_k=5)
+
+    assert "default/skill-07" in context
+    assert "default/skill-03" in context
+    assert "default/skill-00" not in context
+    assert "more skills available" in context
+    # Ranked shortlist must not be registry-order truncation
+    assert context.index("skill-07") < context.index("skill-03")
+
+
+def test_available_skill_context_orders_recommended_first_when_few():
+    entries = [
+        _skill_entry("alpha", "Alpha", "Write docs."),
+        _skill_entry("beta", "Beta", "Deploy app."),
+        _skill_entry("gamma", "Gamma", "Scan code."),
+    ]
+    registry = SkillRegistry([])
+    registry._entries = entries
+    service = SkillService(registry, agent=MagicMock())
+    from agentnexus.skills.router import SkillRoute
+
+    picks = [SkillRoute(entry=entries[2], score=5.0, matched_terms=("scan",), reason="r")]
+
+    context = service.available_skill_context(recommendations=picks)
+
+    assert context.index("default/gamma") < context.index("default/alpha")
+    assert context.index("default/gamma") < context.index("default/beta")
+    assert context.count("default/gamma") >= 2  # recommended section + catalog
+
+
+def test_adaptive_shortlist_len_expands_on_flat_scores():
+    from agentnexus.skills.router.rank import adaptive_shortlist_len
+
+    assert adaptive_shortlist_len([9.0, 1.0], min_k=1, max_k=8) == 1
+    assert adaptive_shortlist_len([5.0, 4.8, 4.6, 4.4], min_k=1, max_k=8) == 4
+    assert adaptive_shortlist_len([5.0, 4.9] + [1.0] * 10, min_k=1, max_k=5) == 2
+
+
+def test_synthesize_intent_queries_include_verb_object_templates():
+    from agentnexus.skills.router.retrieve import synthesize_intent_queries
+
+    entry = _skill_entry("docx", "DOCX", "Create and edit Word documents.")
+    # _skill_entry has no verbs/objects — infer from description
+    intents = synthesize_intent_queries(entry)
+    assert intents
+    assert any("创建" in q or "编辑" in q or "写" in q or "DOCX" in q or "Word" in q for q in intents)
+
+
+def test_auto_select_soft_recommends_without_locking_profile():
+    entry = _skill_entry("only", "Only", "Write concise release notes.")
+    registry = SkillRegistry([])
+    registry._entries = [entry]
+    service = SkillService(registry, agent=MagicMock())
+    # Force soft path: single candidate but score gate uses min_score only —
+    # single-candidate hard activate stays. Use two close scores instead.
+    other = _skill_entry("only2", "Only2", "Write concise release notes too.")
+    registry._entries = [entry, other]
+    service = SkillService(registry, agent=MagicMock())
+    llm = MagicMock()
+    llm.think.return_value = '{"skill_id": "default/only", "confidence": 0.6, "reason": "x"}'
+    service.llm_client = llm
+    route = service.maybe_auto_select("Write concise release notes.")
+    # LLM path hard-activates by design
+    assert route is not None
+    assert service.current is not None
+
+
+def test_soft_recommend_does_not_use_when_margin_small_without_llm():
+    first = _skill_entry("draft-one", "Draft One", "Write concise release notes.")
+    second = _skill_entry("draft-two", "Draft Two", "Write concise release notes.")
+    registry = SkillRegistry([])
+    registry._entries = [first, second]
+    service = SkillService(registry, agent=MagicMock())
+    route = service.maybe_auto_select("Write concise release notes.")
+    assert route is None
+    assert service.current is None
+
+
+def test_llm_rerank_reorders_close_candidates():
+    from agentnexus.skills.router.llm_fallback import parse_llm_rank_order, rerank_with_llm
+
+    assert parse_llm_rank_order('{"ordered_skill_ids": ["b", "a"]}') == ["b", "a"]
+    assert parse_llm_rank_order("not json") == []
+
+    a = _skill_entry("a", "A", "Write docs.")
+    b = _skill_entry("b", "B", "Write docs.")
+    from agentnexus.skills.router import SkillRoute
+
+    cands = [
+        SkillRoute(entry=a, score=3.0, matched_terms=("write",), reason="r"),
+        SkillRoute(entry=b, score=2.9, matched_terms=("docs",), reason="r"),
+    ]
+    llm = MagicMock()
+    llm.think.return_value = '{"ordered_skill_ids": ["default/b", "default/a"]}'
+    out = rerank_with_llm("write docs", cands, llm)
+    assert [c.entry.workflow_id for c in out] == ["b", "a"]
 
 
 def test_skill_service_disable_current_skill_resets_agent_profile():

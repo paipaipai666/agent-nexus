@@ -174,6 +174,9 @@ class IndexedSkillMetadata:
     terms: frozenset[str]
     id_terms: frozenset[str]
     name_terms: frozenset[str]
+    body_terms: frozenset[str] = frozenset()
+    intent_texts: tuple[str, ...] = ()
+    intent_terms: frozenset[str] = frozenset()
     verb_terms: frozenset[str] = frozenset()
     object_terms: frozenset[str] = frozenset()
     alias_terms: frozenset[str] = frozenset()

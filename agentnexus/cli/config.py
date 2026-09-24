@@ -35,6 +35,7 @@ def config(
         "shell_execution_memory_mb",
         "shell_execution_docker_image",
         "enable_contextual_retrieval",
+        "memory_llm_gate",
         "default_skill",
         "skill_auto_route",
         "skill_auto_route_llm_fallback",

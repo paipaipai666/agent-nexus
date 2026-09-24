@@ -15,7 +15,7 @@ Submodules:
 from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.decide import SkillRecommender, SkillRouter, format_reason
 from agentnexus.skills.router.llm_decider import LLMDecision, decide_with_llm
-from agentnexus.skills.router.llm_fallback import parse_llm_skill_id, route_with_llm
+from agentnexus.skills.router.llm_fallback import parse_llm_skill_id, parse_llm_rank_order, rerank_with_llm, route_with_llm
 from agentnexus.skills.router.normalize import (
     augment_tokens_with_known_phrases,
     fuzzy_match_term,
@@ -25,6 +25,7 @@ from agentnexus.skills.router.normalize import (
 )
 from agentnexus.skills.router.parse import extract_intent_signals
 from agentnexus.skills.router.rank import (
+    adaptive_shortlist_len,
     best_candidate_is_intent_confident,
     cosine_similarity,
     rerank_with_intent,
@@ -37,6 +38,8 @@ from agentnexus.skills.router.retrieve import (
     build_index,
     compute_skill_embeddings,
     entries_signature,
+    entry_body_text,
+    entry_body_terms,
     entry_terms,
     infer_aliases,
     infer_objects,
@@ -117,12 +120,17 @@ __all__ = [
     "build_index",
     "compute_skill_embeddings",
     "entry_terms",
+    "entry_body_terms",
+    "entry_body_text",
     "entries_signature",
     "infer_verbs",
     "infer_objects",
     "infer_aliases",
     "format_reason",
     "parse_llm_skill_id",
+    "parse_llm_rank_order",
+    "rerank_with_llm",
+    "adaptive_shortlist_len",
     "levenshtein_distance",
     "fuzzy_match_term",
     "split_mixed_script_boundaries",

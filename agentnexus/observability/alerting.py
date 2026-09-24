@@ -276,5 +276,43 @@ def setup_default_alerts(traces_dir: str | None = None) -> AlertManager:
     manager.add_channel(ConsoleAlertChannel())
     if traces_dir:
         manager.add_channel(LogAlertChannel(log_dir=str(Path(traces_dir).parent / "alerts")))
+    return manager
+
+
+def evaluate_stats(stats: Any, *, drift_critical_count: int = 0) -> list[Alert]:
+    """Run alert rules against aggregated TokenStats (or any object with the same fields)."""
+    metrics = {
+        "total_cost_cny": getattr(stats, "total_cost_cny", 0.0),
+        "tool_failure_rate": getattr(stats, "tool_failure_rate", 0.0),
+        "tool_total_count": getattr(stats, "tool_total_count", 0),
+        "task_success_rate": getattr(stats, "task_success_rate", 1.0),
+        "total_tasks": getattr(stats, "total_tasks", 0),
+        "drift_critical_count": drift_critical_count,
+    }
+    return get_alert_manager().evaluate(metrics)
+
+
+def emit_drift_alerts(signals: list[Any], *, trace_id: str = "") -> list[Alert]:
+    """Emit one CRITICAL alert per drift signal (event path, not metric rules)."""
+    manager = get_alert_manager()
+    emitted: list[Alert] = []
+    for signal in signals or []:
+        severity = getattr(getattr(signal, "severity", None), "value", "")
+        if severity != "critical":
+            continue
+        signal_type = getattr(getattr(signal, "signal_type", None), "value", "")
+        alert = Alert(
+            alert_type=AlertType.DRIFT,
+            severity=AlertSeverity.CRITICAL,
+            message=getattr(signal, "detail", "critical drift signal"),
+            details={
+                "signal_type": signal_type,
+                "step_index": getattr(signal, "step_index", 0),
+            },
+            trace_id=trace_id,
+        )
+        manager.emit(alert)
+        emitted.append(alert)
+    return emitted
 
     return manager

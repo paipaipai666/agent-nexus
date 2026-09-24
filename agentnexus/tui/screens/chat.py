@@ -1155,7 +1155,14 @@ class ChatScreen(Screen):
             return text
         if self._skill_service is not None:
             if hasattr(self._agent, "set_available_skill_context"):
-                self._agent.set_available_skill_context(self._skill_service.available_skill_context())
+                try:
+                    recommendations = self._skill_service.get_recommendations(text) or None
+                except Exception as rec_exc:
+                    logger.debug("Skill recommendations failed: %s", rec_exc)
+                    recommendations = None
+                self._agent.set_available_skill_context(
+                    self._skill_service.available_skill_context(recommendations=recommendations)
+                )
             workflow_result = self._skill_service.prepare_message(
                 text,
                 tool_executor=getattr(self._agent, "tool_executor", None),
@@ -1607,6 +1614,13 @@ class ChatScreen(Screen):
                 return result.answer
             finally:
                 trace_manager.end_trace()
+                try:
+                    from agentnexus.observability.alerting import evaluate_stats
+                    from agentnexus.observability.stats import compute_stats
+
+                    evaluate_stats(compute_stats(get_settings().traces_dir, days=1))
+                except Exception as alert_exc:
+                    logger.debug("Post-run alert evaluation failed: %s", alert_exc)
 
         try:
             answer = await asyncio.to_thread(_run_with_trace)

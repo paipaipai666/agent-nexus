@@ -19,6 +19,9 @@ def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")
 
     try:
         s = compute_stats(get_settings().traces_dir, days)
+        from agentnexus.observability.alerting import evaluate_stats
+
+        evaluate_stats(s)
     except Exception:
         logger.exception("Failed to compute statistics")
         console.print("[red]Failed to compute statistics. Check that trace files are valid.[/red]")

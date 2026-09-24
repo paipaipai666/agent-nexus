@@ -226,6 +226,20 @@ class ChatService:
             except Exception as e:
                 logger.debug("Async event queue put_nowait failed: %s", e)
 
+    def _evaluate_run_alerts(self) -> None:
+        """Feed recent run metrics into the alert pipeline (non-fatal)."""
+        try:
+            from agentnexus.core.config import get_settings
+            from agentnexus.observability.alerting import evaluate_stats
+            from agentnexus.observability.stats import compute_stats
+
+            traces_dir = get_settings().traces_dir
+            if not traces_dir:
+                return
+            evaluate_stats(compute_stats(traces_dir, days=1))
+        except Exception as e:
+            logger.debug("Post-run alert evaluation failed: %s", e)
+
     def send_message(
         self,
         session_id: str,
@@ -291,6 +305,7 @@ class ChatService:
                 result = agent.run(agent_text, memory_manager=memory)
             finally:
                 _tm.end_trace()
+                self._evaluate_run_alerts()
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
             # Persist cumulative token usage and step count to DB

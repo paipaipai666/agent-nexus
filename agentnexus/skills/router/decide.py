@@ -14,6 +14,7 @@ from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.normalize import tokenize
 from agentnexus.skills.router.parse import extract_intent_signals
 from agentnexus.skills.router.rank import (
+    adaptive_shortlist_len,
     best_candidate_is_intent_confident,
     cosine_similarity,
     rerank_with_intent,
@@ -83,7 +84,7 @@ class SkillRecommender:
         *,
         min_score: float = 2.0,
         max_terms: int = 8,
-        max_candidates: int = 5,
+        max_candidates: int = 8,
         use_embeddings: bool = True,
         keyword_weight: float = 0.6,
         semantic_weight: float = 0.4,
@@ -202,8 +203,27 @@ class SkillRecommender:
         if len(scored) > 1:
             scored = rerank_with_intent(scored, intent, self.index)
 
-        # Return only candidates above minimum score threshold
-        return [r for r in scored[:self.max_candidates] if r.score >= self.min_score]
+        keep = adaptive_shortlist_len(
+            [r.score for r in scored],
+            min_k=min(3, self.max_candidates),
+            max_k=self.max_candidates,
+        )
+        return [r for r in scored[:keep] if r.score >= self.min_score]
+
+    def llm_rerank(
+        self,
+        text: str,
+        candidates: list[SkillRoute],
+        llm_client: Any = None,
+    ) -> list[SkillRoute]:
+        """Optional listwise LLM polish for close candidates (P2)."""
+        if llm_client is None or len(candidates) < 2:
+            return list(candidates)
+        if candidates[0].score - candidates[1].score >= self.min_score * 0.75:
+            return list(candidates)
+        from agentnexus.skills.router.llm_fallback import rerank_with_llm
+
+        return rerank_with_llm(text, list(candidates), llm_client)
 
     def _compute_confidence(
         self,

@@ -15,6 +15,8 @@ from agentnexus.observability.alerting import (
     LogAlertChannel,
     TaskSuccessRateRule,
     ToolFailureSpikeRule,
+    emit_drift_alerts,
+    evaluate_stats,
     get_alert_manager,
     setup_default_alerts,
 )
@@ -523,3 +525,78 @@ class TestGetAlertManager:
         m2 = get_alert_manager()
         # Assert
         assert m1 is m2
+
+
+# ── evaluate_stats / emit_drift_alerts (wired pipeline) ──────────
+
+
+class TestEvaluateStats:
+    def test_fires_cost_rule_from_stats(self, monkeypatch):
+        import agentnexus.observability.alerting as mod
+
+        monkeypatch.setattr(mod, "_global_alert_manager", None)
+        manager = setup_default_alerts()
+        stats = MagicMock()
+        stats.total_cost_cny = 12.0
+        stats.tool_failure_rate = 0.0
+        stats.tool_total_count = 0
+        stats.task_success_rate = 1.0
+        stats.total_tasks = 0
+
+        alerts = evaluate_stats(stats)
+
+        assert any(a.alert_type == AlertType.COST_EXCEED for a in alerts)
+        assert len(manager.history) >= 1
+
+    def test_quiet_when_under_thresholds(self, monkeypatch):
+        import agentnexus.observability.alerting as mod
+
+        monkeypatch.setattr(mod, "_global_alert_manager", None)
+        setup_default_alerts()
+        stats = MagicMock()
+        stats.total_cost_cny = 0.1
+        stats.tool_failure_rate = 0.0
+        stats.tool_total_count = 10
+        stats.task_success_rate = 1.0
+        stats.total_tasks = 5
+
+        alerts = evaluate_stats(stats)
+
+        assert alerts == []
+
+
+class TestEmitDriftAlerts:
+    def test_emits_only_critical_signals(self, monkeypatch):
+        import agentnexus.observability.alerting as mod
+
+        monkeypatch.setattr(mod, "_global_alert_manager", None)
+        manager = setup_default_alerts()
+
+        class _Sev:
+            def __init__(self, value):
+                self.value = value
+
+        class _Type:
+            def __init__(self, value):
+                self.value = value
+
+        class _Sig:
+            def __init__(self, severity, detail, signal_type="goal_drift", step_index=3):
+                self.severity = _Sev(severity)
+                self.detail = detail
+                self.signal_type = _Type(signal_type)
+                self.step_index = step_index
+
+        signals = [
+            _Sig("warning", "soft drift"),
+            _Sig("critical", "hard drift", signal_type="repeated_steps", step_index=6),
+        ]
+
+        emitted = emit_drift_alerts(signals, trace_id="t-1")
+
+        assert len(emitted) == 1
+        assert emitted[0].alert_type == AlertType.DRIFT
+        assert emitted[0].severity == AlertSeverity.CRITICAL
+        assert emitted[0].trace_id == "t-1"
+        assert emitted[0].details["signal_type"] == "repeated_steps"
+        assert manager.history[-1] is emitted[0]

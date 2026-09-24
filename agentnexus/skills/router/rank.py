@@ -34,6 +34,20 @@ def score_indexed_entry(
     score = sum(idf.get(term, 1.0) for term in matched)
     score += 1.5 * sum(idf.get(term, 1.0) for term in query_terms & item.id_terms)
     score += 1.0 * sum(idf.get(term, 1.0) for term in query_terms & item.name_terms)
+    # Body (steps / criteria / resource names) is weaker than title/description
+    # but critical for same-topic skills with near-identical short descriptions.
+    score += 0.5 * sum(idf.get(term, 1.0) for term in query_terms & item.body_terms)
+    # Synthetic intent phrasings (verb×object templates / examples)
+    if item.intent_terms:
+        intent_hits = query_terms & item.intent_terms
+        if intent_hits:
+            score += 0.8 * sum(idf.get(term, 1.0) for term in intent_hits)
+    # Negative-hint veto: domain word without domain verb → not this skill
+    neg_hits = query_terms & item.negative_hint_terms
+    if neg_hits:
+        score -= 5.0 * len(neg_hits)
+        if not (query_terms & item.verb_terms):
+            score *= 0.15
     if item.entry.workflow_id.lower() in " ".join(query_terms):
         score += 2.0
     return score
@@ -93,17 +107,20 @@ def score_metadata_alignment(
     if domain_hits:
         bonus += 1.5 * sum(idf.get(t, 1.0) for t in domain_hits)
 
-    # Example-based matching
-    if item.example_terms:
-        example_hits = q_lower & item.example_terms
+    # Example-based matching (includes synthesized intent texts)
+    example_term_pool = item.example_terms | item.intent_terms
+    if example_term_pool:
+        example_hits = q_lower & example_term_pool
         if example_hits:
             bonus += 2.5 * sum(idf.get(t, 1.0) for t in example_hits)
 
-    # Negative hint penalty
+    # Negative hint penalty (hard: domain word without domain verb)
     if item.negative_hint_terms:
         neg_hits = q_lower & item.negative_hint_terms
         if neg_hits:
-            bonus -= 3.0 * len(neg_hits)
+            bonus -= 5.0 * len(neg_hits)
+            if not (q_lower & item.verb_terms):
+                bonus *= 0.15
 
     if fuzzy:
         bonus *= 0.7
@@ -355,13 +372,13 @@ def score_example_similarity(
     Returns (matched_examples, score). Compares query terms against
     per-example token sets, not the aggregated example_terms.
     """
-    if not item.example_texts:
+    if not item.example_texts and not item.intent_texts:
         return [], 0.0
 
     matched_examples: list[str] = []
     best_score = 0.0
 
-    for example in item.example_texts:
+    for example in item.example_texts + item.intent_texts:
         example_tokens = set(tokenize(example))
         if not example_tokens:
             continue
@@ -391,3 +408,26 @@ def cosine_similarity(
     if norm1 == 0 or norm2 == 0:
         return 0.0
     return dot_product / (norm1 * norm2)
+
+
+def adaptive_shortlist_len(
+    scores: list[float],
+    *,
+    min_k: int = 3,
+    max_k: int = 8,
+) -> int:
+    """Pick shortlist depth from the score band (BoR-style adaptive K)."""
+    if not scores:
+        return 0
+    if len(scores) == 1:
+        return 1
+    top = scores[0]
+    k = 1
+    for score in scores[1:]:
+        if top - score <= max(0.75, abs(top) * 0.3):
+            k += 1
+        else:
+            break
+        if k >= max_k:
+            break
+    return max(min(k, max_k, len(scores)), min(min_k, len(scores)))

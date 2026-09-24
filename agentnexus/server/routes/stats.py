@@ -10,10 +10,12 @@ router = APIRouter(tags=["stats"])
 @router.get("/stats")
 def get_stats(days: int = 7):
     from agentnexus.core.config import get_settings
+    from agentnexus.observability.alerting import evaluate_stats
     from agentnexus.observability.stats import compute_stats
 
     settings = get_settings()
     stats = compute_stats(settings.traces_dir, days)
+    evaluate_stats(stats)
     if hasattr(stats, "__dict__"):
         return stats.__dict__
     return stats

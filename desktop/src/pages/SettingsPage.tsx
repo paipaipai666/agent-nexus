@@ -25,7 +25,7 @@ const GROUPS: Record<string, string[]> = {
     'embedding_model', 'reranker_model', 'rag_default_namespace', 'rag_collection_prefix',
   ],
   'Memory': [
-    'max_memories', 'memory_ttl_days',
+    'max_memories', 'memory_ttl_days', 'memory_llm_gate',
     'autocompact_buffer_tokens', 'large_result_threshold',
     'offload_enabled', 'snip_enabled', 'time_microcompact_interval',
     'post_compact_max_files', 'post_compact_token_per_file', 'post_compact_token_budget',
