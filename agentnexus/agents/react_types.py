@@ -71,6 +71,8 @@ class ReActEventType(Enum):
     STREAM_TOKEN = auto()   # LLM 流式 token
     STREAM_REASONING = auto()  # LLM 流式 reasoning
     ANSWER_THOUGHT = auto() # 答案前的思考展示
+    LOOP_WARNING = auto()   # 跑飞兜底 L1：检测到闭环（重复工具调用）
+    BUDGET_REMINDER = auto()  # 跑飞兜底 L3：token 预算提醒
     # ── 旧名 alias（兼容 TUI / 下游测试，勿在新代码中使用）──
     TOOLS_FOUND = TOOLS_REQUESTED
     CLASSIFIED_TOOL = TOOLS_REQUESTED
@@ -143,6 +145,10 @@ class RunState:
     strategy: CallingStrategy = CallingStrategy.PROMPT_JSON
     max_steps: int | None = None    # None = 不设上限（决策3，2026-09-24 拍板）
     max_json_retries: int = 2
+    # ── 跑飞兜底（L1 闭环 / L3 预算）：只提示，不强制终止 ──
+    loop_warn_count: int = 0        # 已发出的闭环提示次数（上限见 MAX_LOOP_WARNINGS）
+    token_budget: int | None = None  # None = 不设预算
+    token_reminders: int = 0        # 已发出的预算提醒次数
     stop_vetoes: int = 0       # consecutive AGENT_STOP hook vetoes (cap prevents loops)
     thinking_enabled: bool = False
     cancel_checker: Any = None

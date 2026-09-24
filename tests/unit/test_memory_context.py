@@ -587,7 +587,7 @@ class TestReActAgentConversationMode:
         return agent._on_round(ctx, ReActEvent(ReActEventType.ROUND_READY))
 
     def _make_ctx(self, question, strategy, response_text, reasoning=""):
-        from agentnexus.agents.react_types import AgentStep, ExecutionContext
+        from agentnexus.agents.react_types import ExecutionContext
         ctx = ExecutionContext(question=question, strategy=strategy)
         ctx.steps.append(AgentStep(step_id=0))
         ctx.last_response_text = response_text
@@ -674,7 +674,7 @@ class TestReActAgentConversationMode:
         assert [event.type for event in followup] == [ReActEventType.TOOLS_DONE]
 
     def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self, monkeypatch):
-        from agentnexus.agents.react_types import AgentStep, CallingStrategy, ReActEventType
+        from agentnexus.agents.react_types import CallingStrategy, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(
@@ -717,8 +717,7 @@ class TestReActAgentConversationMode:
         assert ctx.last_answer == "Final answer"
 
     def test_fallback_text_extracts_answer_from_malformed_json(self):
-        from agentnexus.agents.react_types import (
-            AgentStep, CallingStrategy, ReActEvent, ReActEventType, RetryReason)
+        from agentnexus.agents.react_types import CallingStrategy, ReActEvent, ReActEventType, RetryReason
         from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
@@ -735,8 +734,7 @@ class TestReActAgentConversationMode:
         assert ctx.last_answer == "最终答案"
 
     def test_prompt_json_tool_followup_does_not_append_duplicate_thought_prompt(self, monkeypatch):
-        from agentnexus.agents.react_types import (
-            AgentStep, CallingStrategy, ReActEvent, ReActEventType)
+        from agentnexus.agents.react_types import CallingStrategy, ReActEvent, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)

@@ -13,8 +13,6 @@
 """
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.agents.react_transitions import TRANSFER_TABLE
 from agentnexus.agents.react_types import (
@@ -22,9 +20,14 @@ from agentnexus.agents.react_types import (
     CallingStrategy,
     ExecutionContext,
     ReActEvent,
-    ReActEventType as E,
-    ReActState as S,
+    ReActEventType,
     RetryReason,
+)
+from agentnexus.agents.react_types import (
+    ReActEventType as E,
+)
+from agentnexus.agents.react_types import (
+    ReActState as S,
 )
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.tools.registry import ToolRegistry
@@ -180,6 +183,95 @@ class TestToolBatchMustComplete:
         assert second_round_index == len(order) - 1
         assert second_round_index > order.index(("tool", "probe_4"))
         assert result.answer is not None
+
+
+# ══════════════════════════════════════════════════════════════
+# 跑飞兜底（非强制）：L1 闭环提示 + L3 token 预算提醒
+# ══════════════════════════════════════════════════════════════
+
+
+class TestRunawayGuards:
+    def test_loop_warning_is_emitted_and_run_still_finishes(self):
+        """连续相同工具调用 → 发 LOOP_WARNING + 软 nudge，但不强制终止。"""
+        printed: list[str] = []
+        llm = _make_llm()
+        te = ToolRegistry()
+        te.register_tool("file_read", "读文件", lambda **kw: "same content")
+        agent = ReActAgent(llm, te, max_steps=None, output=printed.append)
+
+        emitted: list[tuple] = []
+        agent._on_event = lambda evt, f, t: emitted.append((evt.type, evt.payload))
+        rounds = {"n": 0}
+
+        def think(**_kw):
+            rounds["n"] += 1
+            if rounds["n"] <= 5:
+                llm.last_tool_calls = [{"name": "file_read", "arguments": {"path": "a.txt"}}]
+                return ""
+            llm.last_tool_calls = []
+            return "看够了，这是答案。"
+
+        llm.think.side_effect = think
+        result = agent.run("读一下 a.txt")
+
+        loop_warns = [e for e in emitted if e[0] is ReActEventType.LOOP_WARNING]
+        assert loop_warns, "重复调用必须触发闭环提示"
+        # 提示有上限，不刷屏
+        assert len(loop_warns) <= 2
+        # 没有被强制终止：模型自己给出答案
+        assert result.answer == "看够了，这是答案。"
+        assert any("闭环检测" in line for line in printed)
+
+    def test_token_budget_reminder_is_emitted_once_per_threshold(self):
+        """token 预算跨阈值 → 提醒（数量不超过阈值个数），不终止。"""
+        printed: list[str] = []
+        llm = _make_llm()
+        llm.last_usage = {"input_tokens": 400, "output_tokens": 400}
+        te = ToolRegistry()
+        te.register_tool("probe", "探测", lambda **kw: "data")
+        agent = ReActAgent(llm, te, max_steps=None, token_budget=1000, output=printed.append)
+
+        emitted: list[tuple] = []
+        agent._on_event = lambda evt, f, t: emitted.append((evt.type, evt.payload))
+        rounds = {"n": 0}
+
+        def think(**_kw):
+            rounds["n"] += 1
+            if rounds["n"] <= 2:
+                llm.last_tool_calls = [{"name": "probe", "arguments": {}}]
+                return "继续查。"
+            llm.last_tool_calls = []
+            return "这是答案。"
+
+        llm.think.side_effect = think
+        result = agent.run("问题")
+
+        reminders = [e for e in emitted if e[0] is ReActEventType.BUDGET_REMINDER]
+        assert reminders, "跨预算阈值必须提醒"
+        assert len(reminders) <= 2
+        assert result.answer == "这是答案。"
+        assert any("预算提醒" in line for line in printed)
+
+    def test_no_guards_when_unconfigured(self):
+        """默认无预算、模型正常推进时，不应有任何兜底提示。"""
+        printed: list[str] = []
+        llm = _make_llm()
+        te = ToolRegistry()
+        te.register_tool("file_read", "读文件", lambda **kw: "content")
+        agent = ReActAgent(llm, te, max_steps=None, output=printed.append)
+
+        emitted: list[tuple] = []
+        agent._on_event = lambda evt, f, t: emitted.append((evt.type, evt.payload))
+
+        def think(**_kw):
+            llm.last_tool_calls = []
+            return "直接给出答案。"
+
+        llm.think.side_effect = think
+        agent.run("问题")
+
+        assert not [e for e in emitted if e[0] is ReActEventType.LOOP_WARNING]
+        assert not [e for e in emitted if e[0] is ReActEventType.BUDGET_REMINDER]
 
 
 # ══════════════════════════════════════════════════════════════

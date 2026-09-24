@@ -33,7 +33,7 @@ from agentnexus.agents.tool_runner import execute_tool
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
-from agentnexus.observability.drift_detector import DriftDetector
+from agentnexus.observability.drift_detector import DriftDetector, DriftSignalType
 from agentnexus.observability.tracer import trace_manager
 
 if TYPE_CHECKING:
@@ -63,6 +63,16 @@ REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
 
 MAX_JSON_RETRIES = 2
 
+# ── 跑飞兜底（非强制，只提示）──
+# L1 闭环：连续相同工具调用触发提示；最多提示这么多次，避免刷屏。
+MAX_LOOP_WARNINGS = 2
+LOOP_NUDGE = (
+    "[系统提示] 检测到你在重复相同的工具调用，且结果没有实质变化。"
+    "请换一种方式继续，或者基于已有信息给出当前能给出的结论。"
+)
+# L3 预算：累计 token 跨过这些比例时提醒一次（不终止）。
+BUDGET_REMINDER_RATIOS = (0.8, 1.0)
+
 # Re-export for backward compatibility
 __all__ = ["ReActAgent", "CallingStrategy", "AgentStep"]
 
@@ -76,6 +86,7 @@ class ReActAgent:
 
     def __init__(self, llm_client: AgentLLM, tool_executor: ToolRegistry,
                  max_steps: int | None = None,
+                 token_budget: int | None = None,
                  output=None, confirm_fn=None, async_confirm=None,
                  conversation_mode: bool = False,
                  agent_id: str = "react_agent"):
@@ -85,6 +96,8 @@ class ReActAgent:
         # max_steps=None 表示无限（跑飞兜底见 docs/fsm-redesign-proposal.md §9，
         # 靠闭环检测 + 软提示 + 用户取消，不再靠硬性步数终止）。
         self.max_steps = max_steps
+        # 跑飞兜底 L3：token 预算（None = 不设）。跨阈值只提醒，不终止。
+        self.token_budget = token_budget
         self._output = output or print
         self._confirm = confirm_fn or self._default_confirm
         self._async_confirm = async_confirm
@@ -221,6 +234,7 @@ class ReActAgent:
             )
             ctx.run_state.thinking_enabled = self.llm_client.capabilities.supports_thinking
             ctx.run_state.cancel_checker = self._cancel_checker
+            ctx.run_state.token_budget = self.token_budget
 
             fsm = StateMachine(TRANSFER_TABLE)
             if self._on_event:
@@ -444,6 +458,8 @@ class ReActAgent:
         if isinstance(cur, dict):
             ctx._total_usage["input_tokens"] += cur.get("input_tokens", 0)
             ctx._total_usage["output_tokens"] += cur.get("output_tokens", 0)
+        # 跑飞兜底 L3：token 预算提醒
+        self._maybe_remind_budget(ctx)
         if ctx.memory_state.memory_manager:
             ctx.memory_state.memory_manager.mark_api_call()
         ctx.last_response_text = response_text
@@ -588,6 +604,8 @@ class ReActAgent:
             execute_tool=self._execute_tool,
             output=self._output,
         )
+        # ── 跑飞兜底 L1：闭环检测（连续相同工具调用）→ 用户可见警告 + 软 nudge ──
+        self._maybe_warn_loop(ctx)
         ctx.run_state.json_retries = 0  # 成功的工具轮重置 JSON 重试预算
         terminal = ctx.run_state.terminal_answer
         if terminal:
@@ -599,6 +617,50 @@ class ReActAgent:
                 {"role": "user",
                  "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
         return [ReActEvent(ReActEventType.TOOLS_DONE)]
+
+    def _maybe_warn_loop(self, ctx: ExecutionContext):
+        """跑飞兜底 L1：闭环检测。
+
+        连续相同的工具调用（Gemini CLI 的 CONSECUTIVE_IDENTICAL_TOOL_CALLS 同款思路，
+        阈值复用 DriftDetector.REPEATED_STEP_THRESHOLD=3）→ 给用户/模型各提示一次。
+        **不强制终止**：模型仍能继续跑，真兜底是用户取消。
+        """
+        if ctx.run_state.loop_warn_count >= MAX_LOOP_WARNINGS:
+            return
+        if not hasattr(self, "_drift_detector"):
+            return
+        signals = self._drift_detector.check(step_index=ctx.run_state.current_step)
+        repeated = [s for s in signals if s.signal_type is DriftSignalType.REPEATED_STEPS]
+        if not repeated:
+            return
+        detail = repeated[0].detail
+        ctx.run_state.loop_warn_count += 1
+        self._output(f"[闭环检测 {ctx.run_state.loop_warn_count}/{MAX_LOOP_WARNINGS}] {detail}")
+        ctx.emit(ReActEventType.LOOP_WARNING,
+                 detail=detail, warn_count=ctx.run_state.loop_warn_count)
+        ctx.messages.append({"role": "user", "content": LOOP_NUDGE})
+
+    def _maybe_remind_budget(self, ctx: ExecutionContext):
+        """跑飞兜底 L3：token 预算提醒（照 Codex RolloutBudget 的思路：跨阈值插提醒，不硬停）。"""
+        budget = ctx.run_state.token_budget
+        if not budget:
+            return
+        used = (ctx._total_usage.get("input_tokens", 0)
+                + ctx._total_usage.get("output_tokens", 0))
+        ratio = used / budget
+        for threshold in BUDGET_REMINDER_RATIOS:
+            if ratio < threshold:
+                continue
+            if ctx.run_state.token_reminders >= len(BUDGET_REMINDER_RATIOS):
+                return
+            ctx.run_state.token_reminders += 1
+            self._output(f"[预算提醒] 已用 {used}/{budget} tokens（{ratio:.0%}）。")
+            ctx.emit(ReActEventType.BUDGET_REMINDER, used=used, budget=budget, ratio=ratio)
+            ctx.messages.append({"role": "user", "content": (
+                f"[系统提示] 本次任务的 token 预算已用约 {ratio:.0%}。"
+                "请尽快收敛，给出当前能给出的结论。"
+            )})
+            return
 
     def _record_tool_drift(self, ctx: ExecutionContext, tool_call: dict):
         """记录工具调用到漂移检测器（原 _on_tool_done 的职责）。"""
