@@ -104,7 +104,7 @@ class MemoryManager:
         self._engine.on_after_compact = callback
 
     def _resolve_ctx_max_async(self) -> None:
-        """Background thread: fill in compaction thresholds once litellm is up."""
+        """Background thread: fill in compaction thresholds without blocking startup."""
         try:
             ctx_max = self._resolve_ctx_max()
         except Exception as exc:

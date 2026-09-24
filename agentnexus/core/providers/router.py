@@ -1,10 +1,10 @@
-"""Provider router — selects the direct LLM provider for a model/endpoint.
+"""Provider router — picks the wire codec from the endpoint URL.
 
 Routing:
-  - api.anthropic.com (or anthropic/* with no custom OpenAI-compatible base)
-      → AnthropicMessagesProvider (/v1/messages)
-  - everything else (OpenAI-compatible gateways, Azure OpenAI-compatible,
-    DeepSeek, OpenRouter, vLLM, …) → OpenAIProvider (chat.completions)
+  - base_url contains anthropic.com → AnthropicMessagesProvider (/v1/messages)
+  - everything else → OpenAIProvider (chat.completions)
+
+No model-id / vendor-prefix guessing — configure base_url to select the protocol.
 """
 
 from __future__ import annotations
@@ -33,19 +33,12 @@ def _get_anthropic_provider() -> BaseLLMProvider:
     return _anthropic_provider
 
 
-def _is_anthropic_wire(model: str, base_url: str) -> bool:
-    url_lower = (base_url or "").lower()
-    model_lower = (model or "").lower()
-    if "anthropic.com" in url_lower:
-        return True
-    # Bare anthropic/* with no custom base → official Messages API.
-    if model_lower.startswith("anthropic/") and not url_lower.strip():
-        return True
-    return False
+def _is_anthropic_wire(base_url: str) -> bool:
+    return "anthropic.com" in (base_url or "").lower()
 
 
 def select_provider(model: str, base_url: str) -> BaseLLMProvider:
-    """Return the direct provider for the given model/endpoint (never None)."""
-    if _is_anthropic_wire(model, base_url):
+    """Return the direct provider for the given endpoint (never None)."""
+    if _is_anthropic_wire(base_url):
         return _get_anthropic_provider()
     return _get_openai_provider()

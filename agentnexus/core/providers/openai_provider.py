@@ -30,27 +30,6 @@ _TOTAL_BUDGET_MULT = 10  # total cap = per-call timeout × this
 
 _SENTINEL = object()
 
-# LiteLLM-style provider prefixes that must be stripped before calling an
-# OpenAI-compatible endpoint (the endpoint expects the bare model name).
-# Namespaced provider models like SiliconFlow's "deepseek-ai/DeepSeek-V4-Flash"
-# or Groq's "llama-3/8b" keep the full string — there the whole name IS the
-# endpoint's model id.
-_KNOWN_PROVIDER_PREFIXES = {
-    "openai", "azure", "deepseek", "anthropic", "zhipu", "glm", "zai",
-    "moonshot", "gemini", "google", "bedrock", "vertex_ai", "azure_ai",
-    "cohere", "mistral", "huggingface", "replicate", "anyscale", "ollama",
-    "groq", "together_ai", "openrouter", "perplexity",
-}
-
-
-def _strip_known_prefix(model: str) -> str:
-    if "/" not in model:
-        return model
-    prefix, _, rest = model.partition("/")
-    if prefix.lower() in _KNOWN_PROVIDER_PREFIXES and rest:
-        return rest
-    return model
-
 
 class OpenAIProvider(BaseLLMProvider):
     """Direct provider for any OpenAI-compatible API endpoint."""
@@ -137,7 +116,7 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         kwargs: dict[str, Any] = {
-            "model": _strip_known_prefix(model),
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "stream": True,

@@ -7,9 +7,12 @@ import pytest
 
 
 def test_config_loading():
-    from agentnexus.core.config import get_settings
+    from agentnexus.core.config import Settings
 
-    assert get_settings().llm_model_id
+    # No vendor defaults — empty until the user configures a provider
+    s = Settings()
+    assert s.llm_model_id == ""
+    assert s.llm_base_url == ""
 
 
 @pytest.mark.xfail(reason="Pre-existing circular import between storage.chroma and rag")
@@ -137,28 +140,6 @@ def test_provider_singleton_cached():
 
 
 # ── Model normalization regression ─────────────────────────────────────
-
-
-def test_normalize_model_id_with_prefix():
-    from agentnexus.core.capabilities import _normalize_model_id
-
-    assert _normalize_model_id("openai/gpt-4", "https://api.openai.com") == "openai/gpt-4"
-    assert _normalize_model_id("deepseek/v4", "https://api.deepseek.com") == "deepseek/v4"
-
-
-def test_normalize_model_id_infers_prefix():
-    from agentnexus.core.capabilities import _normalize_model_id
-
-    assert _normalize_model_id("gpt-4", "https://api.openai.com") == "openai/gpt-4"
-    assert _normalize_model_id("v4", "https://api.deepseek.com") == "deepseek/v4"
-    assert _normalize_model_id("claude", "https://api.anthropic.com") == "anthropic/claude"
-    assert _normalize_model_id("glm-4", "https://open.bigmodel.cn") == "zhipu/glm-4"
-
-
-def test_normalize_model_id_unknown_defaults_to_openai():
-    from agentnexus.core.capabilities import _normalize_model_id
-
-    assert _normalize_model_id("my-model", "https://custom.api.com") == "openai/my-model"
 
 
 # ── Capability detection regression ────────────────────────────────────

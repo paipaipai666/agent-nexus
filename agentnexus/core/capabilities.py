@@ -36,29 +36,13 @@ class ModelCapabilities:
     from_default_fallback: bool = True
 
 
-def _normalize_model_id(model_id: str, base_url: str = "") -> str:
-    """Add provider prefix if missing, based on base_url."""
-    if "/" in model_id:
-        return model_id
-    base = (base_url or "").lower()
-    if "deepseek.com" in base:
-        return f"deepseek/{model_id}"
-    elif "anthropic.com" in base:
-        return f"anthropic/{model_id}"
-    elif "zhipu.com" in base or "bigmodel.cn" in base:
-        return f"zhipu/{model_id}"
-    elif "openai.com" in base:
-        return f"openai/{model_id}"
-    else:
-        return f"openai/{model_id}"
-
-
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
     """Resolve capabilities from user config / model override, else unknown defaults.
 
     Priority: per-model config override > global config > conservative defaults.
     There is no baked-in vendor catalog — when flags are still defaults the
     caller may probe the endpoint (see AgentLLM.capabilities).
+    Model ids are used exactly as configured (no vendor-prefix guessing).
     """
     caps = ModelCapabilities(from_default_fallback=True)
 
@@ -75,9 +59,7 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         caps.from_default_fallback = False
 
     # Per-model override (highest priority) — from the provider's model entry.
-    normalized_id = _normalize_model_id(model_id, base_url) if "/" not in model_id else model_id
-    entry = settings.find_model_override_entry(model_id, base_url) \
-        or settings.find_model_override_entry(normalized_id, base_url)
+    entry = settings.find_model_override_entry(model_id, base_url)
     if entry is not None and entry.override is not None:
         ov = entry.override
         if ov.context_length is not None:

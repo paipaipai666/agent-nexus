@@ -21,12 +21,6 @@ _ANTHROPIC_VERSION = "2023-06-01"
 _DEFAULT_BASE = "https://api.anthropic.com"
 
 
-def _strip_anthropic_prefix(model: str) -> str:
-    if model.lower().startswith("anthropic/"):
-        return model.split("/", 1)[1]
-    return model
-
-
 def _content_to_text(content: Any) -> str:
     if content is None:
         return ""
@@ -109,7 +103,7 @@ def to_anthropic_payload(
         out_messages.append({"role": "user", "content": _content_to_text(content)})
 
     body: dict[str, Any] = {
-        "model": _strip_anthropic_prefix(model),
+        "model": model,
         "max_tokens": max_tokens or 8192,
         "messages": out_messages,
         "temperature": temperature,

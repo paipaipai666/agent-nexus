@@ -73,7 +73,8 @@ class TestProviderEndToEnd:
         assert result == "DeepSeek answer"
         client.chat.completions.create.assert_called_once()
         call_kwargs = client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "deepseek-v4-flash"
+        # Model id is sent exactly as configured (no vendor-prefix stripping)
+        assert call_kwargs["model"] == "deepseek/deepseek-v4-flash"
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")

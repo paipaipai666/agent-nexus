@@ -198,19 +198,20 @@ class Settings(BaseSettings):
         self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
     # ── LLM / Model Configuration ────────────────────────────────────────
+    # No vendor defaults — fill these (or llm_providers) before calling the model.
     llm_api_key: SecretStr = Field(default=SecretStr(""))
-    llm_model_id: str = Field(default="deepseek/deepseek-v4-flash")
-    llm_base_url: str = Field(default="https://api.deepseek.com")
+    llm_model_id: str = Field(default="")
+    llm_base_url: str = Field(default="")
     llm_timeout: int = Field(default=60, ge=1)
     # Model capability overrides (None = auto-detect)
     model_tool_calling: bool | None = Field(default=None)
     model_json_mode: bool | None = Field(default=None)
     model_thinking: bool | None = Field(default=None)
     model_thinking_budget: int = Field(default=4000, ge=1024, le=32000)
-    # Judge LLM (used by evaluators)
-    judge_model_id: str = Field(default="zhipu/glm-4.7-flash")
+    # Judge LLM (used by evaluators) — empty = follow the task model
+    judge_model_id: str = Field(default="")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
-    judge_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
+    judge_base_url: str = Field(default="")
     # Switchable provider profiles. When active_model/active_provider matches
     # an entry here, it overrides the flat llm_* fields (default/fallback).
     llm_providers: list[LLMProvider] = Field(default_factory=list)
@@ -502,11 +503,10 @@ class Settings(BaseSettings):
         return self.llm_model_id, self.llm_base_url, self.llm_api_key, self.llm_timeout
 
     def _judge_legacy_configured(self) -> bool:
-        """True when judge_* flat fields were explicitly set (differ from defaults)."""
-        default_base = "https://open.bigmodel.cn/api/paas/v4/".rstrip("/").lower()
+        """True when judge_* flat fields were explicitly set (any non-empty value)."""
         return bool(self.judge_api_key.get_secret_value()) \
-            or self.judge_model_id != "zhipu/glm-4.7-flash" \
-            or (self.judge_base_url or "").rstrip("/").lower() != default_base
+            or bool(self.judge_model_id.strip()) \
+            or bool((self.judge_base_url or "").strip())
 
     def _migrate_llm_profiles(self) -> None:
         """Idempotent in-memory migration toward the provider/models schema.

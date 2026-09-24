@@ -234,8 +234,8 @@ class TestAgentLLMConfigure:
         assert llm._capabilities is None
         assert llm._session_tracker is None
 
-    def test_configure_normalizes_bare_model_id(self):
+    def test_configure_keeps_model_id_as_written(self):
         llm = AgentLLM(model="openai/gpt-4o", api_key="sk-1", base_url="https://api.openai.com")
         llm.configure(model="deepseek-chat", base_url="https://api.deepseek.com", api_key="sk-3")
-        # Bare ids get a provider prefix derived from base_url
-        assert "/" in llm.model
+        # No vendor-prefix guessing — model id is used exactly as configured
+        assert llm.model == "deepseek-chat"

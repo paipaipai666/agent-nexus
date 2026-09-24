@@ -49,7 +49,8 @@ class TraceRecord:
 
     @property
     def cost_cny(self) -> float:
-        return _cost(self.total_input_tokens, self.total_output_tokens, "deepseek-v4-flash")
+        # Default estimate — no vendor price table. Set ModelOverride prices for accuracy.
+        return _cost(self.total_input_tokens, self.total_output_tokens, "")
 
 
 # ── Aggregate report ─────────────────────────────────────────────

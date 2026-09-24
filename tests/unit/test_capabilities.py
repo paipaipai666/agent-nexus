@@ -3,7 +3,6 @@
 from agentnexus.core.capabilities import (
     ModelCapabilities,
     SessionCapabilityTracker,
-    _normalize_model_id,
     detect_capabilities,
     resolve_ctx_max,
 )
@@ -27,12 +26,6 @@ class TestDetectCapabilities:
         assert caps.supports_tool_calling is False
         assert caps.supports_thinking is True
         assert caps.from_default_fallback is False
-
-    def test_normalize_model_id_deepseek(self):
-        assert _normalize_model_id("deepseek-v4-flash", "https://api.deepseek.com") == "deepseek/deepseek-v4-flash"
-
-    def test_normalize_model_id_keeps_existing_prefix(self):
-        assert _normalize_model_id("openai/gpt-4", "https://api.openai.com") == "openai/gpt-4"
 
 
 class TestResolveCtxMax:

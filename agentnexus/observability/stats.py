@@ -95,7 +95,7 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                     meta = span.get("metadata", {})
                     tokens_in = meta.get("input_tokens", 0)
                     tokens_out = meta.get("output_tokens", 0)
-                    model = _short_model(meta.get("model", "deepseek-v4-flash"))
+                    model = _short_model(meta.get("model", "") or "")
                     latency = span.get("latency_ms", 0)
 
                     # 任务成功/失败追踪
@@ -202,8 +202,8 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
         stats.cache_hit_rate = stats.total_cache_hit_tokens / total_cache_tokens
         # Estimate cost saved by cache (cache hit price is ~1/50 of cache miss price for DeepSeek)
         # This is a rough estimate; actual savings depend on the provider's pricing
-        cache_miss_cost = _cost(stats.total_cache_miss_tokens, 0, "deepseek-v4-flash")
-        cache_hit_cost = _cost(stats.total_cache_hit_tokens, 0, "deepseek-v4-flash")
+        cache_miss_cost = _cost(stats.total_cache_miss_tokens, 0, "")
+        cache_hit_cost = _cost(stats.total_cache_hit_tokens, 0, "")
         stats.cache_saved_cost_cny = round(cache_miss_cost - cache_hit_cost, 4)
 
     return stats

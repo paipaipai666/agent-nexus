@@ -114,13 +114,15 @@ def init():
         console.print("[yellow]API Key cannot be empty[/yellow]")
         api_key = input("LLM API Key (required): ").strip()
 
-    model = input("LLM Model [deepseek/deepseek-v4-flash]: ").strip()
-    if not model:
-        model = "deepseek/deepseek-v4-flash"
+    model = input("LLM Model (required, e.g. deepseek-v4-flash): ").strip()
+    while not model:
+        console.print("[yellow]Model cannot be empty[/yellow]")
+        model = input("LLM Model (required): ").strip()
 
-    base_url = input("LLM Base URL [https://api.deepseek.com]: ").strip()
-    if not base_url:
-        base_url = "https://api.deepseek.com"
+    base_url = input("LLM Base URL (required, e.g. https://api.example.com): ").strip()
+    while not base_url.startswith(("http://", "https://")):
+        console.print("[yellow]Base URL must start with http(s)://[/yellow]")
+        base_url = input("LLM Base URL (required): ").strip()
 
     config_path = get_config_dir() / "config.yaml"
 

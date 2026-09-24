@@ -89,12 +89,10 @@ class AgentLLM:
         apiKey: str | None = None,
         baseUrl: str | None = None,
     ):
-        from agentnexus.core.capabilities import _normalize_model_id
         settings = get_settings()
         profile = settings.get_active_llm_profile()
         self.base_url = base_url or baseUrl or profile[1]
-        raw_model = (model or profile[0]).strip()
-        self.model = _normalize_model_id(raw_model, self.base_url) if "/" not in raw_model else raw_model
+        self.model = (model or profile[0]).strip()
         self.api_key = api_key or apiKey or profile[2].get_secret_value()
         self.timeout = timeout or profile[3]
         # Per-call results live in thread-local storage: concurrent runs
@@ -191,11 +189,8 @@ class AgentLLM:
     def configure(self, *, model: str, base_url: str, api_key: str, timeout: int | None = None) -> None:
         """Hot-switch the underlying model/provider (shared instance — every
         agent holding this client picks the change up on its next call)."""
-        from agentnexus.core.capabilities import _normalize_model_id
-
         self.base_url = base_url
-        raw = model.strip()
-        self.model = _normalize_model_id(raw, base_url) if "/" not in raw else raw
+        self.model = model.strip()
         self.api_key = api_key
         if timeout:
             self.timeout = timeout
@@ -516,9 +511,9 @@ class AgentLLM:
                 if tracker.is_available("json_schema", caps.supports_json_schema):
                     provider_response_format = response_format
 
-        stream_opts = None
-        if "openai.com" in (self.base_url or ""):
-            stream_opts = {"include_usage": True}
+        # Usage on stream: request it uniformly (OpenAI-compatible `stream_options`);
+        # no per-vendor URL sniffing.
+        stream_opts = {"include_usage": True}
 
         self._active_provider = provider
         try:

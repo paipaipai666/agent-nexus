@@ -20,8 +20,6 @@ class TestConfigCommand:
         assert result.exit_code == 0
         assert "AgentNexus Configuration" in result.stdout
         assert "llm_model_id" in result.stdout
-        assert "deepseek/deepseek-v4-flash" in result.stdout
-        assert "default" in result.stdout
 
     def test_view_env_source(self, temp_agentnexus_home, monkeypatch):
         monkeypatch.setenv("AGENTNEXUS_LLM_MODEL_ID", "gpt-4o")
@@ -89,7 +87,7 @@ class TestInitCommand:
         assert data["llm_base_url"] == "https://custom.url"
 
     def test_init_empty_api_key_retry(self, temp_agentnexus_home, monkeypatch):
-        inputs = iter(["", "", "sk-real-key", "model", "url"])
+        inputs = iter(["", "", "sk-real-key", "model", "https://custom.url"])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0

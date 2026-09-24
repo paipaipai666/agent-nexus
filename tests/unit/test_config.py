@@ -10,13 +10,15 @@ class TestConfigSettings:
     def test_get_settings_returns_valid_settings(self, temp_agentnexus_home):
         s = get_settings()
         assert isinstance(s, Settings)
-        assert s.llm_model_id == "deepseek/deepseek-v4-flash"
-        assert s.llm_base_url == "https://api.deepseek.com"
+        # No vendor defaults — must be filled by the user
+        assert s.llm_model_id == ""
+        assert s.llm_base_url == ""
         assert s.llm_timeout == 60
 
     def test_default_field_values(self):
         s = Settings()
-        assert s.llm_model_id == "deepseek/deepseek-v4-flash"
+        assert s.llm_model_id == ""
+        assert s.llm_base_url == ""
         assert s.llm_timeout == 60
         assert s.max_agent_steps == 50
         assert s.enable_query_rewrite is True
