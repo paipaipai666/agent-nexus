@@ -168,16 +168,16 @@ def test_capability_registry_deepseek():
     from agentnexus.core.capabilities import detect_capabilities
 
     caps = detect_capabilities("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
-    assert caps.supports_tool_calling is True
-    assert caps.supports_thinking is True
+    assert caps.supports_tool_calling is False
+    assert caps.from_default_fallback is True
 
 
 def test_capability_registry_openai_gpt4():
     from agentnexus.core.capabilities import detect_capabilities
 
     caps = detect_capabilities("openai/gpt-4o", "https://api.openai.com")
-    assert caps.supports_tool_calling is True
-    assert caps.supports_json_mode is True
+    assert caps.supports_tool_calling is False
+    assert caps.from_default_fallback is True
 
 
 def test_capability_registry_unknown_model():

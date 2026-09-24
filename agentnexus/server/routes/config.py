@@ -326,22 +326,22 @@ def get_llm_capabilities():
     """Detected capabilities of the active LLM profile.
 
     ``source`` tells the caller how the flags were determined:
-    ``registry`` (static match), ``probe`` (live endpoint probe for
-    registry-unknown models), or ``config`` (explicit user override).
+    ``probe`` (live endpoint probe), ``config`` (explicit user override),
+    or ``unknown`` (conservative defaults, not yet probed).
     """
     from agentnexus.server.app import _get_runtime
 
     runtime = _get_runtime()
     llm = runtime.llm
-    caps = llm.capabilities  # detect (+ live probe for unknown models), cached per instance
+    caps = llm.capabilities  # detect (+ live probe when still unknown)
     settings = runtime.settings
     overridden = settings.model_tool_calling is not None or settings.model_json_mode is not None
     if overridden:
         source = "config"
     elif caps.from_default_fallback:
-        source = "probe"
+        source = "unknown"
     else:
-        source = "registry"
+        source = "probe"
     return {
         "model": llm.model,
         "base_url": llm.base_url,

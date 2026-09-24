@@ -10,15 +10,12 @@ from agentnexus.tui.widgets.hud import HUD
 
 class TestResolveCtxMax:
     def test_unknown_model_returns_none(self):
-        """resolve_ctx_max returns None for models outside the static registry."""
+        """resolve_ctx_max returns None without a vendor catalog or override."""
         assert resolve_ctx_max("totally-unknown-model-xyz") is None
 
-    def test_registry_returns_deepseek_context(self):
-        """Static registry returns 262144 for deepseek-v4-flash."""
-        assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") == 262144
-
     def test_registry_fallback_handles_deepseek_v4_flash(self):
-        assert resolve_ctx_max("deepseek/deepseek-v4-flash", "https://api.deepseek.com") == 262144
+        # No hardcoded DeepSeek window — unknown unless the user overrides.
+        assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") is None
 
 
 

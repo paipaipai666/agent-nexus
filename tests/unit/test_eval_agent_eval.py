@@ -13,7 +13,8 @@ from agentnexus.evaluation.agent_eval import (
 
 class TestCost:
     def test_known_model(self):
-        assert _cost(1_000_000, 0, "deepseek-v4-flash") == 0.6
+        # Default estimate without a vendor table: 10 CNY/M input
+        assert _cost(1_000_000, 0, "deepseek-v4-flash") == 10.0
 
     def test_unknown_model(self):
         # Unknown models use default pricing: 10.0 CNY/M input + 30.0 CNY/M output
@@ -25,7 +26,7 @@ class TestCost:
 
     def test_mixed_cost(self):
         cost = _cost(1_000_000, 500_000, "gpt-4o")
-        assert cost == pytest.approx(17.5 + 35.0)
+        assert cost == pytest.approx(10.0 + 15.0)
 
 
 class TestPercentile:
@@ -73,11 +74,11 @@ class TestTraceRecord:
 
     def test_cost_cny(self):
         rec = TraceRecord(trace_id="t", total_input_tokens=1_000_000, total_output_tokens=0)
-        assert rec.cost_cny == 0.6
+        assert rec.cost_cny == 10.0
 
     def test_cost_cny_with_output(self):
         rec = TraceRecord(trace_id="t", total_input_tokens=1_000_000, total_output_tokens=500_000)
-        assert rec.cost_cny == pytest.approx(0.6 + 0.6)
+        assert rec.cost_cny == pytest.approx(10.0 + 15.0)
 
     def test_tool_calls_unique(self):
         rec = TraceRecord(trace_id="t", tool_calls_unique=["search", "read", "search"])

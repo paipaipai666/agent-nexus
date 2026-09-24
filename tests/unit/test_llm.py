@@ -405,14 +405,14 @@ class TestCapabilityProbe:
                           base_url="https://example.test/v1")
         assert client.capabilities.supports_tool_calling is False
 
-    def test_known_model_skips_probe(self, temp_agentnexus_home, monkeypatch):
+    def test_unknown_model_without_probe_stays_conservative(self, temp_agentnexus_home, monkeypatch):
+        """Without a catalog or successful probe, flags stay off."""
         import agentnexus.core.llm as m
 
-        self._patch_provider(monkeypatch, None)  # would return None → probe aborts
-        client = AgentLLM(model="deepseek/deepseek-chat", api_key="k",
-                          base_url="https://api.deepseek.com")
-        assert client.capabilities.supports_tool_calling is True
-        assert not m._probe_cache
+        self._patch_provider(monkeypatch, None)  # probe cannot run
+        client = AgentLLM(model="stealth/never-known", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is False
 
 
 class TestPerCallStateIsolation:

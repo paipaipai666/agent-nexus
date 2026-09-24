@@ -91,6 +91,9 @@ class ModelOverride(BaseModel):
     supports_json_schema: bool | None = None
     supports_thinking: bool | None = None
     supports_parallel_tool_calls: bool | None = None
+    # CNY per million tokens — optional cost estimate inputs
+    input_price_cny_per_mtok: float | None = Field(default=None, ge=0)
+    output_price_cny_per_mtok: float | None = Field(default=None, ge=0)
 
 
 class ModelEntry(BaseModel):

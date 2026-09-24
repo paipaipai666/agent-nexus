@@ -11,18 +11,29 @@ from agentnexus.observability.stats import (
 
 
 class TestCost:
-    def test_known_model(self):
-        # (1000*0.6 + 500*1.2) / 1_000_000 = (600 + 600) / 1_000_000 = 0.0012
-        assert _cost(1000, 500, "deepseek-v4-flash") == 0.0012
+    def test_default_pricing_without_override(self):
+        # No vendor table — default 10.0 / 30.0 CNY per Mtok
+        assert _cost(1000, 500, "deepseek-v4-flash") == (1000 * 10.0 + 500 * 30.0) / 1_000_000
 
-    def test_alias_model(self):
-        # deepseek-chat resolves to deepseek-v3
-        # (1000*1.0 + 500*2.0) / 1_000_000 = (1000 + 1000) / 1_000_000 = 0.002
-        assert _cost(1000, 500, "deepseek-chat") == 0.002
+    def test_alias_model_uses_same_default(self):
+        assert _cost(1000, 500, "deepseek-chat") == (1000 * 10.0 + 500 * 30.0) / 1_000_000
 
     def test_unknown_model_uses_default_pricing(self):
         expected = (1000 * 10.0 + 500 * 30.0) / 1_000_000
         assert _cost(1000, 500, "unknown-model") == expected
+
+    def test_override_pricing(self, monkeypatch):
+        import agentnexus.core.config as cfg
+
+        entry = cfg.ModelEntry(
+            model_id="priced-model",
+            override=cfg.ModelOverride(input_price_cny_per_mtok=2.0, output_price_cny_per_mtok=4.0),
+        )
+        p = cfg.LLMProvider(name="p", base_url="https://x.example.com", models=[entry])
+        s = cfg.Settings(llm_providers=[p])
+        monkeypatch.setattr("agentnexus.core.config.get_settings", lambda: s)
+        import agentnexus.core.pricing as pricing
+        assert pricing.estimate_cost(1_000_000, 500_000, "priced-model") == 2.0 + 2.0
 
     def test_zero_tokens(self):
         assert _cost(0, 0, "deepseek-v4-flash") == 0.0
@@ -30,7 +41,8 @@ class TestCost:
 
 class TestShortModel:
     def test_alias_resolved(self):
-        assert _short_model("deepseek-chat") == "deepseek-v3"
+        # No alias table — id is preserved
+        assert _short_model("deepseek-chat") == "deepseek-chat"
 
     def test_no_alias(self):
         assert _short_model("deepseek-v4-flash") == "deepseek-v4-flash"
@@ -236,14 +248,13 @@ class TestComputeStats:
         stats = compute_stats(str(traces_dir))
         assert "deepseek-v3" in stats.by_model
         assert "deepseek-v4-flash" in stats.by_model
-        # deepseek-v3: 300 input, 100 output, cost = (300*1.0 + 100*2.0)/1e6 = 0.0005
+        # Default pricing 10/30 CNY per Mtok (no vendor table)
         assert stats.by_model["deepseek-v3"]["input_tokens"] == 300
         assert stats.by_model["deepseek-v3"]["output_tokens"] == 100
-        assert stats.by_model["deepseek-v3"]["cost_cny"] == 0.0005
-        # deepseek-v4-flash: 100 input, 50 output, cost = (100*0.6 + 50*1.2)/1e6 = 0.00012
+        assert stats.by_model["deepseek-v3"]["cost_cny"] == (300 * 10.0 + 100 * 30.0) / 1_000_000
         assert stats.by_model["deepseek-v4-flash"]["input_tokens"] == 100
         assert stats.by_model["deepseek-v4-flash"]["output_tokens"] == 50
-        assert stats.by_model["deepseek-v4-flash"]["cost_cny"] == 0.0001
+        assert stats.by_model["deepseek-v4-flash"]["cost_cny"] == (100 * 10.0 + 50 * 30.0) / 1_000_000
 
     def test_by_date_breakdown(self, temp_agentnexus_home):
         traces_dir = temp_agentnexus_home / "traces"

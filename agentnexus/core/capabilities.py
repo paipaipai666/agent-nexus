@@ -1,10 +1,9 @@
-"""Model capability detection and static registry."""
+"""Model capability detection — config overrides + live probe (no hardcoded catalog)."""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 
 from agentnexus.core.config import get_settings
 
@@ -13,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelCapabilities:
-    """What a model can and cannot do. Immutable baseline — runtime overrides live in SessionCapabilityTracker."""
+    """What a model can and cannot do. Runtime overrides live in SessionCapabilityTracker."""
 
-    # Core feature flags
+    # Core feature flags — conservative until probed or overridden
     supports_tool_calling: bool = False
     supports_json_mode: bool = False          # response_format={"type": "json_object"}
     supports_json_schema: bool = False        # structured output with schema
@@ -24,115 +23,17 @@ class ModelCapabilities:
     supports_system_role: bool = True
     supports_vision: bool = False            # image input (multimodal)
 
-    # Token limits
-    max_context_tokens: int = 128_000
+    # Token limits — 0 means unknown (do not invent vendor windows)
+    max_context_tokens: int = 0
     max_output_tokens: int = 8_192
 
     # Thinking tuning
-    thinking_budget_tokens: int = 4_000       # for Anthropic Claude 3.5/4.5
+    thinking_budget_tokens: int = 4_000
     thinking_effort: str = "medium"            # "none"|"low"|"medium"|"high"
 
-    # Provenance — set when the registry match fell through to the "*"
-    # fallback, i.e. these flags are guesses and the endpoint should be
-    # probed live before trusting them.
-    from_default_fallback: bool = False
-
-
-# ── Static registry — prefix-matched, first-match-wins ──────────────────
-
-CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
-    # DeepSeek V4 family
-    "deepseek/deepseek-v4-pro":   ModelCapabilities(
-        supports_tool_calling=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-        max_context_tokens=262_144,
-    ),
-    "deepseek/deepseek-v4-flash": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-        max_context_tokens=262_144,
-    ),
-    # Legacy DeepSeek
-    "deepseek/deepseek-chat":     ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        max_context_tokens=131_072,
-    ),
-    "deepseek/deepseek-reasoner": ModelCapabilities(
-        supports_thinking=True,
-        max_context_tokens=131_072,
-    ),
-    "deepseek/*":                 ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-    ),
-
-    # OpenAI
-    "openai/gpt-5*":   ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        supports_json_schema=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-    ),
-    "openai/gpt-4*":   ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        supports_json_schema=True,
-        supports_parallel_tool_calls=True,
-    ),
-    "openai/o3*":      ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        supports_json_schema=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-    ),
-    "openai/o4*":      ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        supports_json_schema=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-    ),
-    "openai/*":        ModelCapabilities(
-        supports_tool_calling=True,
-        supports_json_mode=True,
-        supports_json_schema=True,
-    ),
-
-    # Anthropic
-    "anthropic/claude-4.6*": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-        thinking_effort="medium",
-        max_context_tokens=200_000,
-    ),
-    "anthropic/claude-4.5*": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_thinking=True,
-        supports_parallel_tool_calls=True,
-        thinking_budget_tokens=4_096,
-    ),
-    "anthropic/claude-3.5*": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_thinking=True,
-        thinking_budget_tokens=4_096,
-    ),
-    "anthropic/*":           ModelCapabilities(
-        supports_tool_calling=True,
-    ),
-
-    # Zhipu / GLM
-    "zhipu/glm-4*": ModelCapabilities(supports_tool_calling=True),
-    "zhipu/*":      ModelCapabilities(),
-
-    # Ultimate fallback — most conservative
-    "*": ModelCapabilities(),
-}
+    # True when flags are still defaults (not probe/config/override) —
+    # callers may probe the live endpoint instead of trusting these.
+    from_default_fallback: bool = True
 
 
 def _normalize_model_id(model_id: str, base_url: str = "") -> str:
@@ -149,78 +50,32 @@ def _normalize_model_id(model_id: str, base_url: str = "") -> str:
     elif "openai.com" in base:
         return f"openai/{model_id}"
     else:
-        # Default to openai for unknown providers
         return f"openai/{model_id}"
 
 
-# Alternate vendor slugs seen in the wild (gateway / HuggingFace naming) that
-# must resolve to the same registry prefix as the canonical provider slug.
-_VENDOR_ALIASES = {
-    "deepseek-ai": "deepseek",
-    "zhipu-ai": "zhipu",
-    "zhipuai": "zhipu",
-}
-
-
-def _canonical_model_id(model_id: str) -> str:
-    """Lowercase and rewrite alternate vendor slugs for registry matching.
-
-    ``deepseek-ai/DeepSeek-V4-Flash`` (SiliconFlow naming) canonicalizes to
-    ``deepseek/deepseek-v4-flash`` so it hits the same registry entry as the
-    official slug. The original model_id is left untouched for API calls —
-    endpoints expect their exact naming.
-    """
-    lowered = model_id.strip().lower()
-    vendor, sep, name = lowered.partition("/")
-    if sep:
-        vendor = _VENDOR_ALIASES.get(vendor, vendor)
-        return f"{vendor}/{name}"
-    return lowered
-
-
-def _lookup_registry(model_id: str) -> ModelCapabilities:
-    """Match model_id against the static registry. First match wins (ordered).
-
-    Matching is case-insensitive and tolerant of alternate vendor slugs
-    (``deepseek-ai/...`` resolves like ``deepseek/...``). When only the
-    ultimate ``*`` fallback matches, the returned caps carry
-    ``from_default_fallback=True`` so callers can probe the endpoint live
-    instead of trusting the conservative defaults.
-
-    Returns a *copy* so that detect_capabilities can mutate the result
-    without polluting the static registry entry.
-    """
-    from dataclasses import replace
-    canonical = _canonical_model_id(model_id)
-    for pattern, caps in CAPABILITY_REGISTRY.items():
-        if pattern == "*":
-            continue
-        if fnmatchcase(canonical, pattern):
-            return replace(caps)
-    return replace(CAPABILITY_REGISTRY["*"], from_default_fallback=True)
-
-
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
-    """Merge static registry + config override (+ live probe upstream).
+    """Resolve capabilities from user config / model override, else unknown defaults.
 
-    Priority: per-model config override > global config > static registry > defaults.
+    Priority: per-model config override > global config > conservative defaults.
+    There is no baked-in vendor catalog — when flags are still defaults the
+    caller may probe the endpoint (see AgentLLM.capabilities).
     """
-    # Registry uses provider/prefixed patterns, so normalize for lookup
-    normalized_id = _normalize_model_id(model_id, base_url) if "/" not in model_id else model_id
-    caps = _lookup_registry(normalized_id)
+    caps = ModelCapabilities(from_default_fallback=True)
 
     # ── User config overrides ──
     settings = get_settings()
     if settings.model_tool_calling is not None:
         caps.supports_tool_calling = settings.model_tool_calling
+        caps.from_default_fallback = False
     if settings.model_json_mode is not None:
         caps.supports_json_mode = settings.model_json_mode
+        caps.from_default_fallback = False
     if settings.model_thinking is not None:
         caps.supports_thinking = settings.model_thinking
+        caps.from_default_fallback = False
 
     # Per-model override (highest priority) — from the provider's model entry.
-    # Match both the raw id and the registry-normalized id (normalization adds
-    # a vendor prefix for bare model names).
+    normalized_id = _normalize_model_id(model_id, base_url) if "/" not in model_id else model_id
     entry = settings.find_model_override_entry(model_id, base_url) \
         or settings.find_model_override_entry(normalized_id, base_url)
     if entry is not None and entry.override is not None:
@@ -241,6 +96,15 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
             caps.supports_thinking = ov.supports_thinking
         if ov.supports_parallel_tool_calls is not None:
             caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
+        if any(
+            getattr(ov, name) is not None
+            for name in (
+                "context_length", "max_output_tokens", "supports_vision",
+                "supports_tool_calling", "supports_json_mode", "supports_json_schema",
+                "supports_thinking", "supports_parallel_tool_calls",
+            )
+        ):
+            caps.from_default_fallback = False
 
     return caps
 
@@ -276,39 +140,9 @@ class SessionCapabilityTracker:
         self.failed_counts.pop(feature, None)
 
 
-def model_candidates(model_id: str, base_url: str = "") -> list[str]:
-    """Generate candidate model IDs for capability lookup."""
-    candidates = [model_id]
-    if "/" not in model_id:
-        base = (base_url or "").lower()
-        if "deepseek" in base:
-            candidates.append(f"deepseek/{model_id}")
-        elif "openai" in base:
-            candidates.append(f"openai/{model_id}")
-        elif "anthropic" in base or "claude" in model_id.lower():
-            candidates.append(f"anthropic/{model_id}")
-        elif "bigmodel" in base or model_id.lower().startswith("glm"):
-            candidates.append(f"zhipu/{model_id}")
-    return list(dict.fromkeys(candidates))
-
-
-def registry_ctx_max(model_id: str, base_url: str = "") -> int | None:
-    """Look up max context tokens from the static capability registry."""
-    for candidate in model_candidates(model_id, base_url):
-        canonical = _canonical_model_id(candidate)
-        for pattern, caps in CAPABILITY_REGISTRY.items():
-            if pattern == "*":
-                continue
-            if fnmatchcase(canonical, pattern):
-                return caps.max_context_tokens
-    return None
-
-
-def resolve_ctx_max_from_litellm(model_id: str) -> int | None:
-    """Deprecated: LiteLLM is no longer a dependency. Always None."""
-    return None
-
-
 def resolve_ctx_max(model_id: str, base_url: str = "") -> int | None:
-    """Resolve max context tokens from the static capability registry."""
-    return registry_ctx_max(model_id, base_url)
+    """Max context tokens from explicit model override only (never invented)."""
+    caps = detect_capabilities(model_id, base_url)
+    if caps.max_context_tokens > 0:
+        return caps.max_context_tokens
+    return None

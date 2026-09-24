@@ -214,13 +214,13 @@ class AgentLLM:
         return self._capabilities
 
     def _merge_probed_capabilities(self, caps: ModelCapabilities) -> ModelCapabilities:
-        """Fill in capabilities for models the static registry doesn't know.
+        """Fill in capabilities when still unknown (no catalog, no user override).
 
         Probes the endpoint once per (model, base_url) with minimal real
         calls — a tool-calling call, then (only when tools are unavailable)
-        a JSON-mode call. Explicit config overrides (model_tool_calling /
-        model_json_mode) always win over probe results. Probe failures never
-        raise and never disable a capability the registry granted.
+        a JSON-mode call. Explicit config overrides always win over probe
+        results. Probe failures never raise and never disable a capability
+        the user already granted.
         """
         settings = get_settings()
         if settings.model_tool_calling is not None and settings.model_json_mode is not None:
@@ -238,6 +238,7 @@ class AgentLLM:
             caps.supports_tool_calling = probed["tool_calling"]
         if settings.model_json_mode is None:
             caps.supports_json_mode = probed["json_mode"]
+        caps.from_default_fallback = False
         return caps
 
     def _probe_capabilities(self) -> dict[str, bool] | None:

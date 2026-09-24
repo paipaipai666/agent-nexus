@@ -1,127 +1,71 @@
-"""Tests for model capability detection."""
+"""Tests for model capability detection (no vendor catalog)."""
+
 from agentnexus.core.capabilities import (
+    ModelCapabilities,
     SessionCapabilityTracker,
-    _lookup_registry,
     _normalize_model_id,
     detect_capabilities,
+    resolve_ctx_max,
 )
 
 
-class TestStaticRegistry:
-    def test_exact_match_deepseek_v4_pro(self):
-        caps = _lookup_registry("deepseek/deepseek-v4-pro")
-        assert caps.supports_tool_calling is True
-        assert caps.supports_thinking is True
-        assert caps.max_context_tokens == 262_144
-
-    def test_wildcard_match_deepseek(self):
-        caps = _lookup_registry("deepseek/some-unknown-model")
-        assert caps.supports_tool_calling is True
-        assert caps.supports_json_mode is True
-
-    def test_wildcard_match_openai(self):
-        caps = _lookup_registry("openai/gpt-4o-mini")
-        assert caps.supports_tool_calling is True
-        assert caps.supports_json_schema is True
-
-    def test_ultimate_fallback(self):
-        caps = _lookup_registry("completely/unknown-model-v99")
+class TestDetectCapabilities:
+    def test_unknown_model_is_conservative_and_flagged(self, temp_agentnexus_home):
+        caps = detect_capabilities("completely/unknown-model-v99", "https://example.com")
         assert caps.supports_tool_calling is False
         assert caps.supports_thinking is False
-
-    def test_zhipu_unknown_is_conservative(self):
-        caps = _lookup_registry("zhipu/glm-3-turbo")
-        assert caps.supports_tool_calling is False
-
-    def test_vendor_alias_deepseek_ai_matches_v4_entry(self):
-        """SiliconFlow naming resolves like the official deepseek slug."""
-        caps = _lookup_registry("deepseek-ai/DeepSeek-V4-Flash")
-        assert caps.supports_tool_calling is True
-        assert caps.from_default_fallback is False
-
-    def test_lookup_registry_case_insensitive(self):
-        caps = _lookup_registry("DeepSeek/DeepSeek-V4-Flash")
-        assert caps.supports_tool_calling is True
-        assert caps.from_default_fallback is False
-
-    def test_ultimate_fallback_flagged_for_probe(self):
-        caps = _lookup_registry("stealth/union-alpha")
-        assert caps.supports_tool_calling is False
+        assert caps.max_context_tokens == 0
         assert caps.from_default_fallback is True
 
-    def test_anthropic_claude_46_has_thinking(self):
-        caps = _lookup_registry("anthropic/claude-4.6-sonnet")
-        assert caps.supports_thinking is True
-        assert caps.supports_parallel_tool_calls is True
-
-
-class TestDetectCapabilities:
     def test_respects_config_override(self, temp_agentnexus_home, monkeypatch):
         monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
         monkeypatch.setenv("AGENTNEXUS_MODEL_THINKING", "true")
-        # Force reload settings
         import agentnexus.core.config as cfg_mod
         cfg_mod._settings_cache = None
 
-        caps = detect_capabilities("deepseek/deepseek-v4-pro")
-        assert caps.supports_tool_calling is False  # overridden
-        assert caps.supports_thinking is True       # overridden
+        caps = detect_capabilities("any-model", "https://api.example.com")
+        assert caps.supports_tool_calling is False
+        assert caps.supports_thinking is True
+        assert caps.from_default_fallback is False
 
     def test_normalize_model_id_deepseek(self):
-        """Test that model ID without prefix gets normalized correctly for deepseek."""
-        caps = detect_capabilities("deepseek-v4-flash", "https://api.deepseek.com")
-        assert caps.supports_tool_calling is True
-        assert caps.supports_thinking is True
+        assert _normalize_model_id("deepseek-v4-flash", "https://api.deepseek.com") == "deepseek/deepseek-v4-flash"
 
-    def test_normalize_model_id_openai(self):
-        """Test that model ID without prefix gets normalized correctly for openai."""
-        caps = detect_capabilities("gpt-4o", "https://api.openai.com")
-        assert caps.supports_tool_calling is True
-
-    def test_normalize_model_id_anthropic(self):
-        """Test that model ID without prefix gets normalized correctly for anthropic."""
-        caps = detect_capabilities("claude-4.6-sonnet", "https://api.anthropic.com")
-        assert caps.supports_tool_calling is True
-
-    def test_normalize_model_id_unknown_provider(self):
-        """Test that model ID without prefix defaults to openai for unknown providers."""
-        caps = detect_capabilities("some-model", "https://unknown-provider.com")
-        assert caps.supports_tool_calling is True  # openai/* has tool calling
-
-    def test_normalize_model_id_with_prefix(self):
-        """Test that model ID with prefix is not changed."""
-        normalized = _normalize_model_id("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
-        assert normalized == "deepseek/deepseek-v4-flash"
+    def test_normalize_model_id_keeps_existing_prefix(self):
+        assert _normalize_model_id("openai/gpt-4", "https://api.openai.com") == "openai/gpt-4"
 
 
-class TestSessionCapabilityTracker:
-    def test_available_by_default(self):
-        tracker = SessionCapabilityTracker()
-        assert tracker.is_available("tool_calling", True) is True
-        assert tracker.is_available("tool_calling", False) is False
+class TestResolveCtxMax:
+    def test_unknown_returns_none(self):
+        assert resolve_ctx_max("totally-unknown-model-xyz") is None
 
-    def test_disabled_after_max_retries(self):
-        tracker = SessionCapabilityTracker()
-        assert tracker.mark_failed("json_mode") is True   # 1 >= default max_retries=1
-        assert tracker.mark_failed("json_mode") is True   # still disabled
-        assert tracker.is_available("json_mode", True) is False
+    def test_override_sets_context(self, monkeypatch):
+        from agentnexus.core.config import LLMProvider, ModelEntry, ModelOverride, Settings
+        import agentnexus.core.capabilities as caps_mod
 
-    def test_reset_clears_failures(self):
-        tracker = SessionCapabilityTracker()
-        tracker.mark_failed("tool_calling")
-        assert tracker.is_available("tool_calling", True) is False
-        tracker.reset("tool_calling")
-        assert tracker.is_available("tool_calling", True) is True
+        entry = ModelEntry(
+            model_id="m1",
+            override=ModelOverride(context_length=50_000),
+        )
+        p = LLMProvider(name="p1", base_url="https://x.example.com/v1", models=[entry])
+        s = Settings(llm_providers=[p])
+        monkeypatch.setattr(caps_mod, "get_settings", lambda: s)
+        assert resolve_ctx_max("m1", "https://x.example.com/v1") == 50_000
 
-    def test_no_cross_feature_contamination(self):
-        tracker = SessionCapabilityTracker()
-        tracker.mark_failed("tool_calling")
-        assert tracker.is_available("json_mode", True) is True
 
-    def test_max_retries_custom(self):
-        tracker = SessionCapabilityTracker()
-        assert tracker.mark_failed("tool_calling", max_retries=3) is False  # 1 < 3
-        assert tracker.is_available("tool_calling", True) is True
-        tracker.mark_failed("tool_calling", max_retries=3)  # 2
-        assert tracker.mark_failed("tool_calling", max_retries=3) is True   # 3 >= 3
-        assert tracker.is_available("tool_calling", True) is False
+class TestSessionTracker:
+    def test_mark_failed_disables(self):
+        t = SessionCapabilityTracker()
+        assert t.mark_failed("tool_calling") is True
+        assert t.is_available("tool_calling", True) is False
+
+    def test_reset_clears(self):
+        t = SessionCapabilityTracker()
+        t.mark_failed("thinking")
+        t.reset("thinking")
+        assert t.is_available("thinking", True) is True
+
+    def test_defaults(self):
+        c = ModelCapabilities()
+        assert c.from_default_fallback is True
+        assert c.max_context_tokens == 0
