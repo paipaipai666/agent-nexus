@@ -143,7 +143,7 @@ nexus eval agent --days 1        # Run agent quality evaluation
 
 ## Tech Stack
 
-**Backend**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
+**Backend**: Python 3.11+ · OpenAI-compatible + Anthropic Messages codecs · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
 
 **Desktop**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 
@@ -201,66 +200,14 @@ def _lookup_registry(model_id: str) -> ModelCapabilities:
     return replace(CAPABILITY_REGISTRY["*"], from_default_fallback=True)
 
 
-@contextmanager
-def _suppress_litellm_noise():
-    """litellm prints 'Provider List' to stdout for models it doesn't know.
-
-    Detection intentionally probes models outside litellm's map, so mute
-    that banner for the duration and restore the previous flag.
-    """
-    try:
-        import litellm
-        prev = litellm.suppress_debug_info
-        litellm.suppress_debug_info = True
-    except Exception:
-        prev = None
-    try:
-        yield
-    finally:
-        if prev is not None:
-            litellm.suppress_debug_info = prev
-
-
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
-    """Merge static registry + litellm dynamic detection + config override.
+    """Merge static registry + config override (+ live probe upstream).
 
-    Priority: config override > litellm runtime > static registry > defaults.
+    Priority: per-model config override > global config > static registry > defaults.
     """
     # Registry uses provider/prefixed patterns, so normalize for lookup
     normalized_id = _normalize_model_id(model_id, base_url) if "/" not in model_id else model_id
     caps = _lookup_registry(normalized_id)
-
-    # ── Dynamic detection via litellm ──
-    # Skip for registry-unknown models: litellm has no data for them (it
-    # raises and spam-logs "Provider List"), and the caller will determine
-    # support with a live probe instead.
-    if not caps.from_default_fallback:
-        with _suppress_litellm_noise():
-            try:
-                import litellm
-                if litellm.supports_function_calling(model=normalized_id):
-                    caps.supports_tool_calling = True
-                if litellm.supports_response_schema(model=normalized_id):
-                    caps.supports_json_schema = True
-                params = litellm.get_supported_openai_params(model=normalized_id)
-                if params:
-                    if "response_format" in params:
-                        caps.supports_json_mode = True
-                    if "reasoning_effort" in params:
-                        caps.supports_thinking = True
-                    if "parallel_tool_calls" in params:
-                        caps.supports_parallel_tool_calls = True
-                    if "image_url" in params:
-                        caps.supports_vision = True
-                model_info = litellm.get_model_info(model=normalized_id)
-                caps.max_context_tokens = model_info.get(
-                    "max_input_tokens", caps.max_context_tokens
-                )
-                caps.max_output_tokens = model_info.get(
-                    "max_output_tokens", caps.max_output_tokens
-                )
-            except Exception as e:
-                logger.debug("LiteLLM dynamic capability detection failed: %s", e)
 
     # ── User config overrides ──
     settings = get_settings()
@@ -358,20 +305,10 @@ def registry_ctx_max(model_id: str, base_url: str = "") -> int | None:
 
 
 def resolve_ctx_max_from_litellm(model_id: str) -> int | None:
-    """Query LiteLLM for a model's max input tokens."""
-    try:
-        from litellm import get_model_info
-        info = get_model_info(model_id)
-        return info.get("max_input_tokens") or info.get("max_context_tokens") or None
-    except Exception as e:
-        logger.debug("LiteLLM model info lookup failed for %s: %s", model_id, e)
-        return None
+    """Deprecated: LiteLLM is no longer a dependency. Always None."""
+    return None
 
 
 def resolve_ctx_max(model_id: str, base_url: str = "") -> int | None:
-    """Resolve max context tokens from LiteLLM or static registry."""
-    for candidate in model_candidates(model_id, base_url):
-        value = resolve_ctx_max_from_litellm(candidate)
-        if value:
-            return value
+    """Resolve max context tokens from the static capability registry."""
     return registry_ctx_max(model_id, base_url)

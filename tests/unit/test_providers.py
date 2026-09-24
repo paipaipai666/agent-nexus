@@ -1,19 +1,25 @@
-"""Tests for agentnexus.core.providers — router, OpenAI provider, fallback."""
+"""Tests for agentnexus.core.providers — router, OpenAI provider, failure paths."""
 
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from agentnexus.core.providers.base import StreamResult
 from agentnexus.core.providers.router import select_provider
 
 
 class TestRouter:
-    def test_anthropic_model_returns_none(self):
-        provider = select_provider("anthropic/claude-4.5", "https://api.anthropic.com")
-        assert provider is None
+    def test_anthropic_model_uses_messages_provider(self):
+        from agentnexus.core.providers.anthropic_provider import AnthropicMessagesProvider
 
-    def test_azure_url_returns_none(self):
+        provider = select_provider("anthropic/claude-4.5", "https://api.anthropic.com")
+        assert isinstance(provider, AnthropicMessagesProvider)
+
+    def test_azure_url_uses_openai_provider(self):
+        from agentnexus.core.providers.openai_provider import OpenAIProvider
+
         provider = select_provider("openai/gpt-4", "https://myresource.openai.azure.com")
-        assert provider is None
+        assert isinstance(provider, OpenAIProvider)
 
     def test_deepseek_returns_openai_provider(self):
         from agentnexus.core.providers.openai_provider import OpenAIProvider
@@ -342,12 +348,8 @@ class TestStreamResult:
 class TestFallbackBehavior:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_transient_failure_skips_litellm(self, mock_trace, mock_settings):
-        """瞬态 provider 错误必须重试 provider 本身，不回退 litellm。
-
-        litellm 常路由不了这些模型，回退会把瞬态失败变成确定性致命错误
-        （llm.py 中 raise 处的刻意设计）。
-        """
+    def test_provider_transient_failure_raises_for_retry(self, mock_trace, mock_settings):
+        """Transient provider errors retry the provider (no other fallback)."""
         mock_settings.return_value.llm_model_id = "gpt-4"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.openai.com"
@@ -362,17 +364,16 @@ class TestFallbackBehavior:
         mock_provider.stream_chat.side_effect = ConnectionError("connection refused")
 
         with patch("agentnexus.core.llm.select_provider", return_value=mock_provider):
-            with patch("litellm.completion") as mock_litellm:
-                result = llm._call(
-                    [{"role": "user", "content": "hi"}], 0, True, 0,
-                )
+            result = llm._call(
+                [{"role": "user", "content": "hi"}], 0, True, 0,
+            )
 
-        mock_litellm.assert_not_called()
-        assert result == ""  # transient — retry decision deferred to think()'s attempts loop
+        assert result == ""
+        assert mock_provider.stream_chat.call_count == 1
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_non_transient_failure_falls_back_to_litellm(self, mock_trace, mock_settings):
+    def test_provider_non_transient_failure_returns_empty(self, mock_trace, mock_settings):
         mock_settings.return_value.llm_model_id = "gpt-4"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.openai.com"
@@ -386,24 +387,16 @@ class TestFallbackBehavior:
         mock_provider = MagicMock()
         mock_provider.stream_chat.side_effect = ValueError("unsupported payload")
 
-        delta = MagicMock(
-            content="fallback", tool_calls=[], reasoning_content=None,
-        )
-        chunk = MagicMock()
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
-
         with patch("agentnexus.core.llm.select_provider", return_value=mock_provider):
-            with patch("litellm.completion", return_value=iter([chunk])):
-                result = llm._call(
-                    [{"role": "user", "content": "hi"}], 0, True, 0,
-                )
+            result = llm._call(
+                [{"role": "user", "content": "hi"}], 0, True, 0,
+            )
 
-        assert result == "fallback"
+        assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_anthropic_skips_provider_goes_to_litellm(self, mock_trace, mock_settings):
+    def test_anthropic_uses_messages_provider(self, mock_trace, mock_settings):
         mock_settings.return_value.llm_model_id = "anthropic/claude-4.5"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.anthropic.com"
@@ -413,18 +406,16 @@ class TestFallbackBehavior:
         from agentnexus.core.llm import AgentLLM
 
         llm = AgentLLM()
-
-        delta = MagicMock(
-            content="claude reply", tool_calls=[], reasoning_content=None,
+        mock_provider = MagicMock()
+        mock_provider.stream_chat.return_value = StreamResult(
+            text="claude reply", finish_reason="stop",
+            usage={"input_tokens": 5, "output_tokens": 3},
         )
-        chunk = MagicMock()
-        chunk.choices = [MagicMock(delta=delta, finish_reason="stop")]
-        chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
-        with patch("litellm.completion", return_value=iter([chunk])) as mock_litellm:
+        with patch("agentnexus.core.llm.select_provider", return_value=mock_provider) as mock_sel:
             result = llm._call(
                 [{"role": "user", "content": "hi"}], 0, True, 0,
             )
 
         assert result == "claude reply"
-        mock_litellm.assert_called_once()
+        mock_sel.assert_called_once()

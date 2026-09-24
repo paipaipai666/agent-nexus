@@ -142,7 +142,7 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 
 ## 技术栈
 
-**后端**: Python 3.11+ · litellm · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
+**后端**: Python 3.11+ · OpenAI 兼容 + Anthropic Messages 编解码 · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
 
 **桌面端**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 

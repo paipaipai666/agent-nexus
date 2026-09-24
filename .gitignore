@@ -59,7 +59,7 @@ perf_test_compact_*.jsonl
 **/designs/
 **/.obsidian/
 ERROR/*.stackdump
-
+**/traces/
 config/
 .mcp.json
 experiments/

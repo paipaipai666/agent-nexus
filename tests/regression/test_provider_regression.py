@@ -1,8 +1,8 @@
 """Provider chain end-to-end regression tests.
 
-These tests mock at the openai SDK level (not litellm), exercising the full:
-  AgentLLM._call() → select_provider() → OpenAIProvider.stream_chat() → openai.SDK
-code path. This ensures the provider abstraction layer works correctly end-to-end.
+These tests mock at the openai SDK / httpx level, exercising:
+  AgentLLM._call() → select_provider() → OpenAIProvider | AnthropicMessagesProvider
+No LiteLLM — that dependency was removed.
 """
 
 from unittest.mock import MagicMock, patch
@@ -42,16 +42,24 @@ def _mock_openai_client(chunks):
     return client
 
 
+def _settings(mock_settings, model, base_url, key="sk-test", timeout=30):
+    secret = MagicMock()
+    secret.get_secret_value.return_value = key
+    mock_settings.return_value.llm_model_id = model
+    mock_settings.return_value.llm_api_key = secret
+    mock_settings.return_value.llm_base_url = base_url
+    mock_settings.return_value.llm_timeout = timeout
+    mock_settings.return_value.get_active_llm_profile.return_value = (model, base_url, secret, timeout)
+    return mock_settings
+
+
 class TestProviderEndToEnd:
-    """Full stack: AgentLLM → ProviderRouter → OpenAIProvider → mock openai SDK."""
+    """Full stack: AgentLLM → ProviderRouter → codec → mock transport."""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_deepseek_model_goes_through_provider(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
@@ -65,15 +73,12 @@ class TestProviderEndToEnd:
         assert result == "DeepSeek answer"
         client.chat.completions.create.assert_called_once()
         call_kwargs = client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "deepseek/deepseek-v4-flash"
+        assert call_kwargs["model"] == "deepseek-v4-flash"
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_openai_model_goes_through_provider(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4o"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "openai/gpt-4o", "https://api.openai.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
@@ -91,61 +96,47 @@ class TestProviderEndToEnd:
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_anthropic_model_skips_provider_goes_litellm(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "anthropic/claude-4.5"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.anthropic.com"
-        mock_settings.return_value.llm_timeout = 30
+    def test_anthropic_model_uses_messages_provider(self, mock_trace, mock_settings):
+        _settings(mock_settings, "anthropic/claude-4.5", "https://api.anthropic.com")
         mock_trace.active = None
 
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content="Claude answer", tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        from agentnexus.core.providers.base import StreamResult
 
         llm = AgentLLM()
-        with patch("litellm.completion", return_value=iter([litellm_chunk])) as mock_lit:
+        mock_provider = MagicMock()
+        mock_provider.stream_chat.return_value = StreamResult(
+            text="Claude answer", finish_reason="stop",
+            usage={"input_tokens": 10, "output_tokens": 5},
+        )
+        with patch("agentnexus.core.llm.select_provider", return_value=mock_provider) as sel:
             with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_openai:
                 result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == "Claude answer"
-        mock_lit.assert_called_once()
+        sel.assert_called_once()
         mock_openai.assert_not_called()
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_azure_model_skips_provider_goes_litellm(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
-        mock_settings.return_value.llm_base_url = "https://myresource.openai.azure.com"
-        mock_settings.return_value.llm_timeout = 30
+    def test_azure_model_uses_openai_provider(self, mock_trace, mock_settings):
+        _settings(mock_settings, "openai/gpt-4", "https://myresource.openai.azure.com")
         mock_trace.active = None
 
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content="Azure answer", tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        client = _mock_openai_client([
+            _openai_chunk(content="Azure answer", finish_reason="stop"),
+        ])
 
         llm = AgentLLM()
-        with patch("litellm.completion", return_value=iter([litellm_chunk])) as mock_lit:
-            with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_openai:
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == "Azure answer"
-        mock_lit.assert_called_once()
-        mock_openai.assert_not_called()
+        client.chat.completions.create.assert_called_once()
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_unknown_provider_uses_openai_provider(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "custom/my-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
-        mock_settings.return_value.llm_base_url = "https://my-proxy.example.com/v1"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "custom/my-model", "https://my-proxy.example.com/v1")
         mock_trace.active = None
 
         client = _mock_openai_client([
@@ -161,80 +152,46 @@ class TestProviderEndToEnd:
         assert client.chat.completions.create.call_count == 1
 
 
-class TestProviderFallbackChain:
-    """Provider failure → LiteLLM fallback regression tests."""
+class TestProviderFailureBehavior:
+    """Provider failures no longer fall back to a second library."""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_connection_error_falls_back(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+    def test_provider_connection_error_returns_empty(self, mock_trace, mock_settings):
+        _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
-
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content="fallback", tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
         llm = AgentLLM()
-        # openai SDK raises, litellm succeeds
         with patch("agentnexus.core.providers.openai_provider.OpenAI", side_effect=ConnectionError("refused")):
-            with patch("litellm.completion", return_value=iter([litellm_chunk])):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
-        assert result == "fallback"
+        assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_timeout_falls_back(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+    def test_provider_timeout_returns_empty(self, mock_trace, mock_settings):
+        _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
-
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content="timeout fallback", tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
         llm = AgentLLM()
         with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = TimeoutError("timed out")
-            with patch("litellm.completion", return_value=iter([litellm_chunk])):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
-        assert result == "timeout fallback"
+        assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
-    def test_provider_api_error_falls_back(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+    def test_provider_api_error_returns_empty(self, mock_trace, mock_settings):
+        _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
-
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content="api error fallback", tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
         llm = AgentLLM()
         with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = Exception("401 Unauthorized")
-            with patch("litellm.completion", return_value=iter([litellm_chunk])):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
-        assert result == "api error fallback"
+        assert result == ""
 
 
 class TestProviderToolCalling:

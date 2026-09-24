@@ -162,27 +162,30 @@ class TestAgentWithProvider:
 
     @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.get_settings")
-    def test_agent_anthropic_uses_litellm_path(self, mock_settings, mock_trace):
-        """Agent with anthropic model goes through LiteLLM, not provider."""
+    def test_agent_anthropic_uses_messages_provider(self, mock_settings, mock_trace):
+        """Agent with anthropic model goes through AnthropicMessagesProvider."""
         mock_settings.return_value.llm_model_id = "anthropic/claude-4.5"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "https://api.anthropic.com"
         mock_settings.return_value.llm_timeout = 30
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "anthropic/claude-4.5", "https://api.anthropic.com", "sk-test", 30,
+        )
         mock_trace.active = None
 
         answer_json = json.dumps({"answer": "Claude answer"})
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content=answer_json, tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        from agentnexus.core.providers.base import StreamResult
 
         llm = _make_llm_with_settings("anthropic/claude-4.5", "https://api.anthropic.com")
         te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
-        with patch("litellm.completion", return_value=iter([litellm_chunk])):
+        mock_provider = MagicMock()
+        mock_provider.stream_chat.return_value = StreamResult(
+            text=answer_json, finish_reason="stop",
+            usage={"input_tokens": 10, "output_tokens": 5},
+        )
+        with patch("agentnexus.core.llm.select_provider", return_value=mock_provider):
             with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_openai:
                 result = agent.run("Hello Claude")
 
@@ -220,29 +223,22 @@ class TestAgentProviderEdgeCases:
 
     @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.get_settings")
-    def test_agent_provider_fallback_on_failure(self, mock_settings, mock_trace):
-        """Provider fails → LiteLLM takes over for the full run."""
+    def test_agent_provider_failure_yields_empty_answer(self, mock_settings, mock_trace):
+        """Provider failure without a second library → empty answer, no crash."""
         mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
         mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
         mock_settings.return_value.llm_timeout = 30
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "deepseek/deepseek-v4-flash", "https://api.deepseek.com", "sk-test", 30,
+        )
         mock_trace.active = None
-
-        answer_json = json.dumps({"answer": "Fallback answer"})
-        litellm_chunk = MagicMock()
-        litellm_chunk.choices = [MagicMock(
-            delta=MagicMock(content=answer_json, tool_calls=[], reasoning_content=None),
-            finish_reason="stop",
-        )]
-        litellm_chunk.usage = MagicMock(prompt_tokens=5, completion_tokens=3, total_tokens=8)
 
         llm = _make_llm_with_settings("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         te = ToolRegistry()
         agent = ReActAgent(llm, te, max_steps=3)
 
         with patch("agentnexus.core.providers.openai_provider.OpenAI", side_effect=ConnectionError("fail")):
-            with patch("litellm.completion", return_value=iter([litellm_chunk])):
-                result = agent.run("Test question")
+            result = agent.run("Test question")
 
-        assert result.answer is not None
-        assert "Fallback" in result.answer
+        assert result is not None

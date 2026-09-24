@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
 from rich.console import Console
-from rich.live import Live
 from rich.text import Text
 
 from agentnexus.agents.exceptions import AgentCancelled
@@ -133,34 +132,6 @@ class AgentLLM:
                     except Exception:
                         pass
                 return
-
-    @staticmethod
-    def _litellm_can_route(model: str) -> bool:
-        """litellm 是否能路由该模型（不认识的模型走了必然 BadRequest）。"""
-        try:
-            import litellm
-            litellm.get_llm_provider(model)
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def _litellm_model(model: str) -> str:
-        """Map the project's provider-prefixed model id to a litellm-safe one.
-
-        ``self.model`` carries OUR provider namespace (``zhipu/glm-4.7-flash``,
-        ``agnes/agnes-3.0-flash``, ``deepseek-ai/DeepSeek-V4-Flash``), which
-        exists for the direct-provider layer and the capability registry.
-        LiteLLM's provider-prefix world is incompatible with it: ``zhipu/``
-        resolves to a broken/absent Zhipu provider and dies with
-        "LLM Provider NOT provided", even though every endpoint we talk to is
-        OpenAI-compatible behind a custom ``api_base``. Rewrite to
-        ``openai/<bare-name>`` so litellm's openai provider routes via
-        ``api_base`` — correct for all our OpenAI-compatible endpoints
-        (bigmodel, siliconflow, agnes, deepseek-official, openrouter...).
-        """
-        _, sep, bare = model.rpartition("/")
-        return f"openai/{bare}" if sep else model
 
     def _cs(self):
         """Per-thread scratch space for the in-flight call's side-channel results."""
@@ -420,75 +391,51 @@ class AgentLLM:
         self.last_reasoning_content = ""
 
         try:
-            # ── Step 1: Try direct provider ─────────────────────
+            # ── Direct provider (OpenAI-compatible or Anthropic Messages) ──
             provider = select_provider(model, self.base_url)
-            if provider is not None:
-                provider_key = f"{type(provider).__name__}/{self.model}"
+            provider_key = f"{type(provider).__name__}/{self.model}"
+            with _provider_health_lock:
+                health = _provider_health.get(provider_key)
+                if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
+                    elapsed = time.time() - health[1]
+                    if elapsed < _PROVIDER_COOLDOWN_SECONDS:
+                        raise RuntimeError(
+                            f"provider {provider_key} in cooldown after repeated failures"
+                        )
+                    _provider_health.pop(provider_key, None)
+            try:
+                result = self._call_via_provider(
+                    provider, messages, temperature, tools,
+                    response_format, thinking, on_token,
+                )
+                self.last_tool_calls = result.tool_calls
+                self.last_truncated = result.truncated
+                self.last_reasoning_content = result.reasoning_content
+                self.last_usage = result.usage or self._estimate_usage(model, messages, result.text)
+                self.total_usage["input_tokens"] += self.last_usage.get("input_tokens", 0)
+                self.total_usage["output_tokens"] += self.last_usage.get("output_tokens", 0)
+                self.total_usage["cache_hit_tokens"] += self.last_usage.get("cache_hit_tokens", 0)
+
+                if ctx and span:
+                    self._end_trace_span(ctx, span, model, result.text)
+
+                if not silent and result.text:
+                    text = Text(result.text)
+                    console.print(text)
+
                 with _provider_health_lock:
-                    health = _provider_health.get(provider_key)
-                    if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
-                        elapsed = time.time() - health[1]
-                        if elapsed < _PROVIDER_COOLDOWN_SECONDS:
-                            provider = None  # Skip to fallback
-                        else:
-                            _provider_health.pop(provider_key, None)
-            provider_err: Exception | None = None
-            if provider is not None:
-                try:
-                    result = self._call_via_provider(
-                        provider, messages, temperature, tools,
-                        response_format, thinking, on_token,
-                    )
-                    # Sync state from provider result
-                    self.last_tool_calls = result.tool_calls
-                    self.last_truncated = result.truncated
-                    self.last_reasoning_content = result.reasoning_content
-                    self.last_usage = result.usage or self._estimate_usage(model, messages, result.text)
-                    self.total_usage["input_tokens"] += self.last_usage.get("input_tokens", 0)
-                    self.total_usage["output_tokens"] += self.last_usage.get("output_tokens", 0)
-                    self.total_usage["cache_hit_tokens"] += self.last_usage.get("cache_hit_tokens", 0)
+                    _provider_health.pop(provider_key, None)
 
-                    if ctx and span:
-                        self._end_trace_span(ctx, span, model, result.text)
-
-                    if not silent and result.text:
-                        text = Text(result.text)
-                        console.print(text)
-
-                    # Reset provider health on success
-                    with _provider_health_lock:
-                        _provider_health.pop(provider_key, None)
-
-                    return result.text
-                except Exception as exc:
-                    provider_err = exc
-                    # Track provider failure for circuit breaker
-                    with _provider_health_lock:
-                        fail_count, _ = _provider_health.get(provider_key, (0, 0))
-                        _provider_health[provider_key] = (fail_count + 1, time.time())
-                    # 瞬态错误（对端断流/超时/429）必须让外层重试直接走
-                    # provider——litellm 往往不认识该模型，只会把瞬态失败
-                    # 变成 "Provider NOT provided" 的确定性致命错误。
-                    if _is_transient_error(exc):
-                        logger.warning("Direct provider failed (transient, will retry): %s", exc)
-                        raise
-                    logger.warning("Direct provider failed, falling back to LiteLLM: %s", exc)
-
-            # ── Step 2: LiteLLM fallback ────────────────────────
-            # litellm 路由不了的模型（OpenRouter 的 *:free / stealth / 第三方
-            # 命名）走 litellm 必然失败并掩盖原始 provider 错误——保留原错误
-            # 交给外层重试分类。
-            if provider_err is not None and not self._litellm_can_route(self._litellm_model(model)):
-                raise provider_err
-            result = self._call_via_litellm(
-                messages, temperature, silent, tools,
-                response_format, thinking, on_token, self._litellm_model(model),
-            )
-
-            if ctx and span:
-                self._end_trace_span(ctx, span, model, result)
-
-            return result
+                return result.text
+            except Exception as exc:
+                with _provider_health_lock:
+                    fail_count, _ = _provider_health.get(provider_key, (0, 0))
+                    _provider_health[provider_key] = (fail_count + 1, time.time())
+                if _is_transient_error(exc):
+                    logger.warning("Provider failed (transient, will retry): %s", exc)
+                    raise
+                logger.warning("Provider failed (non-transient): %s", exc)
+                raise
 
         except Exception as e:
             # 取消信号必须直接传播，不能被重试逻辑吞掉
@@ -591,148 +538,6 @@ class AgentLLM:
             )
         finally:
             self._active_provider = None
-
-    def _call_via_litellm(self, messages, temperature, silent, tools, response_format, thinking,
-                          on_token, model) -> str:
-        """Call LLM via LiteLLM (fallback path)."""
-        import litellm
-
-        caps = self.capabilities
-        tracker = self.session_tracker
-
-        completion_kwargs = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-            "api_key": self.api_key,
-            "api_base": self.base_url,
-            "timeout": self.timeout,
-            "max_tokens": caps.max_output_tokens,
-        }
-
-        # ── Tool calling ──
-        if tools and tracker.is_available("tool_calling", caps.supports_tool_calling):
-            completion_kwargs["tools"] = tools
-            completion_kwargs["tool_choice"] = "auto"
-            if caps.supports_parallel_tool_calls:
-                completion_kwargs["parallel_tool_calls"] = True
-        else:
-            completion_kwargs["drop_params"] = True
-
-        # ── JSON mode ──
-        if response_format:
-            if tracker.is_available("json_mode", caps.supports_json_mode):
-                completion_kwargs["response_format"] = response_format
-            elif isinstance(response_format, dict) and response_format.get("type") == "json_schema":
-                if tracker.is_available("json_schema", caps.supports_json_schema):
-                    completion_kwargs["response_format"] = response_format
-
-        # ── Thinking / reasoning ──
-        should_think = thinking if thinking is not None else caps.supports_thinking
-        if should_think and tracker.is_available("thinking", caps.supports_thinking):
-            if caps.thinking_effort != "none":
-                completion_kwargs["reasoning_effort"] = caps.thinking_effort
-
-        if "openai.com" in (self.base_url or ""):
-            completion_kwargs["stream_options"] = {"include_usage": True}
-        response = litellm.completion(**completion_kwargs)
-
-        collected = []
-        usage = {}
-        finish_reason = ""
-        tool_call_bufs: dict[int, dict] = {}
-        text = Text()
-        live = None
-        if not silent:
-            live = Live(text, console=console, refresh_per_second=15, transient=True)
-            live.__enter__()
-        try:
-            for chunk in response:
-                delta = chunk.choices[0].delta
-                content = delta.content or ""
-                collected.append(content)
-                if on_token and content:
-                    on_token(content)
-                text.append(content)
-                if live:
-                    live.update(text)
-
-                rc = getattr(delta, "reasoning_content", None)
-                if rc:
-                    self._cs().reasoning_buf += rc
-                    if on_token:
-                        on_token(rc, is_reasoning=True)
-
-                tc_list = getattr(delta, "tool_calls", None) or []
-                for tc in tc_list:
-                    idx = tc.get("index", 0) if isinstance(tc, dict) else getattr(tc, "index", 0)
-                    if idx not in tool_call_bufs:
-                        tool_call_bufs[idx] = {
-                            "id": "",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    buf = tool_call_bufs[idx]
-                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                    if tc_id:
-                        buf["id"] = tc_id
-                    fn = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
-                    if fn:
-                        name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
-                        args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
-                        if name:
-                            buf["function"]["name"] += name
-                        if args:
-                            buf["function"]["arguments"] += args
-
-                if hasattr(chunk, "usage") and chunk.usage:
-                    usage = {
-                        "input_tokens": chunk.usage.prompt_tokens or 0,
-                        "output_tokens": chunk.usage.completion_tokens or 0,
-                        "total_tokens": chunk.usage.total_tokens or 0,
-                    }
-                    # DeepSeek prompt cache hit/miss tokens
-                    if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
-                        usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
-                        usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
-                    # OpenAI cached_tokens (prompt_tokens_details.cached_tokens)
-                    elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
-                        usage["cache_hit_tokens"] = getattr(
-                            chunk.usage.prompt_tokens_details, "cached_tokens", 0
-                        ) or 0
-                fr = getattr(chunk.choices[0], "finish_reason", "")
-                if fr:
-                    finish_reason = fr
-        finally:
-            if live:
-                live.__exit__(None, None, None)
-
-        result = "".join(collected)
-        self.last_truncated = finish_reason in ("length", "max_tokens")
-        self.last_reasoning_content = self._cs().reasoning_buf
-
-        self.last_tool_calls = []
-        for buf in tool_call_bufs.values():
-            if buf["function"]["name"]:
-                try:
-                    args = json.loads(buf["function"]["arguments"]) if buf["function"]["arguments"] else {}
-                except (json.JSONDecodeError, ValueError):
-                    args = {}
-                self.last_tool_calls.append({
-                    "id": buf["id"],
-                    "name": buf["function"]["name"],
-                    "arguments": args,
-                })
-
-        if not usage:
-            usage = self._estimate_usage(model, messages, result)
-
-        self.last_usage = usage
-        self.total_usage["input_tokens"] += usage.get("input_tokens", 0)
-        self.total_usage["output_tokens"] += usage.get("output_tokens", 0)
-        self.total_usage["cache_hit_tokens"] += usage.get("cache_hit_tokens", 0)
-
-        return result
 
     def _estimate_usage(self, model, messages, result) -> dict:
         """Estimate token usage via tiktoken when not reported by the API."""

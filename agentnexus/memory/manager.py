@@ -66,9 +66,7 @@ class MemoryManager:
         self._engine.history_dir = f"{base}/history"
         self._pipeline = MemoryExtractionPipeline(self)
         self._last_write_count: int = 0
-        # Resolve ctx_max off the main thread — it imports litellm (~2s),
-        # which would otherwise stall server startup. Compaction simply runs
-        # without a threshold until resolution lands (same as the None path).
+        # Resolve ctx_max off the main thread so startup never blocks on registry I/O.
         threading.Thread(target=self._resolve_ctx_max_async, daemon=True, name="mem-ctx-resolve").start()
 
     # ── Compaction state properties (delegating to the engine) ───────
@@ -139,14 +137,14 @@ class MemoryManager:
 
     @staticmethod
     def _resolve_ctx_max() -> int | None:
-        """Query LiteLLM for the current model's max input tokens."""
+        """Resolve max input tokens from the capability registry."""
         try:
-            from litellm import get_model_info
-            model_id = get_settings().get_active_llm_profile()[0]
-            info = get_model_info(model_id)
-            return info.get("max_input_tokens") or None
+            from agentnexus.core.capabilities import resolve_ctx_max
+
+            model_id, base_url = get_settings().get_active_llm_profile()[:2]
+            return resolve_ctx_max(model_id, base_url or "")
         except Exception as e:
-            logger.debug("Failed to resolve ctx_max from litellm: %s", e)
+            logger.debug("Failed to resolve ctx_max: %s", e)
             return None
 
     def estimate_stm_tokens(self) -> int:

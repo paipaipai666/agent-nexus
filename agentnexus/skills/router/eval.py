@@ -6,6 +6,8 @@ Use for tuning min_score / margin / max_candidates without model calls.
 CLI:
     python -m agentnexus.skills.router.eval path/to/gold.jsonl
     python -m agentnexus.skills.router.eval path/to/gold.jsonl --sweep
+
+Gold JSONL lives at tests/unit/skill_router_gold.jsonl (sample).
 """
 
 from __future__ import annotations

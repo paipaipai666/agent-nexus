@@ -41,6 +41,10 @@ class BaseLLMProvider(ABC):
         parallel_tool_calls: bool | None = None,
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
-        on_token: Callable[[str], None] | None = None,
+        on_token: Callable[..., None] | None = None,
     ) -> StreamResult:
-        """Execute a streaming chat completion and return the unified result."""
+        """Execute a streaming chat completion and return the unified result.
+
+        ``on_token`` may be called as ``on_token(text)`` or
+        ``on_token(text, is_reasoning=True)``.
+        """

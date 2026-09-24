@@ -80,18 +80,20 @@ def test_cli_entry():
 # ── Provider system regression ─────────────────────────────────────────
 
 
-def test_provider_router_anthropic_skipped():
+def test_provider_router_anthropic_uses_messages_codec():
+    from agentnexus.core.providers.anthropic_provider import AnthropicMessagesProvider
     from agentnexus.core.providers.router import select_provider
 
     provider = select_provider("anthropic/claude-4.5", "https://api.anthropic.com")
-    assert provider is None
+    assert isinstance(provider, AnthropicMessagesProvider)
 
 
-def test_provider_router_azure_skipped():
+def test_provider_router_azure_uses_openai_codec():
+    from agentnexus.core.providers.openai_provider import OpenAIProvider
     from agentnexus.core.providers.router import select_provider
 
     provider = select_provider("openai/gpt-4", "https://myresource.openai.azure.com")
-    assert provider is None
+    assert isinstance(provider, OpenAIProvider)
 
 
 def test_provider_router_deepseek_uses_openai():

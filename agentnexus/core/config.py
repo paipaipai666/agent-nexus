@@ -10,11 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agentnexus.core.hook_schemas import HookConfig
 
-# Skip litellm's remote model-cost-map fetch at import time — it stalls startup
-# for seconds on unreachable networks and falls back to the bundled copy anyway.
-# config.py is the earliest shared dependency, so this runs before any litellm import.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
 
 class MCPServerConfig(BaseModel):
     name: str

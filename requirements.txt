@@ -3,7 +3,6 @@
 # Run `pip-compile pyproject.toml -o requirements.txt` to regenerate
 
 # Core
-litellm==1.83.14
 openai==2.24.0
 tiktoken==0.12.0
 pydantic==2.12.5

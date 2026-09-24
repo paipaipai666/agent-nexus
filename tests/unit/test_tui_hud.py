@@ -9,22 +9,16 @@ from agentnexus.tui.widgets.hud import HUD
 
 
 class TestResolveCtxMax:
-    def test_exception_returns_none(self):
-        """resolve_ctx_max returns None when no dynamic or registry info exists."""
-        with patch("litellm.get_model_info", side_effect=Exception):
-            assert resolve_ctx_max("any-model") is None
+    def test_unknown_model_returns_none(self):
+        """resolve_ctx_max returns None for models outside the static registry."""
+        assert resolve_ctx_max("totally-unknown-model-xyz") is None
 
-    def test_returns_max_input_tokens(self):
-        """resolve_ctx_max returns the max_input_tokens value."""
-        mock_info = MagicMock()
-        mock_info.get.return_value = 128000
-        with patch("litellm.get_model_info", return_value=mock_info):
-            assert resolve_ctx_max("test-model") == 128000
+    def test_registry_returns_deepseek_context(self):
+        """Static registry returns 262144 for deepseek-v4-flash."""
+        assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") == 262144
 
     def test_registry_fallback_handles_deepseek_v4_flash(self):
-        """Static registry returns 262144 for deepseek-v4-flash when LiteLLM is unavailable."""
-        with patch("litellm.get_model_info", side_effect=Exception):
-            assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") == 262144
+        assert resolve_ctx_max("deepseek/deepseek-v4-flash", "https://api.deepseek.com") == 262144
 
 
 

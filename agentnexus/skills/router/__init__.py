@@ -15,7 +15,12 @@ Submodules:
 from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.decide import SkillRecommender, SkillRouter, format_reason
 from agentnexus.skills.router.llm_decider import LLMDecision, decide_with_llm
-from agentnexus.skills.router.llm_fallback import parse_llm_skill_id, parse_llm_rank_order, rerank_with_llm, route_with_llm
+from agentnexus.skills.router.llm_fallback import (
+    parse_llm_rank_order,
+    parse_llm_skill_id,
+    rerank_with_llm,
+    route_with_llm,
+)
 from agentnexus.skills.router.normalize import (
     augment_tokens_with_known_phrases,
     fuzzy_match_term,
@@ -38,8 +43,8 @@ from agentnexus.skills.router.retrieve import (
     build_index,
     compute_skill_embeddings,
     entries_signature,
-    entry_body_text,
     entry_body_terms,
+    entry_body_text,
     entry_terms,
     infer_aliases,
     infer_objects,
