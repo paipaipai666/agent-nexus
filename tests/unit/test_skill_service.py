@@ -245,8 +245,9 @@ def test_available_skill_context_injects_all_when_few_skills():
 
 
 def test_available_skill_context_shortlist_when_many_skills():
+    long_desc = "Handles deploy workflows for k8s and release trains. " * 4
     entries = [
-        _skill_entry(f"skill-{i:02d}", f"Skill {i:02d}", f"Capability number {i}.")
+        _skill_entry(f"skill-{i:02d}", f"Skill {i:02d}", f"{long_desc} Capability {i}.")
         for i in range(12)
     ]
     registry = SkillRegistry([])
@@ -259,7 +260,8 @@ def test_available_skill_context_shortlist_when_many_skills():
         SkillRoute(entry=entries[3], score=3.0, matched_terms=("k8s",), reason="r"),
     ]
 
-    context = service.available_skill_context(recommendations=picks, top_k=5)
+    # Tight budget: header + recommended block + only the ranked hits
+    context = service.available_skill_context(recommendations=picks, token_budget=200)
 
     assert "default/skill-07" in context
     assert "default/skill-03" in context
@@ -287,6 +289,52 @@ def test_available_skill_context_orders_recommended_first_when_few():
     assert context.index("default/gamma") < context.index("default/alpha")
     assert context.index("default/gamma") < context.index("default/beta")
     assert context.count("default/gamma") >= 2  # recommended section + catalog
+
+
+def test_skill_context_budget_scales_with_context_window():
+    service = SkillService(SkillRegistry([]), agent=MagicMock())
+    small = service.skill_context_token_budget(
+        context_window_tokens=32_000, budget_ratio=0.02, max_tokens=4000,
+    )
+    large = service.skill_context_token_budget(
+        context_window_tokens=256_000, budget_ratio=0.02, max_tokens=4000,
+    )
+    assert small == int(32_000 * 0.02)
+    # 256k * 2% = 5120 but hard-capped at 4k (Claude Code-style ceiling)
+    assert large == 4000
+    assert large > small
+    # explicit override wins
+    assert service.skill_context_token_budget(token_budget=99) == 99
+
+
+def test_skill_context_budget_ceiling_prevents_unbounded_share():
+    service = SkillService(SkillRegistry([]), agent=MagicMock())
+    huge = service.skill_context_token_budget(
+        context_window_tokens=1_000_000, budget_ratio=0.02, max_tokens=4000,
+    )
+    assert huge == 4000
+    uncapped = service.skill_context_token_budget(
+        context_window_tokens=1_000_000, budget_ratio=0.02, max_tokens=20_000,
+    )
+    assert uncapped == 20_000
+
+
+def test_available_skill_context_respects_token_budget_not_count():
+    long_desc = "Detailed capability description with enough text to burn tokens. " * 3
+    entries = [
+        _skill_entry(f"skill-{i:02d}", f"Skill {i:02d}", f"{long_desc} num={i}")
+        for i in range(6)
+    ]
+    registry = SkillRegistry([])
+    registry._entries = entries
+    service = SkillService(registry, agent=MagicMock())
+
+    tight = service.available_skill_context(token_budget=200)
+    roomy = service.available_skill_context(token_budget=8000)
+
+    assert "more skills available" in tight
+    assert tight.count("- default/") < roomy.count("- default/")
+    assert "more skills available" not in roomy
 
 
 def test_adaptive_shortlist_len_expands_on_flat_scores():
@@ -355,6 +403,40 @@ def test_llm_rerank_reorders_close_candidates():
     llm.think.return_value = '{"ordered_skill_ids": ["default/b", "default/a"]}'
     out = rerank_with_llm("write docs", cands, llm)
     assert [c.entry.workflow_id for c in out] == ["b", "a"]
+
+
+def test_skill_auto_route_margin_gates_hard_activate():
+    """skill_auto_route_margin is the required score gap for hard activation."""
+    from agentnexus.skills.router import SkillRoute
+
+    first = _skill_entry("one", "One", "Write release notes.")
+    second = _skill_entry("two", "Two", "Write release notes.")
+    registry = SkillRegistry([])
+    registry._entries = [first, second]
+    service = SkillService(registry, agent=MagicMock())
+
+    close = SkillRoute(entry=first, score=4.0, matched_terms=("write",), reason="r")
+    far = SkillRoute(entry=second, score=2.5, matched_terms=("notes",), reason="r")
+
+    # gap = 1.5 ≥ margin 0.75 and score 4.0 ≥ 2.5 → hard activate
+    assert service._should_hard_activate(close, [close, far]) is True
+
+    service.router.margin = 2.0
+    # gap 1.5 < required margin 2.0 → soft only
+    assert service._should_hard_activate(close, [close, far]) is False
+
+
+def test_route_with_llm_uses_configured_margin():
+    a = _skill_entry("a", "A", "Write docs.")
+    b = _skill_entry("b", "B", "Scan code.")
+    registry = SkillRegistry([])
+    registry._entries = [a, b]
+    service = SkillService(registry, agent=MagicMock())
+    service.router.min_score = 2.0
+    service.router.margin = 0.75
+    route = service.router.route_with_llm("Write docs.", [a, b], llm_client=None)
+    assert route is not None
+    assert route.entry.qualified_id == "default/a"
 
 
 def test_skill_service_disable_current_skill_resets_agent_profile():

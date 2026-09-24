@@ -41,6 +41,8 @@ def config(
         "skill_auto_route_llm_fallback",
         "skill_auto_route_min_score",
         "skill_auto_route_margin",
+        "skill_context_token_ratio",
+        "skill_context_max_tokens",
     ]
 
     # Support both positional args (nexus config <key> <value>) and legacy flags (--set/--value)

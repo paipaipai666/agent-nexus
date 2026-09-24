@@ -205,13 +205,16 @@ class SkillService:
         return route
 
     def _should_hard_activate(self, route: SkillRoute, candidates: list[SkillRoute]) -> bool:
-        """Raise the auto-activate bar so soft matches do not lock a session profile."""
+        """Raise the auto-activate bar so soft matches do not lock a session profile.
+
+        Uses skill_auto_route_margin (router.margin) as the required score gap.
+        """
         if getattr(route, "source", "") == "llm":
             return True
         if len(candidates) == 1:
             return route.score >= self.router.min_score
-        margin = route.score - candidates[1].score
-        return route.score >= self.router.min_score * 1.25 and margin >= self.router.min_score * 0.5
+        gap = route.score - candidates[1].score
+        return route.score >= self.router.min_score * 1.25 and gap >= self.router.margin
 
     def get_recommendations(self, text: str) -> list[SkillRoute]:
         """Get ranked skill recommendations for the given text.
@@ -306,24 +309,91 @@ class SkillService:
             ),
         )
 
+    def _context_window_tokens(self) -> int:
+        """Resolve the active model context window (tokens)."""
+        for source in (self.llm_client, getattr(self.agent, "llm_client", None)):
+            caps = getattr(source, "capabilities", None)
+            if caps is not None:
+                n = getattr(caps, "max_context_tokens", None)
+                if isinstance(n, int) and n > 0:
+                    return n
+        try:
+            from agentnexus.core.capabilities import detect_capabilities
+            from agentnexus.core.config import get_settings
+
+            settings = get_settings()
+            caps = detect_capabilities(
+                getattr(settings, "llm_model_id", ""),
+                getattr(settings, "llm_base_url", ""),
+            )
+            n = getattr(caps, "max_context_tokens", None)
+            if isinstance(n, int) and n > 0:
+                return n
+        except Exception:
+            pass
+        return 128_000
+
+    def skill_context_token_budget(
+        self,
+        *,
+        token_budget: int | None = None,
+        context_window_tokens: int | None = None,
+        budget_ratio: float | None = None,
+        max_tokens: int | None = None,
+    ) -> int:
+        """Token budget for the skill catalog block.
+
+        Dual bound (not a single magic ratio):
+        1. Soft share of the model context window (skill_context_token_ratio).
+        2. Hard ceiling skill_context_max_tokens (default 4k ≈ Claude Code's
+           ~16k-char available_skills budget / ~100 tokens per skill metadata).
+
+        budget = clamp(window * ratio, 160, max_tokens)
+        """
+        if token_budget is not None and token_budget > 0:
+            return int(token_budget)
+        window = context_window_tokens or self._context_window_tokens()
+        settings = None
+        try:
+            from agentnexus.core.config import get_settings
+
+            settings = get_settings()
+        except Exception:
+            settings = None
+        if budget_ratio is None:
+            budget_ratio = float(getattr(settings, "skill_context_token_ratio", 0.02) or 0.02)
+        if max_tokens is None:
+            max_tokens = int(getattr(settings, "skill_context_max_tokens", 4000) or 4000)
+        budget_ratio = max(0.001, min(float(budget_ratio), 0.2))
+        max_tokens = max(200, int(max_tokens))
+        return max(160, min(int(window * budget_ratio), max_tokens))
+
     def available_skill_context(
         self,
         limit: int = 20,
         recommendations: list[SkillRoute] | None = None,
         *,
-        inject_all_max: int = 8,
-        top_k: int = 5,
+        token_budget: int | None = None,
+        context_window_tokens: int | None = None,
+        budget_ratio: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """Build the skill catalog block for the system prompt.
 
-        Few skills (≤ inject_all_max): inject the full catalog.
-        Many skills: inject only the router shortlist (ranked top_k) so the
-        prompt stays bounded and high-signal skills are not truncated away.
+        Packs skill lines greedily under a token budget derived from the model
+        context window (skill_context_token_ratio). Fits everything when the
+        catalog is small; otherwise injects the rank-ordered shortlist first.
         """
         entries = [entry for entry in self.list() if entry.source_kind == "skill"]
         if not entries:
             return ""
 
+        budget = self.skill_context_token_budget(
+            token_budget=token_budget,
+            context_window_tokens=context_window_tokens,
+            budget_ratio=budget_ratio,
+            max_tokens=max_tokens,
+        )
         rec_list = list(recommendations or [])
         rec_ids = {r.entry.qualified_id for r in rec_list}
         by_id = {entry.qualified_id: entry for entry in entries}
@@ -347,52 +417,42 @@ class SkillService:
             marker = " [recommended]" if entry.qualified_id in rec_ids else ""
             return f"- {entry.qualified_id}: {entry.display_name} — {desc}{marker}"
 
-        few = len(entries) <= inject_all_max
-        if few:
-            ordered: list = []
-            seen: set[str] = set()
-            for rec in rec_list:
-                if rec.entry.qualified_id in by_id and rec.entry.qualified_id not in seen:
-                    ordered.append(by_id[rec.entry.qualified_id])
-                    seen.add(rec.entry.qualified_id)
-            for entry in entries:
-                if entry.qualified_id not in seen:
-                    ordered.append(entry)
-                    seen.add(entry.qualified_id)
+        ordered: list = []
+        seen: set[str] = set()
+        for rec in rec_list:
+            entry = by_id.get(rec.entry.qualified_id) or rec.entry
+            if entry.qualified_id not in seen:
+                ordered.append(entry)
+                seen.add(entry.qualified_id)
+        for entry in entries:
+            if entry.qualified_id not in seen:
+                ordered.append(entry)
+                seen.add(entry.qualified_id)
+
+        from agentnexus.skills.router.retrieve import estimate_text_tokens
+
+        used = estimate_text_tokens("\n".join(lines))
+        body_lines: list[str] = []
+        for entry in ordered:
+            line = _line(entry)
+            cost = estimate_text_tokens(line) + 1
+            if body_lines and used + cost > budget:
+                break
+            body_lines.append(line)
+            used += cost
+
+        all_fit = len(body_lines) >= len(ordered)
+        if all_fit:
             if rec_list:
                 lines.append("")
                 lines.append("All available skills:")
-            for entry in ordered:
-                lines.append(_line(entry))
+            lines.extend(body_lines)
             return "\n".join(lines) + "\n\n"
 
-        # Many skills: rank-ordered shortlist only (do not dump registry order).
-        shortlist: list = []
-        seen = set()
-        if rec_list:
-            from agentnexus.skills.router.rank import adaptive_shortlist_len
-
-            keep_n = adaptive_shortlist_len(
-                [r.score for r in rec_list],
-                min_k=min(3, top_k),
-                max_k=max(top_k, 12),
-            )
-        else:
-            keep_n = top_k
-        for rec in rec_list[:keep_n]:
-            entry = by_id.get(rec.entry.qualified_id) or rec.entry
-            if entry.qualified_id not in seen:
-                shortlist.append(entry)
-                seen.add(entry.qualified_id)
-        if not shortlist:
-            # No ranking for this turn — keep a tiny stable sample and point at /skill list.
-            shortlist = entries[:top_k]
-
         lines.append("")
-        lines.append("Skills matching this request:")
-        for entry in shortlist:
-            lines.append(_line(entry))
-        remaining = len(entries) - len(shortlist)
+        lines.append("Skills matching this request (context budget limited):")
+        lines.extend(body_lines)
+        remaining = len(ordered) - len(body_lines)
         if remaining > 0:
             lines.append(f"- ... {remaining} more skills available via /skill list")
         return "\n".join(lines) + "\n\n"

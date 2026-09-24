@@ -83,6 +83,7 @@ class SkillRecommender:
         self,
         *,
         min_score: float = 2.0,
+        margin: float = 0.75,
         max_terms: int = 8,
         max_candidates: int = 8,
         use_embeddings: bool = True,
@@ -91,6 +92,7 @@ class SkillRecommender:
         semantic_threshold: float = 0.3,
     ):
         self.min_score = min_score
+        self.margin = margin
         self.max_terms = max_terms
         self.max_candidates = max_candidates
         self.use_embeddings = use_embeddings
@@ -348,8 +350,8 @@ class SkillRecommender:
         # If only one candidate or clear winner, return directly
         if len(candidates) == 1:
             return candidates[0]
-        margin = candidates[0].score - candidates[1].score
-        if margin >= self.min_score * 0.375:
+        gap = candidates[0].score - candidates[1].score
+        if gap >= self.margin:
             return candidates[0]
         # Close scores — check if intent disambiguates
         intent = extract_intent_signals(text, set(tokenize(text)))

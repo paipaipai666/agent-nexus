@@ -330,6 +330,14 @@ class Settings(BaseSettings):
     skill_auto_route_llm_fallback: bool = Field(default=True)
     skill_auto_route_min_score: float = Field(default=2.0, ge=0.1, le=100.0)
     skill_auto_route_margin: float = Field(default=0.75, ge=0.0, le=100.0)
+    # Skill catalog block budget. Dual bound from production/research:
+    # - ratio: soft share of the model context window (tool/skill static prefix
+    #   guidance is ~1-5% of window; larger windows should share a smaller slice)
+    # - max_tokens: hard ceiling (~Claude Code available_skills ~16k chars ≈ 4k
+    #   tokens, and ~100 tokens/skill metadata per Anthropic Agent Skills docs)
+    # budget = clamp(window * ratio, 160, max_tokens)
+    skill_context_token_ratio: float = Field(default=0.02, ge=0.001, le=0.2)
+    skill_context_max_tokens: int = Field(default=4000, ge=200, le=50000)
     runtime_profile: str = Field(default="default")
     # 预算分层配置
     budget_simple_max_tokens: int = Field(default=5000, ge=1000, le=100000)

@@ -63,6 +63,7 @@ SETTABLE_KEYS = {
     "skills_default_namespace", "default_skill",
     "skill_auto_route", "skill_auto_route_llm_fallback",
     "skill_auto_route_min_score", "skill_auto_route_margin",
+    "skill_context_token_ratio", "skill_context_max_tokens",
     # Runtime
     "runtime_profile",
     "trace_retention_days",

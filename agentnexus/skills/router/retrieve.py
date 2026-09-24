@@ -16,6 +16,20 @@ from agentnexus.skills.router.types import (
 )
 
 
+def estimate_text_tokens(text: str) -> int:
+    """Approximate token count for prompt-budget packing (tiktoken, CJK fallback)."""
+    if not text:
+        return 0
+    try:
+        from agentnexus.memory.short_term import _get_tiktoken_encoding
+
+        enc = _get_tiktoken_encoding()
+        return len(enc.encode(text))
+    except Exception:
+        # CJK-heavy text runs ~1.5–2 chars/token; stay slightly conservative.
+        return max(1, (len(text) + 1) // 2)
+
+
 def entry_body_text(entry: SkillEntry, max_chars: int = 2000) -> str:
     """Concatenate skill body signals for routing (steps, criteria, resource names).
 

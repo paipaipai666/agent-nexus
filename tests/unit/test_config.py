@@ -36,6 +36,8 @@ class TestConfigSettings:
         assert s.skill_auto_route_llm_fallback is True
         assert s.skill_auto_route_min_score == 2.0
         assert s.skill_auto_route_margin == 0.75
+        assert s.skill_context_token_ratio == 0.02
+        assert s.skill_context_max_tokens == 4000
         assert s.memory_llm_gate is False
 
     def test_default_rag_storage_paths(self, temp_agentnexus_home):

@@ -503,7 +503,7 @@ class ChatService:
 
         # Let the agent decide — it has conversation history + LTM context
         # If agent decides to use a skill, it will call /<skill-id> or
-        # the maybe_auto_select will activate it
+        # the maybe_auto_select will activate it (once — do not re-run below).
         if not session.skill:
             service.maybe_auto_select(text)
 
@@ -511,6 +511,7 @@ class ChatService:
             text,
             tool_executor=self._tool_executor,
             memory_manager=memory_manager,
+            auto_select=False,
         )
         snapshot = service.snapshot()
         if snapshot.auto_route_reason:
