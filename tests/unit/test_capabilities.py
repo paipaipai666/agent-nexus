@@ -33,8 +33,8 @@ class TestResolveCtxMax:
         assert resolve_ctx_max("totally-unknown-model-xyz") is None
 
     def test_override_sets_context(self, monkeypatch):
-        from agentnexus.core.config import LLMProvider, ModelEntry, ModelOverride, Settings
         import agentnexus.core.capabilities as caps_mod
+        from agentnexus.core.config import LLMProvider, ModelEntry, ModelOverride, Settings
 
         entry = ModelEntry(
             model_id="m1",

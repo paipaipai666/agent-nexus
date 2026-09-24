@@ -1,6 +1,6 @@
 """Pure method tests for HUD widget and resolve_ctx_max helper."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from pydantic import SecretStr
 

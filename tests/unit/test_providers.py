@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentnexus.core.providers.base import StreamResult
 from agentnexus.core.providers.router import select_provider
 

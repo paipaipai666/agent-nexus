@@ -7,7 +7,7 @@ Shell injection tests complement existing coverage in test_shell.py
 and test_security_injection.py with redirect, sudo, and env var patterns."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -333,13 +333,15 @@ class TestShellInjection:
         with patch("agentnexus.tools.shell.get_settings") as mock_settings:
             mock_settings.return_value.shell_enabled = True
             mock_settings.return_value.shell_execution_backend = "local_unsafe"
-            with patch("agentnexus.tools.shell.subprocess.run") as mock_run:
-                mock_run.return_value.stdout = "mocked_output"
-                mock_run.return_value.stderr = ""
-                mock_run.return_value.returncode = 0
-                result = shell_exec("echo $SECRET_ENV_VAR")
-                assert "SECRET_ENV_VAR" not in result or "mocked_output" in result
-                assert "exit_code" in result
+            mock_result = MagicMock(
+                stdout="mocked_output", stderr="", returncode=0,
+            )
+            with patch("agentnexus.tools.shell.shutil.which", return_value="/bin/sh"):
+                with patch("agentnexus.tools.shell.process_tracker.run_tracked", return_value=mock_result) as mock_run:
+                    result = shell_exec("echo $SECRET_ENV_VAR")
+                    assert "SECRET_ENV_VAR" not in result or "mocked_output" in result
+                    assert "exit_code" in result
+                    assert mock_run.called
 
     @patch("agentnexus.tools.shell._SYSTEM", "Linux")
     def test_env_var_multi_character_safe(self):

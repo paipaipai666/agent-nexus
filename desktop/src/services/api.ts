@@ -484,13 +484,10 @@ export const api = {
     }),
 
   wikiIngestFile: async (file: File, namespace = 'default', pageType = 'concept') => {
-    const headers: Record<string, string> = {}
-    if (apiKey) headers['X-API-Key'] = apiKey
     const formData = new FormData()
     formData.append('file', file)
     const res = await fetch(`${BASE_URL}/api/wiki/ingest/file?namespace=${namespace}&page_type=${pageType}`, {
       method: 'POST',
-      headers,
       body: formData,
     })
     if (!res.ok) {

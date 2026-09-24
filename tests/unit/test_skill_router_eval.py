@@ -8,7 +8,6 @@ from agentnexus.skills.router.eval import (
 
 
 def _entries():
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     from agentnexus.skills.registry import SkillEntry

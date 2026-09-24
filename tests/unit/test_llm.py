@@ -407,7 +407,6 @@ class TestCapabilityProbe:
 
     def test_unknown_model_without_probe_stays_conservative(self, temp_agentnexus_home, monkeypatch):
         """Without a catalog or successful probe, flags stay off."""
-        import agentnexus.core.llm as m
 
         self._patch_provider(monkeypatch, None)  # probe cannot run
         client = AgentLLM(model="stealth/never-known", api_key="k",
