@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.text_utils import collapse_and_truncate
+from agentnexus.observability.timeline import get_timeline_store
 from agentnexus.services.turn import TurnRecord, TurnRuntime
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ class AgentEvent:
     seq: int = 0  # per-run monotonic sequence for reconnect resume
     tok_seq: int = 0  # per-run monotonic index over stream_token events only;
                       # absolute (queue-position independent) reconnect skip key
+    step_id: int = 0  # ReAct step this event belongs to (timeline grouping)
 
 
 class ChatService:
@@ -216,6 +218,14 @@ class ChatService:
             self._run_event_seq[run_id] = seq
             # frozen dataclass — assign via object.__setattr__
             object.__setattr__(event, "seq", seq)
+            # Timeline persistence — observability never blocks the loop.
+            try:
+                get_timeline_store().record_event(
+                    event.session_id, run_id, seq, event.type,
+                    event.payload, step_id=event.step_id,
+                )
+            except Exception as e:
+                logger.debug("Timeline persist failed: %s", e)
         sync_q = self._run_events.get(run_id)
         if sync_q is not None:
             sync_q.put(event)
@@ -292,6 +302,14 @@ class ChatService:
             # Crash after commit keeps the round; crash before loses only it.
             if hasattr(agent, "set_round_persist"):
                 agent.set_round_persist(turn.commit_round)
+            # Per-model-call context snapshots for the timeline UI. Wrapped in
+            # try/except inside the agent — observability never breaks the run.
+            if hasattr(agent, "set_context_observer"):
+                agent.set_context_observer(
+                    lambda step_id, messages: get_timeline_store().record_snapshot(
+                        session_id, run.id, step_id, messages,
+                    )
+                )
             # Suppress agent _output (print) — events are sent via WebSocket
             try:
                 agent._output = lambda _msg: None
@@ -336,7 +354,13 @@ class ChatService:
             ))
             self._put_event(run.id, AgentEvent(
                 "run_finished",
-                {"answer": answer or "", "status": record.status, "error": llm_error},
+                {
+                    "answer": answer or "",
+                    "status": record.status,
+                    "error": llm_error,
+                    "reason": getattr(record, "reason", "") or "",
+                    "detail": getattr(record, "detail", "") or "",
+                },
                 run_id=run.id,
                 session_id=session_id,
             ))
@@ -570,6 +594,12 @@ class ChatService:
 
         def _on_event(event, from_state, to_state):
             nonlocal has_reasoning
+            # FSM auto-advance transitions notify with event=None — not a real
+            # event; forward to the previous handler but emit nothing.
+            if event is None:
+                if previous is not None:
+                    previous(event, from_state, to_state)
+                return
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
 
@@ -630,6 +660,7 @@ class ChatService:
                     {"name": payload.get("name", ""), "arguments": payload.get("arguments", {})},
                     run_id=run_id,
                     session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
                 ))
                 return
             if event_type == "TOOL_DONE":
@@ -642,6 +673,7 @@ class ChatService:
                     },
                     run_id=run_id,
                     session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
                 ))
                 return
 
@@ -657,6 +689,7 @@ class ChatService:
                 },
                 run_id=run_id,
                 session_id=session_id,
+                step_id=getattr(event, "step_id", 0),
             )
             self._put_event(run_id, agent_event)
             if previous is not None:

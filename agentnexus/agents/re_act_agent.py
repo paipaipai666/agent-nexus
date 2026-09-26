@@ -173,6 +173,15 @@ class ReActAgent:
         """Install per-round durable commit (called after each ReAct iteration)."""
         self._round_persist = fn
 
+    def set_context_observer(self, fn) -> None:
+        """Install a per-model-call context snapshot hook: fn(step_id, messages).
+
+        Called in _on_round right before the LLM request, with the exact
+        messages array about to be sent. Observability only — a throwing
+        observer must never break the loop (caller wraps it).
+        """
+        self._context_observer = fn
+
     def _persist_round(self) -> None:
         """Flush this round's STM rows to disk. Raises MemoryCommitError on failure.
 
@@ -460,13 +469,20 @@ class ReActAgent:
             else:
                 ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
 
+        # 观测：在发起模型调用前快照将发送的完整上下文（仅导出副本，不改写 ctx.messages）
+        observer = getattr(self, "_context_observer", None)
+        if observer is not None:
+            try:
+                observer(ctx.run_state.current_step, [dict(m) for m in ctx.messages])
+            except Exception as e:
+                logger.debug("Context observer failed: %s", e)
+
         response_text = call_llm(
             self.llm_client,
             ctx,
             json_format_section=self._build_json_format_section(),
             on_token=_stream_token,
         )
-
         if self.llm_client.last_error and not response_text:
             err = self.llm_client.last_error
             self._output(f"错误: {err}")

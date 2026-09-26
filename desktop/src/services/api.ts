@@ -1,5 +1,16 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
+// ── Timeline (observability) types ──────────────────────────────────────
+export interface TimelineEvent {
+  id: number
+  run_id: string
+  seq: number
+  ts: number
+  event_type: string
+  step_id: number
+  payload: Record<string, unknown>
+}
+
 // ── LLM provider profile types ──────────────────────────────────────────
 /** Opaque capability override — YAML/advanced only, never edited in the UI.
  *  Round-tripped on save so UI edits don't wipe config.yaml overrides. */
@@ -125,6 +136,28 @@ export const api = {
   getTodos: (sessionId: string) =>
     request<{ items: Array<{ id: number; description: string; status: string }>; count: number }>(
       `/api/session/${sessionId}/todos`
+    ),
+
+  // Timeline (observability)
+  getSessionEvents: (sessionId: string, after = 0) =>
+    request<{ session_id: string; events: TimelineEvent[]; last_id: number; count: number }>(
+      `/api/session/${sessionId}/events?after=${after}`
+    ),
+
+  getContextSnapshot: (sessionId: string, runId: string, stepId: number) =>
+    request<{
+      session_id: string
+      run_id: string
+      step_id: number
+      ts: number
+      message_count: number
+      char_count: number
+      messages: Array<{ role: string; content?: string; tool_call_id?: string; [k: string]: unknown }>
+    }>(`/api/session/${sessionId}/context/${runId}/${stepId}`),
+
+  getContextSteps: (sessionId: string, runId: string) =>
+    request<{ session_id: string; run_id: string; steps: number[] }>(
+      `/api/session/${sessionId}/context-steps/${runId}`
     ),
 
   // Knowledge

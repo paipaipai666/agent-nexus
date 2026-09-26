@@ -394,6 +394,36 @@ def list_todos(session_id: str):
     }
 
 
+@router.get("/session/{session_id}/events")
+def list_session_events(session_id: str, after: int = 0, limit: int = 2000):
+    """Append-only session event log for the timeline UI (cursor: row id)."""
+    from agentnexus.observability.timeline import get_timeline_store
+
+    events = get_timeline_store().list_events(session_id, after_id=after, limit=limit)
+    last_id = events[-1]["id"] if events else after
+    return {"session_id": session_id, "events": events, "last_id": last_id, "count": len(events)}
+
+
+@router.get("/session/{session_id}/context/{run_id}/{step_id}")
+def get_context_snapshot(session_id: str, run_id: str, step_id: int):
+    """Full context snapshot (the exact messages array) for one model call."""
+    from agentnexus.observability.timeline import get_timeline_store
+
+    snapshot = get_timeline_store().get_snapshot(session_id, run_id, step_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail=f"No context snapshot for step {step_id}")
+    return {"session_id": session_id, "run_id": run_id, "step_id": step_id, **snapshot}
+
+
+@router.get("/session/{session_id}/context-steps/{run_id}")
+def list_context_steps(session_id: str, run_id: str):
+    """Step ids that have a context snapshot, for the timeline step picker."""
+    from agentnexus.observability.timeline import get_timeline_store
+
+    steps = get_timeline_store().list_snapshot_steps(session_id, run_id)
+    return {"session_id": session_id, "run_id": run_id, "steps": steps}
+
+
 @router.get("/session/{session_id}")
 def get_session(session_id: str):
     from agentnexus.server.app import _get_runtime

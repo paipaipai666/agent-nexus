@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
@@ -890,6 +890,13 @@ export default function ChatPage() {
               </span>
             )}
             <div className="flex items-center gap-0.5 shrink-0 ml-auto">
+              <button
+                onClick={() => sessionId && navigate(`/chat/${sessionId}/timeline`)}
+                disabled={!sessionId}
+                className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]"
+                style={{ color: 'var(--fg-muted)' }}
+                title="Session timeline — every step + full context"
+              ><GitBranch size={10} /></button>
               <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={10} /></button>
               <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={10} /></button>
               <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={10} /></button>

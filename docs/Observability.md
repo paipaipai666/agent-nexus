@@ -226,8 +226,34 @@ nexus alerts --days 7       # 告警历史
 | Health | `/health` | 健康检查仪表盘（5 项子系统） |
 | Alerts | `/alerts` | 告警历史 + 规则列表 |
 | Audit | `/audit` | 审计日志查看器（搜索/过滤） |
+| Timeline | `/chat/{sessionId}/timeline` | 会话级时间线：agent 每步动作 + 每步完整上下文（Chat 输入框 HUD 行 GitBranch 按钮进入） |
 | StatusBar | 底部常驻 | 连接状态、上下文窗口、Token I/O |
 | MCP Page | `/mcp` | MCP 服务器健康仪表盘 |
+
+## 会话时间线（Session Timeline）
+
+面向单个会话的逐步可观测性：agent 每个 step 干了什么、处于哪个阶段（思考 / 工具调用 / 观察 / 回答 / 错误），以及**每次模型调用前发给 LLM 的完整上下文**。
+
+### 数据链路
+
+```text
+ReActAgent._on_round
+  ├─ 模型调用前 → set_context_observer → context_snapshots 表（全量 messages JSON）
+  └─ ctx.emit 事件 → ChatService._put_event（唯一收口）
+       └─ TimelineStore.record_event → session_events 表（stream_token 不落盘）
+```
+
+- 存储：`memory.db` 两张表 —— `session_events`（追加式，rowid 游标）+ `context_snapshots`（按 step 全量快照）
+- 非阻塞：所有写入 try/except 吞错，观测失败只丢数据，永不阻塞 agent loop
+- 幂等：`INSERT OR IGNORE` on `(session_id, run_id, seq)`，重放安全
+
+### API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/session/{id}/events?after={rowid}` | 事件日志（游标增量拉取，时间线页面 1.5s 轮询） |
+| `GET /api/session/{id}/context/{run_id}/{step_id}` | 该步模型调用前的完整上下文 |
+| `GET /api/session/{id}/context-steps/{run_id}` | 有快照的 step 列表 |
 
 ### 典型排查流程
 
