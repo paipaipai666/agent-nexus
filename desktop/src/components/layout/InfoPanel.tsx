@@ -27,7 +27,6 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    timeline: true,
     todos: true,
     tools: true,
   })
@@ -62,33 +61,6 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
       collapsed={infoPanelCollapsed}
       onToggleCollapse={toggleInfoPanel}
     >
-      {/* Task Timeline */}
-      <Section
-        title="Task Timeline"
-        icon={<Clock size={14} />}
-        expanded={expandedSections.timeline}
-        onToggle={() => toggleSection('timeline')}
-      >
-        <div className="space-y-2">
-          {todos.length === 0 ? (
-            <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>No tasks yet</p>
-          ) : (
-            todos.slice(0, 5).map(todo => (
-              <div key={todo.id} className="flex items-start gap-2">
-                {todo.status === 'done' ? (
-                  <CheckCircle size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--green)' }} />
-                ) : todo.status === 'in_progress' ? (
-                  <Clock size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--amber)' }} />
-                ) : (
-                  <Circle size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--fg-faint)' }} />
-                )}
-                <span className="text-xs" style={{ color: 'var(--fg-secondary)' }}>{todo.description}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </Section>
-
       {/* Todo List */}
       <Section
         title="Todo List"
