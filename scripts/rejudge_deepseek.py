@@ -7,6 +7,7 @@ calls the OpenAI-compatible endpoint directly with thinking disabled and
 """
 
 import json
+import os
 import re
 import sys
 import time
@@ -18,7 +19,6 @@ import httpx
 from agentnexus.eval.benchmarks.rgb_loader import load_rgb_queries
 
 API = "https://api.deepseek.com/chat/completions"
-KEY = "sk-e212a915ff94444889546f1fa2855c56"
 MODEL = "deepseek-flash"
 
 PROMPT = """你是 RAG 评估专家。请判断回答与标准答案的一致程度(correctness)。
@@ -44,10 +44,17 @@ def parse_score(text: str) -> float:
     return 0.0
 
 
+def _api_key() -> str:
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not key:
+        raise SystemExit("DEEPSEEK_API_KEY is not set")
+    return key
+
+
 def judge_one(client: httpx.Client, query, generation: str, limiter) -> tuple[bool, float, str]:
     limiter.acquire()
     try:
-        r = client.post(API, headers={"Authorization": f"Bearer {KEY}"}, json={
+        r = client.post(API, headers={"Authorization": f"Bearer {_api_key()}"}, json={
             "model": MODEL,
             "messages": [{"role": "user", "content": PROMPT.format(
                 question=query.query, ground_truth=query.ground_truth_text(), answer=generation)}],
