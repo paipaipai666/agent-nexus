@@ -46,6 +46,8 @@ Thumbs.db
 **/.trae/
 **/.sisyphus/
 .coverage
+coverage.xml
+htmlcov/
 sample.txt
 perf_report.md
 security_test_report.md
