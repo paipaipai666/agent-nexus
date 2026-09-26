@@ -59,6 +59,18 @@ def test_to_anthropic_payload_maps_system_and_tools():
     assert "tool_result" in types
 
 
+def test_to_anthropic_payload_maps_effort_to_derived_budget():
+    """User config is effort-only; budget_tokens is a derived wire value."""
+    assert to_anthropic_payload([{"role": "user", "content": "x"}], model="m", reasoning_effort=None).get("thinking") is None
+    assert to_anthropic_payload([{"role": "user", "content": "x"}], model="m", reasoning_effort="none").get("thinking") is None
+    low = to_anthropic_payload([{"role": "user", "content": "x"}], model="m", reasoning_effort="low")
+    med = to_anthropic_payload([{"role": "user", "content": "x"}], model="m", reasoning_effort="medium")
+    high = to_anthropic_payload([{"role": "user", "content": "x"}], model="m", reasoning_effort="high")
+    assert low["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert med["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+    assert high["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+
+
 def _sse(*events: dict) -> list[str]:
     lines = []
     for ev in events:

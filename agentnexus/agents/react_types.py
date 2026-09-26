@@ -156,6 +156,8 @@ class RunState:
     # Fast-path stash: visible text accompanying a bookkeeping-only tool batch
     # (todo_add/todo_update), used as the final answer without another LLM round.
     terminal_answer: str | None = None
+    # Partial answer accumulated across length-truncated rounds (continue-on-truncate).
+    partial_answer: str = ""
 
 
 @dataclass

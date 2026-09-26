@@ -90,9 +90,10 @@ class TestTableShape:
         assert events == {E.ANSWER_VETOED, None}  # None = 无条件兜底
 
     def test_execute_tool_exits_match_tool_return_set(self):
-        # _on_tools_requested 返回封闭于 {TOOLS_DONE, ANSWER_READY}
+        # _on_tools_requested 返回封闭于 {TOOLS_DONE, ANSWER_READY, FAULT}
+        # FAULT = 记忆写入失败等致命错误，禁止进入下一轮
         events = {t.event for t in _rows_for(S.EXECUTE_TOOL)}
-        assert events == {E.TOOLS_DONE, E.ANSWER_READY}
+        assert events == {E.TOOLS_DONE, E.ANSWER_READY, E.FAULT}
 
 
 # ══════════════════════════════════════════════════════════════

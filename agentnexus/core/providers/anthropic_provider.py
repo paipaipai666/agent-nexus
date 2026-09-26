@@ -128,6 +128,10 @@ def to_anthropic_payload(
             body["tool_choice"] = {"type": "auto"}
 
     if reasoning_effort and reasoning_effort != "none":
+        # Map the shared effort knob to Anthropic's manual thinking budget.
+        # (budget_tokens is deprecated on Claude 4.6+ in favor of adaptive+effort;
+        # this path still works for 4.5-and-earlier and remains accepted on 4.6.)
+        # "none" omits the thinking block entirely — explicit off.
         budget = 1024 if reasoning_effort == "low" else 4096 if reasoning_effort == "medium" else 8192
         body["thinking"] = {"type": "enabled", "budget_tokens": budget}
 

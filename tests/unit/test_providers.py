@@ -131,6 +131,68 @@ class TestOpenAIProvider:
 
         assert result.reasoning_content == "let me think..."
 
+    def test_reasoning_effort_none_disables_vendor_default_thinking(self):
+        provider = self._make_provider()
+        chunk = MockOpenAIChunk(content="ok", finish_reason="stop")
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="deepseek-ai/DeepSeek-V4-Flash",
+                api_key="k",
+                base_url="https://api.deepseek.com",
+                reasoning_effort="none",
+            )
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning_effort"] == "none"
+        assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    def test_reasoning_effort_high_enables_thinking(self):
+        provider = self._make_provider()
+        chunk = MockOpenAIChunk(content="ok", finish_reason="stop")
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="deepseek-ai/DeepSeek-V4-Flash",
+                api_key="k",
+                base_url="https://api.deepseek.com",
+                reasoning_effort="high",
+            )
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning_effort"] == "high"
+        assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
+    def test_reasoning_effort_rejected_falls_back_to_plain_request(self):
+        provider = self._make_provider()
+        chunk = MockOpenAIChunk(content="ok", finish_reason="stop")
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [
+            ValueError("reasoning_effort not supported"),
+            [chunk],
+        ]
+
+        with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=mock_client):
+            result = provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4o",
+                api_key="k",
+                base_url="https://api.openai.com",
+                reasoning_effort="none",
+            )
+
+        assert result.text == "ok"
+        assert mock_client.chat.completions.create.call_count == 2
+        second = mock_client.chat.completions.create.call_args.kwargs
+        assert "reasoning_effort" not in second
+        assert "extra_body" not in second
+
     def test_tool_calls_accumulated(self):
         provider = self._make_provider()
         tc1 = _make_tool_delta(0, "call_123", "get_weather", '{"loc')

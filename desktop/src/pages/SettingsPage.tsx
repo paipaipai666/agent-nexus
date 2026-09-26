@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Save, Loader2, RotateCcw, Plus, Trash2, RefreshCw, Check } from 'lucide-react'
-import { api, ProviderDraft, ProviderInfo, ModelOverrideDraft } from '../services/api'
+import { api, ProviderDraft, ProviderInfo } from '../services/api'
 import { ACCENT_PRESETS, applyAccent } from '../services/accent'
 
 interface PersonaProject {
@@ -65,31 +65,6 @@ const GROUPS: Record<string, string[]> = {
 
 const EMPTY_PERSONA: PersonaData = { agent_name: '', identity: '', tone: '', projects: [] }
 
-const OVERRIDE_FIELDS: Array<{ key: keyof ModelOverrideDraft; label: string; kind: 'bool' | 'int' }> = [
-  { key: 'supports_vision', label: '视觉', kind: 'bool' },
-  { key: 'supports_tool_calling', label: '工具调用', kind: 'bool' },
-  { key: 'supports_json_mode', label: 'JSON 模式', kind: 'bool' },
-  { key: 'supports_json_schema', label: 'JSON Schema', kind: 'bool' },
-  { key: 'supports_thinking', label: '思考', kind: 'bool' },
-  { key: 'supports_parallel_tool_calls', label: '并行工具', kind: 'bool' },
-  { key: 'context_length', label: '上下文长度', kind: 'int' },
-  { key: 'max_output_tokens', label: '最大输出', kind: 'int' },
-]
-
-function TriSelect({ value, onChange }: { value: boolean | null | undefined; onChange: (v: boolean | null) => void }) {
-  return (
-    <select
-      value={value === true ? 'y' : value === false ? 'n' : ''}
-      onChange={e => onChange(e.target.value === '' ? null : e.target.value === 'y')}
-      className="input-field text-xs"
-    >
-      <option value="">自动</option>
-      <option value="y">是</option>
-      <option value="n">否</option>
-    </select>
-  )
-}
-
 export default function SettingsPage() {
   const [config, setConfig] = useState<Record<string, any>>({})
   const [edited, setEdited] = useState<Record<string, string>>({})
@@ -135,7 +110,7 @@ export default function SettingsPage() {
         name: p.name,
         base_url: p.base_url,
         api_key: '',
-        timeout: String(p.timeout ?? 60),
+        timeout: p.timeout ?? 60,
         models: (p.models || []).map(m => ({ model_id: m.model_id, override: m.override || null })),
       })))
       setActiveModel(d.active_model || d.active || '')
@@ -184,7 +159,7 @@ export default function SettingsPage() {
   const handlePersonaReset = useCallback(() => {
     setPersonaDraft(persona)
   }, [persona])
-  const handleProviderField = (index: number, field: 'name' | 'base_url' | 'api_key' | 'timeout', value: string) => {
+  const handleProviderField = (index: number, field: 'name' | 'base_url' | 'api_key', value: string) => {
     setProvidersDraft(prev => {
       const next = [...prev]
       next[index] = { ...next[index], [field]: value }
@@ -194,7 +169,7 @@ export default function SettingsPage() {
   }
 
   const addProviderRow = () => {
-    setProvidersDraft(prev => [...prev, { name: '', base_url: '', api_key: '', timeout: '60', models: [] }])
+    setProvidersDraft(prev => [...prev, { name: '', base_url: '', api_key: '', timeout: 60, models: [] }])
     setProvidersDirty(true)
   }
 
@@ -232,25 +207,6 @@ export default function SettingsPage() {
     setProvidersDirty(true)
   }
 
-  const handleOverride = (pIdx: number, mIdx: number, field: keyof ModelOverrideDraft, raw: string, kind: 'bool' | 'int') => {
-    setProvidersDraft(prev => {
-      const next = [...prev]
-      const models = [...next[pIdx].models]
-      const override: ModelOverrideDraft = { ...(models[mIdx].override || {}) }
-      if (raw === '') {
-        delete override[field]
-      } else {
-        const value = kind === 'bool' ? raw === 'y' : parseInt(raw, 10)
-        if (typeof value === 'number' && !Number.isFinite(value)) return prev
-        ;(override as Record<string, boolean | number | null | undefined>)[field] = value
-      }
-      models[mIdx] = { ...models[mIdx], override: Object.keys(override).length ? override : null }
-      next[pIdx] = { ...next[pIdx], models }
-      return next
-    })
-    setProvidersDirty(true)
-  }
-
   const handleDiscover = async (pIdx: number) => {
     const row = providersDraft[pIdx]
     setError(null)
@@ -260,7 +216,7 @@ export default function SettingsPage() {
       setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? {
         ...p,
         discovering: false,
-        discovered: d.models.map(m => ({ ...m, checked: false })),
+        discovered: d.models.map(m => ({ id: m.id, context_length: m.context_length })),
       } : p))
     } catch (e) {
       setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? { ...p, discovering: false } : p))
@@ -268,24 +224,16 @@ export default function SettingsPage() {
     }
   }
 
-  const toggleDiscovered = (pIdx: number, id: string) => {
-    setProvidersDraft(prev => prev.map((p, i) => i === pIdx ? {
-      ...p,
-      discovered: (p.discovered || []).map(m => m.id === id ? { ...m, checked: !m.checked } : m),
-    } : p))
-  }
-
-  const importDiscovered = (pIdx: number) => {
+  /** Click a discovered model to toggle it in/out of the provider's model list. */
+  const toggleDiscoveredModel = (pIdx: number, id: string) => {
     setProvidersDraft(prev => {
       const next = [...prev]
       const row = next[pIdx]
-      const existing = new Set(row.models.map(m => m.model_id))
-      const picked = (row.discovered || []).filter(m => m.checked && !existing.has(m.id))
-      next[pIdx] = {
-        ...row,
-        models: [...row.models, ...picked.map(m => ({ model_id: m.id, override: null }))],
-        discovered: undefined,
-      }
+      const exists = row.models.some(m => m.model_id === id)
+      const models = exists
+        ? row.models.filter(m => m.model_id !== id)
+        : [...row.models, { model_id: id, override: null }]
+      next[pIdx] = { ...row, models }
       return next
     })
     setProvidersDirty(true)
@@ -298,7 +246,7 @@ export default function SettingsPage() {
         name: r.name,
         base_url: r.base_url,
         ...(r.api_key ? { api_key: r.api_key } : {}),
-        timeout: parseInt(r.timeout, 10) || 60,
+        timeout: r.timeout || 60,
         models: r.models,
       })))
       setProvidersDirty(false)
@@ -309,7 +257,7 @@ export default function SettingsPage() {
         name: p.name,
         base_url: p.base_url,
         api_key: '',
-        timeout: String(p.timeout ?? 60),
+        timeout: p.timeout ?? 60,
         models: (p.models || []).map(m => ({ model_id: m.model_id, override: m.override || null })),
       })))
       setActiveModel(d.active_model || d.active || '')
@@ -320,16 +268,6 @@ export default function SettingsPage() {
     }
   }
 
-  const handleUseModel = async (selector: string) => {
-    setError(null)
-    try {
-      await api.setActiveLlmProvider(selector)
-      setActiveModel(selector)
-    } catch (e) {
-      setError(`切换模型失败：${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-
   const handleJudgeModelChange = async (selector: string) => {
     setError(null)
     try {
@@ -337,6 +275,22 @@ export default function SettingsPage() {
       setJudgeModel(selector)
     } catch (e) {
       setError(`保存 judge 模型失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const handleThinkingModeChange = async (mode: string) => {
+    setError(null)
+    const prev = { thinking: config.model_thinking, effort: config.model_thinking_effort }
+    const enabled = mode !== 'off'
+    const effort = mode === 'off' ? 'none' : mode
+    setConfig(c => ({ ...c, model_thinking: enabled, model_thinking_effort: effort }))
+    try {
+      // One user knob → both fields: on/off is model_thinking, depth is effort.
+      await api.updateConfig('model_thinking', enabled ? 'true' : 'false')
+      await api.updateConfig('model_thinking_effort', effort)
+    } catch (e) {
+      setConfig(c => ({ ...c, model_thinking: prev.thinking, model_thinking_effort: prev.effort }))
+      setError(`保存思考模式失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -521,8 +475,29 @@ export default function SettingsPage() {
             </button>
           </div>
           <p className="text-[11px] mb-3" style={{ color: 'var(--fg-faint)' }}>
-            每个供应商可挂多个模型；能力默认值自动检测，可逐项覆盖。聊天输入框左下角随时切换任务模型。
+            填 base_url 与 api_key，拉取或添加模型即可。思考模式：关闭=只用协议 Thought；低/中/高=请求模型推理。能力自动检测；特殊模型可在 config.yaml 的 override 里覆盖。
           </p>
+
+          {/* Thinking mode — one knob: off / depth. Maps to model_thinking + model_thinking_effort. */}
+          <div className="flex items-center gap-3 mb-3">
+            <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>思考模式</label>
+            <select
+              value={(() => {
+                const enabled = config.model_thinking === true || config.model_thinking === 'true'
+                const effort = String(config.model_thinking_effort ?? 'medium')
+                if (!enabled || effort === 'none') return 'off'
+                return effort === 'low' || effort === 'high' ? effort : 'medium'
+              })()}
+              onChange={e => handleThinkingModeChange(e.target.value)}
+              className="input-field flex-1 font-mono text-xs"
+              title="关闭=不请求模型推理；低/中/高=开启推理并控制深度。协议层 Thought（工具轮说明）与模型推理分开计"
+            >
+              <option value="off">关闭（仅协议 Thought）</option>
+              <option value="low">低</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
 
           {/* Judge model picker */}
           <div className="flex items-center gap-3 mb-4">
@@ -560,13 +535,12 @@ export default function SettingsPage() {
                   className="input-field w-28 shrink-0 font-mono text-xs"
                   placeholder={savedProviders.find(s => s.name === p.name)?.api_key === '****' ? '****（留空保持不变）' : 'api_key'}
                 />
-                <input type="text" value={p.timeout} onChange={e => handleProviderField(pIdx, 'timeout', e.target.value)} className="input-field w-14 shrink-0 font-mono text-xs" placeholder="超时" title="timeout（秒）" />
                 <button
                   onClick={() => handleDiscover(pIdx)}
                   disabled={p.discovering || !p.base_url.trim()}
                   className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors shrink-0 disabled:opacity-40"
                   style={{ background: 'var(--surface-3)', color: 'var(--fg)' }}
-                  title="从供应商 /v1/models 拉取模型列表"
+                  title="从供应商 /v1/models 拉取模型列表，点击模型加入或移除"
                 >
                   {p.discovering ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 拉取模型
                 </button>
@@ -581,86 +555,55 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              {/* discovered models (checkbox import) */}
+              {/* discovered models — click to toggle membership */}
               {p.discovered && p.discovered.length > 0 && (
                 <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>勾选导入（{p.discovered.filter(m => m.checked).length} 选中）</span>
-                    <button
-                      onClick={() => importDiscovered(pIdx)}
-                      disabled={!p.discovered.some(m => m.checked)}
-                      className="px-2 py-0.5 rounded text-[10px] transition-colors disabled:opacity-40"
-                      style={{ background: 'var(--accent)', color: 'white' }}
-                    >
-                      导入选中
-                    </button>
+                  <div className="mb-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>
+                    点击加入 / 移除（{p.models.filter(m => m.model_id.trim()).length} 已选）
                   </div>
-                  {p.discovered.map(m => (
-                    <label key={m.id} className="flex items-center gap-2 text-[11px] py-0.5 cursor-pointer" style={{ color: 'var(--fg-muted)' }}>
-                      <input type="checkbox" checked={m.checked} onChange={() => toggleDiscovered(pIdx, m.id)} />
-                      <span className="font-mono">{m.id}</span>
-                      {m.context_length && <span className="text-[10px]" style={{ color: 'var(--fg-faint)' }}>{(m.context_length / 1024).toFixed(0)}k ctx</span>}
-                    </label>
-                  ))}
+                  {p.discovered.map(m => {
+                    const added = p.models.some(x => x.model_id === m.id)
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleDiscoveredModel(pIdx, m.id)}
+                        className="w-full flex items-center gap-2 text-[11px] py-0.5 px-1 rounded text-left transition-colors"
+                        style={{ color: added ? 'var(--green)' : 'var(--fg-muted)', background: added ? 'var(--surface-3)' : 'transparent' }}
+                      >
+                        <span className="w-3 shrink-0 text-center">
+                          {added && <Check size={10} />}
+                        </span>
+                        <span className="font-mono flex-1 min-w-0 truncate">{m.id}</span>
+                        {m.context_length ? (
+                          <span className="text-[10px] shrink-0" style={{ color: 'var(--fg-faint)' }}>{(m.context_length / 1024).toFixed(0)}k</span>
+                        ) : null}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
 
-              {/* models table */}
-              {p.models.map((m, mIdx) => {
-                const selector = `${p.name}/${m.model_id}`
-                const isActive = selector === activeModel
-                return (
-                  <div key={mIdx} className="mb-1.5">
-                    <div className="flex items-center gap-2">
-                      {isActive ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 text-center" style={{ background: 'var(--green-muted)', color: 'var(--green)' }}>Active</span>
-                      ) : (
-                        <button
-                          onClick={() => handleUseModel(selector)}
-                          disabled={providersDirty || !p.name.trim() || !m.model_id.trim()}
-                          className="text-[10px] px-1.5 py-0.5 rounded shrink-0 w-12 transition-colors disabled:opacity-40"
-                          style={{ background: 'var(--surface-3)', color: 'var(--fg-muted)' }}
-                          title={providersDirty ? '先保存再切换' : '设为任务模型'}
-                        >
-                          Use
-                        </button>
-                      )}
-                      <input type="text" value={m.model_id} onChange={e => handleModelId(pIdx, mIdx, e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="model_id" />
-                      <button
-                        onClick={() => removeModelRow(pIdx, mIdx)}
-                        className="p-1 rounded-md transition-colors shrink-0"
-                        style={{ color: 'var(--fg-faint)' }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                    {/* capability overrides — empty = auto-detect */}
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 ml-14">
-                      {OVERRIDE_FIELDS.map(f => (
-                        <label key={f.key} className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>
-                          {f.label}
-                          {f.kind === 'bool' ? (
-                            <TriSelect
-                              value={typeof m.override?.[f.key] === 'boolean' ? m.override[f.key] as boolean : null}
-                              onChange={v => handleOverride(pIdx, mIdx, f.key, v === null ? '' : v ? 'y' : 'n', 'bool')}
-                            />
-                          ) : (
-                            <input
-                              type="number"
-                              value={typeof m.override?.[f.key] === 'number' ? m.override[f.key] as number : ''}
-                              onChange={e => handleOverride(pIdx, mIdx, f.key, e.target.value, 'int')}
-                              className="input-field w-20 text-[10px] font-mono"
-                              placeholder="自动"
-                            />
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+              {/* models list */}
+              {p.models.map((m, mIdx) => (
+                <div key={mIdx} className="flex items-center gap-2 mb-1.5">
+                  <input type="text" value={m.model_id} onChange={e => handleModelId(pIdx, mIdx, e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="model_id" />
+                  {m.override && (
+                    <span className="text-[9px] px-1 py-0.5 rounded shrink-0" style={{ background: 'var(--surface-3)', color: 'var(--fg-faint)' }} title="config.yaml 中已配置能力覆盖，将优先生效">
+                      YAML
+                    </span>
+                  )}
+                  <button
+                    onClick={() => removeModelRow(pIdx, mIdx)}
+                    className="p-1 rounded-md transition-colors shrink-0"
+                    style={{ color: 'var(--fg-faint)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-muted)'; e.currentTarget.style.color = 'var(--red)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
               <button
                 onClick={() => addModelRow(pIdx)}
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors mt-1"
@@ -684,7 +627,7 @@ export default function SettingsPage() {
               </button>
             )}
             <span className="text-[10px] ml-auto" style={{ color: 'var(--fg-faint)' }}>
-              当前任务模型：{activeModel || '默认（llm_* 配置）'}
+              当前任务模型：{activeModel || '默认配置'}
             </span>
           </div>
         </div>

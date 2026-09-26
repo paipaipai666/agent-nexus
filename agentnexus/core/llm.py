@@ -497,11 +497,15 @@ class AgentLLM:
             if caps.supports_parallel_tool_calls:
                 parallel = True
 
-        reasoning_effort = None
+        # Explicit thinking control — never rely on vendor defaults (DeepSeek
+        # thinks even when we "don't ask"). "none" disables, low/medium/high
+        # enables at that depth.
         should_think = thinking if thinking is not None else caps.supports_thinking
         if should_think and tracker.is_available("thinking", caps.supports_thinking):
-            if caps.thinking_effort != "none":
-                reasoning_effort = caps.thinking_effort
+            effort = caps.thinking_effort if caps.thinking_effort != "none" else "medium"
+            reasoning_effort = effort
+        else:
+            reasoning_effort = "none"
 
         provider_response_format = None
         if response_format:

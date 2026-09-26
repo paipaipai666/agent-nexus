@@ -25,10 +25,11 @@ class ModelCapabilities:
 
     # Token limits — 0 means unknown (do not invent vendor windows)
     max_context_tokens: int = 0
-    max_output_tokens: int = 8_192
+    # Long-form answers (reports) need headroom; YAML/override can raise further.
+    # Thinking tokens also count against this on Anthropic-style APIs.
+    max_output_tokens: int = 32_768
 
-    # Thinking tuning
-    thinking_budget_tokens: int = 4_000
+    # Thinking tuning — effort is the single user knob; token budgets are derived per vendor
     thinking_effort: str = "medium"            # "none"|"low"|"medium"|"high"
 
     # True when flags are still defaults (not probe/config/override) —
@@ -48,6 +49,9 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
 
     # ── User config overrides ──
     settings = get_settings()
+    # from_default_fallback gates live probe for tool_calling / json_mode only.
+    # model_thinking is never probed — setting it must NOT skip the probe
+    # (that left tool_calling stuck at False → PROMPT_JSON + JSON prompt leak).
     if settings.model_tool_calling is not None:
         caps.supports_tool_calling = settings.model_tool_calling
         caps.from_default_fallback = False
@@ -56,7 +60,13 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         caps.from_default_fallback = False
     if settings.model_thinking is not None:
         caps.supports_thinking = settings.model_thinking
-        caps.from_default_fallback = False
+
+    effort = (getattr(settings, "model_thinking_effort", None) or "medium").strip().lower()
+    if effort in ("none", "low", "medium", "high"):
+        caps.thinking_effort = effort
+    else:
+        logger.warning("Unknown model_thinking_effort %r — falling back to medium", effort)
+        caps.thinking_effort = "medium"
 
     # Per-model override (highest priority) — from the provider's model entry.
     entry = settings.find_model_override_entry(model_id, base_url)
@@ -78,14 +88,9 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
             caps.supports_thinking = ov.supports_thinking
         if ov.supports_parallel_tool_calls is not None:
             caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
-        if any(
-            getattr(ov, name) is not None
-            for name in (
-                "context_length", "max_output_tokens", "supports_vision",
-                "supports_tool_calling", "supports_json_mode", "supports_json_schema",
-                "supports_thinking", "supports_parallel_tool_calls",
-            )
-        ):
+        # Probe gate: only tool_calling/json_mode (the probed pair) force "known".
+        # Thinking / vision / token limits are never probed.
+        if ov.supports_tool_calling is not None or ov.supports_json_mode is not None:
             caps.from_default_fallback = False
 
     return caps

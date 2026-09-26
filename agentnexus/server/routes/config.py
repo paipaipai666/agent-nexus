@@ -30,7 +30,7 @@ SETTABLE_KEYS = {
     # LLM
     "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
     "active_model", "judge_model",
-    "model_tool_calling", "model_json_mode", "model_thinking", "model_thinking_budget",
+    "model_tool_calling", "model_json_mode", "model_thinking", "model_thinking_effort",
     # Judge LLM
     "judge_api_key", "judge_model_id", "judge_base_url",
     # Agent

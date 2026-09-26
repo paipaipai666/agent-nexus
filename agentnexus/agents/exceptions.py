@@ -8,3 +8,11 @@ class FSMError(AgentNexusError):
 
 class AgentCancelled(AgentNexusError):
     """User/caller-initiated cancellation of an agent run."""
+
+
+class MemoryCommitError(AgentNexusError):
+    """Durable memory commit failed after bounded retries.
+
+    Raised instead of silently continuing: a failed write must not start
+    the next ReAct round (data would drift from disk).
+    """

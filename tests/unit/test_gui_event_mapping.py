@@ -154,6 +154,43 @@ class TestChatServiceAnswerFlow:
         assert result["content"] == "I need to search for info"
         assert result["seq"] == 0
 
+    def test_turn_journal_prefers_payload_thought_over_journal(self):
+        service = MagicMock()
+        turn = MagicMock()
+        turn._journal = ["thought: stale journal thought"]
+        service._turns = {"run_123": turn}
+
+        event = AgentEvent(
+            type="turn_journal",
+            payload={"event": "TOOLS_REQUESTED", "thought": "fresh payload thought"},
+            run_id="run_123",
+        )
+        result = _map_to_gui_event(event, service, 0)
+        assert result is not None
+        assert result["content"] == "fresh payload thought"
+
+    def test_turn_journal_skips_empty_thought(self):
+        """Decision 1: tools without visible Thought must not paint a thinking card."""
+        service = MagicMock()
+        turn = MagicMock()
+        turn._journal = []
+        service._turns = {"run_123": turn}
+
+        event = AgentEvent(
+            type="turn_journal",
+            payload={"event": "TOOLS_REQUESTED", "thought": ""},
+            run_id="run_123",
+        )
+        assert _map_to_gui_event(event, service, 0) is None
+
+    def test_turn_journal_skips_whitespace_thought(self):
+        event = AgentEvent(
+            type="turn_journal",
+            payload={"event": "ANSWER_THOUGHT", "thought": "   \n  "},
+            run_id="run_123",
+        )
+        assert _map_to_gui_event(event, MagicMock(), 0) is None
+
     def test_direct_tool_start_maps_to_tool_call(self):
         """tool_start event carries payload directly — no journal parsing."""
         event = AgentEvent(

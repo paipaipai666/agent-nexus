@@ -293,6 +293,7 @@ class TestReActAgentConversationMode:
         mock_llm.capabilities.supports_thinking = False
         mock_llm.capabilities.supports_tool_calling = False
         mock_llm.capabilities.supports_json_mode = False
+        mock_llm.last_truncated = False
         mock_llm.think.return_value = '{"answer": "done"}'
         executor = ToolRegistry()
         executor.register_tool("file_read", "read", lambda: "ok", risk_level="low")
@@ -359,6 +360,7 @@ class TestReActAgentConversationMode:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
+        mock_llm.last_truncated = False
         mock_llm.think.return_value = "done"
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
@@ -622,8 +624,11 @@ class TestReActAgentConversationMode:
 
         assert [e.type for e in returned] == [ReActEventType.TOOLS_REQUESTED]
         assert returned[0].payload["thought"] == "Need fresh information before answering"
-        assert returned[0].payload["tool_calls"] == [
-            {"id": "", "name": "web_search", "arguments": {"query": "latest news"}}]
+        tcs = returned[0].payload["tool_calls"]
+        assert len(tcs) == 1
+        assert tcs[0]["name"] == "web_search"
+        assert tcs[0]["arguments"] == {"query": "latest news"}
+        assert str(tcs[0].get("id") or "").strip(), "tool call id must be non-empty"
 
     def test_classified_tool_falls_back_to_json_thought_without_reasoning(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
@@ -662,15 +667,12 @@ class TestReActAgentConversationMode:
             ReActEventType.TOOL_START,
             ReActEventType.TOOL_DONE,
         ]
-        assert emitted[1] == (
-            ReActEventType.TOOL_DONE,
-            {
-                "name": "web_search",
-                "arguments": {"query": "search"},
-                "result": observation,
-                "id": "",
-            },
-        )
+        done_type, done_payload = emitted[1]
+        assert done_type == ReActEventType.TOOL_DONE
+        assert done_payload["name"] == "web_search"
+        assert done_payload["arguments"] == {"query": "search"}
+        assert done_payload["result"] == observation
+        assert str(done_payload.get("id") or "").strip(), "tool done id must be non-empty"
         assert [event.type for event in followup] == [ReActEventType.TOOLS_DONE]
 
     def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self, monkeypatch):

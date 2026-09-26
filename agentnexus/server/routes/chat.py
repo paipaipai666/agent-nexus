@@ -97,14 +97,21 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         agent_event_name = payload.get("event", "")
 
         if agent_event_name in ("TOOLS_REQUESTED", "ANSWER_THOUGHT"):
-            turn = chat_service._turns.get(run_id)
-            thought = ""
-            if turn:
-                for entry in reversed(turn._journal):
-                    parsed = _parse_journal_entry(entry)
-                    if parsed["kind"] == "thought":
-                        thought = parsed["content"]
-                        break
+            # Prefer the event payload (exact thought for THIS event); journal
+            # reverse-scan is only a fallback for older bridges that dropped it.
+            thought = (payload.get("thought") or "").strip()
+            if not thought:
+                turn = chat_service._turns.get(run_id)
+                if turn:
+                    for entry in reversed(turn._journal):
+                        parsed = _parse_journal_entry(entry)
+                        if parsed["kind"] == "thought":
+                            thought = (parsed["content"] or "").strip()
+                            break
+            # Empty thought (decision 1: tools without visible Thought) must not
+            # paint a "Thinking..." placeholder card on the desktop.
+            if not thought:
+                return None
             return {"type": "thinking", "content": thought, "run_id": run_id, "seq": seq}
 
         return None

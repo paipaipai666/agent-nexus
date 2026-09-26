@@ -65,6 +65,6 @@ ANSWER → 保存 LTM → DONE
 - **流式调用**：始终 `litellm.completion(stream=True)`
 - **重试**：最多 3 次，指数退避 2^attempt × 2.0s，仅重试瞬时错误
 - **截断检测**：`finish_reason in ("length", "max_tokens")`
-- **思考模式**：模型支持 `reasoning_effort` 时自动启用，`thinking_budget` 可配
+- **思考模式**：模型支持时自动启用；强度由 `model_thinking_effort`（none/low/medium/high）控制
 
 > 见 [Tool-Governance](Tool-Governance.md) 了解工具治理，[Memory-System](Memory-System.md) 了解记忆管线。

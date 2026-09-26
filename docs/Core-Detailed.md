@@ -47,7 +47,7 @@ class LLMSettings(BaseModel):
     model_tool_calling: bool | None
     model_json_mode: bool | None
     model_thinking: bool | None
-    model_thinking_budget: int
+    model_thinking_effort: str  # none|low|medium|high
     max_output_tokens: int = 8192
     judge_model_id: str
     judge_api_key: SecretStr
@@ -121,8 +121,7 @@ class ModelCapabilities:
     supports_system_role: bool = True
     max_context_tokens: int = 128_000
     max_output_tokens: int = 8_192
-    thinking_budget_tokens: int = 4_000
-    thinking_effort: str = "medium"
+    thinking_effort: str = "medium"  # none|low|medium|high; vendor budgets derived
 ```
 
 ### 静态注册表（前缀匹配，首次匹配即返回）

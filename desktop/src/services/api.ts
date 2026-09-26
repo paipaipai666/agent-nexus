@@ -1,7 +1,9 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
 // ── LLM provider profile types ──────────────────────────────────────────
-export interface ModelOverrideDraft {
+/** Opaque capability override — YAML/advanced only, never edited in the UI.
+ *  Round-tripped on save so UI edits don't wipe config.yaml overrides. */
+export interface ModelOverride {
   context_length?: number | null
   max_output_tokens?: number | null
   supports_vision?: boolean | null
@@ -10,24 +12,24 @@ export interface ModelOverrideDraft {
   supports_json_schema?: boolean | null
   supports_thinking?: boolean | null
   supports_parallel_tool_calls?: boolean | null
+  [key: string]: unknown
 }
 
 export interface ModelDraft {
   model_id: string
-  override: ModelOverrideDraft | null
+  override: ModelOverride | null
 }
 
 export interface DiscoveredModel {
   id: string
   context_length: number | null
-  checked: boolean
 }
 
 export interface ProviderDraft {
   name: string
   base_url: string
   api_key: string // '' = keep the stored key
-  timeout: string // string for the input; parsed on save
+  timeout: number // not editable in UI — preserved from server/YAML
   models: ModelDraft[]
   // transient discovery state (never persisted)
   discovered?: DiscoveredModel[]

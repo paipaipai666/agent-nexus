@@ -287,6 +287,11 @@ class ChatService:
                 agent.set_cancel_checker(turn.cancel_checker)
             agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
             self._install_agent_event_bridge(turn, events, run.id, session_id, old_on_event, agent=agent)
+            # Per-round durable commit: after each ReAct iteration (tools/answer)
+            # flush new STM rows to SQLite before the next round starts.
+            # Crash after commit keeps the round; crash before loses only it.
+            if hasattr(agent, "set_round_persist"):
+                agent.set_round_persist(turn.commit_round)
             # Suppress agent _output (print) — events are sent via WebSocket
             try:
                 agent._output = lambda _msg: None
@@ -380,6 +385,11 @@ class ChatService:
                 agent._output = old_output
             except Exception as e:
                 logger.debug("Failed to restore agent _output: %s", e)
+            try:
+                if hasattr(agent, "set_round_persist"):
+                    agent.set_round_persist(None)
+            except Exception as e:
+                logger.debug("Failed to clear round persist: %s", e)
             # Run ended — the token snapshot is only meaningful mid-run. Left
             # populated, a post-run reconnect would overwrite the finalized
             # answer with raw streamed tokens (reconnect_snapshot).
@@ -637,7 +647,14 @@ class ChatService:
 
             agent_event = AgentEvent(
                 "turn_journal",
-                {"event": event_type},
+                # Carry the original thought so GUI mapping does not have to
+                # reverse-scan the journal (and so empty thought stays empty).
+                {
+                    "event": event_type,
+                    "thought": (payload.get("thought") or "")
+                    if event_type in ("TOOLS_REQUESTED", "ANSWER_THOUGHT")
+                    else "",
+                },
                 run_id=run_id,
                 session_id=session_id,
             )

@@ -1,6 +1,6 @@
 """Tests for agentnexus.core.llm."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pydantic import SecretStr
 
@@ -315,6 +315,58 @@ class TestCall:
                 llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("thinking", 0) > 0
+
+    @patch("agentnexus.core.llm.get_settings")
+    @patch("agentnexus.core.llm.trace_manager")
+    def test_thinking_off_sends_explicit_none(self, mock_trace, mock_settings):
+        mock_settings.return_value.llm_model_id = "deepseek-ai/DeepSeek-V4-Flash"
+        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
+        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
+        mock_settings.return_value.llm_timeout = 60
+        mock_settings.return_value.model_tool_calling = None
+        mock_settings.return_value.model_json_mode = None
+        mock_settings.return_value.model_thinking = False
+        mock_settings.return_value.model_thinking_effort = "high"  # ignored while off
+        mock_settings.return_value.find_model_override_entry.return_value = None
+        mock_trace.active = None
+
+        llm = AgentLLM()
+        provider = MagicMock()
+        provider.stream_chat.return_value = _make_result(text="ok")
+        with patch("agentnexus.core.llm.select_provider", return_value=provider):
+            llm._call_via_provider(
+                provider, [{"role": "user", "content": "hi"}], 0,
+                None, None, thinking=False,
+            )
+
+        assert provider.stream_chat.call_args.kwargs["reasoning_effort"] == "none"
+
+    @patch("agentnexus.core.llm.get_settings")
+    @patch("agentnexus.core.llm.trace_manager")
+    def test_thinking_on_sends_configured_effort(self, mock_trace, mock_settings):
+        mock_settings.return_value.llm_model_id = "deepseek-ai/DeepSeek-V4-Flash"
+        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
+        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
+        mock_settings.return_value.llm_timeout = 60
+        mock_settings.return_value.model_tool_calling = None
+        mock_settings.return_value.model_json_mode = None
+        mock_settings.return_value.model_thinking = True
+        mock_settings.return_value.model_thinking_effort = "high"
+        mock_settings.return_value.find_model_override_entry.return_value = None
+        mock_trace.active = None
+
+        llm = AgentLLM()
+        # capabilities.detect_capabilities reads settings via its own import
+        with patch("agentnexus.core.capabilities.get_settings", return_value=mock_settings.return_value):
+            provider = MagicMock()
+            provider.stream_chat.return_value = _make_result(text="ok")
+            with patch("agentnexus.core.llm.select_provider", return_value=provider):
+                llm._call_via_provider(
+                    provider, [{"role": "user", "content": "hi"}], 0,
+                    None, None, thinking=True,
+                )
+
+        assert provider.stream_chat.call_args.kwargs["reasoning_effort"] == "high"
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")

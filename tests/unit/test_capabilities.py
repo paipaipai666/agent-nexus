@@ -27,6 +27,19 @@ class TestDetectCapabilities:
         assert caps.supports_thinking is True
         assert caps.from_default_fallback is False
 
+    def test_thinking_effort_from_config(self, temp_agentnexus_home, monkeypatch):
+        monkeypatch.setenv("AGENTNEXUS_MODEL_THINKING_EFFORT", "high")
+        import agentnexus.core.config as cfg_mod
+        cfg_mod._settings_cache = None
+
+        caps = detect_capabilities("any-model", "https://api.example.com")
+        assert caps.thinking_effort == "high"
+
+    def test_thinking_effort_default_medium(self, temp_agentnexus_home):
+        caps = detect_capabilities("any-model", "https://api.example.com")
+        assert caps.thinking_effort == "medium"
+        assert "thinking_budget_tokens" not in type(caps).__dataclass_fields__
+
 
 class TestResolveCtxMax:
     def test_unknown_returns_none(self):

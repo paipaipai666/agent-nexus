@@ -183,6 +183,27 @@ describe('Reasoning/answer display order (desktop)', () => {
     expect(thinkingIndex()).toBeLessThan(answerIndex())
   })
 
+  it('empty thinking events never paint a placeholder card (decision 1)', async () => {
+    await act(async () => {
+      ws._receive({ type: 'run_started', run_id: 'run-1' })
+      ws._receive({ type: 'thinking', content: '' })
+      ws._receive({ type: 'thinking', content: '   ' })
+      ws._receive({ type: 'tool_call', tool_name: 'web_search' })
+      await sleep(30)
+    })
+    await act(async () => {
+      ws._receive({ type: 'answer', content: 'done' })
+      await sleep(10)
+    })
+
+    // No "Thinking..." / blank system cards from empty thought.
+    const systemCards = latestMessages.filter(m => m.role === 'system')
+    expect(systemCards.length).toBe(0)
+    expect(latestMessages.some(m => m.content.includes('Thinking'))).toBe(false)
+    expect(latestMessages.some(m => m.role === 'tool')).toBe(true)
+    expect(latestMessages.some(m => m.role === 'assistant' && m.content === 'done')).toBe(true)
+  })
+
   it('tool flow: thinking commits before the tool card, duplicate draft is discarded, next step renders after', async () => {
     await act(async () => {
       ws._receive({ type: 'run_started', run_id: 'run-1' })

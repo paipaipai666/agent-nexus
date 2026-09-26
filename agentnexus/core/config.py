@@ -207,7 +207,9 @@ class Settings(BaseSettings):
     model_tool_calling: bool | None = Field(default=None)
     model_json_mode: bool | None = Field(default=None)
     model_thinking: bool | None = Field(default=None)
-    model_thinking_budget: int = Field(default=4000, ge=1024, le=32000)
+    # Thinking depth: maps to OpenAI reasoning_effort / Anthropic budget / Gemini thinkingLevel.
+    # Vendor token budgets are derived internally — not user-facing.
+    model_thinking_effort: str = Field(default="medium")
     # Judge LLM (used by evaluators) — empty = follow the task model
     judge_model_id: str = Field(default="")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
@@ -403,6 +405,14 @@ class Settings(BaseSettings):
         normalized = (value or "isolated").strip().lower()
         if normalized not in {"isolated", "cdp"}:
             raise ValueError(f"不支持的浏览器模式: {value}，可选: isolated, cdp")
+        return normalized
+
+    @field_validator("model_thinking_effort")
+    @classmethod
+    def normalize_thinking_effort(cls, value: str) -> str:
+        normalized = (value or "medium").strip().lower()
+        if normalized not in {"none", "low", "medium", "high"}:
+            raise ValueError(f"不支持的思考强度: {value}，可选: none, low, medium, high")
         return normalized
 
     @field_validator("computer_use_backend")

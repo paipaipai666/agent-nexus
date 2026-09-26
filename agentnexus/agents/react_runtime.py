@@ -15,6 +15,31 @@ from agentnexus.tools.dispatcher import ToolDispatcher
 from agentnexus.tools.result_format import summarize_tool_result
 
 
+def ensure_tool_call_ids(calls: list[dict], *, step: int = 0) -> list[dict]:
+    """Guarantee every tool call has a non-empty unique id.
+
+    OpenAI-compatible backends require assistant.tool_calls[].id ↔
+    tool.tool_call_id pairing; empty/missing ids are rejected as
+    ``missing field tool_call_id`` (strict serde gateways). Models and the
+    JSON protocol often omit ids — synthesize ``call_{step}_{i}`` locally.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, tc in enumerate(calls):
+        tc = dict(tc)
+        tid = str(tc.get("id") or "").strip()
+        if not tid or tid in seen:
+            tid = f"call_{step}_{i}"
+            suffix = 0
+            while tid in seen:
+                suffix += 1
+                tid = f"call_{step}_{i}_{suffix}"
+        tc["id"] = tid
+        seen.add(tid)
+        out.append(tc)
+    return out
+
+
 def record_native_tool_calls(
     ctx: ExecutionContext,
     *,
@@ -25,6 +50,9 @@ def record_native_tool_calls(
     memory_state = ctx.memory_state
     tool_state = ctx.tool_state
     step = ctx.steps[-1]
+    tool_state.pending_tool_calls = ensure_tool_call_ids(
+        list(tool_state.pending_tool_calls), step=step.step_id
+    )
     step.tool_calls = list(tool_state.pending_tool_calls)
     if thought:
         output(f"思考: {thought}")
@@ -107,7 +135,9 @@ def execute_pending_tools_batch(
         run_state.json_retries = 0
         return ReActEvent(ReActEventType.ALL_TOOLS_DONE)
 
-    calls = list(tool_state.pending_tool_calls)
+    calls = ensure_tool_call_ids(
+        list(tool_state.pending_tool_calls), step=run_state.current_step
+    )
     tool_state.pending_tool_calls = []
 
     # Emit actions for all tools

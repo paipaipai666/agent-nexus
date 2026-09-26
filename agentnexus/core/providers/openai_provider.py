@@ -137,10 +137,26 @@ class OpenAIProvider(BaseLLMProvider):
         if stream_options:
             kwargs["stream_options"] = stream_options
 
-        if reasoning_effort:
+        # Explicit thinking control. "none" must reach the wire — several
+        # OpenAI-compatible endpoints (DeepSeek family) think by default and
+        # only stop when told. Unknown params fall back to a bare retry below.
+        if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
+            if reasoning_effort == "none":
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            else:
+                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
-        response = client.chat.completions.create(**kwargs)
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "reasoning_effort" not in msg and "thinking" not in msg:
+                raise
+            # Endpoint rejected thinking controls — retry without them.
+            kwargs.pop("reasoning_effort", None)
+            kwargs.pop("extra_body", None)
+            response = client.chat.completions.create(**kwargs)
         self._active_stream = response
 
         result = StreamResult()

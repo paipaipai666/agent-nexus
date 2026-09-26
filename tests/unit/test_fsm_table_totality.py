@@ -173,7 +173,7 @@ class TestDecisionClosure:
 
     def test_execute_tool_is_closed(self):
         rows = {t.event for t in self._rows_for(S.EXECUTE_TOOL)}
-        assert rows == {E.TOOLS_DONE, E.ANSWER_READY}
+        assert rows == {E.TOOLS_DONE, E.ANSWER_READY, E.FAULT}
         assert self._emitted_by_handlers_landing_in(S.EXECUTE_TOOL) <= rows
 
     def test_answer_is_total(self):

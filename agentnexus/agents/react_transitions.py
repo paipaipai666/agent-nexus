@@ -29,6 +29,8 @@ TRANSFER_TABLE: list[Transition] = [
     # ── EXECUTE_TOOL ──
     Transition(S.EXECUTE_TOOL, E.TOOLS_DONE, S.AWAIT_MODEL, "_on_round_advance"),
     Transition(S.EXECUTE_TOOL, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
+    # Durable commit failure after tool batch — do not enter the next round.
+    Transition(S.EXECUTE_TOOL, E.FAULT, S.RECOVER, "_on_recover"),
 
     # ── RECOVER ──
     # _on_recover 的决策封闭于 {ROUND_READY, ANSWER_READY, ABORT}。

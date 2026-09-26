@@ -67,6 +67,6 @@ Detection sources: Static registry (20+ models) → litellm API detection → us
 - **Streaming**: Always `litellm.completion(stream=True)`
 - **Retry**: Up to 3 times, exponential backoff 2^attempt × 2.0s, transient errors only
 - **Truncation detection**: `finish_reason in ("length", "max_tokens")`
-- **Thinking mode**: Auto-enabled when model supports `reasoning_effort`, `thinking_budget` configurable
+- **Thinking mode**: Auto-enabled when the model supports it; depth via `model_thinking_effort` (none/low/medium/high)
 
 > See [Tool Governance](Tool-Governance.en.md) for tool governance, [Memory System](Memory-System.en.md) for memory pipeline.

@@ -437,13 +437,17 @@ export default function SessionManager({ children }: { children: ReactNode }) {
 
     const unsubs = [
       wsPool.on(sid, 'thinking', (data) => {
+        // Empty thought (tools without visible Thought) must not paint a
+        // "Thinking..." placeholder — align with TUI / decision 1.
+        const thought = (data.content || '').trim()
+        if (!thought) return
         // One thinking card per event; reasoning deltas after it start a new
         // process card (same semantics as the old currentReasoningIds reset).
         currentReasoningIds.current.set(sid, null)
         updateSession(sid, prev => ({
           ...prev,
           step: {
-            process: [...(prev.step?.process ?? []), { id: `t-${getSessionCounter(sid)}`, role: 'system' as const, content: data.content || 'Thinking...', timestamp: new Date() }],
+            process: [...(prev.step?.process ?? []), { id: `t-${getSessionCounter(sid)}`, role: 'system' as const, content: thought, timestamp: new Date() }],
             answer: prev.step?.answer ?? null,
           },
         }))

@@ -112,6 +112,7 @@ class ReActAgent:
         self._mcp_context: str = ""
         self._workflow_context: str = ""
         self._cancel_checker: Callable[[], bool] | None = None
+        self._round_persist: Callable[[], bool] | None = None
         self._todo_list = None  # Set externally after construction
         self._degrade_count = 0
         # Persona and behavioral fragments — loaded once, stable across sessions
@@ -167,6 +168,29 @@ class ReActAgent:
         # stream immediately on cancel (产品决策: 取消 = 立刻停止).
         if hasattr(self.llm_client, "set_cancel_checker"):
             self.llm_client.set_cancel_checker(checker)
+
+    def set_round_persist(self, fn) -> None:
+        """Install per-round durable commit (called after each ReAct iteration)."""
+        self._round_persist = fn
+
+    def _persist_round(self) -> None:
+        """Flush this round's STM rows to disk. Raises MemoryCommitError on failure.
+
+        Silent during bounded retries (logs only). Callers must not enter
+        the next ReAct round after a raise.
+        """
+        from agentnexus.agents.exceptions import MemoryCommitError
+
+        fn = getattr(self, "_round_persist", None)
+        if fn is None:
+            return
+        try:
+            ok = fn()
+        except Exception as e:
+            raise MemoryCommitError(f"记忆写入失败: {e}") from e
+        if ok is False:
+            err = getattr(getattr(fn, "__self__", None), "last_commit_error", "") or "commit rejected"
+            raise MemoryCommitError(f"记忆写入失败: {err}")
 
     @property
     def _react_template(self) -> str:
@@ -298,8 +322,14 @@ class ReActAgent:
 
         memory_manager = memory_state.memory_manager
         if memory_manager:
-            memory_state.memory_context = memory_manager.init_session(run_state.question)
+            # Persist the user turn FIRST — a failing LTM/embedding lookup must
+            # never drop the conversation («继续» after errors had no context).
             memory_manager.append("user", run_state.question)
+            try:
+                memory_state.memory_context = memory_manager.init_session(run_state.question)
+            except Exception as e:
+                logger.warning("init_session failed (conversation continues): %s", e)
+                memory_state.memory_context = ""
 
         tool_policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
         tool_state.tools = self.tool_executor.to_openai_tools(self.agent_id, tool_policy=tool_policy)
@@ -509,28 +539,33 @@ class ReActAgent:
                     memory_manager.append("assistant", d.display_thought,
                                           metadata={"display_only": True})
                 ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=d.display_thought)
-            ctx.last_answer = d.text
+            ctx.last_answer = self._join_partial_answer(ctx, d.text)
             return [ReActEvent(ReActEventType.ANSWER_READY, {"text": d.text})]
 
         # ── tools → EXECUTE_TOOL ──
         if d.recovered_protocol_json:
-            ctx.tool_state.pending_tool_calls = [{
-                "id": f"recovered_{ctx.run_state.current_step}",
-                "name": tc["name"],
-                "arguments": tc["arguments"],
-            } for tc in d.tool_calls]
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                [{
+                    "id": f"recovered_{ctx.run_state.current_step}_{i}",
+                    "name": tc["name"],
+                    "arguments": tc["arguments"],
+                } for i, tc in enumerate(d.tool_calls)],
+                step=ctx.run_state.current_step,
+            )
             self._on_native_tool_calls(ctx, "")
         elif ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
             if d.terminal_answer is not None:
                 # Fast path: bookkeeping-only batch carrying answer-grade text.
                 ctx.run_state.terminal_answer = d.terminal_answer
-            ctx.tool_state.pending_tool_calls = list(d.tool_calls)
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                list(d.tool_calls), step=ctx.run_state.current_step,
+            )
             self._on_native_tool_calls(ctx, d.thought)
         else:
-            ctx.tool_state.pending_tool_calls = [
-                {"id": "", "name": tc["name"], "arguments": tc["arguments"]}
-                for tc in d.tool_calls
-            ]
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                [{"name": tc["name"], "arguments": tc["arguments"]} for tc in d.tool_calls],
+                step=ctx.run_state.current_step,
+            )
             if not d.thought:
                 d.thought = self._select_visible_thought(ctx.last_response_text,
                                                          ctx.last_reasoning)
@@ -560,17 +595,20 @@ class ReActAgent:
             "工具调用未执行：模型响应达到输出长度上限，工具参数可能被截断。"
             "请用更短、完整的参数重新发起调用。"
         )
-        for tc in list(ctx.pending_tool_calls):
+        pending = react_runtime.ensure_tool_call_ids(
+            list(ctx.pending_tool_calls), step=ctx.run_state.current_step,
+        )
+        for tc in pending:
             ctx.messages.append({
                 "role": "tool",
-                "tool_call_id": tc.get("id", ""),
+                "tool_call_id": tc["id"],
                 "content": error_text,
             })
             react_runtime.record_tool_done(ctx, {
                 "name": tc["name"],
                 "arguments": tc.get("arguments", {}),
                 "result": "<truncated>",
-                "id": tc.get("id", ""),
+                "id": tc["id"],
             })
         ctx.pending_tool_calls = []
         return [ReActEvent(ReActEventType.ROUND_READY)]
@@ -611,11 +649,26 @@ class ReActAgent:
         if terminal:
             ctx.run_state.terminal_answer = None
             ctx.last_answer = terminal
+            try:
+                self._persist_round()
+            except Exception as e:
+                return [ReActEvent(ReActEventType.FAULT, {
+                    "fatal": True,
+                    "detail": f"记忆写入失败，未保存本轮结果: {e}",
+                })]
             return [ReActEvent(ReActEventType.ANSWER_READY)]
         if is_native:
             ctx.messages.append(
                 {"role": "user",
                  "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
+        # Tools + observations must be durable BEFORE the next round starts.
+        try:
+            self._persist_round()
+        except Exception as e:
+            return [ReActEvent(ReActEventType.FAULT, {
+                "fatal": True,
+                "detail": f"记忆写入失败，已停止后续步骤: {e}",
+            })]
         return [ReActEvent(ReActEventType.TOOLS_DONE)]
 
     def _maybe_warn_loop(self, ctx: ExecutionContext):
@@ -730,7 +783,8 @@ class ReActAgent:
             #   这里不能直接发 ANSWER_VETOED——RECOVER 没有这一行会 FSMError）
             if ctx.steps:
                 ctx.steps[-1].error_message = f"JSON parse failed: {detail or reason}"
-            ctx.last_answer = self._extract_answer_from_text(ctx.last_response_text)
+            ctx.last_answer = self._join_partial_answer(
+                ctx, self._extract_answer_from_text(ctx.last_response_text))
             return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         logger.warning("RECOVER got unhandled fault payload: %s", payload)
@@ -747,10 +801,17 @@ class ReActAgent:
             ctx.messages.append(
                 {"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
         elif reason == RetryReason.TRUNCATED:
+            # Answer-stage truncation: continue writing — never ask to shorten
+            # (that destroys long-form reports). Tool-stage truncation is handled
+            # earlier via _fail_truncated_tool_calls and never reaches here.
             self._output(
-                f"[截断重试 {ctx.json_retries}/{ctx.max_json_retries}] 上一次回复达到输出长度上限")
+                f"[续写 {ctx.json_retries}/{ctx.max_json_retries}] 上一次回复达到输出长度上限，从断点继续")
+            self._stash_partial_answer(ctx, ctx.last_response_text)
             ctx.messages.append(
-                {"role": "user", "content": "你的上一次回复被输出长度上限截断。请缩短本次输出后重试。"})
+                {"role": "user", "content":
+                    "你的上一次回复因输出长度上限被截断。"
+                    "请从断点紧接着继续写完剩余内容：不要重复已写部分，不要缩短，不要总结。"
+                    "若在 JSON 字符串中间被截断，只补全剩余 JSON，保持合法。"})
         else:
             self._output(f"[JSON 重试 {ctx.json_retries}/{ctx.max_json_retries}] {detail or reason}")
             raw = ctx.last_response_text
@@ -848,6 +909,8 @@ class ReActAgent:
             if memory_state.memory_manager:
                 memory_state.memory_manager.append("system", f"[最终答案] {answer}")
                 memory_state.memory_manager.conclude(run_state.question, answer)
+            # Final answer is in STM — durable before the turn is marked done.
+            self._persist_round()
             span.output = {
                 "answer": str(answer)[:500],
                 "subagent_answer": str((tool_state.last_subagent_payload or {}).get("answer", ""))[:500],
@@ -876,6 +939,37 @@ class ReActAgent:
 
     def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
         return decisions.select_strategy(session_caps, self.llm_client.capabilities)
+
+    @staticmethod
+    def _stash_partial_answer(ctx: ExecutionContext, text: str | None) -> None:
+        text = text or ""
+        if not text:
+            return
+        # Prefer the answer body over a complete JSON envelope so continuation
+        # concatenates prose, not stacked `{"answer":...}` shells.
+        body = text
+        try:
+            import json as _json
+            parsed = _json.loads(text.strip())
+            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+                body = parsed["answer"]
+        except Exception:
+            body = text
+        ctx.run_state.partial_answer = (ctx.run_state.partial_answer or "") + body
+
+    @staticmethod
+    def _join_partial_answer(ctx: ExecutionContext, text: str | None) -> str:
+        partial = ctx.run_state.partial_answer or ""
+        ctx.run_state.partial_answer = ""
+        body = text or ""
+        try:
+            import json as _json
+            parsed = _json.loads(body.strip())
+            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+                body = parsed["answer"]
+        except Exception:
+            pass
+        return partial + body if partial else body
 
     @staticmethod
     def _robust_json_parse(raw_text: str) -> dict:

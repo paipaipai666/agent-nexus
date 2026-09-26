@@ -77,7 +77,11 @@ class TestRoundRecording:
         events = self._drive(agent, ctx, monkeypatch)
 
         assert [e.type for e in events] == [ReActEventType.TOOLS_REQUESTED]
-        assert ctx.pending_tool_calls == calls
+        assert len(ctx.pending_tool_calls) == 1
+        assert ctx.pending_tool_calls[0]["name"] == "web_search"
+        assert ctx.pending_tool_calls[0]["arguments"] == {"q": "test"}
+        # OpenAI contract: empty/missing ids are synthesized
+        assert str(ctx.pending_tool_calls[0].get("id") or "").strip()
         assert ctx.last_response_text == "先查一下"
 
     def test_json_path_answer_emits_answer_ready(self, monkeypatch):

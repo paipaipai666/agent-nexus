@@ -7,6 +7,7 @@ import { api } from '../services/api'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
 import { transformHistoryMessages } from '../utils/historyTransform'
+import { unwrapStreamingAnswer } from '../utils/unwrapAnswer'
 import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
 import ModelPicker from '../components/chat/ModelPicker'
@@ -201,7 +202,9 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           </Collapsible>
         ) : (
           <div className="markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {unwrapStreamingAnswer(msg.content)}
+            </ReactMarkdown>
           </div>
         )}
       </div>
