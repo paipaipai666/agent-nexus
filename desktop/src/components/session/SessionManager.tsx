@@ -6,6 +6,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   toolName?: string
+  toolCallId?: string
   toolStatus?: 'running' | 'done' | 'error'
   /** Optional emoji reaction the agent attached under this user message. */
   reaction?: { emoji: string; comment: string }
@@ -525,19 +526,25 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           const next = commitStep(prev, { discardAnswer: true })
           return {
             ...next,
-            messages: [...next.messages, { id: `tc-${getSessionCounter(sid)}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolStatus: 'running', timestamp: new Date() }],
+            messages: [...next.messages, { id: `tc-${getSessionCounter(sid)}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolCallId: data.tool_call_id, toolStatus: 'running', timestamp: new Date() }],
           }
         })
       }),
       wsPool.on(sid, 'tool_result', (data) => {
-        updateSession(sid, prev => ({
-          ...prev,
-          messages: prev.messages.map(m =>
-            m.toolName === data.tool_name && m.toolStatus === 'running'
-              ? { ...m, toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
-              : m
-          ),
-        }))
+        // Parallel tools share the same tool_name — match by tool_call_id and
+        // update exactly ONE card. Fallback (old servers without id): the
+        // FIRST running card with that name, never all of them.
+        updateSession(sid, prev => {
+          const idx = prev.messages.findIndex(m =>
+            data.tool_call_id
+              ? m.toolCallId === data.tool_call_id
+              : (m.toolName === data.tool_name && m.toolStatus === 'running')
+          )
+          if (idx < 0) return prev
+          const messages = [...prev.messages]
+          messages[idx] = { ...messages[idx], toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
+          return { ...prev, messages }
+        })
       }),
       wsPool.on(sid, 'token', (data) => {
         // R8: Track cursor on connection for reconnect

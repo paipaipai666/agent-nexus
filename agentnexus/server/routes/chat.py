@@ -77,6 +77,7 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
             "type": "tool_call",
             "tool_name": payload.get("name", ""),
             "arguments": payload.get("arguments", {}),
+            "tool_call_id": payload.get("id", ""),
             "run_id": run_id,
             "seq": seq,
         }
@@ -89,6 +90,7 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
             "type": "tool_result",
             "tool_name": payload.get("name", ""),
             "result": payload.get("result", ""),
+            "tool_call_id": payload.get("id", ""),
             "run_id": run_id,
             "seq": seq,
         }

@@ -143,7 +143,7 @@ def execute_pending_tools_batch(
     # Emit actions for all tools
     for tc in calls:
         output(f"行动: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['arguments'].items())})")
-        ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"])
+        ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"], id=tc.get("id", ""))
 
     # Dispatch with read/write partitioning
     dispatcher = ToolDispatcher(registry)

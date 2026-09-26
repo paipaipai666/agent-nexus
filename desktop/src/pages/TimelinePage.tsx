@@ -59,7 +59,9 @@ function nodeDetail(e: TimelineEvent): string {
   const p = e.payload
   switch (e.event_type) {
     case 'turn_journal':
-      return String(p.thought || p.event || '')
+      return [p.thought, p.detail, p.reason,
+          p.warn_count !== undefined ? `warning #${String(p.warn_count)}` : '']
+        .filter(Boolean).join(' · ')
     case 'tool_start':
       return `${p.name} ${JSON.stringify(p.arguments || {})}`
     case 'tool_done':

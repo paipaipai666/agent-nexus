@@ -657,7 +657,8 @@ class ChatService:
                         len(self._token_buffers.get(session_id, ""))
                 self._put_event(run_id, AgentEvent(
                     "tool_start",
-                    {"name": payload.get("name", ""), "arguments": payload.get("arguments", {})},
+                    {"name": payload.get("name", ""), "arguments": payload.get("arguments", {}),
+                     "id": payload.get("id", "")},
                     run_id=run_id,
                     session_id=session_id,
                     step_id=getattr(event, "step_id", 0),
@@ -670,6 +671,7 @@ class ChatService:
                         "name": payload.get("name", ""),
                         "arguments": payload.get("arguments", {}),
                         "result": collapse_and_truncate(payload.get("result", ""), 300),
+                        "id": payload.get("id", ""),
                     },
                     run_id=run_id,
                     session_id=session_id,
@@ -681,12 +683,11 @@ class ChatService:
                 "turn_journal",
                 # Carry the original thought so GUI mapping does not have to
                 # reverse-scan the journal (and so empty thought stays empty).
-                {
-                    "event": event_type,
-                    "thought": (payload.get("thought") or "")
-                    if event_type in ("TOOLS_REQUESTED", "ANSWER_THOUGHT")
-                    else "",
-                },
+                # Other payload fields (detail/reason/warn_count/...) pass
+                # through verbatim so the timeline can show them.
+                {**payload,
+                 "event": event_type,
+                 "thought": payload.get("thought") or ""},
                 run_id=run_id,
                 session_id=session_id,
                 step_id=getattr(event, "step_id", 0),
