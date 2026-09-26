@@ -31,23 +31,27 @@ def mock_runtime():
 
     agent = MagicMock()
     agent.run.return_value = "test answer"
-    memory = MagicMock()
-    memory.short_term = ShortTermMemory()
+
+    # Production semantics: one cached MemoryManager (own STM) per session,
+    # created lazily by the factory. No shared global memory, no STM swap —
+    # checkpoint restore goes through chat.restore_session_stm().
+    memories: dict = {}
 
     def memory_factory_builder(session_id):
         def factory():
-            # Migrate STM from chat._stms if present (mirrors real make_memory_factory)
-            if session_id in chat._stms:
-                restored = chat._stms.pop(session_id)
-                memory.short_term = restored
-            return memory
+            m = memories.get(session_id)
+            if m is None:
+                m = MagicMock()
+                m.short_term = ShortTermMemory()
+                memories[session_id] = m
+            return m
         return factory
 
     chat = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=memory_factory_builder)
     runtime = MagicMock()
     runtime.chat = chat
     runtime.subagent_confirm = ConfirmBridge()
-    return runtime, chat, agent, memory
+    return runtime, chat, agent, memories
 
 
 # ── Bug 1: New session should NOT interrupt the running agent ──────────
@@ -64,7 +68,7 @@ class TestSessionSwitchDoesNotInterruptAgent:
         Reproduces Bug 1: user starts a new session while old session's agent
         is still running. The old agent must finish and persist.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         agent_finished = threading.Event()
@@ -110,7 +114,7 @@ class TestSessionSwitchDoesNotInterruptAgent:
         The version manager should receive commit_with_messages when the agent
         finishes, even though the WebSocket is already closed.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         # Replace the version manager with a mock to track persistence
@@ -163,17 +167,17 @@ class TestSessionSwitchDoesNotInterruptAgent:
 
         Reproduces Bug 1: per-session STM isolation.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
 
         session_a = chat.start_session()
         session_b = chat.start_session()
 
         # Pre-populate session A's STM
-        stm_a = chat._get_or_create_stm(session_a.id)
+        stm_a = chat._get_or_create_memory(session_a.id).short_term
         stm_a.append("user", "session A message")
 
         # Get session B's STM — should be independent
-        stm_b = chat._get_or_create_stm(session_b.id)
+        stm_b = chat._get_or_create_memory(session_b.id).short_term
         assert len(stm_b.get_all()) == 0, "Session B STM should be empty"
         assert len(stm_a.get_all()) == 1, "Session A STM should still have its message"
 
@@ -193,7 +197,7 @@ class TestUserQuestionPersistsImmediately:
         Reproduces Bug 2: user sends a question, navigates away before agent
         finishes, comes back — question should be visible.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         version_mgr = MagicMock()
@@ -241,7 +245,7 @@ class TestUserQuestionPersistsImmediately:
         """If the agent throws an exception, the user question should still
         be in the database (persisted before the agent ran).
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         version_mgr = MagicMock()
@@ -267,7 +271,7 @@ class TestUserQuestionPersistsImmediately:
 
         Reproduces Bug 2 end-to-end.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         version_mgr = MagicMock()
@@ -327,13 +331,13 @@ class TestUserQuestionPersistsImmediately:
 # ── STM swap correctness ──────────
 
 
-class TestSTMSwapCorrectness:
-    """Verify the STM swap mechanism in send_message works correctly."""
+class TestPerSessionSTM:
+    """Verify each session's run sees its own STM (per-session MemoryManager)."""
 
-    def test_stm_swapped_during_agent_run(self, mock_runtime):
+    def test_agent_run_uses_per_session_stm(self, mock_runtime):
         """During agent.run(), memory_manager.short_term should be the
-        per-session STM, not the global one."""
-        runtime, chat, agent, memory = mock_runtime
+        session's own STM."""
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         captured_stms = []
@@ -349,7 +353,7 @@ class TestSTMSwapCorrectness:
         from agentnexus.memory.short_term import ShortTermMemory
         session_stm = ShortTermMemory()
         session_stm.append("user", "old context")
-        chat._stms[session.id] = session_stm
+        chat._get_or_create_memory(session.id).short_term = session_stm
 
         chat.send_message(session.id, "new message")
 
@@ -360,42 +364,6 @@ class TestSTMSwapCorrectness:
         all_msgs = captured_stms[0].get_all()
         assert any(m.get("content") == "old context" for m in all_msgs)
 
-    def test_global_stm_restored_after_run(self, mock_runtime):
-        """After send_message returns, memory_manager.short_term should be
-        restored to the global STM."""
-        runtime, chat, agent, memory = mock_runtime
-        session = chat.start_session()
-
-        # Create a global STM
-        from agentnexus.memory.short_term import ShortTermMemory
-        global_stm = ShortTermMemory()
-        global_stm.append("system", "global state")
-        memory.short_term = global_stm
-
-        chat.send_message(session.id, "hello")
-
-        # Global STM should be restored
-        assert memory.short_term is global_stm
-        assert any(m.get("content") == "global state" for m in global_stm.get_all())
-
-    def test_stm_swap_survives_agent_exception(self, mock_runtime):
-        """If agent.run() throws, the global STM should still be restored."""
-        runtime, chat, agent, memory = mock_runtime
-        session = chat.start_session()
-
-        from agentnexus.memory.short_term import ShortTermMemory
-        global_stm = ShortTermMemory()
-        global_stm.append("system", "global state")
-        memory.short_term = global_stm
-
-        agent.run.side_effect = RuntimeError("boom")
-
-        with pytest.raises(RuntimeError, match="boom"):
-            chat.send_message(session.id, "hello")
-
-        # Global STM must be restored even after exception
-        assert memory.short_term is global_stm
-
 
 # ── Concurrent sessions: the real bug scenario ──────────
 
@@ -404,7 +372,8 @@ class TestConcurrentSessions:
     """Test two sessions running concurrently — the actual bug scenario.
 
     When the user has session A running and creates session B, both sessions
-    may call send_message concurrently. The STM swap must be thread-safe.
+    may call send_message concurrently. Each session must see its own
+    per-session MemoryManager/STM.
     """
 
     def test_concurrent_send_message_different_sessions(self, mock_runtime):
@@ -413,10 +382,9 @@ class TestConcurrentSessions:
         waits until the first finishes.
 
         This is the real Bug 1 scenario: old session A is still running when
-        session B starts. Both use self._memory.short_term — the STM swap
-        must be thread-safe.
+        session B starts. Each must run against its own STM — no shared state.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session_a = chat.start_session()
         session_b = chat.start_session()
 
@@ -424,11 +392,11 @@ class TestConcurrentSessions:
         from agentnexus.memory.short_term import ShortTermMemory
         stm_a = ShortTermMemory()
         stm_a.append("user", "session A context")
-        chat._stms[session_a.id] = stm_a
+        chat._get_or_create_memory(session_a.id).short_term = stm_a
 
         stm_b = ShortTermMemory()
         stm_b.append("user", "session B context")
-        chat._stms[session_b.id] = stm_b
+        chat._get_or_create_memory(session_b.id).short_term = stm_b
 
         stms_seen = {}
 
@@ -471,18 +439,18 @@ class TestConcurrentSessions:
     def test_stm_not_corrupted_by_sequential_access(self, mock_runtime):
         """After sequential send_message calls, each session's STM should
         contain only its own messages — not the other session's."""
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session_a = chat.start_session()
         session_b = chat.start_session()
 
         from agentnexus.memory.short_term import ShortTermMemory
         stm_a = ShortTermMemory()
         stm_a.append("user", "A's secret")
-        chat._stms[session_a.id] = stm_a
+        chat._get_or_create_memory(session_a.id).short_term = stm_a
 
         stm_b = ShortTermMemory()
         stm_b.append("user", "B's secret")
-        chat._stms[session_b.id] = stm_b
+        chat._get_or_create_memory(session_b.id).short_term = stm_b
 
         def agent_run(_text, memory_manager=None):
             return "done"
@@ -499,31 +467,6 @@ class TestConcurrentSessions:
         assert "B's secret" not in msgs_a, f"Session A STM corrupted: {msgs_a}"
         assert "A's secret" not in msgs_b, f"Session B STM corrupted: {msgs_b}"
 
-    def test_global_stm_not_corrupted_by_sequential_sessions(self, mock_runtime):
-        """The global scratch STM should be unchanged after sequential
-        session operations."""
-        runtime, chat, agent, memory = mock_runtime
-        session_a = chat.start_session()
-        session_b = chat.start_session()
-
-        from agentnexus.memory.short_term import ShortTermMemory
-        global_stm = ShortTermMemory()
-        global_stm.append("system", "global data")
-        memory.short_term = global_stm
-
-        def agent_run(_text, memory_manager=None):
-            return "done"
-
-        agent.run.side_effect = agent_run
-
-        chat.send_message(session_a.id, "msg A")
-        chat.send_message(session_b.id, "msg B")
-
-        # Global STM should be unchanged
-        assert memory.short_term is global_stm
-        msgs = [m.get("content") for m in global_stm.get_all()]
-        assert msgs == ["global data"], f"Global STM corrupted: {msgs}"
-
 
 # ── End-to-end: full lifecycle ──────────
 
@@ -537,7 +480,7 @@ class TestSessionSwitchLifecycle:
 
         Both sessions should have their own history.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
 
         # Version managers per session to track persistence
         version_managers = {}
@@ -638,7 +581,7 @@ class TestReasoningContentPersistence:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext
 
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
 
         # Create a real agent with mocked LLM
         agent = ReActAgent.__new__(ReActAgent)
@@ -679,11 +622,11 @@ class TestReasoningContentPersistence:
         Simulates: agent produces reasoning → user navigates away → user comes
         back → loadAndDisplayMessages fetches from backend → reasoning visible.
         """
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
         # Simulate STM with reasoning content (as the fix would produce)
-        stm = chat._get_or_create_stm(session.id)
+        stm = chat._get_or_create_memory(session.id).short_term
         stm.append("user", "what is 2+2?")
         stm.append("system", "[思考过程] Let me think about basic arithmetic...")
         stm.append("assistant", "I need to calculate 2+2")
@@ -704,7 +647,7 @@ class TestReasoningContentPersistence:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import AgentStep, ExecutionContext
 
-        runtime, chat, agent, memory = mock_runtime
+        runtime, chat, agent, _memories = mock_runtime
 
         agent = ReActAgent.__new__(ReActAgent)
         agent._output = lambda msg: None

@@ -351,7 +351,7 @@ def restore_session(req: CreateSessionRequest):
         )
         snapshot = version.get_head_stm()
         if snapshot:
-            chat.set_session_stm_snapshot(session_id, snapshot)
+            chat.restore_session_stm(session_id, snapshot)
         return {"session_id": session_id, "restored": True}
 
     # Session not found in DB either — create a new one instead of 404
@@ -475,11 +475,12 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
             )
             if stored_workspace:
                 chat._sessions[session_id] = SessionHandle(id=session_id, workspace=stored_workspace)
-                # Restore STM
+                # Restore the conversation STM into this session's MemoryManager
+                # (server restore_session is off — sessions are discovered here).
                 version = ConversationVersionManager(session_id, settings.memory_db_path, workspace_path=stored_workspace)
                 snapshot = version.get_head_stm()
                 if snapshot:
-                    chat.set_session_stm_snapshot(session_id, snapshot)
+                    chat.restore_session_stm(session_id, snapshot)
         except Exception:
             pass
         # If still not found, reject

@@ -103,7 +103,9 @@ def clear_short_term_memory(session_id: str | None = None):
 
     runtime = _get_runtime()
     if session_id:
-        runtime.chat._stms.pop(session_id, None)
+        memory = runtime.chat._memory_managers.get(session_id)
+        if memory is not None:
+            memory.short_term.clear()
     else:
         runtime.memory_manager.short_term.clear()
     return {"status": "cleared"}

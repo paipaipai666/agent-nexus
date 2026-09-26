@@ -103,9 +103,8 @@ class ChatService:
         self._run_token_seq: dict[str, int] = {}
         # Per-session version managers — each session gets its own journal + checkpoints
         self._version_managers: dict[str, Any] = {}
-        # Per-session short-term memories — each session gets its own STM deque
-        # (R7: migrated into MemoryManager via closure factory)
-        self._stms: dict[str, Any] = {}
+        # Per-session short-term memories live inside their MemoryManager
+        # (chat._get_or_create_memory) — restored via restore_session_stm().
 
     def start_session(
         self,
@@ -442,21 +441,22 @@ class ChatService:
             )
         return self._version_managers[session_id]
 
-    def _get_or_create_stm(self, session_id: str, snapshot: str | None = None) -> Any:
-        """Return the per-session STM, creating one from snapshot if needed."""
-        if session_id not in self._stms:
-            if snapshot:
-                from agentnexus.memory.short_term import ShortTermMemory
-                self._stms[session_id] = ShortTermMemory.from_json(snapshot)
-            else:
-                from agentnexus.memory.short_term import ShortTermMemory
-                self._stms[session_id] = ShortTermMemory()
-        return self._stms[session_id]
+    def restore_session_stm(self, session_id: str, snapshot: str) -> None:
+        """Inject a checkpoint STM snapshot into the session's MemoryManager.
 
-    def set_session_stm_snapshot(self, session_id: str, snapshot: str) -> None:
-        """Store a per-session STM from a checkpoint snapshot (used by restore_session)."""
+        Used by the server restore paths (WS connect / POST /session/restore):
+        sessions are discovered at connect time, so restore happens here — not
+        at build time like the TUI's restore_session. No-op when the in-memory
+        STM already holds messages, so a mid-run reconnect never clobbers
+        fresher state with an older snapshot.
+        """
+        memory = self._get_or_create_memory(session_id)
+        if getattr(memory, "short_term", None) is None or memory.short_term._messages:
+            return
         from agentnexus.memory.short_term import ShortTermMemory
-        self._stms[session_id] = ShortTermMemory.from_json(snapshot)
+        restored = ShortTermMemory.from_json(snapshot)
+        memory.short_term._messages = restored._messages
+        memory.short_term._summary = restored._summary
 
     def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:

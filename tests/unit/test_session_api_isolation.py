@@ -57,12 +57,16 @@ class TestSessionAddressing:
         service = _make_service()
         s1 = service.start_session()
         s2 = service.start_session()
-        service._stms[s1.id] = MagicMock()
-        service._stms[s2.id] = MagicMock()
+        service._memory_managers[s1.id] = MagicMock()
+        service._memory_managers[s2.id] = MagicMock()
         # 等价于 /memory/short/clear?session_id=s1 的效果
-        service._stms.pop(s1.id, None)
-        assert s1.id not in service._stms
-        assert s2.id in service._stms, "清理 s1 不得波及 s2"
+        mm = service._memory_managers.get(s1.id)
+        if mm is not None:
+            mm.short_term.clear()
+        mm1 = service._memory_managers[s1.id]
+        mm2 = service._memory_managers[s2.id]
+        mm1.short_term.clear.assert_called_once()
+        mm2.short_term.clear.assert_not_called()  # 清理 s1 不得波及 s2
 
 
 class TestSessionAuthPosture:
