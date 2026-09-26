@@ -1,87 +1,100 @@
+"""Tests for the runtime helpers that are still live after the FSM redesign.
+
+历史：本文件原先测试 `record_llm_response`（轮次记录）与 `retry_gate`（重试门）。
+Step 5 清理死代码时这两个函数被删除——轮次记录已并入 `_on_round`，重试门由
+`decisions.retry_gate_decision` 承担。用例改为覆盖这两处**仍然活着**的等价逻辑。
+"""
 from unittest.mock import MagicMock
 
-from agentnexus.agents.react_runtime import record_llm_response, record_tool_done, retry_gate
-from agentnexus.agents.react_types import CallingStrategy, ExecutionContext, ReActEventType
+from agentnexus.agents import decisions
+from agentnexus.agents.react_runtime import record_tool_done
+from agentnexus.agents.react_types import (
+    AgentStep,
+    CallingStrategy,
+    ExecutionContext,
+    ReActEvent,
+    ReActEventType,
+)
 
 
-class TestRecordLlmResponse:
-    def _make_ctx(self, *, strategy=CallingStrategy.NATIVE_TOOLS, current_step=0):
-        ctx = ExecutionContext(
-            question="test",
-            strategy=strategy,
-            current_step=current_step,
+def _make_llm(**attrs):
+    llm = MagicMock()
+    llm.last_usage = attrs.get("usage", {"input_tokens": 10, "output_tokens": 20})
+    llm.last_tool_calls = attrs.get("tool_calls", [])
+    llm.last_reasoning_content = attrs.get("reasoning", "reasoning_text")
+    llm.last_error = ""
+    llm.last_truncated = False
+    return llm
+
+
+class TestRoundRecording:
+    """_on_round 的轮次记录（替代旧 record_llm_response 的覆盖）。"""
+
+    def _agent(self, llm):
+        from agentnexus.agents.re_act_agent import ReActAgent
+
+        agent = ReActAgent(llm, MagicMock())
+        agent._output = lambda _msg: None
+        return agent
+
+    def _drive(self, agent, ctx, monkeypatch):
+        monkeypatch.setattr(
+            "agentnexus.agents.re_act_agent.call_llm",
+            lambda llm, ctx, json_format_section="", on_token=None: ctx.last_response_text,
         )
-        return ctx
+        return agent._on_round(ctx, ReActEvent(ReActEventType.ROUND_READY))
 
-    def _make_llm_client(self, *, usage=None, tool_calls=None, reasoning="reasoning_text"):
-        client = MagicMock()
-        client.last_usage = usage or {"input_tokens": 10, "output_tokens": 20}
-        client.last_tool_calls = tool_calls
-        client.last_reasoning_content = reasoning
-        return client
+    def test_creates_agent_step(self, monkeypatch):
+        llm = _make_llm(tool_calls=[])
+        agent = self._agent(llm)
+        ctx = ExecutionContext(question="test", strategy=CallingStrategy.NATIVE_TOOLS)
+        ctx.last_response_text = "the answer"
 
-    def test_creates_agent_step(self):
-        ctx = self._make_ctx()
-        llm = self._make_llm_client(tool_calls=[{"name": "t", "arguments": {}}])
-
-        record_llm_response(ctx, response_text="response", llm_client=llm)
+        self._drive(agent, ctx, monkeypatch)
 
         assert len(ctx.steps) == 1
-        assert ctx.steps[0].content == "response"
+        assert ctx.steps[0].content == "the answer"
         assert ctx.steps[0].reasoning_content == "reasoning_text"
 
-    def test_accumulates_tokens(self):
-        ctx = self._make_ctx()
-        llm = self._make_llm_client(
-            usage={"input_tokens": 100, "output_tokens": 200},
-            tool_calls=[{"name": "t", "arguments": {}}],
-        )
+    def test_accumulates_tokens(self, monkeypatch):
+        llm = _make_llm(usage={"input_tokens": 100, "output_tokens": 200}, tool_calls=[])
+        agent = self._agent(llm)
+        ctx = ExecutionContext(question="test", strategy=CallingStrategy.NATIVE_TOOLS)
+        ctx.last_response_text = "the answer"
 
-        record_llm_response(ctx, response_text="r", llm_client=llm)
+        self._drive(agent, ctx, monkeypatch)
 
         assert ctx._total_usage["input_tokens"] == 100
         assert ctx._total_usage["output_tokens"] == 200
 
-    def test_routes_native(self):
-        ctx = self._make_ctx(strategy=CallingStrategy.NATIVE_TOOLS)
-        llm = self._make_llm_client(tool_calls=[{"name": "t", "arguments": {}}])
-
-        events = record_llm_response(ctx, response_text="r", llm_client=llm)
-
-        assert len(events) == 1
-        assert events[0].type == ReActEventType.ROUTE_NATIVE
-
-    def test_routes_json(self):
-        ctx = self._make_ctx(strategy=CallingStrategy.JSON_MODE)
-        llm = self._make_llm_client(tool_calls=None)
-
-        events = record_llm_response(ctx, response_text="r", llm_client=llm)
-
-        assert len(events) == 1
-        assert events[0].type == ReActEventType.ROUTE_JSON
-
-    def test_sets_pending_tool_calls_native(self):
-        ctx = self._make_ctx(strategy=CallingStrategy.NATIVE_TOOLS)
+    def test_native_path_sets_pending_and_emits_tools_requested(self, monkeypatch):
         calls = [{"name": "web_search", "arguments": {"q": "test"}}]
-        llm = self._make_llm_client(tool_calls=calls)
+        llm = _make_llm(tool_calls=calls)
+        agent = self._agent(llm)
+        ctx = ExecutionContext(question="test", strategy=CallingStrategy.NATIVE_TOOLS)
+        ctx.last_response_text = "先查一下"
 
-        record_llm_response(ctx, response_text="r", llm_client=llm)
+        events = self._drive(agent, ctx, monkeypatch)
 
+        assert [e.type for e in events] == [ReActEventType.TOOLS_REQUESTED]
         assert ctx.pending_tool_calls == calls
+        assert ctx.last_response_text == "先查一下"
 
-    def test_sets_last_response_text(self):
-        ctx = self._make_ctx()
-        llm = self._make_llm_client(tool_calls=[])
+    def test_json_path_answer_emits_answer_ready(self, monkeypatch):
+        llm = _make_llm(tool_calls=[], reasoning="")
+        agent = self._agent(llm)
+        ctx = ExecutionContext(question="test", strategy=CallingStrategy.PROMPT_JSON)
+        ctx.last_response_text = '{"answer": "final answer"}'
 
-        record_llm_response(ctx, response_text="final answer", llm_client=llm)
+        events = self._drive(agent, ctx, monkeypatch)
 
-        assert ctx.last_response_text == "final answer"
+        assert [e.type for e in events] == [ReActEventType.ANSWER_READY]
+        assert ctx.last_answer == "final answer"
 
 
 class TestRecordToolDone:
     def _make_ctx(self):
         ctx = ExecutionContext(question="test", current_step=1)
-        from agentnexus.agents.react_types import AgentStep
         ctx.steps.append(AgentStep(step_id=1))
         return ctx
 
@@ -111,43 +124,20 @@ class TestRecordToolDone:
         assert ctx.tool_state.last_subagent_payload is None
 
 
-class TestRetryGate:
-    def _make_ctx(self, *, json_retries=0, max_json_retries=2, strategy=CallingStrategy.JSON_MODE):
-        ctx = ExecutionContext(
-            question="test",
-            strategy=strategy,
-            json_retries=json_retries,
-            max_json_retries=max_json_retries,
-        )
-        return ctx
+class TestRecoverGate:
+    """重试/降档/兜底策略（替代旧 react_runtime.retry_gate 的覆盖）。"""
 
     def test_retries_left(self):
-        ctx = self._make_ctx(json_retries=0, max_json_retries=3)
-
-        events = retry_gate(ctx, "parse error")
-
-        assert len(events) == 1
-        assert events[0].type == ReActEventType.RETRIES_LEFT
+        assert decisions.retry_gate_decision(
+            json_retries=0, max_json_retries=3,
+            strategy=CallingStrategy.JSON_MODE) == "round"
 
     def test_no_retries_json_mode(self):
-        ctx = self._make_ctx(json_retries=2, max_json_retries=2, strategy=CallingStrategy.JSON_MODE)
-
-        events = retry_gate(ctx, "parse error")
-
-        assert len(events) == 1
-        assert events[0].type == ReActEventType.NO_RETRIES
+        assert decisions.retry_gate_decision(
+            json_retries=2, max_json_retries=2,
+            strategy=CallingStrategy.JSON_MODE) == "degrade"
 
     def test_fallback_text_when_not_json_mode(self):
-        ctx = self._make_ctx(json_retries=2, max_json_retries=2, strategy=CallingStrategy.PROMPT_JSON)
-
-        events = retry_gate(ctx, "parse error")
-
-        assert len(events) == 1
-        assert events[0].type == ReActEventType.FALLBACK_TEXT
-
-    def test_payload_contains_reason(self):
-        ctx = self._make_ctx(json_retries=0, max_json_retries=2)
-
-        events = retry_gate(ctx, "bad format")
-
-        assert events[0].payload["reason"] == "bad format"
+        assert decisions.retry_gate_decision(
+            json_retries=2, max_json_retries=2,
+            strategy=CallingStrategy.PROMPT_JSON) == "salvage"

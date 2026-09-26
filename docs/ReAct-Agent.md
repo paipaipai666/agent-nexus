@@ -4,48 +4,38 @@
 
 ## FSM 状态机
 
-Agent 的执行循环由一个 **16 状态 × 25 规则** 的 FSM 驱动，而非简单的 while 循环。
+Agent 的执行循环由一个 **6 状态 × 13 规则** 的 FSM 驱动，而非简单的 while 循环。
+（重设计于 2026-09-24；旧形态是 15 状态 × 33 规则，其中多数状态只有一个出口——
+它们是流水线的一步，不是决策点，详见 `docs/fsm-redesign-proposal.md`。）
 
 | 状态 | 含义 | 进入条件 |
 |------|------|----------|
-| `INIT` | 初始化 | 收到用户问题 |
-| `SELECT_STRATEGY` | 选择 LLM 策略 | 系统提示就绪 |
-| `PREPARE_LLM_CALL` | 准备 LLM 参数 | 策略已选定 |
-| `CALL_LLM` | 调用 LLM | 参数已准备好 |
-| `RECEIVE_RESPONSE` | 接收响应 | LLM 返回 |
-| `CHECK_TOOL_CALLS` | 检查工具调用 | Native Tool Calling 结果 |
-| `EXECUTE_TOOL` | 执行工具 | 发现工具调用 |
-| `CHECK_EMPTY` | 检查空响应 | JSON 模式 |
-| `JSON_PARSE` | 解析 JSON | 响应非空 |
-| `CLASSIFY` | 分类结果 | 解析成功 |
-| `RETRY_GATE` | 重试门控 | 失败 |
-| `DEGRADE` | 降级策略 | 重试耗尽 |
-| `EMIT_ANSWER` | 输出答案 | 收到最终 answer |
-| `MAX_STEPS` | 步数超限 | current_step >= max_steps |
-| `ERROR_ABORT` | 不可恢复错误 | LLM 调用彻底失败 |
-| `DONE` | 结束 | 任意终态 |
+| `INIT` | 初始化：建上下文、选协议档位 | 收到用户问题 |
+| `AWAIT_MODEL` | 一轮模型往返 + 解释成标准化决策 | 循环体（`event=None` auto-advance 自环） |
+| `EXECUTE_TOOL` | 执行整批工具 | 模型请求了工具（原生 tool_calls 或协议 JSON） |
+| `RECOVER` | 重试 / 降档 / 兜底提取 / 终止 | 本轮输出不可用（FAULT） |
+| `ANSWER` | 交最终答案 | 有最终 answer（可被 AGENT_STOP 钩子打回） |
+| `DONE` | 结束 | 无条件落点 / ABORT |
+
+协议档位（原生工具 / JSON Mode / Prompt JSON）不再是状态，而是 `AWAIT_MODEL` 的内部属性。
 
 ## 执行流程
 
 ```
-用户问题 → INIT → SELECT_STRATEGY → CALL_LLM
+用户问题 → INIT → AWAIT_MODEL（每轮：调用 LLM + 解释输出）
     │
-    ├── Native Tool Calling:
-    │   RECEIVE_RESPONSE → CHECK_TOOL_CALLS
-    │     ├── 有 tool_calls → EXECUTE_TOOL(逐个执行)
-    │     │     ↕ 循环 → PREPARE_LLM_CALL(继续)
-    │     └── 无 → EMIT_ANSWER
+    ├── TOOLS_REQUESTED → EXECUTE_TOOL（整批执行，读写分区并发）
+    │     ├── TOOLS_DONE → AWAIT_MODEL（继续）
+    │     └── ANSWER_READY → ANSWER（记账类工具的 fast path）
     │
-    └── JSON / Prompt JSON:
-        RECEIVE_RESPONSE → CHECK_EMPTY → JSON_PARSE → CLASSIFY
-          ├── {"tool":...} → EXECUTE_TOOL
-          ├── {"answer":...} → EMIT_ANSWER
-          └── 解析失败 → RETRY_GATE(重试2次)
-                ├── 有重试 → PREPARE_LLM_CALL(加错误提示)
-                ├── 降级 → PREPARE_LLM_CALL(换策略)
-                └── 兜底 → 从原始文本提取
+    ├── ANSWER_READY → ANSWER →(stop 钩子否决)→ ANSWER_VETOED → AWAIT_MODEL
+    │
+    └── FAULT → RECOVER
+          ├── ROUND_READY（重试加提示 / 换策略档位）→ AWAIT_MODEL
+          ├── ANSWER_READY（从原始文本兜底提取）→ ANSWER
+          └── ABORT → DONE
 
-EMIT_ANSWER → 保存 LTM → DONE
+ANSWER → 保存 LTM → DONE
 ```
 
 ## LLM 策略三级降级

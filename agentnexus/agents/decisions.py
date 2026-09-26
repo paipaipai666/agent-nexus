@@ -296,23 +296,6 @@ def retry_gate_decision(
     return "salvage"
 
 
-def after_retry_round_decision(
-    *,
-    json_retries: int,
-    max_json_retries: int,
-    strategy: CallingStrategy,
-) -> str:
-    """Tail of _on_retries_left: after one more retry was consumed, decide
-    "continue" (LLM_PARAMS_READY) or "degrade" (DEGRADED).
-
-    NOTE: the "degrade" outcome lands in PREPARE_LLM_CALL, which has no
-    DEGRADED row — the third known crash gap.  Preserved as-is in Step 1.
-    """
-    if json_retries >= max_json_retries and strategy == CallingStrategy.JSON_MODE:
-        return "degrade"
-    return "continue"
-
-
 def select_strategy(session_caps: Any, caps: Any) -> CallingStrategy:
     """Mirrors ReActAgent._select_strategy — capability ladder with session
     blocklist.  Kept as a free function so decisions stay framework-free.

@@ -218,21 +218,15 @@ class TestRecover:
             json_retries=2, max_json_retries=2,
             strategy=CallingStrategy.PROMPT_JSON) == "salvage"
 
-    def test_after_retry_round_degrades_json_mode(self):
-        assert decisions.after_retry_round_decision(
+    def test_exhausted_in_json_mode_degrades(self):
+        assert decisions.retry_gate_decision(
             json_retries=2, max_json_retries=2,
             strategy=CallingStrategy.JSON_MODE) == "degrade"
 
-    def test_after_retry_round_continues_when_budget_left(self):
-        assert decisions.after_retry_round_decision(
-            json_retries=1, max_json_retries=2,
-            strategy=CallingStrategy.JSON_MODE) == "continue"
-
-    def test_after_retry_round_continues_in_prompt_json(self):
-        # PROMPT_JSON 即使重试耗尽也不降级（与原实现对齐）
-        assert decisions.after_retry_round_decision(
+    def test_exhausted_in_prompt_json_salvages(self):
+        assert decisions.retry_gate_decision(
             json_retries=5, max_json_retries=2,
-            strategy=CallingStrategy.PROMPT_JSON) == "continue"
+            strategy=CallingStrategy.PROMPT_JSON) == "salvage"
 
 
 class TestSelectStrategy:

@@ -4,48 +4,40 @@
 
 ## FSM State Machine
 
-The agent's execution loop is driven by a **16-state × 25-rule** FSM, not a simple while loop.
+The agent's execution loop is driven by a **6-state × 13-rule** FSM, not a simple while loop.
+(Redesigned 2026-09-24; the previous form was 15 states × 33 rules, and most of those
+states had a single exit — they were pipeline steps, not decision points. See
+`docs/fsm-redesign-proposal.md`.)
 
 | State | Meaning | Entry Condition |
 |------|------|----------|
-| `INIT` | Initialization | User question received |
-| `SELECT_STRATEGY` | Select LLM strategy | System prompt ready |
-| `PREPARE_LLM_CALL` | Prepare LLM params | Strategy selected |
-| `CALL_LLM` | Call LLM | Params prepared |
-| `RECEIVE_RESPONSE` | Receive response | LLM returned |
-| `CHECK_TOOL_CALLS` | Check tool calls | Native tool calling result |
-| `EXECUTE_TOOL` | Execute tool | Tool call found |
-| `CHECK_EMPTY` | Check empty response | JSON mode |
-| `JSON_PARSE` | Parse JSON | Response non-empty |
-| `CLASSIFY` | Classify result | Parse succeeded |
-| `RETRY_GATE` | Retry gate | Failure |
-| `DEGRADE` | Degrade strategy | Retries exhausted |
-| `EMIT_ANSWER` | Output answer | Final answer received |
-| `MAX_STEPS` | Steps exceeded | current_step >= max_steps |
-| `ERROR_ABORT` | Unrecoverable error | LLM call completely failed |
-| `DONE` | Done | Any terminal state |
+| `INIT` | Build context, pick protocol tier | User question received |
+| `AWAIT_MODEL` | One model round-trip + interpret the output | Loop body (`event=None` auto-advance self-loop) |
+| `EXECUTE_TOOL` | Run the tool batch | Model requested tools (native tool_calls or protocol JSON) |
+| `RECOVER` | Retry / degrade / salvage / abort | This round's output is unusable (FAULT) |
+| `ANSWER` | Deliver the final answer | Final answer ready (AGENT_STOP hook may veto it) |
+| `DONE` | Done | Unconditional landing / ABORT |
+
+The protocol tier (native tools / JSON mode / prompt JSON) is no longer a set of
+states — it is an attribute of `AWAIT_MODEL`.
 
 ## Execution Flow
 
 ```
-User question → INIT → SELECT_STRATEGY → CALL_LLM
+User question → INIT → AWAIT_MODEL (per round: call LLM + interpret)
     │
-    ├── Native Tool Calling:
-    │   RECEIVE_RESPONSE → CHECK_TOOL_CALLS
-    │     ├── Has tool_calls → EXECUTE_TOOL(one by one)
-    │     │     ↕ loop → PREPARE_LLM_CALL(continue)
-    │     └── None → EMIT_ANSWER
+    ├── TOOLS_REQUESTED → EXECUTE_TOOL (whole batch, read/write partitioned)
+    │     ├── TOOLS_DONE → AWAIT_MODEL (continue)
+    │     └── ANSWER_READY → ANSWER (bookkeeping-only fast path)
     │
-    └── JSON / Prompt JSON:
-        RECEIVE_RESPONSE → CHECK_EMPTY → JSON_PARSE → CLASSIFY
-          ├── {"tool":...} → EXECUTE_TOOL
-          ├── {"answer":...} → EMIT_ANSWER
-          └── Parse failed → RETRY_GATE(retry 2x)
-                ├── Has retries → PREPARE_LLM_CALL(add error hint)
-                ├── Degrade → PREPARE_LLM_CALL(swap strategy)
-                └── Fallback → Extract from raw text
+    ├── ANSWER_READY → ANSWER → (stop hook veto) ANSWER_VETOED → AWAIT_MODEL
+    │
+    └── FAULT → RECOVER
+          ├── ROUND_READY (retry with a hint / swap protocol tier) → AWAIT_MODEL
+          ├── ANSWER_READY (salvage from raw text) → ANSWER
+          └── ABORT → DONE
 
-EMIT_ANSWER → Save LTM → DONE
+ANSWER → Save LTM → DONE
 ```
 
 ## LLM Strategy 3-Tier Degradation

@@ -132,24 +132,25 @@ def test_batch_tool_done_events_preserve_order():
     assert done_names == ["alpha_tool", "beta_tool", "gamma_tool"]
 
 
-def test_single_tool_returns_tool_done_fsm_event():
-    """Sanity: the single-tool path returns TOOL_DONE as an FSM event (processed by FSM loop)."""
-    from agentnexus.agents.react_runtime import execute_pending_tool
+def test_single_tool_batch_still_emits_tool_done_events():
+    """单工具也走 batch 路径（旧 execute_pending_tool 单条路径已在 Step 5 删除）。"""
+    from agentnexus.agents.react_runtime import execute_pending_tools_batch
 
     ctx = _make_ctx("web_search")
+    events = _capture_events(ctx)
     execute_fn = MagicMock(return_value="search_result")
 
-    result = execute_pending_tool(
+    execute_pending_tools_batch(
         ctx,
+        registry=_make_registry(),
         execute_tool=execute_fn,
         output=_noop_output,
     )
 
-    # Single-tool path returns TOOL_DONE as FSM event (not via ctx.emit)
-    assert isinstance(result, ReActEvent)
-    assert result.type == ReActEventType.TOOL_DONE
-    assert result.payload["name"] == "web_search"
-    assert result.payload["result"] == "search_result"
+    done = [e for e in events if e.type == ReActEventType.TOOL_DONE]
+    assert len(done) == 1
+    assert done[0].payload["name"] == "web_search"
+    assert done[0].payload["result"] == "search_result"
 
 
 def test_batch_still_records_tool_outputs_in_step():

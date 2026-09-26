@@ -4,9 +4,11 @@
 
 ## 概述
 
-`agents` 模块实现了 AgentNexus 的核心代理系统——基于**转移表驱动的有限状态机 (FSM)** 的 ReAct（Reasoning + Acting）代理。每个决策点是一个显式状态，每次转换是一个处理方法。
+`agents` 模块实现了 AgentNexus 的核心代理系统——基于**转移表驱动的有限状态机 (FSM)** 的 ReAct（Reasoning + Acting）代理。只有真正的决策点才是状态，流水线步骤是普通函数（见 `agents/decisions.py`）。
 
-**设计哲学**：将 LLM 交互的复杂逻辑分解为 16 个状态和 25 条转移规则，每条规则对应一个处理方法，实现完全可追踪、可调试的代理行为。
+**设计哲学**：6 个状态、13 条转移规则。状态只承载"需要等待外部输入、且同一事件在不同情境下需要不同处理"的地方；参数准备、JSON 解析、分类这些**做完下一步必然**的步骤一律收进纯函数，方便单测也避免转移表膨胀成组合爆炸。
+
+> 重设计记录（2026-09-24）：旧形态是 15 个状态 / 33 条转移，其中 `SELECT_STRATEGY`、`PREPARE_LLM_CALL`、`CHECK_EMPTY`、`JSON_PARSE`、`DEGRADE` 等都只有一个出口——它们是流水线的一步，不是决策点。更严重的是那张表不是全函数：handler 在落点状态发出该状态没定义的事件时 `fsm.py` 会直接抛错，且没有任何便宜手段提前发现（三个这样的缺口都能被普通模型行为触发）。现在决策函数返回值封闭，与落点状态的行一一对应，totality 由 `tests/unit/test_fsm_table_totality.py` 用 AST 静态断言守护。
 
 ## 架构总览
 
@@ -17,34 +19,26 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    ReActAgent.run()                          │
 │                                                              │
-│  ┌─────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
-│  │INIT │→│SELECT    │→│PREPARE  │→│CALL_LLM │        │
-│  │     │  │STRATEGY  │  │LLM_CALL │  │          │        │
-│  └─────┘  └──────────┘  └──────────┘  └──────────┘        │
-│                                       │                     │
-│                    ┌──────────────────┤                     │
-│                    ▼                  ▼                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │CHECK_TOOL    │  │CHECK_EMPTY   │  │ERROR_ABORT   │     │
-│  │CALLS (Native)│  │(JSON/Text)   │  │              │     │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘     │
-│         │                 │                                 │
-│         ▼                 ▼                                 │
-│  ┌──────────────┐  ┌──────────────┐                        │
-│  │EXECUTE_TOOL  │  │JSON_PARSE    │                        │
-│  │              │  │→CLASSIFY     │                        │
-│  └──────┬───────┘  └──────┬───────┘                        │
-│         │                 │                                 │
-│         └────────┬────────┘                                 │
-│                  ▼                                          │
-│  ┌──────────────┐  ┌──────────────┐                        │
-│  │RETRY_GATE    │→│DEGRADE       │ (策略降级)              │
-│  └──────┬───────┘  └──────────────┘                        │
-│         │                                                   │
-│         ▼                                                   │
-│  ┌──────────────┐  ┌──────────────┐                        │
-│  │EMIT_ANSWER   │→│DONE          │                        │
-│  └──────────────┘  └──────────────┘                        │
+│  ┌─────      ┌──────────────┐                              │
+│  │INIT │─────>│ AWAIT_MODEL  │<──────────────┐              │
+│  └─────┘      │ (auto-advance│               │              │
+│               │  循环体)      │               │              │
+│               └──────┬───────┘               │              │
+│                      │                       │              │
+│        TOOLS_REQUESTED│  ANSWER_READY  FAULT  │              │
+│                      ▼                       │              │
+│               ┌──────────────┐       ┌───────┴──────┐       │
+│               │ EXECUTE_TOOL │       │   RECOVER    │       │
+│               └──────┬───────┘       │ 重试/降档/兜底│       │
+│        TOOLS_DONE ───┘               └───────┬──────┘       │
+│        ANSWER_READY ──────────┐  ROUND_READY │ ABORT        │
+│                               ▼              │              │
+│                        ┌──────────────┐      ▼              │
+│                        │   ANSWER     │   ┌──────┐          │
+│                        │ (stop 钩子)  │   │ DONE │          │
+│                        └──────┬───────┘   └──────┘          │
+│                    ANSWER_VETOED │ (无条件)                  │
+│                               └──────────────┘              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,109 +59,72 @@
 
 ### ReActState（FSM 状态）
 
-16 个状态，覆盖完整的 ReAct 循环：
+6 个状态，覆盖完整的 ReAct 循环（重设计后；旧形态曾有 15 个）：
 
-| 状态 | 说明 |
-| --- | --- |
-| `INIT` | 入口：构建 prompt、消息、记忆 |
-| `SELECT_STRATEGY` | 根据能力选择 CallingStrategy |
-| `PREPARE_LLM_CALL` | 设置 tools/response_format，注入 JSON 提示 |
-| `CALL_LLM` | 阻塞调用 llm_client.think() |
-| `RECEIVE_RESPONSE` | 记录 AgentStep，按策略路由 |
-| `CHECK_TOOL_CALLS` | NATIVE 模式：检查 last_tool_calls |
-| `EXECUTE_TOOL` | 执行工具，收集观察结果 |
-| `CHECK_EMPTY` | 非 NATIVE：响应文本是否为空？ |
-| `JSON_PARSE` | _robust_json_parse() |
-| `CLASSIFY` | _classify_parsed() → tool_call / answer / error |
-| `RETRY_GATE` | 是否重试、降级或回退？ |
-| `DEGRADE` | 标记失败 + 重新选择策略 |
-| `EMIT_ANSWER` | 输出最终答案，保存记忆，结束 |
-| `MAX_STEPS` | 达到步数限制 |
-| `ERROR_ABORT` | 不可恢复错误 |
-| `DONE` | 终态 |
+| 状态 | 说明 | 吸收掉的旧状态 |
+| --- | --- | --- |
+| `INIT` | 入口：构建 prompt、消息、记忆、选择协议档位 | `INIT`、`SELECT_STRATEGY` |
+| `AWAIT_MODEL` | 一轮模型往返 + 把输出解释成标准化决策（`event=None` auto-advance 自环即循环体） | `PREPARE_LLM_CALL`、`CALL_LLM`、`RECEIVE_RESPONSE`、`CHECK_TOOL_CALLS`、`CHECK_EMPTY`、`JSON_PARSE`、`CLASSIFY` |
+| `EXECUTE_TOOL` | 执行整批工具，收集观察结果 | `EXECUTE_TOOL` |
+| `RECOVER` | 所有"出问题了怎么办"的收口：重试 / 降档 / 兜底提取 / 终止 | `RETRY_GATE`、`DEGRADE`、`ERROR_ABORT` |
+| `ANSWER` | 交最终答案（可被 AGENT_STOP 钩子否决打回） | `EMIT_ANSWER` |
+| `DONE` | 终态 | `DONE` |
+
+协议档位（`CallingStrategy`）不再是状态——它是 `AWAIT_MODEL` 的一个内部属性。
 
 ### ReActEvent（事件）
 
-驱动状态转换的事件：
+驱动状态转换的队列事件（8 个，返回值封闭集）：
 
 | 事件 | 说明 |
 | --- | --- |
 | `START` | 用户调用 run(question) |
-| `STRATEGY_READY` | _select_strategy() 完成 |
-| `LLM_PARAMS_READY` | think 参数准备就绪 |
-| `LLM_RESPONSE` | LLM 成功返回 |
-| `LLM_ERROR` | LLM 调用失败 |
-| `TOOLS_FOUND` | NATIVE：last_tool_calls 非空 |
-| `NO_TOOLS` | NATIVE：无 tool_calls，有文本 → 答案 |
-| `NO_TOOLS_NO_TEXT` | NATIVE：无 tool_calls，无文本 → 降级 |
-| `TOOL_DONE` | 单个工具执行完成 |
-| `ALL_TOOLS_DONE` | 批次中所有工具执行完成 |
-| `EMPTY_RESPONSE` | 非 NATIVE：响应文本为空 |
-| `HAS_CONTENT` | 非 NATIVE：响应文本有内容 |
-| `PARSE_SUCCESS` | JSON 解析成功 |
-| `PARSE_ERROR` | JSON 解析失败 |
-| `CLASSIFIED_TOOL` | 分类为工具调用 |
-| `CLASSIFIED_ANSWER` | 分类为最终答案 |
-| `CLASSIFIED_ERROR` | 分类为错误 |
-| `RETRIES_LEFT` | 还有重试次数 |
-| `NO_RETRIES` | 无重试次数 → 降级 |
-| `FALLBACK_TEXT` | 回退到文本输出 |
+| `TOOLS_REQUESTED` | 解释器判定：模型要调工具（payload 带 tool_calls / thought / terminal_answer） |
+| `ANSWER_READY` | 解释器判定：这是最终答案（含兜底提取） |
+| `FAULT` | 本轮输出不可用或致命错误（payload 带 reason / detail / fatal） |
+| `TOOLS_DONE` | 整批工具执行完成 |
+| `ROUND_READY` | recover 决策：再来一轮模型调用 |
+| `ABORT` | 终止 |
+| `ANSWER_VETOED` | AGENT_STOP 钩子否决了最终答案 → 回到 AWAIT_MODEL |
+
+**旁路观测事件**（`ctx.emit`，不进队列，只给 TUI 实时展示）：`TOOL_START`、`TOOL_DONE`、`STREAM_TOKEN`、`STREAM_REASONING`、`ANSWER_THOUGHT`、`LOOP_WARNING`（闭环提示）、`BUDGET_REMINDER`（预算提醒）。它们与队列事件共享同一个单调递增 `seq`，所以 UI 侧顺序不会乱。
+
+旧事件名（`TOOLS_FOUND`、`ALL_TOOLS_DONE`、`LLM_PARAMS_READY`、`STOP_VETOED`、`NO_TOOLS`、`RETRIES_LEFT`、`DEGRADED` 等）保留为 **enum alias**，兼容下游按成员比较的代码。注意：alias 会让 `.type.name` 返回**新**的规范名，按字符串匹配旧名的代码必须同步更新。
 
 ## 转移表
 
 **文件**：`agentnexus/agents/react_transitions.py`
 
-25 条转移规则定义完整的状态机行为：
+13 条转移规则定义完整的状态机行为：
 
 ```python
 TRANSFER_TABLE = [
     # INIT
-    Transition(INIT, START, SELECT_STRATEGY, "_on_init"),
+    Transition(S.INIT, E.START, S.AWAIT_MODEL, "_on_init"),
 
-    # SELECT_STRATEGY
-    Transition(SELECT_STRATEGY, STRATEGY_READY, PREPARE_LLM_CALL, "_on_strategy_ready"),
-
-    # PREPARE_LLM_CALL
-    Transition(PREPARE_LLM_CALL, LLM_PARAMS_READY, CALL_LLM, "_on_llm_params_ready"),
-
-    # CALL_LLM
-    Transition(CALL_LLM, LLM_RESPONSE, RECEIVE_RESPONSE, "_on_llm_response"),
-    Transition(CALL_LLM, LLM_ERROR, ERROR_ABORT, "_on_llm_error"),
-
-    # RECEIVE_RESPONSE → 路由
-    Transition(RECEIVE_RESPONSE, ROUTE_NATIVE, CHECK_TOOL_CALLS, "_on_receive_native"),
-    Transition(RECEIVE_RESPONSE, ROUTE_JSON, CHECK_EMPTY, "_on_receive_json"),
-
-    # CHECK_TOOL_CALLS
-    Transition(CHECK_TOOL_CALLS, TOOLS_FOUND, EXECUTE_TOOL, "_on_tools_found"),
-    Transition(CHECK_TOOL_CALLS, NO_TOOLS, EMIT_ANSWER, "_on_no_tools_answer"),
-    Transition(CHECK_TOOL_CALLS, NO_TOOLS_NO_TEXT, DEGRADE, "_on_no_tools_degrade"),
+    # AWAIT_MODEL —— event=None 的 auto-advance 自环即循环体
+    Transition(S.AWAIT_MODEL, None, S.AWAIT_MODEL, "_on_round"),
+    Transition(S.AWAIT_MODEL, E.ROUND_READY, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.AWAIT_MODEL, E.TOOLS_REQUESTED, S.EXECUTE_TOOL, "_on_tools_requested"),
+    Transition(S.AWAIT_MODEL, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
+    Transition(S.AWAIT_MODEL, E.FAULT, S.RECOVER, "_on_recover"),
 
     # EXECUTE_TOOL
-    Transition(EXECUTE_TOOL, TOOL_DONE, EXECUTE_TOOL, "_on_tool_done"),
-    Transition(EXECUTE_TOOL, ALL_TOOLS_DONE, PREPARE_LLM_CALL, "_on_all_tools_done"),
+    Transition(S.EXECUTE_TOOL, E.TOOLS_DONE, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.EXECUTE_TOOL, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
 
-    # JSON_PARSE
-    Transition(JSON_PARSE, PARSE_SUCCESS, CLASSIFY, "_on_parse_success"),
-    Transition(JSON_PARSE, PARSE_ERROR, RETRY_GATE, "_on_parse_error"),
+    # RECOVER —— 决策封闭于 {ROUND_READY, ANSWER_READY, ABORT}
+    Transition(S.RECOVER, E.ROUND_READY, S.AWAIT_MODEL, "_on_round_advance"),
+    Transition(S.RECOVER, E.ANSWER_READY, S.ANSWER, "_on_answer_ready"),
+    Transition(S.RECOVER, E.ABORT, S.DONE, "_on_error_abort"),
 
-    # CLASSIFY
-    Transition(CLASSIFY, CLASSIFIED_TOOL, EXECUTE_TOOL, "_on_classified_tool"),
-    Transition(CLASSIFY, CLASSIFIED_ANSWER, EMIT_ANSWER, "_on_classified_answer"),
-    Transition(CLASSIFY, CLASSIFIED_ERROR, RETRY_GATE, "_on_classified_error"),
-
-    # RETRY_GATE
-    Transition(RETRY_GATE, RETRIES_LEFT, PREPARE_LLM_CALL, "_on_retries_left"),
-    Transition(RETRY_GATE, NO_RETRIES, DEGRADE, "_on_no_retries_degrade"),
-    Transition(RETRY_GATE, FALLBACK_TEXT, EMIT_ANSWER, "_on_fallback_text"),
-
-    # DEGRADE
-    Transition(DEGRADE, DEGRADED, PREPARE_LLM_CALL, "_on_degraded"),
-
-    # EMIT_ANSWER → DONE (无条件)
-    Transition(EMIT_ANSWER, None, DONE, "_on_emit_answer"),
+    # ANSWER → DONE (无条件)
+    Transition(S.ANSWER, E.ANSWER_VETOED, S.AWAIT_MODEL, "_on_vetoed"),
+    Transition(S.ANSWER, None, S.DONE, "_on_emit_answer"),
 ]
 ```
+
+**为什么这张表是全函数**：`_on_round` 只能返回 `TOOLS_REQUESTED` / `ANSWER_READY` / `FAULT` / `ROUND_READY`，`_on_recover` 只能返回 `ROUND_READY` / `ANSWER_READY` / `ABORT`，`_on_tools_requested` 只能返回 `TOOLS_DONE` / `ANSWER_READY`——每个 handler 的返回值封闭集都与落点状态的行一一对应。`tests/unit/test_fsm_table_totality.py` 用 AST 静态扫描断言这一点，任何破坏它的改动都会在测试里挂掉。
 
 ## FSM 引擎
 

@@ -15,7 +15,7 @@
 |---|---|---|
 | A 调研 | 读完 Codex / OpenCode / Gemini CLI / Aider 的主循环源码 | 结论：**四家都是 `while` 变体，没有显式状态机**；OpenCode 是"步函数返回状态码 + 外层 while"最接近一半的抽象 |
 | B 取证 | 写 10 个测试验证"FSM 框住选择空间"的三个约束 | `tests/unit/test_fsm_constraints.py`：**8 passed / 2 xfailed** |
-| C 审计 | 写 AST 脚本静态扫转移表 | `loop s/audit_fsm.py`：33 行转移仅 1 个状态有兜底行，**3 个真实可达崩溃缺口** |
+| C 审计 | 写 AST 脚本静态扫转移表 | 33 行转移仅 1 个状态有兜底行，**3 个真实可达崩溃缺口**；该脚本后来固化为 `tests/unit/test_fsm_table_totality.py` |
 | D 归因 | 定位根因 | 不是"状态机错了"，是**转移表不是全函数** + **状态承载了本该是函数做的事** |
 | E 设计 | 出目标形态 + 三决策 + 跑飞兜底调研 | 本文档 §2~§9 |
 | **F 实施** | **还没开始** | 见 0.3 |
@@ -47,9 +47,9 @@
 ### 0.4 每步的验收标准（DoD）
 
 1. 全量回归绿：`cd D:/code/AgentNexus && "D:/python3.13/python.exe" -m pytest tests/unit tests/integration tests/regression -q`
-2. AST 审计无缺口（脚本已入库 `scripts/audit_fsm.py`）：
-   `cd D:/code/AgentNexus && "D:/python3.13/python.exe" scripts/audit_fsm.py`，
-   看 `[1]` 段应为 `0 gap(s)`（重设计后；今天是 `3 gap(s)`）
+2. totality 测试通过（原 `scripts/audit_fsm.py` 已固化为
+   `tests/unit/test_fsm_table_totality.py`，脚本随之删除）：
+   `pytest tests/unit/test_fsm_table_totality.py -q`
 3. 没有新的 `FSMError` 触发路径：grep 确认没有 handler 返回所在状态没定义的事件
 4. TUI 事件流无变化：`test_gui_event_mapping` / `test_realtime_events` / `test_ws_agent_stream` 全绿（这三件套是事件名的看门狗）
 
