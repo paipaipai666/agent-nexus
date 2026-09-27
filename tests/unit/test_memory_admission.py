@@ -75,7 +75,27 @@ class TestDefaultDeny:
         assert pipeline.should_extract("部署这个服务", "已完成部署，共 3 个实例") is True
         llm.think.assert_called_once()
 
-    def test_strong_signal_never_touches_gate(self):
+    def test_strong_signal_routes_through_gate_when_enabled(self):
+        """GateCal fix: signal words appear inside questions/quotes/code
+        (gate_bench class I leaked 152/152). With the gate enabled, a strong
+        signal only grants ACCESS to the gate — the LLM decides."""
+        llm = MagicMock()
+        llm.think.return_value = "yes"
+        mgr = _make_mgr(memory_llm_gate=True, llm=llm)
+        pipeline = mgr._pipeline
+        assert pipeline.should_extract("我喜欢简洁的回答", "好的") is True
+        llm.think.assert_called_once()
+
+    def test_gate_can_reject_strong_signal_pollution(self):
+        llm = MagicMock()
+        llm.think.return_value = "no"
+        mgr = _make_mgr(memory_llm_gate=True, llm=llm)
+        pipeline = mgr._pipeline
+        assert pipeline.should_extract("代码注释里出现了'记住'两个字，确认下是不是误提交",
+                                       "好的，已处理") is False
+
+    def test_strong_signal_auto_admits_when_gate_disabled(self):
+        """Rules-only deployments keep the old whitelist behavior."""
         llm = MagicMock()
         mgr = _make_mgr(memory_llm_gate=False, llm=llm)
         pipeline = mgr._pipeline

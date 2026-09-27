@@ -30,3 +30,16 @@ def eval_memory(
 
     if not report.passed and ci:
         raise typer.Exit(1)
+
+
+@eval_app.command("memory-audit")
+def eval_memory_audit(
+    db: str | None = typer.Option(None, "--db", help="memory.db 路径（默认取配置 memory_db_path）"),
+    sample_csv: str | None = typer.Option(
+        None, "--sample-csv", help="导出分层抽样 CSV 供标注，计算线上 P_write"),
+    n_per_category: int = typer.Option(10, "--n-per-cat", help="每类抽样条数"),
+):
+    """审计真实 LTM 库：类别/写入者分布、强信号占比、标注采样（GateCal P3，只读）。"""
+    from agentnexus.evaluation.audit_ltm import main as audit_main
+
+    audit_main(db_path=db, sample_csv=sample_csv, n_per_category=n_per_category)

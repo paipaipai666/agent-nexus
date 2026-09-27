@@ -462,6 +462,109 @@ def _probe_admission(sb: MemorySandbox, res: CaseResult) -> None:
         res.unexpected.append(f"P/R below floor: P={p:.2f} R={r:.2f}")
 
 
+# ── GateCal: stratified gate benchmark (data/gate_bench.jsonl) ──────────
+# Eight classes × 25 labeled samples. Offline probe measures the rules layer;
+# the judge probe drives the full conclude() → gate → extraction → store path.
+
+
+def _probe_gatebench_rules(sb: MemorySandbox, res: CaseResult) -> None:
+    """L0 rules-layer P/R per class. Enforces the whitelist contract only:
+    A must always pass; C/D/E must never pass. B/F/G denial here is EXPECTED
+    (uncertain bucket → default-deny) — reported as the tightness signal, not
+    failed. H passes rules by design (rule layer can't see injection; the LLM
+    layers reject it), reported as pass-through count.
+    """
+    from types import SimpleNamespace
+
+    from agentnexus.evaluation.gate_bench import load as load_gate_bench
+    from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
+    from agentnexus.memory.manager import MemoryManager
+
+    mgr = MemoryManager.__new__(MemoryManager)
+    mgr._settings = SimpleNamespace(memory_llm_gate=False)
+    mgr._llm = None
+    pipeline = MemoryExtractionPipeline(mgr)
+
+    rows = load_gate_bench()
+    by_cls: dict[str, list[tuple[bool, bool]]] = {}
+    for row in rows:
+        predicted = pipeline.should_extract(row["question"], row["answer"])
+        by_cls.setdefault(row["cls"], []).append((row["expect_write"], predicted))
+
+    all_pairs = [p for pairs in by_cls.values() for p in pairs]
+    p, r, f1 = _admission_stats(all_pairs)
+    lines = [f"overall P={p:.2f} R={r:.2f} F1={f1:.2f} (n={len(all_pairs)})"]
+    for cls in sorted(by_cls):
+        cp, cr, _ = _admission_stats(by_cls[cls])
+        lines.append(f"  {cls}: P={cp:.2f} R={cr:.2f} (n={len(by_cls[cls])})")
+    res.detail = "\n".join(lines)
+
+    a = by_cls["A_explicit_durable"]
+    a_misses = sum(1 for _, predicted in a if not predicted)
+    if a_misses:
+        res.missing.append(f"A 类被拒 {a_misses}/{len(a)}（白名单回归）")
+    for cls in ("C_ephemeral_instruction", "D_transactional", "E_dialog_residue"):
+        leaks = sum(1 for _, predicted in by_cls[cls] if predicted)
+        if leaks:
+            res.unexpected.append(f"{cls} 规则层放行 {leaks}/{len(by_cls[cls])}")
+
+
+def _probe_gatebench_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
+    """Full write path over gate_bench: conclude → gate → extraction → store.
+
+    Per-row label check (write/no-write), G-row key retention (new value must
+    be stored), F-row category check (time-sensitive content must land in
+    note, not permanent fact).
+    """
+    from types import SimpleNamespace
+
+    from agentnexus.evaluation.gate_bench import load as load_gate_bench
+    from agentnexus.memory.manager import MemoryManager
+    from agentnexus.memory.short_term import ShortTermMemory
+
+    mgr = MemoryManager.__new__(MemoryManager)
+    mgr.session_id = "eval"
+    mgr._settings = SimpleNamespace(memory_llm_gate=True)
+    mgr._llm = sb.generator
+    mgr.long_term = sb.ltm
+    mgr.short_term = ShortTermMemory()
+    mgr._embed_model = _StubEmbed()
+    from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
+    mgr._pipeline = MemoryExtractionPipeline(mgr)
+
+    rows = load_gate_bench()
+    pairs: list[tuple[bool, bool]] = []
+    cat_hits = cat_total = 0
+    for row in rows:
+        before = {r["content"] for r in sb.ltm.list_recent(limit=500)}
+        mgr.conclude(row["question"], row["answer"])
+        new_rows = [r for r in sb.ltm.list_recent(limit=500) if r["content"] not in before]
+        wrote = bool(new_rows)
+        pairs.append((row["expect_write"], wrote))
+        if row["expect_write"] and not wrote:
+            res.missing.append(f"应写入但未写入: {row['id']} {row['question'][:30]}")
+        elif not row["expect_write"] and wrote:
+            res.unexpected.append(
+                f"误写入: {row['id']} {row['question'][:30]} → "
+                f"{sorted(r['content'] for r in new_rows)[:1]}")
+        if row["expect_write"] and wrote and row.get("key"):
+            if not any(row["key"] in r["content"] for r in new_rows):
+                res.unexpected.append(f"key 丢失[{row['key']}]: {row['id']}")
+        if row["expect_write"] and wrote and row.get("keys"):
+            if not any(any(k in r["content"] for k in row["keys"]) for r in new_rows):
+                res.unexpected.append(f"keys 全部丢失{row['keys']}: {row['id']}")
+        if row["expect_category"] and new_rows:
+            cat_total += 1
+            if any(r["category"] == row["expect_category"] for r in new_rows):
+                cat_hits += 1
+    p, r, f1 = _admission_stats(pairs)
+    res.detail = f"gate_bench pipeline P={p:.2f} R={r:.2f} F1={f1:.2f} (n={len(pairs)})"
+    if cat_total:
+        res.detail += f"; F→note 类别命中 {cat_hits}/{cat_total}"
+    if p < 0.8 or r < 0.5:
+        res.unexpected.append(f"pipeline P/R below floor: P={p:.2f} R={r:.2f}")
+
+
 # ── LLM-judged quality probes (opt-in via --judge) ──────────────────
 
 _JUDGE_PRESERVED_PROMPT = """判断摘要中是否保留了给定的关键信息（语义等价即可，不要求字面一致）。
@@ -610,6 +713,8 @@ def _probe_judge_admission_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
     mgr.long_term = sb.ltm
     mgr.short_term = ShortTermMemory()
     mgr._embed_model = _StubEmbed()
+    from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
+    mgr._pipeline = MemoryExtractionPipeline(mgr)
 
     pairs: list[tuple[bool, bool]] = []
     misses: list[str] = []
@@ -919,9 +1024,13 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
         # ── admission ──
         MemoryCase(name="admission_whitelist", dimension="admission",
                    layer="admission", probe=_probe_admission),
+        MemoryCase(name="admission_gatebench_rules", dimension="admission",
+                   layer="admission", probe=_probe_gatebench_rules),
     ]
     if include_judge:
         cases += [
+            MemoryCase(name="gatebench_pipeline", dimension="admission",
+                       layer="ltm", probe=_probe_gatebench_pipeline),
             # 写入侧：完整管线 P/R/F1（conclude → gate → 提取 → 入库核对）
             MemoryCase(name="judge_admission_pipeline", dimension="admission",
                        layer="ltm", probe=_probe_judge_admission_pipeline),

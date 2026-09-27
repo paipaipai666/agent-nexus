@@ -83,25 +83,32 @@ class MemoryExtractionPipeline:
         return "uncertain"
 
     def should_extract(self, question: str, answer: str) -> bool:
-        """Whitelist admission: rules first; LLM gate only if explicitly enabled.
+        """Two-tier admission.
 
-        Default-deny for boundary cases (0 token). Set ``memory_llm_gate`` in
-        config to let an LLM judge boundary cases instead of dropping them.
+        Rules decide who MAY reach the LLM gate; the gate (when enabled)
+        decides the final answer. "no" from rules is final; strong-signal
+        "yes" auto-admits ONLY in rules-only deployments (gate disabled) —
+        signal words appear inside questions, quotes and code, where
+        keyword-first admission leaked 152/152 pollution negatives
+        (gate_bench class I, see evaluation/gate_bench.py).
         """
         metrics = get_metrics()
 
-        # Level 1: rule filter (0ms, deterministic)
+        # Level 1: rule filter (0ms, deterministic). "no" is final.
         rule_result = self.should_extract_rules(question, answer)
-        if rule_result != "uncertain":
-            return rule_result == "yes"
-
-        # Default-deny: boundary cases are dropped unless the LLM gate is enabled.
-        settings = getattr(self._mgr, "_settings", None)
-        if not getattr(settings, "memory_llm_gate", False):
-            metrics.incr("writes_skipped_gate")
+        if rule_result == "no":
             return False
 
-        # Level 2: LLM gate (opt-in, boundary cases only)
+        # Rules-only fallback: whitelist auto-admits, uncertain default-denies.
+        settings = getattr(self._mgr, "_settings", None)
+        if not getattr(settings, "memory_llm_gate", False):
+            if rule_result == "uncertain":
+                metrics.incr("writes_skipped_gate")
+            return rule_result == "yes"
+
+        # Level 2: LLM gate — every rules-non-"no" case (strong signal or
+        # uncertain) gets a verdict. Fail-closed: circuit open or exception
+        # denies the write.
         gate = self.gate_circuit
         if not gate.should_allow():
             metrics.incr("writes_skipped_gate")
