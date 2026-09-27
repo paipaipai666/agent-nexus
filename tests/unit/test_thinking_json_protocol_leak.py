@@ -73,7 +73,8 @@ class TestProbeThenNativeStrategy:
         client._session_tracker = SessionCapabilityTracker()
         monkeypatch.setattr(
             AgentLLM, "_probe_capabilities",
-            lambda self: {"tool_calling": tool_calling, "json_mode": False},
+            lambda self: {"tool_calling": tool_calling, "json_mode": False,
+                          "parallel_tool_calls": False},
         )
         monkeypatch.setattr(
             AgentLLM, "_merge_probed_capabilities",
@@ -137,7 +138,8 @@ class TestEndToEndThinkingJsonLeak:
         client._session_tracker = SessionCapabilityTracker()
         monkeypatch.setattr(
             AgentLLM, "_probe_capabilities",
-            lambda self: {"tool_calling": True, "json_mode": True},
+            lambda self: {"tool_calling": True, "json_mode": True,
+                          "parallel_tool_calls": False},
         )
 
         resolved = client.capabilities

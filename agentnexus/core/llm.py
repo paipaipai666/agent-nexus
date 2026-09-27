@@ -212,10 +212,11 @@ class AgentLLM:
         """Fill in capabilities when still unknown (no catalog, no user override).
 
         Probes the endpoint once per (model, base_url) with minimal real
-        calls — a tool-calling call, then (only when tools are unavailable)
-        a JSON-mode call. Explicit config overrides always win over probe
-        results. Probe failures never raise and never disable a capability
-        the user already granted.
+        calls — a tool-calling call, a parallel follow-up (two noop calls in
+        one response), then (only when tools are unavailable) a JSON-mode
+        call. Explicit config overrides always win over probe results; probe
+        failures never raise and never disable a capability the user already
+        granted.
         """
         settings = get_settings()
         if settings.model_tool_calling is not None and settings.model_json_mode is not None:
@@ -233,15 +234,17 @@ class AgentLLM:
             caps.supports_tool_calling = probed["tool_calling"]
         if settings.model_json_mode is None:
             caps.supports_json_mode = probed["json_mode"]
+        if not caps.parallel_explicit:
+            caps.supports_parallel_tool_calls = probed["parallel_tool_calls"]
         caps.from_default_fallback = False
         return caps
 
     def _probe_capabilities(self) -> dict[str, bool] | None:
-        """Probe tool-calling / JSON-mode support with minimal real calls.
+        """Probe tool-calling / JSON-mode / parallel support with minimal real calls.
 
-        Returns {"tool_calling": bool, "json_mode": bool} on a definitive
-        outcome, or None when the endpoint couldn't be reached (transient —
-        left uncached so a later client retries).
+        Returns {"tool_calling", "json_mode", "parallel_tool_calls"} on a
+        definitive outcome, or None when the endpoint couldn't be reached
+        (transient — left uncached so a later client retries).
         """
         provider = select_provider(self.model, self.base_url)
         if provider is None:
@@ -261,6 +264,22 @@ class AgentLLM:
             logger.debug("tool-calling probe failed for %s: %s", self.model, exc)
             return None
         tool_calling = bool(tool_result.tool_calls)
+        parallel_tool_calls = False
+        if tool_calling:
+            try:
+                parallel_result = provider.stream_chat(
+                    messages=[{"role": "user", "content": "Call the noop tool twice — make both calls in this single response."}],
+                    model=self.model,
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    temperature=0,
+                    tools=[_PROBE_NOOP_TOOL],
+                    max_tokens=128,
+                    timeout=self.timeout,
+                )
+                parallel_tool_calls = len(parallel_result.tool_calls) >= 2
+            except Exception as exc:
+                logger.debug("parallel-tool probe failed for %s: %s", self.model, exc)
         json_mode = False
         if not tool_calling:
             try:
@@ -278,7 +297,8 @@ class AgentLLM:
                 json_mode = True
             except Exception as exc:
                 logger.debug("json-mode probe failed for %s: %s", self.model, exc)
-        return {"tool_calling": tool_calling, "json_mode": json_mode}
+        return {"tool_calling": tool_calling, "json_mode": json_mode,
+                "parallel_tool_calls": parallel_tool_calls}
 
     @property
     def session_tracker(self) -> SessionCapabilityTracker:

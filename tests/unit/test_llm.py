@@ -442,6 +442,43 @@ class TestCapabilityProbe:
         import agentnexus.core.llm as m
         assert ("stealth/probe-down", "https://example.test/v1") not in m._probe_cache
 
+    def test_probe_detects_parallel_tool_calls(self, temp_agentnexus_home, monkeypatch):
+        class _ParallelProvider:
+            def stream_chat(self, **kwargs):
+                result = StreamResult()
+                if kwargs.get("tools"):
+                    content = kwargs["messages"][0]["content"]
+                    n = 2 if "twice" in content else 1
+                    result.tool_calls = [
+                        {"id": f"call_{i}", "name": "noop", "arguments": {}}
+                        for i in range(n)
+                    ]
+                else:
+                    result.text = '{"ok": true}'
+                return result
+
+        self._patch_provider(monkeypatch, _ParallelProvider())
+        client = AgentLLM(model="stealth/probe-parallel", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is True
+        assert client.capabilities.supports_parallel_tool_calls is True
+
+    def test_probe_marks_non_parallel_model(self, temp_agentnexus_home, monkeypatch):
+        class _SerialProvider:
+            def stream_chat(self, **kwargs):
+                result = StreamResult()
+                if kwargs.get("tools"):
+                    result.tool_calls = [{"id": "call_1", "name": "noop", "arguments": {}}]
+                else:
+                    result.text = '{"ok": true}'
+                return result
+
+        self._patch_provider(monkeypatch, _SerialProvider())
+        client = AgentLLM(model="stealth/probe-serial", api_key="k",
+                          base_url="https://example.test/v1")
+        assert client.capabilities.supports_tool_calling is True
+        assert client.capabilities.supports_parallel_tool_calls is False
+
     def test_config_override_wins_over_probe(self, temp_agentnexus_home, monkeypatch):
         monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
 

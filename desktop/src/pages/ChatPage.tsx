@@ -219,6 +219,30 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
 })
 
 /* ─── Main Chat Page ─── */
+
+/** HUD action pill — icon + label, bordered, visible hit target (~24px tall).
+ *  Bare 10px icon buttons proved undiscoverable; labels are the point. */
+function HudAction({ icon: Icon, label, onClick, disabled, title }: {
+  icon: typeof History
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      className="flex items-center gap-1 px-1.5 h-6 rounded-md border transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--fg)] disabled:opacity-30"
+      style={{ color: 'var(--fg-muted)', borderColor: 'var(--border)' }}
+    >
+      <Icon size={12} style={{ flexShrink: 0 }} />
+      <span className="text-[10px]">{label}</span>
+    </button>
+  )
+}
+
 export default function ChatPage() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -916,17 +940,17 @@ export default function ChatPage() {
                 checkpoint: {versionStatus.head.id?.slice(0, 8)}
               </span>
             )}
-            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
-              <button
-                onClick={() => sessionId && navigate(`/chat/${sessionId}/timeline`)}
-                disabled={!sessionId}
-                className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]"
-                style={{ color: 'var(--fg-muted)' }}
+            <div className="flex items-center gap-1 shrink-0 ml-auto">
+              <HudAction icon={GitBranch} label="时间线" disabled={!sessionId}
                 title="Session timeline — every step + full context"
-              ><GitBranch size={10} /></button>
-              <button onClick={handleUndo} disabled={!versionStatus?.can_undo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Undo2 size={10} /></button>
-              <button onClick={handleRedo} disabled={!versionStatus?.can_redo} className="p-0.5 rounded transition-colors disabled:opacity-30 hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><Redo2 size={10} /></button>
-              <button onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} className="p-0.5 rounded transition-colors hover:text-[var(--fg)]" style={{ color: 'var(--fg-muted)' }}><History size={10} /></button>
+                onClick={() => sessionId && navigate(`/chat/${sessionId}/timeline`)} />
+              <HudAction icon={Undo2} label="撤销" disabled={!versionStatus?.can_undo}
+                title="撤销到上一个 checkpoint" onClick={handleUndo} />
+              <HudAction icon={Redo2} label="重做" disabled={!versionStatus?.can_redo}
+                title="重做到下一个 checkpoint" onClick={handleRedo} />
+              <HudAction icon={History} label="检查点"
+                title="查看 checkpoint 历史"
+                onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} />
             </div>
           </div>
         </div>

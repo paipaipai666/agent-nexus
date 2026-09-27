@@ -92,13 +92,13 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
     <div ref={rootRef} className="relative shrink-0">
       <button
         onClick={handleToggle}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--surface-2)]"
-        style={{ color: 'var(--fg-muted)' }}
+        className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md border transition-colors hover:bg-[var(--surface-3)]"
+        style={{ color: 'var(--fg-muted)', borderColor: 'var(--border)' }}
         title="切换模型（立即生效）"
       >
-        <Cpu size={10} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
-        <span>{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
-        <ChevronDown size={9} style={{ color: 'var(--fg-faint)' }} />
+        <Cpu size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+        <span className="text-[11px]">{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
+        <ChevronDown size={11} style={{ color: 'var(--fg-faint)' }} />
       </button>
 
       {open && (
@@ -185,9 +185,24 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             {caps ? (
               <>
                 <div className="flex flex-wrap gap-1">
-                  <CapChip label="原生工具" ok={caps.tool_calling} disabled={caps.session_disabled.includes('tool_calling')} />
-                  <CapChip label="JSON Mode" ok={caps.json_mode} disabled={caps.session_disabled.includes('json_mode')} />
-                  <CapChip label="JSON Schema" ok={caps.json_schema} disabled={caps.session_disabled.includes('json_schema')} />
+                  {(() => {
+                    // Mutually exclusive fallback ladder (backend decisions.py):
+                    // native tools → JSON Mode → JSON Schema. Show whichever
+                    // mechanism is active; all-red shows 原生工具 as failed.
+                    const chain = [
+                      { key: 'tool_calling', label: '原生工具' },
+                      { key: 'json_mode', label: 'JSON Mode' },
+                      { key: 'json_schema', label: 'JSON Schema' },
+                    ] as const
+                    const active = chain.find(c => caps[c.key]) ?? chain[0]
+                    return (
+                      <CapChip
+                        label={active.label}
+                        ok={caps[active.key]}
+                        disabled={caps.session_disabled.includes(active.key)}
+                      />
+                    )
+                  })()}
                   <CapChip label="Thinking" ok={caps.thinking} disabled={caps.session_disabled.includes('thinking')} />
                   <CapChip label="视觉" ok={caps.vision} />
                   <CapChip label="并行工具" ok={caps.parallel_tool_calls} disabled={caps.session_disabled.includes('parallel_tool_calls')} />

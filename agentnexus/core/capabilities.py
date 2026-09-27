@@ -35,6 +35,9 @@ class ModelCapabilities:
     # True when flags are still defaults (not probe/config/override) —
     # callers may probe the live endpoint instead of trusting these.
     from_default_fallback: bool = True
+    # True when supports_parallel_tool_calls came from an explicit override —
+    # the probe must not flip it (user may have forced it off).
+    parallel_explicit: bool = False
 
 
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
@@ -88,8 +91,10 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
             caps.supports_thinking = ov.supports_thinking
         if ov.supports_parallel_tool_calls is not None:
             caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
+            caps.parallel_explicit = True
         # Probe gate: only tool_calling/json_mode (the probed pair) force "known".
-        # Thinking / vision / token limits are never probed.
+        # Thinking / vision / token limits are never probed. A parallel-only
+        # override stays probed-able: tool/json may still be unknown.
         if ov.supports_tool_calling is not None or ov.supports_json_mode is not None:
             caps.from_default_fallback = False
 
