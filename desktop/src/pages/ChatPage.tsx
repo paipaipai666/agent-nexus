@@ -4,6 +4,7 @@ import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderO
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
+import { planModeArm } from '../services/planModeArm'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
 import { transformHistoryMessages } from '../utils/historyTransform'
@@ -426,7 +427,12 @@ export default function ChatPage() {
             initRestore(session_id)
           }
         })
-        .catch(() => api.createSession().then(({ session_id }) => { currentSessionIdRef.current = session_id; initNew(session_id) }))
+        .catch(() => api.createSession().then(async ({ session_id }) => {
+          if (planModeArm.consume()) {
+            try { await api.setPlanMode(session_id, true) } catch { /* best-effort */ }
+          }
+          currentSessionIdRef.current = session_id; initNew(session_id)
+        }))
     } else {
       // Don't create session eagerly — defer to first message send.
       // This prevents empty "New session" cards from accumulating in the sidebar.
@@ -488,7 +494,12 @@ export default function ChatPage() {
       // Defer the actual send to a useEffect that fires after activeSessionId
       // is set and the WS connection is established by SessionManager.
       pendingFirstMessageRef.current = text
-      api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(({ session_id }) => {
+      api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(async ({ session_id }) => {
+        // Plan mode armed via the HUD toggle pre-session: apply it BEFORE the
+        // first message can be sent, so the very first run is already gated.
+        if (planModeArm.consume()) {
+          try { await api.setPlanMode(session_id, true) } catch { /* best-effort; toggle shows off */ }
+        }
         currentSessionIdRef.current = session_id
         initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
         setPendingWorkspace(null) // the session carries its folder now

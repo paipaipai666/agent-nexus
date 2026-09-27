@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import PlanModeToggle from '../components/chat/PlanModeToggle'
 import PlanReviewCard from '../components/chat/PlanReviewCard'
 import { api } from '../services/api'
+import { planModeArm } from '../services/planModeArm'
 
 vi.mock('../services/api', () => ({
   api: {
@@ -17,6 +18,7 @@ const mockedApi = vi.mocked(api)
 describe('PlanModeToggle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    planModeArm.setArmed(false)
   })
 
   it('reflects initial plan_mode=true from getSession', async () => {
@@ -37,11 +39,32 @@ describe('PlanModeToggle', () => {
     expect(mockedApi.setPlanMode).toHaveBeenCalledWith('s1', false)
   })
 
-  it('is disabled and makes no requests without a session', () => {
-    render(<PlanModeToggle sessionId={null} />)
+  it('arms without a session and applies it once a session appears', async () => {
+    mockedApi.setPlanMode.mockResolvedValue({ session_id: 's1', plan_mode: true })
+    const { rerender } = render(<PlanModeToggle sessionId={null} />)
     const btn = screen.getByRole('button')
-    expect(btn).toBeDisabled()
+    expect(btn).not.toBeDisabled() // pre-session arming must be possible
+    await userEvent.click(btn)
+    expect(btn).toHaveAttribute('aria-pressed', 'true')
     expect(mockedApi.getSession).not.toHaveBeenCalled()
+    expect(mockedApi.setPlanMode).not.toHaveBeenCalled()
+    // session created on first send → armed intent applied before any run
+    rerender(<PlanModeToggle sessionId="s1" />)
+    await waitFor(() => expect(mockedApi.setPlanMode).toHaveBeenCalledWith('s1', true))
+    await waitFor(() => expect(btn).toHaveAttribute('aria-pressed', 'true'))
+    // consumed exactly once
+    rerender(<PlanModeToggle sessionId="s2" />)
+    await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s2'))
+    expect(mockedApi.setPlanMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('disarmed pre-session stays off when a session appears', async () => {
+    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: false })
+    const { rerender } = render(<PlanModeToggle sessionId={null} />)
+    rerender(<PlanModeToggle sessionId="s1" />)
+    await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s1'))
+    expect(mockedApi.setPlanMode).not.toHaveBeenCalled()
+    expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'false')
   })
 })
 
