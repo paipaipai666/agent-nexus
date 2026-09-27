@@ -31,7 +31,7 @@ def test_finish_persists_checkpoint_without_extra_memory_append():
     version.commit_with_messages.assert_called_once()
 
 
-def test_cancel_generates_summary_with_reason_question_and_journal():
+def test_cancel_generates_compact_summary_with_reason_and_activity_count():
     memory = MagicMock()
     memory.short_term.to_json.return_value = '{"messages":[]}'
     turn = _turn(memory, MagicMock())
@@ -41,8 +41,12 @@ def test_cancel_generates_summary_with_reason_question_and_journal():
 
     assert record.status == "interrupted"
     assert "user interrupted" in record.answer
-    assert "do work" in record.answer
-    assert "tool start: web_search" in record.answer
+    assert "项活动" in record.answer
+    # Journal dump must NOT leak into the chat-visible answer (it stays in
+    # TurnRecord.journal for Timeline/logs).
+    assert "tool start: web_search" not in record.answer
+    # The question bubble already sits above in chat — never duplicate it.
+    assert "do work" not in record.answer
     # cancel() does not append to memory (only finish does)
     memory.append.assert_not_called()
 

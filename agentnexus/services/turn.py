@@ -262,18 +262,16 @@ class TurnRuntime:
                 logger.warning("Version commit failed: %s", e)
 
     def _build_interrupted_answer(self, *, status: TurnStatus, reason: str, detail: str = "") -> str:
-        lines = [
-            "[会话中断记录]",
-            f"状态: {status}",
-            f"原因: {reason}",
-            f"原始请求: {self.question}",
-        ]
-        if detail and detail != reason:
-            lines.append(f"详情: {collapse_and_truncate(detail, 500)}")
-        if self._journal:
-            lines.append("中断前已记录的活动:")
-            for item in self._journal[-20:]:
-                lines.append(f"- {item}")
-        else:
-            lines.append("中断前没有记录到已完成的 Agent 活动。")
-        return "\n".join(lines)
+        # Compact, user-facing message. The full activity journal already
+        # lives in TurnRecord.journal (Timeline/logs) — dumping it here lands
+        # in the chat bubble via get_messages_with_answers() backfill and
+        # pollutes the rebuilt model context.
+        suffix = f"（本轮已记录 {len(self._journal)} 项活动）" if self._journal else ""
+        if status == "interrupted":
+            return f"已中断（{reason}）{suffix}" if reason else f"已中断{suffix}"
+        if status == "failed":
+            lines = [f"执行失败：{reason}"]
+            if detail and detail != reason:
+                lines.append(f"详情：{collapse_and_truncate(detail, 500)}")
+            return "\n".join(lines)
+        return f"Agent 未能得出最终答案{suffix}"
