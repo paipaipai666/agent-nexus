@@ -85,7 +85,7 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
                 ) : (
                   <Circle size={12} style={{ color: 'var(--fg-faint)' }} />
                 )}
-                <span className="text-xs truncate" style={{ color: 'var(--fg)' }}>{todo.description}</span>
+                <span className="text-[12.5px] truncate" style={{ color: 'var(--fg)' }}>{todo.description}</span>
               </div>
             ))
           )}
@@ -105,14 +105,14 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
                 <Server size={12} style={{ color: 'var(--blue)' }} />
-                <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>MCP</span>
+                <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)' }}>MCP</span>
               </div>
               <div className="space-y-1">
                 {connectedServers.map(server => (
                   <div key={server.name} className="flex items-center gap-2 px-2 py-1 rounded" style={{ background: 'var(--surface-3)' }}>
                     <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--green)' }} />
-                    <span className="text-[11px] font-medium truncate" style={{ color: 'var(--fg)' }}>{server.name}</span>
-                    <span className="text-[10px] ml-auto" style={{ color: 'var(--fg-faint)' }}>{server.tool_names.length}</span>
+                    <span className="text-[12.5px] font-medium truncate" style={{ color: 'var(--fg)' }}>{server.name}</span>
+                    <span className="text-[11.5px] ml-auto" style={{ color: 'var(--fg-faint)' }}>{server.tool_names.length}</span>
                   </div>
                 ))}
               </div>
@@ -124,13 +124,13 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
                 <Zap size={12} style={{ color: 'var(--accent)' }} />
-                <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>Skills</span>
+                <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)' }}>Skills</span>
               </div>
               <div className="space-y-1">
                 {enabledSkills.map(skill => (
                   <div key={skill.id} className="flex items-center gap-2 px-2 py-1 rounded" style={{ background: 'var(--surface-3)' }}>
                     <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--green)' }} />
-                    <span className="text-[11px] font-medium truncate" style={{ color: 'var(--fg)' }}>{skill.display_name || skill.id}</span>
+                    <span className="text-[12.5px] font-medium truncate" style={{ color: 'var(--fg)' }}>{skill.display_name || skill.id}</span>
                   </div>
                 ))}
               </div>
@@ -168,15 +168,15 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
           backdropFilter: 'blur(16px) saturate(1.3)',
           WebkitBackdropFilter: 'blur(16px) saturate(1.3)',
           border: '1px solid var(--border)',
-          boxShadow: 'var(--shadow-card), var(--card-highlight)',
+          boxShadow: 'var(--shadow-float)',
           color: 'var(--fg-secondary)',
           animation: 'rise-in 0.2s var(--ease)',
         }}
       >
         <PanelRightOpen size={13} />
-        <span className="text-[11px] font-medium">Tools</span>
+        <span className="text-[12.5px] font-medium">Tools</span>
         <span
-          className="text-[10px] font-mono px-1.5 py-px rounded-full"
+          className="text-[11.5px] font-mono px-1.5 py-px rounded-full"
           style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
         >
           {totalTools}
@@ -187,13 +187,13 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
 
   return (
     <div
-      className="absolute right-4 top-3 bottom-3 w-[300px] z-20 flex flex-col overflow-hidden rounded-xl"
+      className="absolute right-4 top-3 bottom-3 w-[300px] z-20 flex flex-col overflow-hidden rounded-2xl"
       style={{
         background: 'color-mix(in srgb, var(--surface-2) 92%, transparent)',
         backdropFilter: 'blur(20px) saturate(1.3)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.3)',
         border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-float), var(--card-highlight)',
+        boxShadow: 'var(--shadow-float)',
         animation: 'rise-in 0.25s var(--ease)',
       }}
     >
@@ -203,8 +203,8 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
         style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
         <span
-          className="text-[11px] font-medium uppercase"
-          style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
+          className="text-[12.5px] font-medium"
+          style={{ color: 'var(--fg-muted)' }}
         >
           Session
         </span>

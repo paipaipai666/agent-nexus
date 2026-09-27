@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Puzzle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
+import { toolIcon } from '../utils/toolIcons'
 import { transformHistoryMessages } from '../utils/historyTransform'
 import { unwrapStreamingAnswer } from '../utils/unwrapAnswer'
 import { useSession, type Message } from '../components/session/SessionProvider'
@@ -90,41 +91,53 @@ function Collapsible({ header, children, defaultExpanded = false, className = ''
   )
 }
 
-/* ─── Tool Card ─── */
-const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
+/* ─── Tool Row — one quiet line inside a shared group card (v3) ───
+ * Consecutive tool messages render inside a single bordered card (see the
+ * thread renderer); each row is ~34px and expands only when running or
+ * clicked. Icon comes from the tool-name map; unknown tools fall back to
+ * their first letter, MCP tools to the puzzle glyph. */
+const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; isMcp?: boolean }) {
+  const [expanded, setExpanded] = useState(msg.toolStatus === 'running')
+  useEffect(() => { if (msg.toolStatus === 'running') setExpanded(true) }, [msg.toolStatus])
+
   const statusColor = msg.toolStatus === 'running' ? 'var(--amber)' : msg.toolStatus === 'error' ? 'var(--red)' : 'var(--green)'
-  const statusBg = msg.toolStatus === 'running' ? 'var(--amber-muted)' : msg.toolStatus === 'error' ? 'var(--red-muted)' : 'var(--green-muted)'
   const statusLabel = msg.toolStatus === 'running' ? 'running' : msg.toolStatus === 'error' ? 'error' : 'done'
+  const Icon = toolIcon(msg.toolName)
 
   const lines = msg.content.split('\n')
   const hasDiff = lines.some(l => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@'))
 
   return (
-    <div className="my-2 overflow-hidden max-w-[560px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
-      <Collapsible
-        defaultExpanded={msg.toolStatus === 'running'}
-        header={
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div
-              className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-semibold shrink-0"
-              style={{ background: statusBg, color: statusColor }}
-            >
-              {(msg.toolName || 'T')[0].toUpperCase()}
-            </div>
-            <span className="font-mono text-[11px] truncate" style={{ color: 'var(--accent)' }}>{msg.toolName || 'tool'}</span>
-            <div className="ml-auto flex items-center gap-1 text-[10px] font-medium shrink-0" style={{ color: statusColor }}>
-              {msg.toolStatus === 'running' && (
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
-              )}
-              {statusLabel}
-            </div>
-          </div>
-        }
-        className="px-3 py-1.5 font-mono"
+    <div className="group/tool">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
       >
-        <div className="px-3.5 py-2.5 font-mono text-xs leading-relaxed" style={{ color: 'var(--fg-secondary)' }}>
+        <span
+          className="w-[18px] h-[18px] rounded-[5px] grid place-items-center shrink-0"
+          style={{ background: 'var(--surface-2)', color: 'var(--fg-muted)' }}
+        >
+          {Icon ? <Icon size={11} strokeWidth={2} /> : isMcp
+            ? <Puzzle size={11} strokeWidth={2} />
+            : <span className="font-mono text-[9.5px] font-semibold">{(msg.toolName || 'T')[0].toUpperCase()}</span>}
+        </span>
+        <span className="font-mono text-[12.5px] truncate" style={{ color: 'var(--fg-secondary)' }}>{msg.toolName || 'tool'}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-[11.5px] shrink-0" style={{ color: statusColor }}>
+          {msg.toolStatus === 'running' && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
+          )}
+          {statusLabel}
+        </span>
+        <ChevronRight
+          size={13}
+          className="shrink-0 transition-transform duration-200"
+          style={{ color: 'var(--fg-faint)', transform: expanded ? 'rotate(90deg)' : 'none' }}
+        />
+      </button>
+      {expanded && (
+        <div className="px-4 pb-3 font-mono text-[12px] leading-[1.7]" style={{ color: 'var(--fg-muted)' }}>
           {hasDiff ? (
-            <div className="font-mono text-xs leading-[1.7]">
+            <div>
               {lines.map((line, i) => {
                 if (line.startsWith('@@')) return <div key={i} style={{ color: 'var(--blue)' }}>{line}</div>
                 if (line.startsWith('+') && !line.startsWith('+++')) return <div key={i} style={{ color: 'var(--green)' }}>{line}</div>
@@ -136,7 +149,7 @@ const ToolCard = React.memo(function ToolCard({ msg }: { msg: Message }) {
             <pre className="whitespace-pre-wrap">{msg.content}</pre>
           )}
         </div>
-      </Collapsible>
+      )}
     </div>
   )
 })
@@ -151,13 +164,13 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           animateMessage(el, msg.role)
         }
       }}
-      className="py-2"
+      className="py-3"
     >
       <div className="max-w-3xl mx-auto px-6">
         {/* Role label — only for user messages */}
         {msg.role === 'user' && (
-          <div className="flex items-center justify-end gap-2 mb-1">
-            <span className="text-[11px] uppercase font-medium" style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}>
+          <div className="flex items-center justify-end gap-2 mb-1.5">
+            <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)', letterSpacing: '0.02em' }}>
               You
             </span>
           </div>
@@ -175,13 +188,8 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
                 wrapping lines that should fit on one. */}
             <div className="flex flex-col items-end w-full">
               <div
-                className="text-[13px] leading-relaxed rounded-xl px-3.5 py-2.5 w-fit max-w-[85%] whitespace-pre-wrap break-words"
-                style={{
-                  color: 'var(--fg-secondary)',
-                  background: 'var(--surface-1)',
-                  border: '1px solid var(--border-subtle)',
-                  boxShadow: 'var(--shadow-card), var(--card-highlight)',
-                }}
+                className="text-[15px] leading-[1.55] rounded-[18px] rounded-br-[6px] px-4 py-2.5 w-fit max-w-[85%] whitespace-pre-wrap break-words"
+                style={{ background: 'var(--surface-2)', color: 'var(--fg)' }}
               >
                 {msg.content}
               </div>
@@ -197,7 +205,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           <Collapsible
             defaultExpanded={false}
             header={
-              <span className="text-[11px] font-mono" style={{ color: 'var(--fg-muted)' }}>
+              <span className="text-[12px] font-mono" style={{ color: 'var(--fg-muted)' }}>
                 {msg.content.slice(0, 60)}{msg.content.length > 60 ? '...' : ''}
               </span>
             }
@@ -220,8 +228,8 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
 
 /* ─── Main Chat Page ─── */
 
-/** HUD action pill — icon + label, bordered, visible hit target (~24px tall).
- *  Bare 10px icon buttons proved undiscoverable; labels are the point. */
+/** HUD action — quiet 28px icon button (v3). The label moves to the tooltip;
+ *  at HUD density, text competed with the model/plan chips for attention. */
 function HudAction({ icon: Icon, label, onClick, disabled, title }: {
   icon: typeof History
   label: string
@@ -234,11 +242,11 @@ function HudAction({ icon: Icon, label, onClick, disabled, title }: {
       onClick={onClick}
       disabled={disabled}
       title={title ?? label}
-      className="flex items-center gap-1 px-1.5 h-6 rounded-md border transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--fg)] disabled:opacity-30"
-      style={{ color: 'var(--fg-muted)', borderColor: 'var(--border)' }}
+      aria-label={label}
+      className="flex items-center justify-center w-7 h-7 rounded-lg transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--fg)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[var(--fg-muted)]"
+      style={{ color: 'var(--fg-muted)' }}
     >
-      <Icon size={12} style={{ flexShrink: 0 }} />
-      <span className="text-[10px]">{label}</span>
+      <Icon size={14} style={{ flexShrink: 0 }} />
     </button>
   )
 }
@@ -736,54 +744,48 @@ export default function ChatPage() {
           <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
             <div className="text-center">
               <h1
-                className="text-[22px] font-semibold mb-2"
-                style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}
+                className="text-[27px] font-semibold mb-3"
+                style={{ color: 'var(--fg)', letterSpacing: '-0.025em' }}
               >
                 What are we building?
               </h1>
-              <p className="text-[13px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
+              <p className="text-[15px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
                 Code. Debug. Create. Ship.
               </p>
             </div>
 
             {/* Prompt starters — concrete one-tap openers that fill the composer */}
-            <div className="w-full max-w-md mt-2">
-              <div
-                className="text-[11px] font-medium mb-2 px-1 uppercase"
-                style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
-              >
-                Quick starts
-              </div>
-              <div className="flex flex-col gap-1.5">
+            <div className="w-full max-w-2xl mt-10">
+              <div className="grid grid-cols-2 gap-2.5">
                 {STARTERS.map(action => {
                   const Icon = action.icon
                   return (
                     <button
                       key={action.label}
                       onClick={() => { setInput(action.prompt); inputRef.current?.focus() }}
-                      className="group/starter flex items-center gap-3 px-3 rounded-xl text-left transition-all"
+                      className="group/starter flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all"
                       style={{
-                        height: 44,
-                        background: 'var(--surface-2)',
+                        background: 'var(--surface-1)',
                         border: '1px solid var(--border)',
-                        boxShadow: 'var(--shadow-card), var(--card-highlight)',
                         transitionDuration: '150ms',
                         transitionTimingFunction: 'var(--ease)',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.background = 'var(--surface-3)' }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface-2)' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.background = 'var(--surface-2)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface-1)' }}
                     >
                       <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+                        className="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0"
+                        style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
                       >
-                        <Icon size={14} />
+                        <Icon size={15} />
                       </div>
-                      <span className="text-[13px] font-medium flex-1" style={{ color: 'var(--fg)' }}>{action.label}</span>
+                      <span className="min-w-0">
+                        <span className="block text-[14px] font-medium truncate" style={{ color: 'var(--fg)' }}>{action.label}</span>
+                      </span>
                       <ArrowRight
-                        size={13}
-                        className="opacity-0 group-hover/starter:opacity-100 transition-opacity"
-                        style={{ color: 'var(--fg-faint)' }}
+                        size={14}
+                        className="ml-auto opacity-0 group-hover/starter:opacity-100 transition-all shrink-0 -translate-x-1 group-hover/starter:translate-x-0"
+                        style={{ color: 'var(--fg-faint)', transitionDuration: '150ms' }}
                       />
                     </button>
                   )
@@ -792,9 +794,38 @@ export default function ChatPage() {
             </div>
           </div>
         )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} animatedIds={animatedIds} />
-        ))}
+        {(() => {
+          // v3: consecutive tool calls share ONE card (hairline-divided rows)
+          // so N parallel calls cost N quiet lines, not N boxes.
+          const mcpNames = Object.fromEntries(mcpTools.map(t => [t.tool, true])) as Record<string, true>
+          type Group = { kind: 'msg', msg: Message } | { kind: 'tools', msgs: Message[] }
+          const groups: Group[] = []
+          for (const msg of messages) {
+            if (msg.role === 'tool') {
+              const last = groups[groups.length - 1]
+              if (last && last.kind === 'tools') last.msgs.push(msg)
+              else groups.push({ kind: 'tools', msgs: [msg] })
+            } else {
+              groups.push({ kind: 'msg', msg })
+            }
+          }
+          return groups.map((g) => g.kind === 'msg' ? (
+            <MessageBubble key={g.msg.id} msg={g.msg} animatedIds={animatedIds} />
+          ) : (
+            <div key={g.msgs[0].id} className="py-2">
+              <div
+                className="max-w-[608px] overflow-hidden"
+                style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}
+              >
+                {g.msgs.map((m, i) => (
+                  <div key={m.id} style={i > 0 ? { borderTop: '1px solid var(--border-subtle)' } : undefined}>
+                    <ToolCard msg={m} isMcp={mcpNames[m.toolName ?? ''] === true} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        })()}
         <div ref={messagesEndRef} />
       </div>
 
@@ -810,10 +841,13 @@ export default function ChatPage() {
           </div>
         ) : (
         <div className="max-w-3xl mx-auto w-full px-6 mb-3">
-          <div className="rounded-lg p-4" style={{ background: 'var(--amber-muted)', border: '1px solid var(--amber-muted)' }}>
-            <div className="text-sm font-medium mb-2" style={{ color: 'var(--amber)' }}>Confirmation Required</div>
-            <pre className="text-xs rounded-lg p-2.5 mb-3 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-1)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
-            <div className="flex gap-2">
+          <div className="rounded-2xl p-5" style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-float)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--amber)' }} />
+              <span className="text-[14px] font-semibold" style={{ color: 'var(--fg)' }}>Confirmation required</span>
+            </div>
+            <pre className="text-[12.5px] rounded-xl p-3 mb-4 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
+            <div className="flex gap-2.5">
               <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
               <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
             </div>
@@ -865,9 +899,9 @@ export default function ChatPage() {
         )}
         <div
           className="max-w-3xl mx-auto transition-all"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-float), var(--card-highlight)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
-          onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--shadow-float), var(--card-highlight)' }}
-          onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'var(--shadow-float), var(--card-highlight)' }}
+          style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-float)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
+          onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--shadow-float)' }}
+          onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow-float)' }}
         >
 
           {/* Workspace chip — this chat's folder; locked once created */}
@@ -878,8 +912,8 @@ export default function ChatPage() {
                 style={{ color: 'var(--fg-muted)' }}
                 title={chipWorkspace ? `工作区：${chipWorkspace}（创建后不可更改）` : undefined}
               >
-                <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
-                <span className="text-[10px] font-mono truncate max-w-[320px]">
+                <FolderOpen size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+                <span className="text-[11.5px] font-mono truncate max-w-[320px]">
                   {chipWorkspace ?? '默认工作区'}
                 </span>
               </div>
@@ -905,7 +939,7 @@ export default function ChatPage() {
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder={isRunning ? "Agent running... messages will be queued" : "Message Nexus..."}
-              className="flex-1 bg-transparent text-sm resize-none focus:outline-none max-h-32 min-h-[24px]"
+              className="flex-1 bg-transparent text-[15px] resize-none focus:outline-none max-h-32 min-h-[26px]"
               style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
               rows={1}
             />
@@ -915,11 +949,10 @@ export default function ChatPage() {
               <button
                 onClick={handleSend}
                 disabled={!input.trim()}
-                className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 disabled:opacity-60"
                 style={{
-                  background: input.trim() ? 'var(--accent-gradient)' : 'var(--surface-3)',
-                  color: input.trim() ? '#ffffff' : 'var(--fg-faint)',
-                  boxShadow: input.trim() ? '0 1px 6px var(--accent-glow)' : 'none',
+                  background: 'var(--accent)',
+                  color: 'var(--on-accent)',
                 }}
               >
                 <Send size={14} />
@@ -928,7 +961,7 @@ export default function ChatPage() {
           </div>
 
           {/* HUD row — model switcher + session actions */}
-          <div className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-muted)' }}>
+          <div className="flex items-center gap-1 px-3 py-2 text-[12px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-muted)' }}>
             <ModelPicker
               currentModel={runtimeStatus?.model_id ?? null}
               onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}

@@ -22,6 +22,9 @@ export const ACCENT_PRESETS: AccentPreset[] = [
   { id: 'emerald', label: 'Emerald', dark: ['#34d399', '#6ee7b7', '#059669'], light: ['#059669', '#34d399', '#34d399'] },
   { id: 'amber',   label: 'Amber',   dark: ['#fbbf24', '#fcd34d', '#d97706'], light: ['#d97706', '#fbbf24', '#fbbf24'] },
   { id: 'orange',  label: 'Orange',  dark: ['#fb923c', '#fdba74', '#ea580c'], light: ['#ea580c', '#fb923c', '#fb923c'] },
+  // Monochrome — theme-aware grayscale (black inverts to white on dark canvas, etc.)
+  { id: 'black',   label: 'Black',   dark: ['#e5e5e5', '#c9c9c9', '#e5e5e5'], light: ['#0a0a0a', '#262626', '#0a0a0a'] },
+  { id: 'white',   label: 'White',   dark: ['#fafafa', '#ffffff', '#fafafa'], light: ['#d4d4d4', '#bdbdbd', '#d4d4d4'] },
 ]
 
 const STORAGE_KEY = 'agentnexus-accent'

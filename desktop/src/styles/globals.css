@@ -16,34 +16,37 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════
-   v2 TOKEN SYSTEM — designs/mockups/v2-ui.yaml
-   Hierarchy via surface luminance steps + 1px
-   translucent borders. No colored shadows.
+   v3 TOKEN SYSTEM — designs/mockups/v3-redesign-test.html
+   "Calm Confidence": hierarchy via type & space, near-flat
+   elevation, single sparing accent, high-contrast neutral
+   canvas. --card-highlight is a zero-shadow no-op kept only
+   so legacy inline box-shadow lists still parse.
    ═══════════════════════════════════════════ */
 :root,
 [data-theme="light"] {
-  /* Backgrounds — luminance ladder */
-  --surface-0: #f7f7f8;   /* window base */
+  /* Backgrounds — luminance ladder (pure-white canvas) */
+  --surface-0: #ffffff;   /* window base */
   --surface-1: #ffffff;   /* panels: sidebar, status bar */
-  --surface-2: #f0f0f2;   /* cards, overlays, inputs */
-  --surface-3: #e6e6e9;   /* hover */
-  --surface-4: #d9d9dd;   /* strong fill (toggles, tracks) */
+  --surface-2: #f5f5f5;   /* cards, overlays, inputs */
+  --surface-3: #ebebeb;   /* hover */
+  --surface-4: #e2e2e2;   /* strong fill (toggles, tracks) */
 
-  /* Foregrounds — alpha ladder */
-  --fg: #17181c;
-  --fg-secondary: rgba(23, 24, 28, 0.70);
-  --fg-muted: rgba(23, 24, 28, 0.48);
-  --fg-faint: rgba(23, 24, 28, 0.32);
+  /* Foregrounds — alpha ladder on near-black */
+  --fg: #0a0a0a;
+  --fg-secondary: rgba(10, 10, 10, 0.68);
+  --fg-muted: rgba(10, 10, 10, 0.44);
+  --fg-faint: rgba(10, 10, 10, 0.28);
 
-  /* Accent — rose, used sparingly */
+  /* Accent — rose, used sparingly (solid, no candy gradient) */
   --accent: #e11d48;
   --accent-hover: #be123c;
-  --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent-gradient: #e11d48;
   --accent-muted: rgba(225, 29, 72, 0.08);
   --accent-subtle: rgba(225, 29, 72, 0.05);
-  --accent-glow: rgba(225, 29, 72, 0.10);
-  --accent-ring: rgba(225, 29, 72, 0.28);
-
+  --accent-glow: rgba(225, 29, 72, 0.12);
+  --accent-ring: rgba(225, 29, 72, 0.26);
+  --border-active: rgba(225, 29, 72, 0.32);
+  --on-accent: #ffffff;   /* text/icons sitting on --accent */
   /* Semantic */
   --green: #059669;
   --green-muted: rgba(5, 150, 105, 0.10);
@@ -61,26 +64,26 @@
   /* Borders — translucent, 1px */
   --border: rgba(0, 0, 0, 0.08);
   --border-subtle: rgba(0, 0, 0, 0.05);
-  --border-strong: rgba(0, 0, 0, 0.14);
-  --border-active: rgba(225, 29, 72, 0.35);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-active: rgba(225, 29, 72, 0.32);
 
   /* Scrollbar */
   --scrollbar-thumb: rgba(0, 0, 0, 0.14);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.24);
 
-  /* Elevation — floating surfaces only */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.08), 0 24px 64px rgba(0, 0, 0, 0.10);
-  --shadow-hard: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  --scrim: rgba(23, 24, 28, 0.32);
+  /* Elevation — floating surfaces only, near-flat elsewhere */
+  --shadow-sm: 0 1px 2px rgba(10, 10, 10, 0.05);
+  --shadow-md: 0 2px 8px rgba(10, 10, 10, 0.06);
+  --shadow-lg: 0 8px 24px rgba(10, 10, 10, 0.08);
+  --shadow-elevated: 0 2px 8px rgba(10, 10, 10, 0.07), 0 28px 64px -12px rgba(10, 10, 10, 0.20);
+  --shadow-hard: 0 1px 2px rgba(10, 10, 10, 0.05);
+  --card-highlight: 0 0 #0000;   /* v3: inset highlight retired */
+  --scrim: rgba(10, 10, 10, 0.35);
 
-  /* Depth system (v2.1) */
-  --shadow-card: 0 1px 2px rgba(15, 16, 20, 0.05), 0 4px 14px rgba(15, 16, 20, 0.05);
-  --shadow-card-hover: 0 2px 4px rgba(15, 16, 20, 0.07), 0 10px 26px rgba(15, 16, 20, 0.09);
-  --shadow-float: 0 1px 3px rgba(15, 16, 20, 0.08), 0 10px 30px rgba(15, 16, 20, 0.10);
+  /* Depth system — one whisper level for cards, one float for overlays */
+  --shadow-card: 0 1px 2px rgba(10, 10, 10, 0.04), 0 4px 14px rgba(10, 10, 10, 0.04);
+  --shadow-card-hover: 0 2px 4px rgba(10, 10, 10, 0.06), 0 10px 26px rgba(10, 10, 10, 0.07);
+  --shadow-float: 0 1px 2px rgba(10, 10, 10, 0.06), 0 16px 40px -12px rgba(10, 10, 10, 0.16);
   --glow-accent: 0 0 0 1px var(--accent-ring), 0 2px 12px var(--accent-glow);
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%);
   --ambient-bg:
@@ -107,105 +110,132 @@
    overrides the accent token family per theme.
    ═══════════════════════════════════════════ */
 [data-theme="dark"][data-accent="rose"] {
-  --accent: #f43f5e; --accent-hover: #fb7185; --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent: #f43f5e; --accent-hover: #fb7185; --accent-gradient: var(--accent);
   --accent-muted: rgba(244,63,94,0.12); --accent-subtle: rgba(244,63,94,0.08); --accent-glow: rgba(244,63,94,0.14);
   --accent-ring: rgba(244,63,94,0.30); --border-active: rgba(244,63,94,0.40);
 }
 [data-theme="dark"][data-accent="indigo"] {
-  --accent: #818cf8; --accent-hover: #a5b4fc; --accent-gradient: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
+  --accent: #818cf8; --accent-hover: #a5b4fc; --accent-gradient: var(--accent);
   --accent-muted: rgba(129,140,248,0.12); --accent-subtle: rgba(129,140,248,0.08); --accent-glow: rgba(129,140,248,0.14);
   --accent-ring: rgba(129,140,248,0.30); --border-active: rgba(129,140,248,0.40);
 }
 [data-theme="dark"][data-accent="violet"] {
-  --accent: #a78bfa; --accent-hover: #c4b5fd; --accent-gradient: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
+  --accent: #a78bfa; --accent-hover: #c4b5fd; --accent-gradient: var(--accent);
   --accent-muted: rgba(167,139,250,0.12); --accent-subtle: rgba(167,139,250,0.08); --accent-glow: rgba(167,139,250,0.14);
   --accent-ring: rgba(167,139,250,0.30); --border-active: rgba(167,139,250,0.40);
 }
 [data-theme="dark"][data-accent="blue"] {
-  --accent: #60a5fa; --accent-hover: #93c5fd; --accent-gradient: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+  --accent: #60a5fa; --accent-hover: #93c5fd; --accent-gradient: var(--accent);
   --accent-muted: rgba(96,165,250,0.12); --accent-subtle: rgba(96,165,250,0.08); --accent-glow: rgba(96,165,250,0.14);
   --accent-ring: rgba(96,165,250,0.30); --border-active: rgba(96,165,250,0.40);
 }
 [data-theme="dark"][data-accent="cyan"] {
-  --accent: #22d3ee; --accent-hover: #67e8f9; --accent-gradient: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  --accent: #22d3ee; --accent-hover: #67e8f9; --accent-gradient: var(--accent);
   --accent-muted: rgba(34,211,238,0.12); --accent-subtle: rgba(34,211,238,0.08); --accent-glow: rgba(34,211,238,0.14);
   --accent-ring: rgba(34,211,238,0.30); --border-active: rgba(34,211,238,0.40);
 }
 [data-theme="dark"][data-accent="emerald"] {
-  --accent: #34d399; --accent-hover: #6ee7b7; --accent-gradient: linear-gradient(180deg, #34d399 0%, #059669 100%);
+  --accent: #34d399; --accent-hover: #6ee7b7; --accent-gradient: var(--accent);
   --accent-muted: rgba(52,211,153,0.12); --accent-subtle: rgba(52,211,153,0.08); --accent-glow: rgba(52,211,153,0.14);
   --accent-ring: rgba(52,211,153,0.30); --border-active: rgba(52,211,153,0.40);
 }
 [data-theme="dark"][data-accent="amber"] {
-  --accent: #fbbf24; --accent-hover: #fcd34d; --accent-gradient: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  --accent: #fbbf24; --accent-hover: #fcd34d; --accent-gradient: var(--accent);
   --accent-muted: rgba(251,191,36,0.12); --accent-subtle: rgba(251,191,36,0.08); --accent-glow: rgba(251,191,36,0.14);
   --accent-ring: rgba(251,191,36,0.30); --border-active: rgba(251,191,36,0.40);
 }
 [data-theme="dark"][data-accent="orange"] {
-  --accent: #fb923c; --accent-hover: #fdba74; --accent-gradient: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  --accent: #fb923c; --accent-hover: #fdba74; --accent-gradient: var(--accent);
   --accent-muted: rgba(251,146,60,0.12); --accent-subtle: rgba(251,146,60,0.08); --accent-glow: rgba(251,146,60,0.14);
   --accent-ring: rgba(251,146,60,0.30); --border-active: rgba(251,146,60,0.40);
 }
+/* Monochrome accents — theme-aware grayscale: stays legible on both canvases */
+[data-theme="dark"][data-accent="black"] {
+  --accent: #e5e5e5; --accent-hover: #c9c9c9; --accent-gradient: var(--accent);
+  --accent-muted: rgba(229,229,229,0.10); --accent-subtle: rgba(229,229,229,0.07); --accent-glow: rgba(229,229,229,0.14);
+  --accent-ring: rgba(229,229,229,0.32); --border-active: rgba(229,229,229,0.40);
+  --on-accent: #0a0a0a;
+}
+[data-theme="dark"][data-accent="white"] {
+  --accent: #fafafa; --accent-hover: #ffffff; --accent-gradient: var(--accent);
+  --accent-muted: rgba(250,250,250,0.10); --accent-subtle: rgba(250,250,250,0.07); --accent-glow: rgba(250,250,250,0.14);
+  --accent-ring: rgba(250,250,250,0.34); --border-active: rgba(250,250,250,0.42);
+  --on-accent: #0a0a0a;
+}
 /* Light-theme variants */
 [data-theme="light"][data-accent="rose"] {
-  --accent: #e11d48; --accent-hover: #be123c; --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent: #e11d48; --accent-hover: #be123c; --accent-gradient: var(--accent);
   --accent-muted: rgba(225,29,72,0.08); --accent-subtle: rgba(225,29,72,0.05); --accent-glow: rgba(225,29,72,0.10);
   --accent-ring: rgba(225,29,72,0.28); --border-active: rgba(225,29,72,0.35);
 }
 [data-theme="light"][data-accent="indigo"] {
-  --accent: #4f46e5; --accent-hover: #4338ca; --accent-gradient: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
+  --accent: #4f46e5; --accent-hover: #4338ca; --accent-gradient: var(--accent);
   --accent-muted: rgba(79,70,229,0.08); --accent-subtle: rgba(79,70,229,0.05); --accent-glow: rgba(79,70,229,0.10);
   --accent-ring: rgba(79,70,229,0.28); --border-active: rgba(79,70,229,0.35);
 }
 [data-theme="light"][data-accent="violet"] {
-  --accent: #7c3aed; --accent-hover: #6d28d9; --accent-gradient: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
+  --accent: #7c3aed; --accent-hover: #6d28d9; --accent-gradient: var(--accent);
   --accent-muted: rgba(124,58,237,0.08); --accent-subtle: rgba(124,58,237,0.05); --accent-glow: rgba(124,58,237,0.10);
   --accent-ring: rgba(124,58,237,0.28); --border-active: rgba(124,58,237,0.35);
 }
 [data-theme="light"][data-accent="blue"] {
-  --accent: #2563eb; --accent-hover: #1d4ed8; --accent-gradient: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+  --accent: #2563eb; --accent-hover: #1d4ed8; --accent-gradient: var(--accent);
   --accent-muted: rgba(37,99,235,0.08); --accent-subtle: rgba(37,99,235,0.05); --accent-glow: rgba(37,99,235,0.10);
   --accent-ring: rgba(37,99,235,0.28); --border-active: rgba(37,99,235,0.35);
 }
 [data-theme="light"][data-accent="cyan"] {
-  --accent: #0891b2; --accent-hover: #0e7490; --accent-gradient: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  --accent: #0891b2; --accent-hover: #0e7490; --accent-gradient: var(--accent);
   --accent-muted: rgba(8,145,178,0.08); --accent-subtle: rgba(8,145,178,0.05); --accent-glow: rgba(8,145,178,0.10);
   --accent-ring: rgba(8,145,178,0.28); --border-active: rgba(8,145,178,0.35);
 }
 [data-theme="light"][data-accent="emerald"] {
-  --accent: #059669; --accent-hover: #047857; --accent-gradient: linear-gradient(180deg, #34d399 0%, #059669 100%);
+  --accent: #059669; --accent-hover: #047857; --accent-gradient: var(--accent);
   --accent-muted: rgba(5,150,105,0.08); --accent-subtle: rgba(5,150,105,0.05); --accent-glow: rgba(5,150,105,0.10);
   --accent-ring: rgba(5,150,105,0.28); --border-active: rgba(5,150,105,0.35);
 }
 [data-theme="light"][data-accent="amber"] {
-  --accent: #d97706; --accent-hover: #b45309; --accent-gradient: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  --accent: #d97706; --accent-hover: #b45309; --accent-gradient: var(--accent);
   --accent-muted: rgba(217,119,6,0.08); --accent-subtle: rgba(217,119,6,0.05); --accent-glow: rgba(217,119,6,0.10);
   --accent-ring: rgba(217,119,6,0.28); --border-active: rgba(217,119,6,0.35);
 }
 [data-theme="light"][data-accent="orange"] {
-  --accent: #ea580c; --accent-hover: #c2410c; --accent-gradient: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  --accent: #ea580c; --accent-hover: #c2410c; --accent-gradient: var(--accent);
   --accent-muted: rgba(234,88,12,0.08); --accent-subtle: rgba(234,88,12,0.05); --accent-glow: rgba(234,88,12,0.10);
   --accent-ring: rgba(234,88,12,0.28); --border-active: rgba(234,88,12,0.35);
 }
+[data-theme="light"][data-accent="black"] {
+  --accent: #0a0a0a; --accent-hover: #262626; --accent-gradient: var(--accent);
+  --accent-muted: rgba(10,10,10,0.08); --accent-subtle: rgba(10,10,10,0.05); --accent-glow: rgba(10,10,10,0.12);
+  --accent-ring: rgba(10,10,10,0.30); --border-active: rgba(10,10,10,0.35);
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="white"] {
+  --accent: #d4d4d4; --accent-hover: #bdbdbd; --accent-gradient: var(--accent);
+  --accent-muted: rgba(148,148,148,0.12); --accent-subtle: rgba(148,148,148,0.08); --accent-glow: rgba(148,148,148,0.14);
+  --accent-ring: rgba(120,120,120,0.32); --border-active: rgba(120,120,120,0.40);
+  --on-accent: #0a0a0a;
+}
 [data-theme="dark"] {
-  --surface-0: #0a0b0d;
-  --surface-1: #101216;
-  --surface-2: #16181d;
-  --surface-3: #1e2127;
-  --surface-4: #262a31;
+  /* deep black canvas, warm-neutral graphite steps */
+  --surface-0: #0a0a0a;
+  --surface-1: #141414;
+  --surface-2: #1c1c1c;
+  --surface-3: #262626;
+  --surface-4: #303030;
 
-  --fg: #eceef1;
-  --fg-secondary: rgba(236, 238, 241, 0.70);
-  --fg-muted: rgba(236, 238, 241, 0.45);
-  --fg-faint: rgba(236, 238, 241, 0.30);
+  --fg: #f5f5f5;
+  --fg-secondary: rgba(245, 245, 245, 0.66);
+  --fg-muted: rgba(245, 245, 245, 0.42);
+  --fg-faint: rgba(245, 245, 245, 0.26);
 
   --accent: #f43f5e;
   --accent-hover: #fb7185;
-  --accent-gradient: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  --accent-gradient: #f43f5e;
   --accent-muted: rgba(244, 63, 94, 0.12);
   --accent-subtle: rgba(244, 63, 94, 0.08);
-  --accent-glow: rgba(244, 63, 94, 0.14);
-  --accent-ring: rgba(244, 63, 94, 0.30);
+  --accent-glow: rgba(244, 63, 94, 0.16);
+  --accent-ring: rgba(244, 63, 94, 0.32);
+  --on-accent: #ffffff;   /* text/icons sitting on --accent */
 
   --green: #34d399;
   --green-muted: rgba(52, 211, 153, 0.12);
@@ -222,24 +252,24 @@
 
   --border: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.15);
   --border-active: rgba(244, 63, 94, 0.40);
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.10);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.40);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.50);
-  --shadow-elevated: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.45), 0 32px 80px rgba(0, 0, 0, 0.55);
-  --shadow-hard: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --scrim: rgba(4, 5, 6, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.50);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.55);
+  --shadow-elevated: 0 1px 2px rgba(0, 0, 0, 0.50), 0 12px 32px rgba(0, 0, 0, 0.55), 0 32px 80px rgba(0, 0, 0, 0.60);
+  --shadow-hard: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --card-highlight: 0 0 #0000;   /* v3: inset highlight retired */
+  --scrim: rgba(0, 0, 0, 0.60);
 
-  /* Depth system (v2.1) — ambient multi-layer card shadows, hover lift, accent glow */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.22);
-  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.32), 0 12px 32px rgba(0, 0, 0, 0.30);
-  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 36px rgba(0, 0, 0, 0.35);
+  /* Depth system — one whisper level for cards, one float for overlays */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.40), 0 10px 26px rgba(0, 0, 0, 0.45);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.50), 0 16px 44px -10px rgba(0, 0, 0, 0.65);
   --glow-accent: 0 0 0 1px var(--accent-ring), 0 2px 12px var(--accent-glow);
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 40%);
   --ambient-bg:
@@ -275,8 +305,8 @@ body {
   background-image: var(--ambient-bg);
   background-attachment: fixed;
   color: var(--fg);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -491,31 +521,30 @@ html.theme-anim * {
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card), var(--card-highlight);
+    /* v3: cards are flat — border + tonal step carry the separation */
   }
 
   .surface-elevated {
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-float), var(--card-highlight);
+    box-shadow: var(--shadow-float);
   }
 
   .btn-primary {
-    background: var(--accent-gradient);
-    color: #ffffff;
+    background: var(--accent);
+    color: var(--on-accent);
     border: none;
     border-radius: var(--radius);
-    padding: 7px 14px;
-    font-size: 12px;
+    padding: 8px 16px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    box-shadow: 0 1px 6px var(--accent-glow);
-    transition: filter 0.15s var(--ease), transform 0.1s var(--ease);
+    transition: background 0.15s var(--ease), transform 0.1s var(--ease);
   }
 
   .btn-primary:hover {
-    filter: brightness(1.08);
+    background: var(--accent-hover);
   }
 
   .btn-primary:active {
@@ -527,17 +556,17 @@ html.theme-anim * {
     color: var(--fg-secondary);
     border: none;
     border-radius: var(--radius);
-    padding: 7px 14px;
-    font-size: 12px;
+    padding: 8px 16px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s var(--ease);
+    transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
 
   .btn-ghost:hover {
     background: var(--surface-3);
     color: var(--fg);
-    filter: brightness(1.05);
+    filter: brightness(1.02);
   }
 
   .input-field {
@@ -564,14 +593,14 @@ html.theme-anim * {
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    height: 22px;
-    padding: 0 9px;
+    gap: 6px;
+    height: 26px;
+    padding: 0 11px;
     border-radius: var(--radius-chip);
     background: var(--surface-2);
     border: 1px solid var(--border-subtle);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-secondary);
   }
 

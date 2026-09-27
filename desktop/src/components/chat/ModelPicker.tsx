@@ -92,25 +92,25 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
     <div ref={rootRef} className="relative shrink-0">
       <button
         onClick={handleToggle}
-        className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md border transition-colors hover:bg-[var(--surface-3)]"
-        style={{ color: 'var(--fg-muted)', borderColor: 'var(--border)' }}
+        className="flex items-center gap-1.5 h-7 px-3 rounded-full transition-colors hover:bg-[var(--surface-3)] font-mono text-[12px]"
+        style={{ color: 'var(--fg-muted)' }}
         title="切换模型（立即生效）"
       >
         <Cpu size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
-        <span className="text-[11px]">{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
+        <span>{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
         <ChevronDown size={11} style={{ color: 'var(--fg-faint)' }} />
       </button>
 
       {open && (
         <div
-          className="fixed w-64 rounded-lg overflow-hidden z-50 animate-slide-up max-h-[70vh] flex flex-col"
+          className="fixed w-64 rounded-[14px] overflow-hidden z-50 animate-slide-up max-h-[70vh] flex flex-col"
           style={{
-            background: 'var(--surface-2)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-lg)',
+            background: 'var(--surface-2)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-elevated)',
             left: anchorRect?.left ?? 0,
             bottom: anchorRect ? window.innerHeight - anchorRect.top + 6 : 0,
           }}
         >
-          <div className="px-3 pt-2 pb-1 text-[9px] uppercase tracking-wider shrink-0" style={{ color: 'var(--fg-faint)' }}>
+          <div className="px-3 pt-2 pb-1 text-[11.5px] shrink-0" style={{ color: 'var(--fg-faint)' }}>
             Model
           </div>
 
@@ -119,16 +119,16 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             {legacyModel && (
               <button
                 onClick={() => handleSelect('')}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-[var(--surface-3)]"
+                className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-3)]"
               >
-                <span className="w-3 shrink-0 text-center" style={{ color: 'var(--green)' }}>
-                  {active === '' && <Check size={10} />}
+                <span className="w-3 shrink-0 text-center" style={{ color: 'var(--accent)' }}>
+                  {active === '' && <Check size={12} />}
                 </span>
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[11px] truncate" style={{ color: 'var(--fg)' }}>
+                  <span className="block text-[13px] truncate" style={{ color: 'var(--fg)' }}>
                     默认 · {legacyModel.split('/').pop() ?? legacyModel}
                   </span>
-                  <span className="block text-[9px] truncate" style={{ color: 'var(--fg-faint)' }}>{legacyModel}</span>
+                  <span className="block text-[12px] truncate" style={{ color: 'var(--fg-faint)' }}>{legacyModel}</span>
                 </span>
               </button>
             )}
@@ -136,7 +136,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             {/* Providers grouped with their models */}
             {providers.map((p) => (
               <div key={p.name}>
-                <div className="px-3 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--fg-faint)' }}>
+                <div className="px-3 pt-1.5 pb-0.5 text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>
                   {p.name}
                 </div>
                 {p.models.map((m) => {
@@ -146,16 +146,16 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                       key={selector}
                       onClick={() => handleSelect(selector)}
                       disabled={switching !== null}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 pl-6 text-left transition-colors hover:bg-[var(--surface-3)] disabled:opacity-50"
+                      className="w-full flex items-center gap-2 px-3 py-2 pl-6 text-left transition-colors hover:bg-[var(--surface-3)] disabled:opacity-50"
                     >
-                      <span className="w-3 shrink-0 text-center" style={{ color: 'var(--green)' }}>
-                        {active === selector && <Check size={10} />}
+                      <span className="w-3 shrink-0 text-center" style={{ color: 'var(--accent)' }}>
+                        {active === selector && <Check size={12} />}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="block text-[11px] truncate" style={{ color: 'var(--fg)' }}>
+                        <span className="block text-[13px] truncate" style={{ color: 'var(--fg)' }}>
                           {m.model_id.split('/').pop() ?? m.model_id}
                         </span>
-                        <span className="block text-[9px] truncate" style={{ color: 'var(--fg-faint)' }}>{m.model_id}</span>
+                        <span className="block text-[12px] truncate" style={{ color: 'var(--fg-faint)' }}>{m.model_id}</span>
                       </span>
                       {switching === selector && (
                         <span className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin shrink-0" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
@@ -168,14 +168,14 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
           </div>
 
           {error && (
-            <div className="px-3 py-1.5 text-[10px] shrink-0" style={{ color: 'var(--red)' }}>{error}</div>
+            <div className="px-3 py-1.5 text-[12px] shrink-0" style={{ color: 'var(--red)' }}>{error}</div>
           )}
 
           {/* Capability detection results for the active model */}
           <div className="px-3 pt-2 pb-2.5 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--fg-faint)' }}>能力检测</span>
-              <span className="text-[9px]" style={{ color: 'var(--fg-faint)' }}>
+              <span className="text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>能力检测</span>
+              <span className="text-[12px]" style={{ color: 'var(--fg-faint)' }}>
                 {!caps ? '检测中…'
                   : caps.source === 'probe' ? '实时探测'
                   : caps.source === 'config' ? '配置指定'
@@ -207,7 +207,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                   <CapChip label="视觉" ok={caps.vision} />
                   <CapChip label="并行工具" ok={caps.parallel_tool_calls} disabled={caps.session_disabled.includes('parallel_tool_calls')} />
                 </div>
-                <div className="mt-1.5 text-[9px]" style={{ color: 'var(--fg-faint)' }}>
+                <div className="mt-1.5 text-[12px]" style={{ color: 'var(--fg-faint)' }}>
                   上下文 {(caps.max_context_tokens / 1000).toFixed(0)}K · 输出 {(caps.max_output_tokens / 1000).toFixed(0)}K
                 </div>
               </>
@@ -225,8 +225,8 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-3)] shrink-0"
             style={{ borderTop: '1px solid var(--border)', color: 'var(--fg-muted)' }}
           >
-            <Settings2 size={10} style={{ flexShrink: 0 }} />
-            <span className="text-[10px]">管理模型提供商…</span>
+            <Settings2 size={12} style={{ flexShrink: 0 }} />
+            <span className="text-[12px]">管理模型提供商…</span>
           </button>
         </div>
       )}
@@ -237,14 +237,14 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
 function CapChip({ label, ok, disabled = false }: { label: string; ok: boolean; disabled?: boolean }) {
   return (
     <span
-      className="inline-flex items-center gap-0.5 px-1.5 rounded text-[9px] leading-4"
+      className="inline-flex items-center gap-0.5 px-1.5 rounded text-[10.5px] leading-4"
       title={disabled ? `${label}：运行时被禁用（API 报错后自动降级）` : label}
       style={
         disabled
-          ? { background: 'var(--surface-3)', color: 'var(--amber)', border: '1px solid var(--border)' }
+          ? { background: 'var(--surface-3)', color: 'var(--amber)' }
           : ok
-            ? { background: 'var(--surface-3)', color: 'var(--green)', border: '1px solid var(--border)' }
-            : { background: 'var(--surface-3)', color: 'var(--fg-faint)', border: '1px solid var(--border)' }
+            ? { background: 'var(--surface-3)', color: 'var(--green)' }
+            : { background: 'var(--surface-3)', color: 'var(--fg-faint)' }
       }
     >
       {ok && !disabled ? <Check size={8} /> : (!ok && !disabled) ? <X size={8} /> : <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />}

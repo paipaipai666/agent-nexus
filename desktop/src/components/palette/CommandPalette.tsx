@@ -138,7 +138,7 @@ export default function CommandPalette() {
           transform: 'translateX(-50%)',
           background: 'var(--surface-2)',
           border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)',
+          borderRadius: '16px',
           boxShadow: 'var(--shadow-elevated)',
           transformOrigin: 'top center',
           animation: 'pop-in-3d 0.25s var(--ease)',
@@ -146,7 +146,7 @@ export default function CommandPalette() {
       >
         <div
           className="flex items-center gap-2.5 px-4"
-          style={{ height: 46, borderBottom: '1px solid var(--border-subtle)' }}
+          style={{ height: 52, borderBottom: '1px solid var(--border-subtle)' }}
         >
           <Search size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
           <input
@@ -155,10 +155,10 @@ export default function CommandPalette() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
             placeholder="Type a command or search…"
-            className="flex-1 bg-transparent outline-none text-[14px]"
+            className="flex-1 bg-transparent outline-none text-[15px]"
             style={{ color: 'var(--fg)' }}
           />
-          <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'var(--fg-faint)', background: 'var(--surface-3)' }}>esc</kbd>
+          <kbd className="font-mono text-[11.5px] px-1.5 py-0.5 rounded" style={{ color: 'var(--fg-faint)', background: 'var(--surface-3)' }}>esc</kbd>
         </div>
 
         <div className="max-h-[320px] overflow-y-auto p-1.5">
@@ -170,8 +170,8 @@ export default function CommandPalette() {
           {groups.map((g) => (
             <div key={g.name}>
               <div
-                className="px-2.5 pt-2 pb-1 text-[11px] font-medium uppercase"
-                style={{ color: 'var(--fg-faint)', letterSpacing: '0.06em' }}
+                className="px-2.5 pt-2 pb-1 text-[11.5px] font-medium"
+                style={{ color: 'var(--fg-muted)' }}
               >
                 {g.name}
               </div>
@@ -183,9 +183,8 @@ export default function CommandPalette() {
                     key={item.id}
                     onClick={() => exec(index)}
                     onMouseEnter={() => setSelected(index)}
-                    className="relative w-full flex items-center gap-2.5 px-2.5 rounded-lg text-left transition-colors"
+                    className="relative w-full flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-left transition-colors"
                     style={{
-                      height: 36,
                       background: sel ? 'var(--surface-3)' : 'transparent',
                       color: sel ? 'var(--fg)' : 'var(--fg-secondary)',
                       transitionDuration: '120ms',
@@ -198,11 +197,11 @@ export default function CommandPalette() {
                       />
                     )}
                     <Icon size={14} style={{ color: sel ? 'var(--fg-secondary)' : 'var(--fg-muted)', flexShrink: 0 }} />
-                    <span className="text-[13px] truncate">{item.label}</span>
+                    <span className="text-[14px] truncate">{item.label}</span>
                     <span className="ml-auto flex items-center gap-1.5 shrink-0">
-                      {item.hint && <span className="font-mono text-[10px]" style={{ color: 'var(--fg-faint)' }}>{item.hint}</span>}
+                      {item.hint && <span className="font-mono text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>{item.hint}</span>}
                       {item.kbd && (
-                        <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'var(--fg-faint)', background: 'var(--surface-1)' }}>
+                        <kbd className="font-mono text-[11.5px] px-1.5 py-0.5 rounded" style={{ color: 'var(--fg-faint)', background: 'var(--surface-1)' }}>
                           {item.kbd}
                         </kbd>
                       )}
@@ -215,8 +214,8 @@ export default function CommandPalette() {
         </div>
 
         <div
-          className="flex items-center gap-3.5 px-3.5 font-mono text-[10px]"
-          style={{ height: 32, borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-faint)' }}
+          className="flex items-center gap-3.5 px-3.5 font-mono text-[11.5px]"
+          style={{ height: 40, borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-faint)' }}
         >
           <span>↑↓ navigate</span>
           <span>↵ open</span>

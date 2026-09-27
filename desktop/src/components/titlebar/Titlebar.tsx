@@ -16,7 +16,7 @@ export default function Titlebar() {
 
   return (
     <div
-      className="h-9 flex items-center select-none shrink-0 relative z-10"
+      className="h-11 flex items-center select-none shrink-0 relative z-10"
       style={{
         background: 'color-mix(in srgb, var(--surface-0) 80%, transparent)',
         backdropFilter: 'blur(16px) saturate(1.4)',
@@ -28,8 +28,8 @@ export default function Titlebar() {
       {/* App identity */}
       <div className="w-[232px] shrink-0 px-3 flex items-center gap-2">
         <span
-          className="grid place-items-center w-[18px] h-[18px] rounded-[5px] font-mono font-bold text-[10px]"
-          style={{ background: 'var(--accent-gradient)', color: '#fff', boxShadow: '0 1px 4px var(--accent-glow)' }}
+          className="grid place-items-center w-5 h-5 rounded-[5px] font-mono font-bold text-[12px]"
+          style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
         >
           N
         </span>
@@ -40,7 +40,7 @@ export default function Titlebar() {
 
       {/* Breadcrumb */}
       <div
-        className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-[12px]"
+        className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-[13px]"
         style={{ color: 'var(--fg-muted)' }}
       >
         <span>{current?.label ?? 'Chat'}</span>
@@ -56,7 +56,7 @@ export default function Titlebar() {
         {location.pathname.startsWith('/chat/') && (
           <>
             <span style={{ color: 'var(--fg-faint)' }}>/</span>
-            <span className="font-mono text-[11px]" style={{ color: 'var(--fg-secondary)' }}>
+            <span className="font-mono text-[12px]" style={{ color: 'var(--fg-secondary)' }}>
               {location.pathname.split('/').pop()?.slice(0, 8)}
             </span>
           </>
@@ -67,17 +67,17 @@ export default function Titlebar() {
       <div className="flex items-center h-full ml-auto" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-2 h-6 px-2.5 mr-2 rounded-lg transition-colors font-mono text-[11px]"
+          className="flex items-center gap-2 h-[30px] px-2.5 mr-2 rounded-full transition-colors font-mono text-[13px]"
           style={{
             background: 'var(--surface-2)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--fg-muted)',
-            minWidth: 140,
+            minWidth: 190,
           }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.color = 'var(--fg-secondary)' }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--fg-muted)' }}
         >
-          <Search size={11} />
+          <Search size={13} />
           <span>Search</span>
           <span className="ml-auto" style={{ color: 'var(--fg-faint)' }}>Ctrl K</span>
         </button>

@@ -8,7 +8,7 @@ export default function StatusBar() {
 
   return (
     <div
-      className="h-6 flex items-center shrink-0 font-mono text-[11px] gap-0.5"
+      className="h-6 flex items-center shrink-0 font-mono text-[12px] gap-0.5"
       style={{
         background: 'var(--surface-1)',
         borderTop: '1px solid var(--border-subtle)',
@@ -82,7 +82,7 @@ export default function StatusBar() {
 
 function StatusItem({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1 px-2 h-full hover:bg-[var(--surface-2)] transition-colors cursor-default rounded">
+    <div className="flex items-center gap-1 px-2.5 h-full hover:bg-[var(--surface-2)] transition-colors cursor-default rounded">
       {children}
     </div>
   )

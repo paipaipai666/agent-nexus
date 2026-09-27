@@ -155,14 +155,14 @@ export default function Sidebar() {
       <div className="px-3 pt-3 pb-2 shrink-0">
         <button
           onClick={handleNewChat}
-          className="btn-primary w-full flex items-center justify-center gap-1.5"
-          style={{ height: 30 }}
+          className="btn-primary w-full flex items-center justify-center gap-1.5 text-[13.5px]"
+          style={{ height: 36 }}
         >
           <Plus size={13} />
           New Chat
         </button>
         <div
-          className="mt-2.5 flex items-center gap-1.5 h-8 px-2.5 rounded-lg transition-all"
+          className="mt-2.5 flex items-center gap-1.5 h-[34px] px-2.5 rounded-lg transition-all"
           style={{
             background: 'var(--surface-2)',
             border: '1px solid var(--border-subtle)',
@@ -183,7 +183,7 @@ export default function Sidebar() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search sessions…"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[12px]"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[13px]"
             style={{ color: 'var(--fg)' }}
           />
         </div>
@@ -196,11 +196,10 @@ export default function Sidebar() {
         {draftSession && (
           <button
             onClick={() => (draftSession.isNew ? navigate('/') : handleSessionClick(draftSession.id))}
-            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 mb-1 rounded-lg transition-all text-left"
+            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 mb-1 rounded-[9px] transition-all text-left"
             style={{
               color: 'var(--fg)',
-              background: 'var(--accent-muted)',
-              boxShadow: 'var(--glow-accent)',
+              background: 'var(--surface-2)',
               transitionDuration: '150ms',
               transitionTimingFunction: 'var(--ease)',
             }}
@@ -210,7 +209,7 @@ export default function Sidebar() {
               style={{ background: 'var(--accent)' }}
             />
             <MessageSquare size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-            <span className="text-[12px] truncate flex-1" title={draftSession.preview || 'New session'}>
+            <span className="text-[13.5px] truncate flex-1" title={draftSession.preview || 'New session'}>
               {draftSession.preview || 'New session'}
             </span>
             {!draftSession.isNew && isSessionRunning(draftSession.id) && (
@@ -220,25 +219,26 @@ export default function Sidebar() {
                 title="Running"
               />
             )}
-            <span className="text-[10px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
+            <span className="text-[12px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
               now
             </span>
           </button>
         )}
         <div className="flex items-center justify-between pr-1 pt-3 pb-1.5">
           <span
-            className="px-1 text-[11px] font-medium uppercase"
-            style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
+            className="px-1 text-[12px] font-medium"
+            style={{ color: 'var(--fg-muted)' }}
           >
             Projects
           </span>
           <button
             onClick={handleAddProject}
-            className="p-1 rounded-md transition-colors"
+            className="w-7 h-7 grid place-items-center rounded-md transition-colors -my-2"
             style={{ color: 'var(--fg-faint)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
             title="Add project folder"
+            aria-label="Add project folder"
           >
             <FolderPlus size={12} />
           </button>
@@ -251,13 +251,13 @@ export default function Sidebar() {
         ) : groups.length === 0 ? (
           <button
             onClick={handleAddProject}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-[9px] transition-colors text-left"
             style={{ color: 'var(--fg-faint)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-3)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
             <FolderPlus size={13} style={{ flexShrink: 0 }} />
-            <span className="text-[12px]">Add a project folder…</span>
+            <span className="text-[13.5px]">Add a project folder…</span>
           </button>
         ) : (
           <div className="space-y-1.5">
@@ -273,9 +273,10 @@ export default function Sidebar() {
                   >
                     <button
                       onClick={() => setCollapsed(c => ({ ...c, [group.key]: !c[group.key] }))}
-                      className="p-0.5 shrink-0 transition-opacity"
+                      className="w-7 h-7 grid place-items-center shrink-0 transition-opacity -my-2"
                       style={{ color: 'var(--fg-faint)' }}
                       title={isCollapsed ? 'Expand' : 'Collapse'}
+                      aria-label={isCollapsed ? 'Expand' : 'Collapse'}
                     >
                       {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     </button>
@@ -286,8 +287,8 @@ export default function Sidebar() {
                     >
                       <FolderOpen size={12} style={{ color: isSelected ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
                       <span
-                        className="text-[12px] font-medium truncate"
-                        style={{ color: isSelected ? 'var(--fg)' : 'var(--fg-secondary)', fontFamily: 'var(--font-mono)' }}
+                        className="text-[11.5px] font-medium truncate"
+                        style={{ color: isSelected ? 'var(--fg-secondary)' : 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}
                       >
                         {group.path.split(/[\\/]/).filter(Boolean).pop() ?? group.path}
                       </span>
@@ -295,18 +296,20 @@ export default function Sidebar() {
                     {group.explicit ? (
                       <button
                         onClick={() => removeProject(group.path)}
-                        className="p-0.5 shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
+                        className="w-7 h-7 grid place-items-center shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity -my-2"
                         style={{ color: 'var(--fg-faint)' }}
                         title="Remove from projects (sessions are kept)"
+                        aria-label="Remove from projects"
                       >
                         <X size={11} />
                       </button>
                     ) : (
                       <button
                         onClick={() => addProject(group.path)}
-                        className="p-0.5 shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity"
+                        className="w-7 h-7 grid place-items-center shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity -my-2"
                         style={{ color: 'var(--fg-faint)' }}
                         title="Add as project"
+                        aria-label="Add as project"
                       >
                         <Plus size={11} />
                       </button>
@@ -317,18 +320,17 @@ export default function Sidebar() {
                   {!isCollapsed && (
                     <div className="ml-4 space-y-1">
                       {group.sessions.length === 0 ? (
-                        <div className="px-3 py-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>No chats yet</div>
+                        <div className="px-3 py-1 text-[12px]" style={{ color: 'var(--fg-faint)' }}>No chats yet</div>
                       ) : group.sessions.map((session) => {
                         const active = isActiveSession(session.session_id)
                         return (
                           <button
                             key={session.session_id}
                             onClick={() => handleSessionClick(session.session_id)}
-                            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg transition-all text-left"
+                            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-[9px] transition-all text-left"
                             style={{
                               color: active ? 'var(--fg)' : 'var(--fg-secondary)',
-                              background: active ? 'var(--accent-muted)' : 'transparent',
-                              boxShadow: active ? 'var(--glow-accent)' : 'none',
+                              background: active ? 'var(--surface-2)' : 'transparent',
                               transitionDuration: '150ms',
                               transitionTimingFunction: 'var(--ease)',
                             }}
@@ -340,7 +342,7 @@ export default function Sidebar() {
                               />
                             )}
                             <MessageSquare size={12} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
-                            <span className="text-[12px] truncate flex-1" title={session.preview || 'New session'}>
+                            <span className="text-[13.5px] truncate flex-1" title={session.preview || 'New session'}>
                               {session.preview || 'New session'}
                             </span>
                             {isSessionRunning(session.session_id) && (
@@ -353,7 +355,7 @@ export default function Sidebar() {
                             {/* pending confirm badge — pulsing "!" */}
                             {sessions.get(session.session_id)?.pendingConfirm && (
                               <span
-                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
+                                className="text-[12px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
                                 style={{ background: 'var(--amber)', color: '#0a0b0d' }}
                                 title="Waiting for tool confirmation"
                               >
@@ -363,13 +365,13 @@ export default function Sidebar() {
                             {/* Unread count badge */}
                             {sessions.get(session.session_id)?.unreadCount ? (
                               <span
-                                className="text-[9px] px-1 py-0.5 rounded-full shrink-0"
+                                className="text-[12px] px-1 py-0.5 rounded-full shrink-0"
                                 style={{ background: 'var(--accent)', color: '#fff' }}
                               >
                                 {sessions.get(session.session_id)!.unreadCount}
                               </span>
                             ) : null}
-                            <span className="text-[10px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
+                            <span className="text-[12px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
                               {formatTime(session.last_message_at)}
                             </span>
                           </button>
@@ -388,11 +390,10 @@ export default function Sidebar() {
       <div className="shrink-0 px-3 py-2.5" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <button
           onClick={() => navigate('/settings')}
-          className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg transition-all text-left"
+          className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-[9px] transition-all text-left"
           style={{
             color: isSettingsActive ? 'var(--fg)' : 'var(--fg-secondary)',
-            background: isSettingsActive ? 'var(--accent-muted)' : 'transparent',
-            boxShadow: isSettingsActive ? 'var(--glow-accent)' : 'none',
+            background: isSettingsActive ? 'var(--surface-2)' : 'transparent',
             transitionDuration: '150ms',
             transitionTimingFunction: 'var(--ease)',
           }}
@@ -404,9 +405,9 @@ export default function Sidebar() {
             />
           )}
           <Settings size={14} style={{ color: isSettingsActive ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
-          <span className="text-[12px] font-medium flex-1">Settings</span>
+          <span className="text-[13.5px] font-medium flex-1">Settings</span>
           <kbd
-            className="font-mono text-[10px] px-1 rounded"
+            className="font-mono text-[12px] px-1 rounded"
             style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}
           >
             Ctrl K

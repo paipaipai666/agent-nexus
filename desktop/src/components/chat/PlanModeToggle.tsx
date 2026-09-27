@@ -64,18 +64,17 @@ export default function PlanModeToggle({ sessionId }: PlanModeToggleProps) {
       onClick={handleToggle}
       disabled={busy}
       aria-pressed={enabled}
-      className="flex items-center gap-1 px-1.5 h-6 rounded-md border transition-colors hover:bg-[var(--surface-3)] disabled:opacity-40"
+      className="flex items-center gap-1.5 h-7 px-3 rounded-full transition-colors hover:bg-[var(--surface-3)] disabled:opacity-40"
       style={{
         color: enabled ? 'var(--accent)' : 'var(--fg-muted)',
-        borderColor: enabled ? 'var(--accent-ring)' : 'var(--border)',
-        background: enabled ? 'var(--accent-subtle)' : 'transparent',
+        background: enabled ? 'var(--accent-muted)' : 'transparent',
       }}
       title={sessionId
         ? '计划模式：开启后 agent 只能只读调研，提交计划经你批准后退出'
         : '计划模式：将在新会话创建后生效（首条消息发送前应用）'}
     >
-      <ClipboardList size={12} style={{ flexShrink: 0 }} />
-      <span className="text-[11px]">plan</span>
+      <ClipboardList size={13} style={{ flexShrink: 0 }} />
+      <span className="text-[12.5px]">plan</span>
       {enabled && (
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
       )}
