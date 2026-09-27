@@ -50,6 +50,9 @@ def build_tool_descriptor(
     else:
         description = f"[MCP:{config.name}] 远端工具 {remote_name}"
 
+    annotations = getattr(tool, "annotations", None)
+    read_only = bool(getattr(annotations, "readOnlyHint", False)) if annotations is not None else False
+
     return MCPToolDescriptor(
         local_name=local_name,
         remote_name=remote_name,
@@ -61,6 +64,7 @@ def build_tool_descriptor(
         require_hitl=config.require_hitl,
         timeout_sec=config.timeout_sec,
         rate_limit_per_min=config.rate_limit_per_min,
+        read_only=read_only,
     )
 
 

@@ -66,6 +66,7 @@ class ComputerUseToolProvider:
                 rate_limit_per_min=10,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("computer_list_windows"):
@@ -84,6 +85,7 @@ class ComputerUseToolProvider:
                 rate_limit_per_min=30,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("computer_switch_window"):

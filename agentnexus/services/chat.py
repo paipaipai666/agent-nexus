@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.agents.plan_mode import PlanModeBinding, PlanModeManager
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.observability.timeline import get_timeline_store
 from agentnexus.services.turn import TurnRecord, TurnRuntime
@@ -105,6 +106,19 @@ class ChatService:
         self._version_managers: dict[str, Any] = {}
         # Per-session short-term memories live inside their MemoryManager
         # (chat._get_or_create_memory) — restored via restore_session_stm().
+        # Per-session plan-mode switches (in-memory; reset on server restart).
+        self._plan_mode = PlanModeManager()
+
+    # ── Plan mode ─────────────────────────────────────────────────
+
+    def set_plan_mode(self, session_id: str, enabled: bool) -> bool:
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        (self._plan_mode.enable if enabled else self._plan_mode.disable)(session_id)
+        return self._plan_mode.is_active(session_id)
+
+    def is_plan_mode(self, session_id: str) -> bool:
+        return self._plan_mode.is_active(session_id)
 
     def start_session(
         self,
@@ -167,6 +181,7 @@ class ChatService:
             self._session_locks.pop(session_id, None)
         with self._processing_lock:
             self._processing_sessions.discard(session_id)
+        self._plan_mode.clear(session_id)
 
     def is_session_processing(self, session_id: str) -> bool:
         """Check if a specific session is currently processing."""
@@ -260,6 +275,9 @@ class ChatService:
         # Per-session agent and memory — no shared lock needed (R1)
         agent = self._get_or_create_agent(session_id)
         memory = self._get_or_create_memory(session_id)
+        # Plan-mode gate: live binding so mid-run manual toggles take effect.
+        if hasattr(agent, "set_plan_mode"):
+            agent.set_plan_mode(PlanModeBinding(self._plan_mode, session_id))
         # Tools resolve relative paths against this session's workspace folder.
         from agentnexus.tools.workspace import current_workspace
         _ws_token = current_workspace.set(self._sessions[session_id].workspace)

@@ -56,6 +56,7 @@ class SearchToolProvider:
                 rate_limit_per_min=20,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("web_search"):
@@ -118,6 +119,7 @@ class SearchToolProvider:
                 rate_limit_per_min=10,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("kb_search"):
@@ -171,6 +173,7 @@ class SearchToolProvider:
                 rate_limit_per_min=20,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("web_fetch"):
@@ -206,6 +209,7 @@ class SearchToolProvider:
                 rate_limit_per_min=5,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         context.mark_registered(executor, before)

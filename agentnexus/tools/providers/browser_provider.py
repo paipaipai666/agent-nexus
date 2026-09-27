@@ -59,6 +59,7 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 recoverable=True,
+                read_only=True,
             )
 
         if context.want("browser_snapshot"):
@@ -107,6 +108,7 @@ class BrowserToolProvider:
                 rate_limit_per_min=10,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("browser_click"):
@@ -182,6 +184,7 @@ class BrowserToolProvider:
                 rate_limit_per_min=20,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("browser_screenshot"):
@@ -244,6 +247,7 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("browser_scroll"):
@@ -260,12 +264,13 @@ class BrowserToolProvider:
                             "description": "滚动方向",
                             "default": "down",
                         },
-                        "amount": {"type": "integer", "description": "滚动像素数", "default": 500},
+                        "amount": {"type": "integer", "description": "滚动的像素数", "default": 500},
                     },
                     "required": [],
                 },
                 risk_level="low",
                 rate_limit_per_min=30,
+                read_only=True,
             )
 
         if context.want("browser_scroll_to"):
@@ -286,6 +291,7 @@ class BrowserToolProvider:
                 },
                 risk_level="low",
                 rate_limit_per_min=20,
+                read_only=True,
             )
 
         if context.want("browser_wait_navigation"):
@@ -310,6 +316,7 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("browser_dismiss_popup"):
@@ -343,6 +350,7 @@ class BrowserToolProvider:
                 risk_level="low",
                 rate_limit_per_min=30,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("browser_switch_page"):

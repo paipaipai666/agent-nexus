@@ -106,6 +106,7 @@ class ToolMeta:
     max_retention: int = 5               # keep last N results when compacting
     concurrency_safe: bool = False       # True = read-only, safe to run in parallel
     lane: str = ""                     # named parallel lane (e.g. "subagent"); overrides concurrency_safe grouping
+    read_only: bool = False            # True = 只读工具，计划模式下允许调用
 
 
 @dataclass
@@ -168,6 +169,7 @@ class ToolRegistry:
         max_retention: int = 5,
         concurrency_safe: bool = False,
         lane: str = "",
+        read_only: bool = False,
     ) -> None:
         """Register a tool with flat parameters (convenience wrapper)."""
         risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
@@ -190,6 +192,7 @@ class ToolRegistry:
             max_retention=max_retention,
             concurrency_safe=concurrency_safe,
             lane=lane,
+            read_only=read_only,
         )
         self.register(meta, func)
 

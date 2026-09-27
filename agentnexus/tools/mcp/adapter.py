@@ -261,6 +261,7 @@ class MCPToolManager:
                 require_hitl=tool.require_hitl,
                 timeout_sec=tool.timeout_sec,
                 rate_limit_per_min=tool.rate_limit_per_min,
+                read_only=tool.read_only,
                 source_type="mcp",
                 source_id=f"mcp:{tool.server_name}",
             )
@@ -669,6 +670,7 @@ class MCPToolManager:
             "hitl": tool.require_hitl,
             "timeout": tool.timeout_sec,
             "rate": tool.rate_limit_per_min,
+            "read_only": tool.read_only,
             "capability": tool.capability,
         }
         return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)

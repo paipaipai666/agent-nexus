@@ -21,6 +21,7 @@ from agentnexus.tools.providers.execution_provider import ExecutionToolProvider
 from agentnexus.tools.providers.filesystem_provider import FilesystemToolProvider
 from agentnexus.tools.providers.mcp_bridge_provider import McpBridgeToolProvider
 from agentnexus.tools.providers.memory_provider import MemoryToolProvider
+from agentnexus.tools.providers.plan_mode_provider import PlanModeToolProvider
 from agentnexus.tools.providers.reaction_provider import ReactionToolProvider
 from agentnexus.tools.providers.search_provider import SearchToolProvider
 from agentnexus.tools.providers.subagent_provider import SubagentToolProvider
@@ -44,6 +45,7 @@ def default_tool_providers() -> list[ToolProvider]:
         BrowserToolProvider(),
         ComputerUseToolProvider(),
         ReactionToolProvider(),
+        PlanModeToolProvider(),
     ]
 
 
@@ -67,6 +69,7 @@ __all__ = [
     "FilesystemToolProvider",
     "McpBridgeToolProvider",
     "MemoryToolProvider",
+    "PlanModeToolProvider",
     "ProviderSpec",
     "ReactionToolProvider",
     "SearchToolProvider",

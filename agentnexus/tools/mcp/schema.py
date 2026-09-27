@@ -32,6 +32,7 @@ class MCPToolDescriptor:
     require_hitl: bool
     timeout_sec: int
     rate_limit_per_min: int
+    read_only: bool = False
     capability: str = "tool"
 
 

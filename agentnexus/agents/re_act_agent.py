@@ -7,12 +7,13 @@ Each decision point is an explicit state; each transition is a handler method.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from agentnexus.agents import decisions, json_helpers, react_runtime
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
+from agentnexus.agents.plan_mode import EXIT_PLAN_MODE_TOOL, PLAN_MODE_PROMPT, PlanModeBinding
 from agentnexus.agents.prompt_builder import (
     assemble_react_messages,
     build_conversation_context,
@@ -35,9 +36,6 @@ from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.observability.drift_detector import DriftDetector, DriftSignalType
 from agentnexus.observability.tracer import trace_manager
-
-if TYPE_CHECKING:
-    from agentnexus.tools.errors import ToolError
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import (
     CompiledSessionProfile,
@@ -46,6 +44,7 @@ from agentnexus.skills import (
     load_core_fragments,
     validate_session_profile,
 )
+from agentnexus.tools.errors import ToolError
 from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -114,6 +113,8 @@ class ReActAgent:
         self._cancel_checker: Callable[[], bool] | None = None
         self._round_persist: Callable[[], bool] | None = None
         self._todo_list = None  # Set externally after construction
+        # Plan-mode binding (per-session in server mode); None = plan mode off.
+        self._plan_mode: PlanModeBinding | None = None
         self._degrade_count = 0
         # Persona and behavioral fragments — loaded once, stable across sessions
         settings = get_settings()
@@ -168,6 +169,10 @@ class ReActAgent:
         # stream immediately on cancel (产品决策: 取消 = 立刻停止).
         if hasattr(self.llm_client, "set_cancel_checker"):
             self.llm_client.set_cancel_checker(checker)
+
+    def set_plan_mode(self, binding: PlanModeBinding | None) -> None:
+        """安装计划模式绑定；None 表示该 agent 不受计划模式约束。"""
+        self._plan_mode = binding
 
     def set_round_persist(self, fn) -> None:
         """Install per-round durable commit (called after each ReAct iteration)."""
@@ -1071,6 +1076,14 @@ class ReActAgent:
             merged_conversation = (
                 conversation_context + "\n\n" + suffix if conversation_context else suffix
             )
+        appendix = self._append_system_prompt
+        if self._plan_mode is not None and self._plan_mode.active():
+            names = sorted(
+                n for n in self.tool_executor.list_tools()
+                if (m := self.tool_executor.get_meta(n)) is not None and m.read_only is True
+            )
+            plan_block = PLAN_MODE_PROMPT + "\n当前计划模式可用工具: " + ", ".join([*names, EXIT_PLAN_MODE_TOOL])
+            appendix = f"{appendix}\n\n{plan_block}" if appendix else plan_block
         sections = build_react_sections(
             memory_context=memory_context,
             conversation_context=merged_conversation,
@@ -1080,7 +1093,7 @@ class ReActAgent:
             todo_context=todo_context,
             environment_context=build_environment_block(),
             project_instructions=load_project_instructions(),
-            append_system_prompt=self._append_system_prompt,
+            append_system_prompt=appendix,
         )
         return assemble_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
@@ -1095,6 +1108,32 @@ class ReActAgent:
         return build_conversation_context(memory_manager)
 
     def _execute_tool(self, name: str, arguments: dict) -> str | dict | ToolError:
+        pm = self._plan_mode
+        if pm is not None and pm.active():
+            # 规则 1：exit_plan_mode 特判 —— 提交计划走审批，在 run 线程执行。
+            if name == EXIT_PLAN_MODE_TOOL:
+                return pm.request_exit(str(arguments.get("plan") or ""), confirm=self._confirm)
+            # 规则 2：subagent_run 不拦角色，把子代理工具集物理裁成只读集。
+            if name == "subagent_run":
+                ro = sorted(
+                    n for n in self.tool_executor.list_tools()
+                    if (m := self.tool_executor.get_meta(n)) is not None and m.read_only is True
+                )
+                arguments = {**arguments, "allowed_tools": ro}
+            else:
+                # 规则 3/4：严格 is True —— duck-typed/mock 注册表的 truthy
+                # read_only 不得放行（fail-closed，同 dispatcher 的 lane 防御）。
+                meta = self.tool_executor.get_meta(name)
+                if meta is None or getattr(meta, "read_only", False) is not True:
+                    return ToolError(
+                        error_code="PLAN_MODE_BLOCKED",
+                        message=f"计划模式下禁止调用写入/执行类工具 '{name}'，只允许只读工具。",
+                        recoverable=True,
+                        suggested_action="用只读工具完成调研，然后调用 exit_plan_mode(plan=...) 提交最终计划文档申请退出",
+                    )
+        elif name == EXIT_PLAN_MODE_TOOL:
+            # 文案不得含"已批准/可以执行"含义（模型会把报错当授权继续写）。
+            return "[exit_plan_mode] 当前不在计划模式，未提交任何计划供审批。"
         policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
         return execute_tool(
             tool_executor=self.tool_executor,

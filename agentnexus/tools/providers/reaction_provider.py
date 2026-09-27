@@ -60,5 +60,6 @@ class ReactionToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 concurrency_safe=True,
+                read_only=True,
             )
         context.mark_registered(executor, before)

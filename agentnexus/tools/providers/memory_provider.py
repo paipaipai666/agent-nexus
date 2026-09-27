@@ -34,6 +34,7 @@ class MemoryToolProvider:
                 risk_level="low",
                 rate_limit_per_min=15,
                 concurrency_safe=True,
+                read_only=True,
             )
         if context.want("memory_search"):
             executor.register_tool(
@@ -49,6 +50,7 @@ class MemoryToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("memory_save"):
@@ -84,5 +86,6 @@ class MemoryToolProvider:
                 risk_level="low",
                 rate_limit_per_min=10,
                 concurrency_safe=True,
+                read_only=True,
             )
         context.mark_registered(executor, before)

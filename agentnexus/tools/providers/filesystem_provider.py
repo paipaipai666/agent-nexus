@@ -34,6 +34,7 @@ class FilesystemToolProvider:
                 rate_limit_per_min=30,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("file_list"):
@@ -58,6 +59,7 @@ class FilesystemToolProvider:
                 rate_limit_per_min=20,
                 recoverable=True,
                 concurrency_safe=True,
+                read_only=True,
             )
 
         if context.want("file_write"):

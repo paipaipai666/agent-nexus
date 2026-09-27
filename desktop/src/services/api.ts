@@ -115,9 +115,15 @@ export const api = {
     }),
 
   getSession: (sessionId: string) =>
-    request<{ session_id: string; skill: string | null; profile: string | null; workspace: string | null }>(
+    request<{ session_id: string; skill: string | null; profile: string | null; workspace: string | null; plan_mode: boolean }>(
       `/api/session/${sessionId}`
     ),
+
+  setPlanMode: (sessionId: string, enabled: boolean) =>
+    request<{ session_id: string; plan_mode: boolean }>(`/api/session/${sessionId}/plan-mode`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
 
   getSessions: () =>
     request<{ sessions: Array<{ session_id: string; skill: string | null }> }>('/api/sessions'),

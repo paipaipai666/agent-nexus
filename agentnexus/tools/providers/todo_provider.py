@@ -75,6 +75,7 @@ class TodoToolProvider:
                 param_schema={"type": "object", "properties": {}},
                 risk_level="low",
                 concurrency_safe=True,
+                read_only=True,
             )
 
         context.mark_registered(executor, before)

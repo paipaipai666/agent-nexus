@@ -439,9 +439,26 @@ def get_session(session_id: str):
             "skill": session.skill,
             "profile": session.profile,
             "workspace": session.workspace,
+            "plan_mode": runtime.chat.is_plan_mode(session_id),
         }
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+
+class PlanModeRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/session/{session_id}/plan-mode")
+def set_plan_mode(session_id: str, req: PlanModeRequest):
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    try:
+        active = runtime.chat.set_plan_mode(session_id, req.enabled)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"session_id": session_id, "plan_mode": active}
 
 
 @router.websocket("/ws/agent/{session_id}")

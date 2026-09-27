@@ -11,6 +11,11 @@ import { unwrapStreamingAnswer } from '../utils/unwrapAnswer'
 import { useSession, type Message } from '../components/session/SessionProvider'
 import InfoPanel from '../components/layout/InfoPanel'
 import ModelPicker from '../components/chat/ModelPicker'
+import PlanModeToggle from '../components/chat/PlanModeToggle'
+import PlanReviewCard from '../components/chat/PlanReviewCard'
+
+/** Backend plan_mode.py PLAN_REVIEW_MARKER — keep in sync. */
+const PLAN_REVIEW_MARKER = '[PLAN_REVIEW]'
 
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
 // Once per app launch: reopen the most recent session instead of landing on a
@@ -758,8 +763,17 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Confirm */}
+      {/* Confirm / Plan review */}
       {confirmRequest && (
+        confirmRequest.summary.startsWith(PLAN_REVIEW_MARKER) ? (
+          <div className="max-w-3xl mx-auto w-full px-6 mb-3">
+            <PlanReviewCard
+              plan={confirmRequest.summary.slice(PLAN_REVIEW_MARKER.length).trim()}
+              onApprove={() => handleConfirm(true)}
+              onDeny={() => handleConfirm(false)}
+            />
+          </div>
+        ) : (
         <div className="max-w-3xl mx-auto w-full px-6 mb-3">
           <div className="rounded-lg p-4" style={{ background: 'var(--amber-muted)', border: '1px solid var(--amber-muted)' }}>
             <div className="text-sm font-medium mb-2" style={{ color: 'var(--amber)' }}>Confirmation Required</div>
@@ -770,6 +784,7 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+        )
       )}
 
       {/* Input Area */}
@@ -883,6 +898,7 @@ export default function ChatPage() {
               currentModel={runtimeStatus?.model_id ?? null}
               onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}
             />
+            <PlanModeToggle sessionId={sessionId} />
             {versionStatus?.head && (
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)' }} />

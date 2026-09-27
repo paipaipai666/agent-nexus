@@ -21,6 +21,7 @@ def test_default_providers_expose_specs():
         "browser",
         "computer-use",
         "reaction",
+        "plan_mode",
     ]
 
 
