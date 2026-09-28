@@ -222,6 +222,24 @@ def _reset_settings_cache() -> None:
         cfg._settings_cache = None
 
 
+@router.get("/extensions")
+def get_extensions():
+    """Discovered plugins/extensions load report.
+
+    The desktop polls this on chat mount and in the Plugins page. There is no
+    ExtensionManager in the runtime yet (docs describe a planned one) — report
+    the honest current state instead of 404ing: discovery on, zero plugins.
+    """
+    from agentnexus.core.config import get_settings
+
+    settings = get_settings()
+    return {
+        "enabled": bool(getattr(settings, "extensions_enabled", True)),
+        "discovered": [],
+        "load_report": {"loaded": [], "disabled": [], "failed": []},
+    }
+
+
 @router.get("/llm/providers")
 def list_llm_providers():
     from agentnexus.core.config import get_settings

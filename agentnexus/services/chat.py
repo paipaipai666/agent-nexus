@@ -525,6 +525,37 @@ class ChatService:
         memory.short_term._messages = restored._messages
         memory.short_term._summary = restored._summary
 
+    def ensure_session_restored(self, session_id: str) -> bool:
+        """Register a DB-backed session (if unknown) and inject its head STM.
+
+        Idempotent — safe on every WS connect / restore call. Returns False
+        only when the session does not exist in the database. Needed because
+        AppRuntime.build adopts recent sessions into chat._sessions at startup
+        (handles only, no STM) — without this, the ws restore branch was
+        skipped for adopted sessions and the agent lost all context on
+        service restart.
+        """
+        from agentnexus.core.config import get_settings
+        from agentnexus.memory.versioned import ConversationVersionManager
+        settings = get_settings()
+        stored_workspace = ConversationVersionManager.get_session_workspace(
+            settings.memory_db_path, session_id
+        )
+        if stored_workspace is None:
+            return False
+        if session_id not in self._sessions:
+            self._sessions[session_id] = SessionHandle(
+                id=session_id, workspace=stored_workspace or None,
+            )
+        version = ConversationVersionManager(
+            session_id, settings.memory_db_path,
+            workspace_path=stored_workspace or None,
+        )
+        snapshot = version.get_head_stm()
+        if snapshot:
+            self.restore_session_stm(session_id, snapshot)
+        return True
+
     def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")

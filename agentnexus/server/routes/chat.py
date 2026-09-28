@@ -6,7 +6,6 @@ import asyncio
 import logging
 import secrets
 import threading
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -314,7 +313,6 @@ def restore_session(req: CreateSessionRequest):
     from agentnexus.memory.versioned import ConversationVersionManager
 
     settings = get_settings()
-    workspace = str(Path.cwd())
 
     # Find the latest session if no session_id provided (across all workspaces —
     # sessions carry their own workspace folders)
@@ -325,33 +323,13 @@ def restore_session(req: CreateSessionRequest):
         )
 
     from agentnexus.server.app import _get_runtime
-    from agentnexus.services.chat import SessionHandle
 
     runtime = _get_runtime()
     chat = runtime.chat
 
-    # If session already exists in memory, just return it
-    if session_id and session_id in chat._sessions:
-        return {"session_id": session_id, "restored": True}
-
-    # Try to restore from database — sessions live in their own workspace
-    # folders, so adopt the stored workspace instead of matching the server cwd.
-    stored_workspace = (
-        ConversationVersionManager.get_session_workspace(settings.memory_db_path, session_id)
-        if session_id else None
-    )
-    if session_id and stored_workspace:
-        handle = SessionHandle(id=session_id, skill=None, profile=req.profile, workspace=stored_workspace)
-        chat._sessions[session_id] = handle
-
-        # Restore memory from version manager
-        version = ConversationVersionManager(
-            session_id, settings.memory_db_path,
-            workspace_path=stored_workspace, profile=req.profile or ""
-        )
-        snapshot = version.get_head_stm()
-        if snapshot:
-            chat.restore_session_stm(session_id, snapshot)
+    # If session already exists in memory, still ensure its STM is restored —
+    # startup-adopted sessions have handles but no injected STM.
+    if session_id and chat.ensure_session_restored(session_id):
         return {"session_id": session_id, "restored": True}
 
     # Session not found in DB either — create a new one instead of 404
@@ -365,7 +343,7 @@ def list_checkpoints(session_id: str):
 
     runtime = _get_runtime()
     try:
-        version = runtime.version_manager
+        version = runtime.chat._get_version_manager(session_id)
         checkpoints = version.log() if hasattr(version, "log") else []
         return {"session_id": session_id, "checkpoints": checkpoints}
     except Exception as e:
@@ -479,32 +457,17 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
     runtime = _get_runtime()
     chat = runtime.chat
 
+    # Always ensure (idempotent, STM-guarded): sessions adopted at startup or
+    # by a previous connect never went through the old restore-only-when-unknown
+    # branch, so their agent context was empty after a service restart.
+    try:
+        chat.ensure_session_restored(session_id)
+    except Exception:
+        pass
     if session_id not in chat._sessions:
-        # Try to restore from database on-demand
-        try:
-            from agentnexus.core.config import get_settings
-            from agentnexus.memory.versioned import ConversationVersionManager
-            from agentnexus.services.chat import SessionHandle
-            settings = get_settings()
-            # Sessions live in their own workspace folders — adopt the stored one.
-            stored_workspace = ConversationVersionManager.get_session_workspace(
-                settings.memory_db_path, session_id
-            )
-            if stored_workspace:
-                chat._sessions[session_id] = SessionHandle(id=session_id, workspace=stored_workspace)
-                # Restore the conversation STM into this session's MemoryManager
-                # (server restore_session is off — sessions are discovered here).
-                version = ConversationVersionManager(session_id, settings.memory_db_path, workspace_path=stored_workspace)
-                snapshot = version.get_head_stm()
-                if snapshot:
-                    chat.restore_session_stm(session_id, snapshot)
-        except Exception:
-            pass
-        # If still not found, reject
-        if session_id not in chat._sessions:
-            await ws.send_json({"type": "error", "message": f"Unknown session: {session_id}"})
-            await ws.close()
-            return
+        await ws.send_json({"type": "error", "message": f"Unknown session: {session_id}"})
+        await ws.close()
+        return
 
     # R8: On reconnect with resumeFrom, send snapshot so client can catch up
     token_cursor_offset = 0
