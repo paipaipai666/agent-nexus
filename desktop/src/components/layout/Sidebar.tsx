@@ -146,6 +146,22 @@ export default function Sidebar() {
     navigate(`/chat/${sessionId}`)
   }
 
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string, preview: string) => {
+    e.stopPropagation()
+    if (!window.confirm(`删除会话「${preview.slice(0, 40)}」？\n该会话的消息历史将被永久删除，不可恢复。`)) return
+    try {
+      const res = await api.deleteSessions([sessionId])
+      if (res.skipped.includes(sessionId)) {
+        window.alert('该会话正在运行中，请先等待或取消当前任务。')
+        return
+      }
+      setRecentSessions(prev => prev.filter(s => s.session_id !== sessionId))
+      if (location.pathname === `/chat/${sessionId}`) navigate('/')
+    } catch (err) {
+      console.error('Failed to delete session:', err)
+    }
+  }
+
   const isActiveSession = (sid: string) => location.pathname === `/chat/${sid}`
   const selectedKey = selected ? workspaceKey(selected) : null
 
@@ -324,45 +340,45 @@ export default function Sidebar() {
                       ) : group.sessions.map((session) => {
                         const active = isActiveSession(session.session_id)
                         return (
-                          <button
-                            key={session.session_id}
-                            onClick={() => handleSessionClick(session.session_id)}
-                            className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-[9px] transition-all text-left"
-                            style={{
-                              color: active ? 'var(--fg)' : 'var(--fg-secondary)',
-                              background: active ? 'var(--surface-2)' : 'transparent',
-                              transitionDuration: '150ms',
-                              transitionTimingFunction: 'var(--ease)',
-                            }}
-                          >
-                            {active && (
-                              <span
-                                className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full"
-                                style={{ background: 'var(--accent)' }}
-                              />
-                            )}
-                            <MessageSquare size={12} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
-                            <span className="text-[13.5px] truncate flex-1" title={session.preview || 'New session'}>
-                              {session.preview || 'New session'}
-                            </span>
-                            {isSessionRunning(session.session_id) && (
-                              <span
-                                className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
-                                style={{ background: 'var(--green)' }}
-                                title="Running"
-                              />
-                            )}
-                            {/* pending confirm badge — pulsing "!" */}
-                            {sessions.get(session.session_id)?.pendingConfirm && (
-                              <span
-                                className="text-[12px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
-                                style={{ background: 'var(--amber)', color: '#0a0b0d' }}
-                                title="Waiting for tool confirmation"
-                              >
-                                !
+                          <div key={session.session_id} className="relative group/session">
+                            <button
+                              onClick={() => handleSessionClick(session.session_id)}
+                              className="relative w-full flex items-center gap-2 px-2.5 py-2.5 rounded-[9px] transition-all text-left"
+                              style={{
+                                color: active ? 'var(--fg)' : 'var(--fg-secondary)',
+                                background: active ? 'var(--surface-2)' : 'transparent',
+                                transitionDuration: '150ms',
+                                transitionTimingFunction: 'var(--ease)',
+                              }}
+                            >
+                              {active && (
+                                <span
+                                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-3.5 rounded-full"
+                                  style={{ background: 'var(--accent)' }}
+                                />
+                              )}
+                              <MessageSquare size={12} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
+                              <span className="text-[13.5px] truncate flex-1" title={session.preview || 'New session'}>
+                                {session.preview || 'New session'}
                               </span>
-                            )}
-                            {/* Unread count badge */}
+                              {isSessionRunning(session.session_id) && (
+                                <span
+                                  className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                                  style={{ background: 'var(--green)' }}
+                                  title="Running"
+                                />
+                              )}
+                              {/* pending confirm badge — pulsing "!" */}
+                              {sessions.get(session.session_id)?.pendingConfirm && (
+                                <span
+                                  className="text-[12px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
+                                  style={{ background: 'var(--amber)', color: '#0a0b0d' }}
+                                  title="Waiting for tool confirmation"
+                                >
+                                  !
+                                </span>
+                              )}
+                              {/* Unread count badge */}
                             {sessions.get(session.session_id)?.unreadCount ? (
                               <span
                                 className="text-[12px] px-1 py-0.5 rounded-full shrink-0"
@@ -374,7 +390,17 @@ export default function Sidebar() {
                             <span className="text-[12px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
                               {formatTime(session.last_message_at)}
                             </span>
-                          </button>
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteSession(e, session.session_id, session.preview || '')}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center rounded-md opacity-0 group-hover/session:opacity-100 transition-opacity"
+                              style={{ color: 'var(--fg-faint)', background: 'var(--surface-3)' }}
+                              title="Delete session (history is permanently removed)"
+                              aria-label="Delete session"
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
                         )
                       })}
                     </div>

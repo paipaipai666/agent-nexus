@@ -1,5 +1,17 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
+// ── Version control (checkpoints) types ─────────────────────────────────
+export interface VersionCheckpoint {
+  id: string
+  session_id: string
+  parent_id: string | null
+  question: string
+  answer: string
+  is_head: boolean
+  message_count: number | null
+  created_at: string
+}
+
 // ── Timeline (observability) types ──────────────────────────────────────
 export interface TimelineEvent {
   id: number
@@ -149,6 +161,12 @@ export const api = {
     request<{ session_id: string; events: TimelineEvent[]; last_id: number; count: number }>(
       `/api/session/${sessionId}/events?after=${after}`
     ),
+
+  deleteSessions: (sessionIds: string[]) =>
+    request<{ deleted: string[]; skipped: string[]; count: number }>('/api/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({ session_ids: sessionIds }),
+    }),
 
   getContextSnapshot: (sessionId: string, runId: string, stepId: number) =>
     request<{
@@ -389,26 +407,29 @@ export const api = {
       body: JSON.stringify({ server }),
     }),
 
-  // Version Control
-  getVersionStatus: () =>
-    request<{ session_id: string; head: any; can_undo: boolean; can_redo: boolean }>('/api/version/status'),
+  // Version Control (session-scoped — checkpoints are stored per session)
+  getVersionStatus: (sessionId: string) =>
+    request<{ session_id: string; head: VersionCheckpoint | null; can_undo: boolean; can_redo: boolean }>(`/api/version/status?session_id=${sessionId}`),
 
-  getVersionLog: (limit = 10) =>
-    request<{ checkpoints: any[]; total: number }>(`/api/version/log?limit=${limit}`),
+  getVersionLog: (sessionId: string, limit = 10) =>
+    request<{ checkpoints: VersionCheckpoint[]; total: number }>(`/api/version/log?session_id=${sessionId}&limit=${limit}`),
 
-  versionUndo: () =>
-    request<{ status: string; checkpoint: any }>('/api/version/undo', { method: 'POST' }),
+  versionUndo: (sessionId: string) =>
+    request<{ status: string; checkpoint: VersionCheckpoint }>(`/api/version/undo?session_id=${sessionId}`, { method: 'POST' }),
 
-  versionRedo: () =>
-    request<{ status: string; checkpoint: any }>('/api/version/redo', { method: 'POST' }),
+  versionRedo: (sessionId: string) =>
+    request<{ status: string; checkpoint: VersionCheckpoint }>(`/api/version/redo?session_id=${sessionId}`, { method: 'POST' }),
 
-  versionReset: () =>
-    request<{ status: string }>('/api/version/reset', { method: 'POST' }),
+  versionJump: (sessionId: string, cpId: string) =>
+    request<{ status: string; checkpoint: VersionCheckpoint }>(`/api/version/jump?session_id=${sessionId}&cp_id=${cpId}`, { method: 'POST' }),
 
-  compactContext: (customInstructions = '') =>
+  versionReset: (sessionId: string) =>
+    request<{ status: string }>(`/api/version/reset?session_id=${sessionId}`, { method: 'POST' }),
+
+  compactContext: (sessionId: string, customInstructions = '') =>
     request<{ status: string; tokens_saved: number }>('/api/version/compact', {
       method: 'POST',
-      body: JSON.stringify({ custom_instructions: customInstructions }),
+      body: JSON.stringify({ session_id: sessionId, custom_instructions: customInstructions }),
     }),
 
   // Extensions / Plugins
