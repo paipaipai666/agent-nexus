@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, FileText, Upload, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { BorderBeam } from 'border-beam'
 import { api } from '../services/api'
 import { animateEntrance } from '../utils/animations'
+import { useTheme } from '../components/theme/ThemeProvider'
+import { usePrefersReducedMotion } from '../utils/effects'
 
 interface IngestionProgress {
   runId: string
@@ -40,6 +43,8 @@ function clearActiveUpload() {
 }
 
 export default function KnowledgePage() {
+  const { theme } = useTheme()
+  const reducedMotion = usePrefersReducedMotion()
   const [documents, setDocuments] = useState<any[]>([])
   const [totalChunks, setTotalChunks] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
@@ -196,6 +201,13 @@ export default function KnowledgePage() {
       {/* Progress Bar */}
       {progress && (
         <div className="px-6 pb-3">
+          <BorderBeam
+            size="line"
+            theme={theme}
+            active={progress.status === 'processing' && !reducedMotion}
+            strength={0.8}
+            borderRadius={10}
+          >
           <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -232,6 +244,7 @@ export default function KnowledgePage() {
               {progress.message || STAGE_LABELS[progress.stage] || progress.stage}
             </p>
           </div>
+          </BorderBeam>
         </div>
       )}
 

@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquare, Search, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight, Settings } from 'lucide-react'
+import { BorderBeam } from 'border-beam'
 import { api } from '../../services/api'
 import { useSession } from '../session/SessionProvider'
 import { useProjects, selectProject, addProject, removeProject, pickAndAddProject, workspaceKey } from '../../services/projects'
+import { useTheme } from '../theme/ThemeProvider'
+import { usePrefersReducedMotion } from '../../utils/effects'
 
 interface RecentSession {
   session_id: string
@@ -47,6 +50,8 @@ const formatTime = (dateStr: string) => {
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { theme } = useTheme()
+  const reducedMotion = usePrefersReducedMotion()
   const { isSessionRunning, activateSession, sessions } = useSession()
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(false)
@@ -169,14 +174,23 @@ export default function Sidebar() {
     <div className="w-[232px] flex flex-col h-full shrink-0" role="complementary" aria-label="Chat sessions">
       {/* New Chat + search */}
       <div className="px-3 pt-3 pb-2 shrink-0">
-        <button
-          onClick={handleNewChat}
-          className="btn-primary w-full flex items-center justify-center gap-1.5 text-[13.5px]"
-          style={{ height: 36 }}
+        <BorderBeam
+          size="pulse-inner"
+          theme={theme}
+          active={!reducedMotion}
+          strength={0.75}
+          borderRadius={8}
+          style={{ display: 'block' }}
         >
-          <Plus size={13} />
-          New Chat
-        </button>
+          <button
+            onClick={handleNewChat}
+            className="btn-primary w-full flex items-center justify-center gap-1.5 text-[13.5px]"
+            style={{ height: 36 }}
+          >
+            <Plus size={13} />
+            New Chat
+          </button>
+        </BorderBeam>
         <div
           className="mt-2.5 flex items-center gap-1.5 h-[34px] px-2.5 rounded-lg transition-all"
           style={{

@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
+import { ThinkingOrb } from 'thinking-orbs'
+import { usePrefersReducedMotion } from '../utils/effects'
 
 const HEALTH_CHECK_INTERVAL_MS = 1000
 const MAX_RETRIES = 30
@@ -22,6 +24,7 @@ async function checkHealth(port: number): Promise<boolean> {
 export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingScreenProps) {
   const [retries, setRetries] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const reducedMotion = usePrefersReducedMotion()
 
   const stableOnReady = useCallback(onReady, [])
 
@@ -32,8 +35,6 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
     const poll = async () => {
       if (cancelled) return
       const healthy = await checkHealth(backendPort)
-      if (cancelled) return
-
       if (healthy) {
         stableOnReady()
       } else {
@@ -60,6 +61,7 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
 
   return (
     <div
+      data-theme="dark"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -72,24 +74,26 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
         gap: '1.5rem',
       }}
     >
-      <div style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
+      <div
+        className="metal-heading"
+        style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '-0.02em' }}
+      >
         AgentNexus
       </div>
       {!error && (
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            border: '3px solid rgba(255,255,255,0.1)',
-            borderTopColor: '#6366f1',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ThinkingOrb
+            state="connecting"
+            size={32}
+            theme="dark"
+            paused={reducedMotion}
+            aria-label="Connecting to backend"
+          />
+          <div style={{ fontSize: '0.875rem', color: '#888' }}>
+            Connecting to backend... ({retries})
+          </div>
+        </div>
       )}
-      <div style={{ fontSize: '0.875rem', color: '#888' }}>
-        {error ? 'Connection failed' : `Connecting to backend... (${retries})`}
-      </div>
       {error && (
         <div
           style={{
@@ -102,7 +106,6 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
           {error}
         </div>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

@@ -101,6 +101,12 @@
   --radius-xl: 12px;
   --radius-chip: 999px;
 
+  /* Metal type ramp (CSS .metal-heading) */
+  --metal-a: #1e293b;
+  --metal-b: #64748b;
+  --metal-c: #334155;
+  --metal-d: #94a3b8;
+
   /* Motion */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -284,6 +290,12 @@
   --radius-lg: 12px;
   --radius-xl: 12px;
   --radius-chip: 999px;
+
+  /* Metal type ramp — light chrome on dark ink */
+  --metal-a: #f8fafc;
+  --metal-b: #94a3b8;
+  --metal-c: #e2e8f0;
+  --metal-d: #64748b;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -511,6 +523,48 @@ html.theme-anim * {
   max-width: 100%;
   border-radius: var(--radius);
   margin: 0.5em 0;
+}
+
+/* ═══════════════════════════════════════════
+   METAL HEADING — CSS liquid-metal type
+   Used for empty-state h1 / loading logo.
+   (WebGL MetalText ghosted against DOM glyphs on light
+   theme and read as noise; this stays crisp on both.)
+   ═══════════════════════════════════════════ */
+.metal-heading {
+  display: inline-block;
+  background-image: linear-gradient(
+    115deg,
+    var(--metal-a) 0%,
+    var(--metal-b) 18%,
+    var(--metal-c) 34%,
+    var(--metal-a) 48%,
+    var(--metal-d) 62%,
+    var(--metal-c) 78%,
+    var(--metal-a) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: metal-sheen 6s ease-in-out infinite;
+}
+
+@keyframes metal-sheen {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Empty-state entrance */
+@keyframes empty-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-empty-in {
+  animation: empty-fade-in 0.45s var(--ease) both;
 }
 
 /* ═══════════════════════════════════════════

@@ -3,14 +3,18 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Puzzle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { BorderBeam } from 'border-beam'
+import { ThinkingOrb } from 'thinking-orbs'
 import { api } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
 import { toolIcon } from '../utils/toolIcons'
+import { toolOrbState, usePrefersReducedMotion } from '../utils/effects'
 import { transformHistoryMessages } from '../utils/historyTransform'
 import { unwrapStreamingAnswer } from '../utils/unwrapAnswer'
 import { useSession, type Message } from '../components/session/SessionProvider'
+import { useTheme } from '../components/theme/ThemeProvider'
 import InfoPanel from '../components/layout/InfoPanel'
 import ModelPicker from '../components/chat/ModelPicker'
 import PlanModeToggle from '../components/chat/PlanModeToggle'
@@ -99,6 +103,7 @@ function Collapsible({ header, children, defaultExpanded = false, className = ''
 const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; isMcp?: boolean }) {
   const [expanded, setExpanded] = useState(msg.toolStatus === 'running')
   const userToggled = useRef(false)
+  const reducedMotion = usePrefersReducedMotion()
   useEffect(() => {
     // auto-expand while running; collapse again when done unless the user
     // explicitly opened the row (v3: cards rest collapsed — the running
@@ -131,7 +136,13 @@ const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; is
         <span className="font-mono text-[12.5px] truncate" style={{ color: 'var(--fg-secondary)' }}>{msg.toolName || 'tool'}</span>
         <span className="ml-auto flex items-center gap-1.5 text-[11.5px] shrink-0" style={{ color: statusColor }}>
           {msg.toolStatus === 'running' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" /></svg>
+            <ThinkingOrb
+              state={toolOrbState(msg.toolName)}
+              size={20}
+              paused={reducedMotion}
+              aria-label={`${msg.toolName || 'tool'} running`}
+              style={{ width: 14, height: 14 }}
+            />
           )}
           {statusLabel}
         </span>
@@ -262,6 +273,8 @@ export default function ChatPage() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
+  const { theme } = useTheme()
+  const reducedMotion = usePrefersReducedMotion()
   const currentSessionIdRef = useRef<string | null>(null)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -748,13 +761,13 @@ export default function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in px-6">
+          <div className="flex flex-col items-center justify-center h-full gap-6 animate-empty-in px-6">
             <div className="text-center">
               <h1
                 className="text-[27px] font-semibold mb-3"
-                style={{ color: 'var(--fg)', letterSpacing: '-0.025em' }}
+                style={{ letterSpacing: '-0.025em' }}
               >
-                What are we building?
+                <span className="metal-heading">What are we building?</span>
               </h1>
               <p className="text-[15px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
                 Code. Debug. Create. Ship.
@@ -848,17 +861,26 @@ export default function ChatPage() {
           </div>
         ) : (
         <div className="max-w-3xl mx-auto w-full px-6 mb-3">
-          <div className="rounded-2xl p-5" style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-float)' }}>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-2 h-2 rounded-full" style={{ background: 'var(--amber)' }} />
-              <span className="text-[14px] font-semibold" style={{ color: 'var(--fg)' }}>Confirmation required</span>
+          <BorderBeam
+            size="pulse-inner"
+            colorVariant="mono"
+            theme={theme}
+            active={!reducedMotion}
+            strength={0.7}
+            borderRadius={16}
+          >
+            <div className="rounded-2xl p-5" style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-float)' }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--amber)' }} />
+                <span className="text-[14px] font-semibold" style={{ color: 'var(--fg)' }}>Confirmation required</span>
+              </div>
+              <pre className="text-[12.5px] rounded-xl p-3 mb-4 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
+              <div className="flex gap-2.5">
+                <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
+                <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
+              </div>
             </div>
-            <pre className="text-[12.5px] rounded-xl p-3 mb-4 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
-            <div className="flex gap-2.5">
-              <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
-              <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
-            </div>
-          </div>
+          </BorderBeam>
         </div>
         )
       )}
@@ -904,8 +926,16 @@ export default function ChatPage() {
             })()}
           </div>
         )}
+        <BorderBeam
+          size="md"
+          theme={theme}
+          active={isRunning && !reducedMotion}
+          strength={0.85}
+          borderRadius={12}
+          style={{ maxWidth: 720, margin: '0 auto' }}
+        >
         <div
-          className="max-w-3xl mx-auto transition-all"
+          className="transition-all"
           style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-float)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
           onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--shadow-float)' }}
           onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow-float)' }}
@@ -945,6 +975,7 @@ export default function ChatPage() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              aria-busy={isRunning}
               placeholder={isRunning ? "Agent running... messages will be queued" : "Message Nexus..."}
               className="flex-1 bg-transparent text-[15px] resize-none focus:outline-none max-h-32 min-h-[26px]"
               style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
@@ -994,6 +1025,7 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+        </BorderBeam>
       </div>
 
       {/* Checkpoint Overlay */}

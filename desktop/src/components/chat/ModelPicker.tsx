@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, ChevronDown, Cpu, Settings2, X } from 'lucide-react'
+import { ThinkingOrb } from 'thinking-orbs'
 import { api, ProviderInfo } from '../../services/api'
+import { usePrefersReducedMotion } from '../../utils/effects'
 
 interface ModelCapabilities {
   model: string
@@ -38,6 +40,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
   const [caps, setCaps] = useState<ModelCapabilities | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const reducedMotion = usePrefersReducedMotion()
 
   const refreshCaps = () => {
     api.getModelCapabilities().then(setCaps).catch(() => setCaps(null))
@@ -96,7 +99,17 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
         style={{ color: 'var(--fg-muted)' }}
         title="切换模型（立即生效）"
       >
-        <Cpu size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+        {switching !== null ? (
+          <ThinkingOrb
+            state="weaving"
+            size={20}
+            paused={reducedMotion}
+            aria-label="Switching model"
+            style={{ width: 14, height: 14, flexShrink: 0 }}
+          />
+        ) : (
+          <Cpu size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
+        )}
         <span>{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
         <ChevronDown size={11} style={{ color: 'var(--fg-faint)' }} />
       </button>
@@ -158,7 +171,13 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                         <span className="block text-[12px] truncate" style={{ color: 'var(--fg-faint)' }}>{m.model_id}</span>
                       </span>
                       {switching === selector && (
-                        <span className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin shrink-0" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
+                        <ThinkingOrb
+                          state="weaving"
+                          size={20}
+                          paused={reducedMotion}
+                          aria-label="Switching model"
+                          style={{ width: 14, height: 14, flexShrink: 0 }}
+                        />
                       )}
                     </button>
                   )
