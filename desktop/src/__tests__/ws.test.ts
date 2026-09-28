@@ -140,6 +140,29 @@ describe('AgentWebSocket', () => {
         JSON.stringify({ type: 'send_message', content: 'hello world' })
       )
     })
+
+    it('includes attachments when non-empty', () => {
+      agentWs.connect('session-123')
+      const ws = getWs('session-123')
+      const attachments = [{ path: 'C:\\a.png', name: 'a.png', size: 10, mime: 'image/png' }]
+
+      agentWs.sendMessage('see this', attachments)
+
+      expect(ws.send).toHaveBeenCalledWith(
+        JSON.stringify({ type: 'send_message', content: 'see this', attachments })
+      )
+    })
+
+    it('omits attachments when empty — payload stays byte-identical', () => {
+      agentWs.connect('session-123')
+      const ws = getWs('session-123')
+
+      agentWs.sendMessage('hello world', [])
+
+      expect(ws.send).toHaveBeenCalledWith(
+        JSON.stringify({ type: 'send_message', content: 'hello world' })
+      )
+    })
   })
 
   describe('cancel', () => {

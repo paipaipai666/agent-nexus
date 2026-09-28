@@ -100,6 +100,25 @@ def to_anthropic_payload(
                 "content": blocks if blocks else _content_to_text(content),
             })
             continue
+        if isinstance(content, list):
+            blocks: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    blocks.append({"type": "text", "text": str(block.get("text") or "")})
+                elif btype == "image_url":
+                    # Internal OpenAI-shaped block from chat attachments.
+                    url = str((block.get("image_url") or {}).get("url") or "")
+                    if url.startswith("data:") and ";base64," in url:
+                        media_type, _, data = url[5:].partition(";base64,")
+                        blocks.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media_type, "data": data},
+                        })
+            out_messages.append({"role": "user", "content": blocks})
+            continue
         out_messages.append({"role": "user", "content": _content_to_text(content)})
 
     body: dict[str, Any] = {

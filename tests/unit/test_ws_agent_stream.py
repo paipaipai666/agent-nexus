@@ -348,3 +348,66 @@ class TestWebSocketAgentStream:
         assert any(event.get("type") == "confirm_request" for event in sent_events)
         assert confirm_finished.wait(timeout=5)
         assert confirm_result == [False]
+
+    @pytest.mark.asyncio
+    async def test_ws_invalid_attachments_shape_rejected(self, mock_runtime):
+        """Malformed attachments must error out without starting a run."""
+        runtime, _chat, session, agent = mock_runtime
+        sent_events: list[dict] = []
+        ws = AsyncMock()
+        ws.accept = AsyncMock()
+        ws.receive_json = AsyncMock(side_effect=[
+            {"type": "send_message", "content": "hi", "attachments": "bogus"},
+            WebSocketDisconnect(),
+        ])
+        ws.send_json = AsyncMock(side_effect=lambda payload: sent_events.append(payload))
+
+        with patch("agentnexus.server.app._get_runtime", return_value=runtime):
+            await ws_agent(ws, session.id)
+
+        errors = [e for e in sent_events if e.get("type") == "error"]
+        assert any(e.get("message") == "Invalid attachments" for e in errors)
+        assert not any(e.get("type") == "run_started" for e in sent_events)
+        agent.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ws_missing_attachment_file_surfaces_error(self, mock_runtime):
+        """A dead attachment path must surface '附件不可用' and start no run."""
+        runtime, _chat, session, agent = mock_runtime
+        sent_events: list[dict] = []
+        target_sent = asyncio.Event()
+        received_message = False
+        dead_path = "D:\\no\\such\\file_xyz.txt"
+
+        async def receive_json():
+            nonlocal received_message
+            if not received_message:
+                received_message = True
+                return {
+                    "type": "send_message",
+                    "content": "hi",
+                    "attachments": [{
+                        "path": dead_path, "name": "file_xyz.txt",
+                        "size": 1, "mime": "text/plain",
+                    }],
+                }
+            await asyncio.wait_for(target_sent.wait(), timeout=1)
+            raise WebSocketDisconnect()
+
+        async def send_json(payload: dict):
+            sent_events.append(payload)
+            if payload.get("type") == "error":
+                target_sent.set()
+
+        ws = AsyncMock()
+        ws.accept = AsyncMock()
+        ws.receive_json = AsyncMock(side_effect=receive_json)
+        ws.send_json = AsyncMock(side_effect=send_json)
+
+        with patch("agentnexus.server.app._get_runtime", return_value=runtime):
+            await ws_agent(ws, session.id)
+
+        errors = [e for e in sent_events if e.get("type") == "error"]
+        assert any("附件不可用" in (e.get("message") or "") and dead_path in e.get("message", "") for e in errors)
+        assert not any(e.get("type") == "run_started" for e in sent_events)
+        agent.run.assert_not_called()

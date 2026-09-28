@@ -158,6 +158,7 @@ class CreateSessionRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     session_id: str
     content: str
+    attachments: list[dict] | None = None
 
 
 class CancelRequest(BaseModel):
@@ -204,7 +205,7 @@ def send_message(req: SendMessageRequest):
 
     runtime = _get_runtime()
     try:
-        run = runtime.chat.send_message(req.session_id, req.content)
+        run = runtime.chat.send_message(req.session_id, req.content, attachments=req.attachments)
         snapshot = runtime.chat.get_run_snapshot(run.id)
         return {
             "run_id": run.id,
@@ -667,6 +668,19 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                     await ws.send_json({"type": "error", "message": "Empty content"})
                     continue
 
+                attachments = data.get("attachments")
+                if attachments is not None:
+                    if (
+                        not isinstance(attachments, list)
+                        or any(
+                            not isinstance(a, dict)
+                            or not all(k in a for k in ("path", "name", "size", "mime"))
+                            for a in attachments
+                        )
+                    ):
+                        await ws.send_json({"type": "error", "message": "Invalid attachments"})
+                        continue
+
                 # Store user message as session preview for sidebar display
                 try:
                     from agentnexus.core.config import get_settings
@@ -695,11 +709,22 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                         chat.send_message(
                             session_id,
                             content,
+                            attachments=attachments,
                             on_run_started=lambda run: main_loop.call_soon_threadsafe(
                                 record_run_started,
                                 run.id,
                             ),
                         )
+                    except ValueError as e:
+                        # Attachment validation failed (missing/oversize) —
+                        # nothing was committed or started; tell the user why.
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                ws.send_json({"type": "error", "message": str(e)}),
+                                main_loop,
+                            ).result(timeout=2)
+                        except Exception:
+                            pass
                     except Exception as e:
                         # 用户取消是正常流程：send_message 已发出 run_interrupted
                         # 事件，这里只需安静退出，不得报错误。

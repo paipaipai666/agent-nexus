@@ -1,5 +1,34 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
+// ── Chat attachments ────────────────────────────────────────────
+/** Local file attached to a chat message — referenced by absolute path,
+ *  never copied. Backend reads images as vision blocks, other files via
+ *  file_read against the injected path. */
+export interface AttachmentRef {
+  path: string
+  name: string
+  size: number
+  mime: string
+}
+
+const ATTACH_IMAGE_EXTS: Record<string, true> = {
+  '.png': true, '.jpg': true, '.jpeg': true, '.gif': true, '.webp': true,
+}
+
+/** Derive mime from extension — backend only branches on image/*. */
+export function mimeForPath(p: string): string {
+  const dot = p.lastIndexOf('.')
+  const ext = dot >= 0 ? p.slice(dot).toLowerCase() : ''
+  if (ATTACH_IMAGE_EXTS[ext]) return `image/${ext === '.jpg' ? 'jpeg' : ext.slice(1)}`
+  return 'application/octet-stream'
+}
+
+export function humanSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 // ── Version control (checkpoints) types ─────────────────────────────────
 export interface VersionCheckpoint {
   id: string

@@ -6,6 +6,16 @@ interface ElectronProjectStore {
   projects: string[]
   lastProject: string | null
 }
+interface PickedFile {
+  path: string
+  name: string
+  size: number
+}
+interface FileStatResult {
+  path: string
+  ok: boolean
+  size: number
+}
 
 interface ElectronAPI {
   minimize: () => void
@@ -17,6 +27,10 @@ interface ElectronAPI {
   addProject: (path: string) => Promise<ElectronProjectStore>
   removeProject: (path: string) => Promise<ElectronProjectStore>
   setLastProject: (path: string) => Promise<ElectronProjectStore>
+  // Chat attachments
+  pickFiles: () => Promise<PickedFile[] | null>
+  statFiles: (paths: string[]) => Promise<FileStatResult[]>
+  getPathForFile: (file: File) => string
 
   // Backend status
   getBackendStatus: () => Promise<BackendStatus>

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { wsPool } from '../../services/ws'
+import type { AttachmentRef } from '../../services/api'
 
 export interface Message {
   id: string
@@ -8,12 +9,21 @@ export interface Message {
   toolName?: string
   toolCallId?: string
   toolStatus?: 'running' | 'done' | 'error'
+  /** Files attached to a user message — rendered as chips on the bubble. */
+  attachments?: AttachmentRef[]
   /** Optional emoji reaction the agent attached under this user message. */
   reaction?: { emoji: string; comment: string }
   timestamp: Date
 }
 
 // ── Per-session stable state (R4: NOT token buffers) ────────────
+
+/** Queued while the agent is running — attachments ride along and are
+ *  re-validated by the backend at dequeue time. */
+interface QueuedMessage {
+  text: string
+  attachments?: AttachmentRef[]
+}
 
 interface SessionState {
   sessionId: string
@@ -46,7 +56,7 @@ interface SessionState {
   // Animation tracking
   animatedIds: Set<string>
   // Message queue
-  messageQueue: string[]
+  messageQueue: QueuedMessage[]
 }
 
 /** Flush the in-flight step into committed messages in canonical order:
@@ -128,11 +138,11 @@ export interface SessionManagerContextType {
   incrementMsgCounter: () => number
 
   // Actions
-  sendMessage: (text: string) => void
+  sendMessage: (text: string, attachments?: AttachmentRef[]) => void
   cancelRun: () => void
   confirmToolCall: (approved: boolean) => void
   processQueue: () => void
-  queueMessage: (text: string) => void
+  queueMessage: (text: string, attachments?: AttachmentRef[]) => void
   resetForSessionSwitch: () => void
   getCachedMessages: (sessionId: string) => Message[] | null
   clearCachedMessages: (sessionId: string) => void
@@ -316,7 +326,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
 
   // ── Actions (backward-compatible with SessionProvider) ───────
 
-  const sendMessageInternal = useCallback((text: string) => {
+  const sendMessageInternal = useCallback((text: string, attachments?: AttachmentRef[]) => {
     if (!activeSessionId) return
     const sid = activeSessionId
 
@@ -326,18 +336,18 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     updateSession(sid, prev => ({
       ...prev,
       step: null,
-      messages: [...prev.messages, { id: `u-${getSessionCounter(sid)}`, role: 'user', content: text, timestamp: new Date() }],
+      messages: [...prev.messages, { id: `u-${getSessionCounter(sid)}`, role: 'user', content: text, attachments, timestamp: new Date() }],
       isRunning: true,
     }))
 
     // Ensure WS is connected before sending. If not yet open, queue and retry.
     if (wsPool.isConnected(sid)) {
-      wsPool.sendMessage(sid, text)
+      wsPool.sendMessage(sid, text, attachments)
     } else {
       // WS might be connecting — wait for open, then send
       const checkAndSend = () => {
         if (wsPool.isConnected(sid)) {
-          wsPool.sendMessage(sid, text)
+          wsPool.sendMessage(sid, text, attachments)
         } else {
           setTimeout(checkAndSend, 50)
         }
@@ -347,16 +357,16 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event('session-updated'))
   }, [activeSessionId, updateSession, getSessionCounter])
 
-  const sendMessage = useCallback((text: string) => {
-    sendMessageInternal(text)
+  const sendMessage = useCallback((text: string, attachments?: AttachmentRef[]) => {
+    sendMessageInternal(text, attachments)
   }, [sendMessageInternal])
 
-  const queueMessage = useCallback((text: string) => {
+  const queueMessage = useCallback((text: string, attachments?: AttachmentRef[]) => {
     if (!activeSessionId) return
     const sid = activeSessionId
     updateSession(sid, prev => ({
       ...prev,
-      messageQueue: [...prev.messageQueue, text],
+      messageQueue: [...prev.messageQueue, { text, attachments }],
       messages: [...prev.messages, { id: `q-${getSessionCounter(sid)}`, role: 'system', content: `[Queued] ${text}`, timestamp: new Date() }],
     }))
   }, [activeSessionId, updateSession, getSessionCounter])
@@ -383,7 +393,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         ...prev,
         messageQueue: prev.messageQueue.slice(1),
       }))
-      setTimeout(() => sendMessageInternal(next), 100)
+      setTimeout(() => sendMessageInternal(next.text, next.attachments), 100)
     }
   }, [activeSessionId, updateSession, sendMessageInternal])
 

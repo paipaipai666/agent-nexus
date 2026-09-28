@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Puzzle } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, ChevronDown, ChevronRight, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Puzzle, Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { BorderBeam } from 'border-beam'
 import { ThinkingOrb } from 'thinking-orbs'
-import { api } from '../services/api'
+import { api, type AttachmentRef, mimeForPath, humanSize } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
@@ -205,6 +205,22 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
                 to squeeze every bubble to 85% of its own text width,
                 wrapping lines that should fit on one. */}
             <div className="flex flex-col items-end w-full">
+              {msg.attachments && msg.attachments.length > 0 && (
+                <div className="flex flex-wrap justify-end gap-1 mb-1.5">
+                  {msg.attachments.map(a => (
+                    <span
+                      key={a.path}
+                      title={a.path}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] max-w-[280px]"
+                      style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', color: 'var(--fg-muted)' }}
+                    >
+                      <Paperclip size={10} style={{ flexShrink: 0 }} />
+                      <span className="truncate">{a.name}</span>
+                      <span style={{ color: 'var(--fg-faint)' }}>{humanSize(a.size)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
               <div
                 className="text-[15px] leading-[1.55] rounded-[18px] rounded-br-[6px] px-4 py-2.5 w-fit max-w-[85%] whitespace-pre-wrap break-words"
                 style={{ background: 'var(--surface-2)', color: 'var(--fg)' }}
@@ -279,6 +295,10 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // Chat attachments — local files referenced by absolute path, never copied.
+  const [attachments, setAttachments] = useState<AttachmentRef[]>([])
+  const [dragOver, setDragOver] = useState(false)
+  const [deadPaths, setDeadPaths] = useState<Set<string>>(new Set())
 
   // HUD state
   const [versionStatus, setVersionStatus] = useState<any>(null)
@@ -527,7 +547,7 @@ export default function ChatPage() {
   }, [])
 
   // Pending first message for lazy session creation (route '/' without session)
-  const pendingFirstMessageRef = useRef<string | null>(null)
+  const pendingFirstMessageRef = useRef<{ text: string; attachments?: AttachmentRef[] } | null>(null)
 
   // Send pending first message once session is activated (WS connects on activeSessionId change)
   useEffect(() => {
@@ -535,17 +555,17 @@ export default function ChatPage() {
     if (!pending) return
     pendingFirstMessageRef.current = null
     // sendMessageInternal retries WS send if not yet connected, so this is safe
-    sendMessage(pending)
+    sendMessage(pending.text, pending.attachments)
   }, [sendMessage])
 
   // Handle first message — create session lazily if needed, then send.
-  const handleSendMessage = useCallback((text: string) => {
+  const handleSendMessage = useCallback((text: string, atts?: AttachmentRef[]) => {
     if (!currentSessionIdRef.current) {
       // No session yet (first message from route '/') — create lazily, bound to
       // the pending per-session workspace if the user picked one.
       // Defer the actual send to a useEffect that fires after activeSessionId
       // is set and the WS connection is established by SessionManager.
-      pendingFirstMessageRef.current = text
+      pendingFirstMessageRef.current = { text, attachments: atts }
       api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(async ({ session_id }) => {
         // Plan mode armed via the HUD toggle pre-session: apply it BEFORE the
         // first message can be sent, so the very first run is already gated.
@@ -559,10 +579,11 @@ export default function ChatPage() {
       }).catch((err) => {
         pendingFirstMessageRef.current = null
         setInput(text) // restore the unsent message
+        setAttachments(atts ?? []) // and its attachments
         window.alert(`创建会话失败：${err instanceof Error ? err.message : err}`)
       })
     } else {
-      sendMessage(text)
+      sendMessage(text, atts)
       if (location.pathname === '/') {
         navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
       }
@@ -578,12 +599,78 @@ export default function ChatPage() {
     if (picked) setPendingWorkspace(picked)
   }
 
-  const handleSend = () => {
-    const text = input.trim(); if (!text) return
+  const addSys = useCallback((c: string) => {
+    setMessages(prev => [...prev, { id: `sys-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
+  }, [setMessages, incrementMsgCounter])
+
+  // Attach local files (picker + drag-drop share this path): dedupe by path,
+  // stat for liveness + fresh size — directories and dead files are rejected.
+  const addAttachments = useCallback(async (candidates: { path: string; name: string; size: number }[]) => {
+    const bridge = window.electronAPI
+    if (!bridge || candidates.length === 0) return
+    const fresh = candidates.filter(c => c.path && !attachments.some(a => a.path === c.path))
+    if (fresh.length === 0) return
+    try {
+      const stats = await bridge.statFiles(fresh.map(c => c.path))
+      const ok: AttachmentRef[] = []
+      const rejected: string[] = []
+      for (const c of fresh) {
+        const s = stats.find(x => x.path === c.path)
+        if (s && s.ok) ok.push({ path: c.path, name: c.name, size: s.size, mime: mimeForPath(c.path) })
+        else rejected.push(c.name)
+      }
+      if (rejected.length > 0) addSys(`附件不可用（不存在或是文件夹）: ${rejected.join(', ')}`)
+      if (ok.length > 0) setAttachments(prev => [...prev, ...ok])
+    } catch {
+      // statFiles unavailable — attach anyway; the backend validates on send.
+      setAttachments(prev => [...prev, ...fresh.map(c => ({ path: c.path, name: c.name, size: c.size, mime: mimeForPath(c.path) }))])
+    }
+  }, [attachments, addSys])
+
+  const handlePickFiles = async () => {
+    const picked = await window.electronAPI?.pickFiles()
+    if (picked) addAttachments(picked)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false)
+    const bridge = window.electronAPI
+    if (!bridge) return
+    const files = Array.from(e.dataTransfer.files)
+      .map(f => {
+        const p = bridge.getPathForFile(f)
+        return p ? { path: p, name: f.name, size: f.size } : null
+      })
+      .filter((c): c is { path: string; name: string; size: number } => c !== null)
+    addAttachments(files)
+  }
+
+  const handleSend = async () => {
+    const text = input.trim(); if (!text && attachments.length === 0) return
+    // Pre-send liveness check: a file deleted after attaching must block the
+    // send (keep the draft) rather than half-send. The backend re-validates
+    // on receipt anyway — this is UX, not the security boundary.
+    if (attachments.length > 0 && window.electronAPI) {
+      try {
+        const stats = await window.electronAPI.statFiles(attachments.map(a => a.path))
+        const dead = new Set(stats.filter(s => !s.ok).map(s => s.path))
+        if (dead.size > 0) {
+          setDeadPaths(dead)
+          const names = attachments.filter(a => dead.has(a.path)).map(a => a.name).join(', ')
+          addSys(`附件已失效: ${names}。已阻止发送，请移除失效附件后重试。`)
+          return
+        }
+        setDeadPaths(new Set())
+      } catch { /* statFiles unavailable — the backend is the backstop */ }
+    }
+    const atts = attachments.length > 0 ? attachments : undefined
     setInput(''); setShowPalette(false); setPaletteDismissed(false)
-    if (text.startsWith('/')) { handleSlashCommand(text); return }
-    if (isRunning) { queueMessage(text) }
-    else handleSendMessage(text)
+    setAttachments([]); setDeadPaths(new Set())
+    // Attachment-only sends still need text — the WS layer rejects empty content.
+    const out = text || '（见附件）'
+    if (out.startsWith('/')) { handleSlashCommand(out); return }
+    if (isRunning) { queueMessage(out, atts) }
+    else handleSendMessage(out, atts)
   }
 
   const handleSlashCommand = async (text: string) => {
@@ -936,7 +1023,18 @@ export default function ChatPage() {
         >
         <div
           className="transition-all"
-          style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-float)', transitionDuration: '200ms', transitionTimingFunction: 'var(--ease)' }}
+          style={{
+            background: 'var(--surface-1)',
+            border: `1px solid ${dragOver ? 'var(--accent-ring)' : 'var(--border-strong)'}`,
+            borderRadius: 'var(--radius-xl)',
+            overflow: 'hidden',
+            boxShadow: 'var(--shadow-float)',
+            transitionDuration: '200ms',
+            transitionTimingFunction: 'var(--ease)',
+          }}
+          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
           onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--accent-ring)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-glow), var(--shadow-float)' }}
           onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow-float)' }}
         >
@@ -969,7 +1067,53 @@ export default function ChatPage() {
             )}
           </div>
 
+          {/* Attachment chips — local files referenced by absolute path */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
+              {attachments.map(a => {
+                const dead = deadPaths.has(a.path)
+                return (
+                  <span
+                    key={a.path}
+                    title={a.path}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] max-w-[280px]"
+                    style={{
+                      background: 'var(--surface-2)',
+                      border: `1px solid ${dead ? 'var(--red)' : 'var(--border)'}`,
+                      color: dead ? 'var(--red)' : 'var(--fg-muted)',
+                      textDecoration: dead ? 'line-through' : 'none',
+                    }}
+                  >
+                    <span className="truncate">{a.name}</span>
+                    <span style={{ color: 'var(--fg-faint)' }}>{humanSize(a.size)}</span>
+                    <button
+                      onClick={() => {
+                        setAttachments(prev => prev.filter(x => x.path !== a.path))
+                        setDeadPaths(prev => { const n = new Set(prev); n.delete(a.path); return n })
+                      }}
+                      className="p-0.5 rounded"
+                      style={{ color: 'var(--fg-faint)' }}
+                      title="移除附件"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+
           <div className="flex items-end gap-2.5 p-3 pt-1.5">
+            {window.electronAPI && (
+              <button
+                onClick={handlePickFiles}
+                className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-[var(--surface-2)]"
+                style={{ color: 'var(--fg-muted)' }}
+                title="添加附件（本地文件，按路径引用）"
+              >
+                <Paperclip size={14} />
+              </button>
+            )}
             <textarea
               ref={inputRef}
               value={input}
@@ -986,7 +1130,7 @@ export default function ChatPage() {
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() && attachments.length === 0}
                 className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 disabled:opacity-60"
                 style={{
                   background: 'var(--accent)',

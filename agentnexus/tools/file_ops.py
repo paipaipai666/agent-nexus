@@ -23,7 +23,10 @@ LARGE_FILE_PREVIEW_LINES = 20
 
 def _get_allowed_roots() -> list[Path]:
     """Build the set of allowed root directories (recomputed each call)."""
-    from agentnexus.tools.workspace import get_effective_workspace
+    from agentnexus.tools.workspace import (
+        get_effective_workspace,
+        get_registered_attachment_paths,
+    )
     roots = [get_effective_workspace()]
 
     # Allow ~/.agentnexus for skills, config, memory, etc.
@@ -39,6 +42,15 @@ def _get_allowed_roots() -> list[Path]:
             roots.append(pkg_dir)
     except Exception:
         pass
+
+    # Per-run user attachments: exact file paths, matched by _is_within's
+    # p == r branch — the agent may read exactly these files, nothing else.
+    # Registered globally (not per-context) because tool execution happens
+    # on dispatcher threads that don't inherit ContextVars.
+    for p in get_registered_attachment_paths():
+        resolved = Path(p).resolve(strict=False)
+        if resolved not in roots:
+            roots.append(resolved)
 
     return roots
 

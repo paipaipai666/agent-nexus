@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time as _time
-from typing import Callable
+from typing import Any, Callable
 
 from agentnexus.agents import decisions, json_helpers, react_runtime
 from agentnexus.agents.exceptions import AgentCancelled
@@ -92,6 +92,12 @@ class ReActAgent:
                  agent_id: str = "react_agent"):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
+        # Run-scoped attachments; set by ChatService via run(images=...,
+        # attachment_note=...), consumed by _build_messages, cleared in
+        # run()'s finally. Kept off the user's message so bubbles/history
+        # stay clean.
+        self._run_images: list[dict] = []
+        self._run_attachment_note: str = ""
         # 决策3（2026-09-24 拍板）：默认不设步数上限。
         # max_steps=None 表示无限（跑飞兜底见 docs/fsm-redesign-proposal.md §9，
         # 靠闭环检测 + 软提示 + 用户取消，不再靠硬性步数终止）。
@@ -214,7 +220,9 @@ class ReActAgent:
             return REACT_THINK_PROMPT_TEMPLATE
         return REACT_PROMPT_TEMPLATE
 
-    def run(self, question: str, memory_manager=None) -> ReActResult:
+    def run(self, question: str, memory_manager=None,
+            images: list[dict] | None = None,
+            attachment_note: str | None = None) -> ReActResult:
         """Thin entry point: build context, run FSM loop, return structured result."""
         from agentnexus.core.hooks import HookType, get_hook_manager
 
@@ -229,6 +237,10 @@ class ReActAgent:
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
         self._step_count = 0
         self._degrade_count = 0
+        # Run-scoped attachments — _build_messages reads these on every
+        # rebuild so they must live on the agent, not on ctx.messages.
+        self._run_images = images or []
+        self._run_attachment_note = attachment_note or ""
 
         # ── user prompt submit hook (root agent only; subagent task text
         #    is internal, not a user prompt) ─────────────────────
@@ -292,6 +304,10 @@ class ReActAgent:
             steps = []
             self._total_usage = {"input_tokens": 0, "output_tokens": 0}
             self._step_count = 0
+        finally:
+            # Stale attachments must never leak into a later run on this instance.
+            self._run_images = []
+            self._run_attachment_note = ""
 
         # ── agent end hook ───────────────────────────────────────
         hook_mgr.fire(HookType.AGENT_END, {
@@ -1124,7 +1140,7 @@ class ReActAgent:
     def _build_messages(self, tools_desc: str, question: str,
                          memory_context: str, conversation_context: str,
                          workflow_context: str = "",
-                         native_tools: bool = False) -> list[dict[str, str]]:
+                         native_tools: bool = False) -> list[dict[str, Any]]:
         """Build messages array with stable prefix for prompt caching."""
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
@@ -1159,14 +1175,37 @@ class ReActAgent:
             project_instructions=load_project_instructions(),
             append_system_prompt=appendix,
         )
-        return assemble_react_messages(
+        # Attachment note reaches the LLM prompt only — never the user's
+        # message text — so bubbles and history stay clean.
+        effective_question = question + self._run_attachment_note
+        messages = assemble_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
             tools_desc=tools_desc,
             sections=sections,
-            question=question,
+            question=effective_question,
             workflow_context=workflow_context,
             include_tools_desc=not native_tools,
         )
+        if self._run_images and messages:
+            # Attach vision images to the flattened question message. This
+            # rebuilds on every LLM call (tool-set changes etc.), so the
+            # injection must happen here rather than on ctx.messages.
+            # ponytail: images re-sent each ReAct step (~1.5k tokens/img/call)
+            # and are not counted in the STM truncation budget; degrade to
+            # first-step-only injection if that becomes a cost problem.
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        msg["content"] = (
+                            [{"type": "text", "text": content}]
+                            + [
+                                {"type": "image_url", "image_url": {"url": img["data_url"]}}
+                                for img in self._run_images
+                            ]
+                        )
+                    break
+        return messages
 
     def _build_conversation_context(self, memory_manager) -> str:
         return build_conversation_context(memory_manager)

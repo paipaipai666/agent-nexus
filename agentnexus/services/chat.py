@@ -29,6 +29,79 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MAX_ATTACHMENTS = 10
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024  # Anthropic base64 image limit
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+
+def _human_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+def _prepare_attachments(
+    attachments: list[dict] | None, *, vision_ok: bool,
+) -> tuple[list[dict] | None, tuple[str, ...], str]:
+    """Validate user attachments; return (images, allowed_paths, note).
+
+    All-or-nothing: collects every offending path into one ValueError, raised
+    before any message is committed or run started. `note` is the agent-only
+    attachment manifest — injected into the LLM prompt by ReActAgent, NEVER
+    appended to the user's message (it must not show in bubbles/history).
+    images is None unless at least one vision-enabled image was attached.
+    """
+    import base64
+    from pathlib import Path
+
+    if not attachments:
+        return None, (), ""
+
+    if len(attachments) > _MAX_ATTACHMENTS:
+        raise ValueError(f"附件过多: 最多 {_MAX_ATTACHMENTS} 个，收到 {len(attachments)} 个")
+
+    missing: list[str] = []
+    oversize: list[str] = []
+    images: list[dict] = []
+    note_lines: list[str] = []
+    for a in attachments:
+        path = str(a.get("path") or "")
+        name = str(a.get("name") or Path(path).name or path)
+        mime = str(a.get("mime") or "application/octet-stream")
+        if not path or not Path(path).is_file():
+            missing.append(path or name)
+            continue
+        size = Path(path).stat().st_size
+        is_image = mime.startswith("image/") and Path(path).suffix.lower() in _IMAGE_EXTS
+        if is_image and size > _MAX_IMAGE_BYTES:
+            oversize.append(path)
+            continue
+        if is_image and vision_ok:
+            try:
+                data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            except OSError:
+                missing.append(path)
+                continue
+            images.append({"media_type": mime, "data_url": f"data:{mime};base64,{data}"})
+            line_note = "— 图片内容已随本条消息直接提供给模型"
+        elif is_image:
+            line_note = "— 当前模型未启用视觉（config.yaml 模型 override 设 supports_vision: true 后可用），仅提供路径"
+        else:
+            line_note = "— 已授权读取，用 file_read 工具打开此绝对路径"
+        note_lines.append(f"- {path} ({mime}, {_human_size(size)}) {line_note}")
+
+    if missing or oversize:
+        parts = []
+        if missing:
+            parts.append("附件不存在: " + "; ".join(missing))
+        if oversize:
+            parts.append(f"图片超过 {_MAX_IMAGE_BYTES // (1024 * 1024)}MB: " + "; ".join(oversize))
+        raise ValueError("附件不可用: " + "；".join(parts))
+
+    return (images or None), tuple(str(a.get("path")) for a in attachments), "\n\n[附件]\n" + "\n".join(note_lines)
+
 
 @dataclass(frozen=True)
 class SessionHandle:
@@ -303,6 +376,8 @@ class ChatService:
         session_id: str,
         text: str,
         on_run_started: Callable[[RunHandle], None] | None = None,
+        *,
+        attachments: list[dict] | None = None,
     ) -> RunHandle:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
@@ -312,9 +387,21 @@ class ChatService:
         # Plan-mode gate: live binding so mid-run manual toggles take effect.
         if hasattr(agent, "set_plan_mode"):
             agent.set_plan_mode(PlanModeBinding(self._plan_mode, session_id))
+        # Attachments: validate all-or-nothing BEFORE anything is committed —
+        # a dead file must not half-send. Vision gate degrades images to
+        # path-only references when the model can't see. The manifest note
+        # goes to the LLM prompt only; the user's message text stays clean.
+        caps = getattr(getattr(agent, "llm_client", None), "capabilities", None)
+        vision_ok = bool(caps and getattr(caps, "supports_vision", False))
+        images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
         # Tools resolve relative paths against this session's workspace folder.
-        from agentnexus.tools.workspace import current_workspace
+        from agentnexus.tools.workspace import (
+            current_workspace,
+            register_attachment_paths,
+            unregister_attachment_paths,
+        )
         _ws_token = current_workspace.set(self._sessions[session_id].workspace)
+        register_attachment_paths(attach_paths)
         # Reset token buffers for new run (R8)
         with self._get_session_lock(session_id):
             self._token_buffers[session_id] = ""
@@ -388,7 +475,13 @@ class ChatService:
                 "session_id": session_id,
             })
             try:
-                result = agent.run(agent_text, memory_manager=memory)
+                if images or attach_note:
+                    result = agent.run(
+                        agent_text, memory_manager=memory,
+                        images=images, attachment_note=attach_note or None,
+                    )
+                else:
+                    result = agent.run(agent_text, memory_manager=memory)
             finally:
                 _tm.end_trace()
                 self._evaluate_run_alerts()
@@ -464,6 +557,7 @@ class ChatService:
             raise
         finally:
             current_workspace.reset(_ws_token)
+            unregister_attachment_paths(attach_paths)
             self.mark_processing(False, session_id=session_id)
             if hasattr(agent, "set_cancel_checker"):
                 agent.set_cancel_checker(None)

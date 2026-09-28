@@ -10,6 +10,37 @@ from agentnexus.core.providers.anthropic_provider import (
 from agentnexus.core.providers.router import select_provider
 
 
+def test_to_anthropic_payload_maps_image_url_block():
+    """Chat attachments: OpenAI-shaped image_url data URL → Anthropic image block."""
+    body = to_anthropic_payload(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看图"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+                ],
+            }
+        ],
+        model="m",
+    )
+    user_msg = body["messages"][0]
+    assert user_msg["role"] == "user"
+    text_blocks = [b for b in user_msg["content"] if b["type"] == "text"]
+    image_blocks = [b for b in user_msg["content"] if b["type"] == "image"]
+    assert [b["text"] for b in text_blocks] == ["看图"]
+    assert image_blocks == [{
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
+    }]
+
+
+def test_to_anthropic_payload_str_content_unchanged():
+    """Plain string user content still flattens exactly as before."""
+    body = to_anthropic_payload([{"role": "user", "content": "hi"}], model="m")
+    assert body["messages"] == [{"role": "user", "content": "hi"}]
+
+
 def test_select_provider_routes_anthropic_com():
     p = select_provider("claude-sonnet-4-6", "https://api.anthropic.com")
     assert isinstance(p, AnthropicMessagesProvider)

@@ -23,6 +23,9 @@ function mockElectronBridge(overrides: Partial<ElectronAPI>) {
     addProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     removeProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
     setLastProject: vi.fn().mockResolvedValue({ projects: [], lastProject: null }),
+    pickFiles: vi.fn().mockResolvedValue(null),
+    statFiles: vi.fn().mockResolvedValue([]),
+    getPathForFile: vi.fn().mockReturnValue(''),
     getBackendStatus: vi.fn().mockResolvedValue({ ready: true, port: 0 }),
     ...overrides,
   }

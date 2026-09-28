@@ -18,6 +18,36 @@ current_workspace: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     default=None,
 )
 
+# Per-run user attachment paths. ChatService registers them around each run
+# so file_read can reach attachments outside the session workspace.
+# Plain module state, NOT a ContextVar: tool calls execute on dispatcher
+# lane threads that never inherit context — a ContextVar set in send_message
+# is invisible there (verified by REST smoke: agent's file_read got 路径越界).
+# Counted so concurrent runs sharing a file stay correct; paths are revoked
+# when the last registering run ends.
+_ATTACHMENT_PATH_COUNTS: dict[str, int] = {}
+
+
+def register_attachment_paths(paths: tuple[str, ...] | list[str]) -> None:
+    """Allow file_read on exactly these absolute paths until unregister."""
+    for p in paths:
+        key = str(Path(p).resolve(strict=False))
+        _ATTACHMENT_PATH_COUNTS[key] = _ATTACHMENT_PATH_COUNTS.get(key, 0) + 1
+
+
+def unregister_attachment_paths(paths: tuple[str, ...] | list[str]) -> None:
+    for p in paths:
+        key = str(Path(p).resolve(strict=False))
+        n = _ATTACHMENT_PATH_COUNTS.get(key, 0) - 1
+        if n > 0:
+            _ATTACHMENT_PATH_COUNTS[key] = n
+        else:
+            _ATTACHMENT_PATH_COUNTS.pop(key, None)
+
+
+def get_registered_attachment_paths() -> tuple[str, ...]:
+    return tuple(_ATTACHMENT_PATH_COUNTS)
+
 
 def get_effective_workspace() -> Path:
     """Return the session's workspace override, falling back to process cwd."""

@@ -1,3 +1,5 @@
+import type { AttachmentRef } from './api'
+
 type EventHandler = (data: any) => void
 
 // ── Per-session connection ──────────────────────────────────────
@@ -104,8 +106,14 @@ class WebSocketPool {
     }
   }
 
-  sendMessage(sessionId: string, content: string): void {
-    this.send(sessionId, { type: 'send_message', content })
+  sendMessage(sessionId: string, content: string, attachments?: AttachmentRef[]): void {
+    // Attachments ride along only when non-empty so the wire payload for
+    // plain messages stays byte-identical to before.
+    if (attachments && attachments.length > 0) {
+      this.send(sessionId, { type: 'send_message', content, attachments })
+    } else {
+      this.send(sessionId, { type: 'send_message', content })
+    }
   }
 
   cancel(sessionId: string, runId: string): void {
@@ -208,8 +216,8 @@ class AgentWebSocketCompat {
     if (this._activeSessionId) wsPool.send(this._activeSessionId, data)
   }
 
-  sendMessage(content: string) {
-    if (this._activeSessionId) wsPool.sendMessage(this._activeSessionId, content)
+  sendMessage(content: string, attachments?: AttachmentRef[]) {
+    if (this._activeSessionId) wsPool.sendMessage(this._activeSessionId, content, attachments)
   }
 
   cancel(runId: string) {
