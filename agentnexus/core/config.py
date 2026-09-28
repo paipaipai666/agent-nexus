@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -646,11 +647,16 @@ def load_config_yaml() -> dict:
 
 
 _settings_cache: Settings | None = None
+_settings_lock = threading.Lock()
 
 
 def get_settings() -> Settings:
     global _settings_cache
     if _settings_cache is None:
-        data = _load_yaml()
-        _settings_cache = Settings(**data, **_default_paths())
+        # Cold-start double-build race: two threads can both see None and
+        # construct separate instances. Serialize check+build.
+        with _settings_lock:
+            if _settings_cache is None:
+                data = _load_yaml()
+                _settings_cache = Settings(**data, **_default_paths())
     return _settings_cache

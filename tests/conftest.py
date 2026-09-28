@@ -24,11 +24,41 @@ def _ensure_valid_cwd():
     yield
 
 
-@pytest.fixture
-def temp_agentnexus_home():
-    """临时 .agentnexus 目录，测试后自动清理"""
+@pytest.fixture(autouse=True)
+def _isolate_agentnexus_home():
+    """Every test runs against a throwaway AGENTNEXUS_HOME.
+
+    Without this, tests that build ChatService/ConversationVersionManager
+    directly (no temp_agentnexus_home opt-in) silently wrote into the user's
+    real ~/.agentnexus/memory.db — thousands of one-message junk sessions
+    ('hello' x5000+, 'msg A/B', test fixtures) accumulated from pytest runs.
+    """
     import agentnexus.core.config as cfg
     old_home = os.environ.get("AGENTNEXUS_HOME")
+    old_cache = cfg._settings_cache
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        os.environ["AGENTNEXUS_HOME"] = tmpdir
+        cfg._settings_cache = None
+        from agentnexus.memory.long_term import _reset_long_term_memory
+        _reset_long_term_memory()
+        try:
+            yield
+        finally:
+            cfg._settings_cache = old_cache
+            if old_home:
+                os.environ["AGENTNEXUS_HOME"] = old_home
+            else:
+                os.environ.pop("AGENTNEXUS_HOME", None)
+
+
+@pytest.fixture
+def temp_agentnexus_home():
+    """临时 .agentnexus 目录，测试后自动清理
+
+    注：根 conftest 的 autouse `_isolate_agentnexus_home` 已为每个测试
+    隔离了 HOME；此 fixture 主要用于需要访问 tmpdir 路径本身的测试。
+    """
+    import agentnexus.core.config as cfg
     old_cache = cfg._settings_cache
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         os.environ["AGENTNEXUS_HOME"] = tmpdir
@@ -39,10 +69,6 @@ def temp_agentnexus_home():
             yield Path(tmpdir)
         finally:
             cfg._settings_cache = old_cache
-            if old_home:
-                os.environ["AGENTNEXUS_HOME"] = old_home
-            else:
-                del os.environ["AGENTNEXUS_HOME"]
 
 
 @pytest.fixture
