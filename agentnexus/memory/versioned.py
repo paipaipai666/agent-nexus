@@ -123,6 +123,20 @@ class ConversationVersionManager:
         })
 
         with self._lock:
+            # Committing from a HEAD that sits behind the journal tail (after
+            # undo/jump) forks the timeline: rows past HEAD belong to the
+            # abandoned future and are physically cut, so the new checkpoint
+            # counts only HEAD's window plus the new turn.
+            head = self._current_checkpoint()
+            head_count = head.get("message_count") if head else None
+            if head_count is not None:
+                self._conn.execute(
+                    "DELETE FROM conversation_messages WHERE session_id = ? AND id NOT IN ("
+                    "SELECT id FROM conversation_messages WHERE session_id = ? ORDER BY id LIMIT ?"
+                    ")",
+                    (self.session_id, self.session_id, head_count),
+                )
+
             # Write messages
             rows = [
                 (self.session_id, m.get("role", ""), m.get("content", ""), m.get("ts", _time.time()))
@@ -252,15 +266,34 @@ class ConversationVersionManager:
             return len(rows)
 
     def get_messages(self, limit: int = 0) -> list[dict]:
-        """Read messages from the journal. limit=0 means all messages."""
+        """Read messages from the journal. limit=0 means all messages.
+
+        Reads are HEAD-aware: after undo/jump, rows past the HEAD
+        checkpoint's message_count are hidden (the future of the timeline).
+        A NULL message_count (pre-column legacy checkpoints) means no
+        truncation.
+        """
         with self._lock:
+            head = self._current_checkpoint()
+            head_count = head.get("message_count") if head else None
+
             if limit > 0:
+                effective = limit if head_count is None else min(limit, head_count)
                 rows = self._conn.execute(
                     "SELECT role, content, ts FROM conversation_messages "
                     "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-                    (self.session_id, limit),
+                    (self.session_id, effective),
                 ).fetchall()
                 return [dict(r) for r in reversed(rows)]
+
+            if head_count is not None:
+                rows = self._conn.execute(
+                    "SELECT role, content, ts FROM conversation_messages "
+                    "WHERE session_id = ? ORDER BY id LIMIT ?",
+                    (self.session_id, head_count),
+                ).fetchall()
+                return [dict(r) for r in rows]
+
             rows = self._conn.execute(
                 "SELECT role, content, ts FROM conversation_messages "
                 "WHERE session_id = ? ORDER BY id",
@@ -548,6 +581,45 @@ class ConversationVersionManager:
 
             return dict(cp)
 
+    def jump_to(self, cp_id: str) -> dict | None:
+        """Move HEAD directly to a checkpoint. Returns it, or None if unreachable.
+
+        Backward (target is an ancestor of HEAD): bypassed checkpoints are
+        pushed onto the redo stack, nearest-first. Forward (target is on the
+        redo stack): settles on its timeline and clears redo, like a new
+        commit. Checkpoints from other sessions (or unknown ids) are rejected
+        and leave HEAD untouched.
+        """
+        with self._lock:
+            target = self._get_checkpoint(cp_id)
+            if target is None or target["session_id"] != self.session_id:
+                return None
+
+            head_id = self._current_head_id()
+            if head_id == cp_id:
+                return dict(target)
+
+            chain_ids = [r["id"] for r in self._ancestor_chain(head_id)]
+            if cp_id in chain_ids:
+                # Backward: everything strictly between HEAD and target becomes
+                # redoable; append order puts the nearest checkpoint at the
+                # top of the stack (redo pops from the end).
+                idx = chain_ids.index(cp_id)
+                self._redo_stack.extend(chain_ids[:idx])
+                self._set_head(cp_id)
+                self._conn.commit()
+                return dict(target)
+
+            if cp_id in self._redo_stack:
+                # Forward jump along the redo timeline — commits here would
+                # fork, so the redo stack is discarded (same as commit).
+                self._redo_stack.clear()
+                self._set_head(cp_id)
+                self._conn.commit()
+                return dict(target)
+
+            return None
+
     def log(self) -> list[dict]:
         """List checkpoints for current session, newest first."""
         with self._lock:
@@ -608,13 +680,14 @@ class ConversationVersionManager:
                 # No journal data either — return empty
                 return ""
 
-            # Read the last msg_count messages from journal, capped by max_messages
+            # Read the first msg_count messages of the journal (the HEAD
+            # window — rows past HEAD are the undone future and must not
+            # leak into the replay), capped by max_messages.
             limit = min(msg_count, max_messages)
-            offset = max(0, msg_count - limit)
             rows = self._conn.execute(
                 "SELECT role, content, ts FROM conversation_messages "
-                "WHERE session_id = ? ORDER BY id LIMIT ? OFFSET ?",
-                (self.session_id, limit, offset),
+                "WHERE session_id = ? ORDER BY id LIMIT ?",
+                (self.session_id, limit),
             ).fetchall()
 
             messages = [dict(r) for r in rows]
