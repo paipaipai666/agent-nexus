@@ -411,7 +411,6 @@ class TestMCPReadOnly:
                 read_only=True,
             )
         }
-        mgr._registered_signatures = {}
         reg = ToolRegistry()
         mgr.register_tools(reg)
         assert reg.get_meta("mcp_srv__lookup").read_only is True

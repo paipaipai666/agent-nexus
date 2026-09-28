@@ -217,7 +217,22 @@ class ToolRegistry:
         self._param_validators.pop(name, None)
         self._output_validators.pop(name, None)
         self._rate_counters.pop(name, None)
+        mcp_sigs = getattr(self, "_mcp_registered_signatures", None)
+        if mcp_sigs is not None:
+            mcp_sigs.pop(name, None)
         return existed
+
+    def close(self) -> None:
+        """Shut down this registry's thread pools.
+
+        Only for short-lived registries (e.g. per-attempt subagent children):
+        on Python < 3.13 an un-shutdown ThreadPoolExecutor's idle workers
+        never exit. The session-scoped registry lives for the process and
+        must NOT be closed.
+        """
+        self._executor.shutdown(wait=False)
+        for pool in self._lane_pools.values():
+            pool.shutdown(wait=False)
 
     def get_meta(self, name: str) -> ToolMeta | None:
         """Return ToolMeta for a registered tool, or None if not found."""

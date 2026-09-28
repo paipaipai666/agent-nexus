@@ -151,62 +151,67 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
 
     child_llm = _clone_llm(parent_llm)
     child_executor = ToolRegistry()
-    _register_child_tools(
-        child_executor,
-        parent_llm,
-        non_interactive,
-        tool_names,
-        subagent_confirm,
-        mcp_manager,
-    )
-    child_agent = ReActAgent(
-        child_llm,
-        child_executor,
-        max_steps=max(1, min(int(max_steps), 8)),
-        output=lambda *_args, **_kwargs: None,
-        confirm_fn=subagent_confirm,
-        conversation_mode=False,
-        agent_id=f"subagent_{role}",
-    )
-    if cancel_bridge is not None:
-        # Cooperative cancellation: parent run cancelled → child loop stops
-        # at the next step boundary instead of running to max_steps.
-        child_agent.set_cancel_checker(cancel_bridge.check)
-
     try:
-        with trace_manager.span("subagent_attempt", {
-            "role": role,
-            "tool_names": tool_names,
-            "max_steps": max_steps,
-            "retry_reason": retry_reason or "",
-            "task_preview": task[:200],
-            "parent_trace_id": trace_manager.get_inherited_trace() or "",
-        }) as span:
-            result = child_agent.run(_build_subagent_prompt(task, role, retry_reason), memory_manager=None)
-            answer = (result.answer or "").strip()
-            salvaged = _extract_step_summary(result)
-            span.output = {
-                "answer": answer[:500],
-                "salvaged": salvaged[:500],
-                "steps_used": len(getattr(result, "steps", []) or []),
-            }
-            span.metadata = {
-                "status": "ok",
-                "agent_id": f"subagent_{role}",
-            }
-            return {
+        _register_child_tools(
+            child_executor,
+            parent_llm,
+            non_interactive,
+            tool_names,
+            subagent_confirm,
+            mcp_manager,
+        )
+        child_agent = ReActAgent(
+            child_llm,
+            child_executor,
+            max_steps=max(1, min(int(max_steps), 8)),
+            output=lambda *_args, **_kwargs: None,
+            confirm_fn=subagent_confirm,
+            conversation_mode=False,
+            agent_id=f"subagent_{role}",
+        )
+        if cancel_bridge is not None:
+            # Cooperative cancellation: parent run cancelled → child loop stops
+            # at the next step boundary instead of running to max_steps.
+            child_agent.set_cancel_checker(cancel_bridge.check)
+
+        try:
+            with trace_manager.span("subagent_attempt", {
                 "role": role,
                 "tool_names": tool_names,
-                "answer": answer,
-                "salvaged": salvaged,
-                "steps_used": len(getattr(result, "steps", []) or []),
-                "result": result,
-            }, None
-    except Exception as exc:
-        hook_mgr.fire(HookType.AFTER_SUBAGENT_RUN, {
-            "task": task, "role": role, "success": False, "error": str(exc),
-        })
-        return None, exc
+                "max_steps": max_steps,
+                "retry_reason": retry_reason or "",
+                "task_preview": task[:200],
+                "parent_trace_id": trace_manager.get_inherited_trace() or "",
+            }) as span:
+                result = child_agent.run(_build_subagent_prompt(task, role, retry_reason), memory_manager=None)
+                answer = (result.answer or "").strip()
+                salvaged = _extract_step_summary(result)
+                span.output = {
+                    "answer": answer[:500],
+                    "salvaged": salvaged[:500],
+                    "steps_used": len(getattr(result, "steps", []) or []),
+                }
+                span.metadata = {
+                    "status": "ok",
+                    "agent_id": f"subagent_{role}",
+                }
+                return {
+                    "role": role,
+                    "tool_names": tool_names,
+                    "answer": answer,
+                    "salvaged": salvaged,
+                    "steps_used": len(getattr(result, "steps", []) or []),
+                    "result": result,
+                }, None
+        except Exception as exc:
+            hook_mgr.fire(HookType.AFTER_SUBAGENT_RUN, {
+                "task": task, "role": role, "success": False, "error": str(exc),
+            })
+            return None, exc
+    finally:
+        # The child registry is per-attempt; without shutdown its pool
+        # threads would linger (one+ per attempt on Python < 3.13).
+        child_executor.close()
 
 
 

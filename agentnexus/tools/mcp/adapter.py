@@ -70,7 +70,6 @@ class MCPToolManager:
             server.name: MCPServerState.DISCONNECTED for server in self._servers
         }
         self._failures: dict[str, str] = {}
-        self._registered_signatures: dict[tuple[int, str], str] = {}
         self._callable_cache: dict[str, Any] = {}
 
     @property
@@ -242,13 +241,19 @@ class MCPToolManager:
 
     def register_tools(self, executor: ToolRegistry, include_tools: set[str] | None = None) -> list[str]:
         registered = []
-        executor_key = id(executor)
+        # Signatures hang off the executor, not the manager: child registries
+        # (one per subagent attempt) are short-lived, so manager-level state
+        # keyed by id(executor) leaked entries, and a recycled id could make a
+        # fresh registry wrongly skip registration.
+        sigs = getattr(executor, "_mcp_registered_signatures", None)
+        if sigs is None:
+            sigs = {}
+            executor._mcp_registered_signatures = sigs
         for tool in self.tool_descriptors():
             if include_tools is not None and tool.local_name not in include_tools:
                 continue
             signature = self._descriptor_signature(tool)
-            cache_key = (executor_key, tool.local_name)
-            if self._registered_signatures.get(cache_key) == signature:
+            if sigs.get(tool.local_name) == signature:
                 registered.append(tool.local_name)
                 continue
             executor.register_tool(
@@ -265,7 +270,7 @@ class MCPToolManager:
                 source_type="mcp",
                 source_id=f"mcp:{tool.server_name}",
             )
-            self._registered_signatures[cache_key] = signature
+            sigs[tool.local_name] = signature
             registered.append(tool.local_name)
         return registered
 
