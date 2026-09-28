@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -26,6 +28,51 @@ logger = logging.getLogger(__name__)
 QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
 MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
 HYDE_PROMPT = load_prompt("rag_hyde")
+
+# ── Process-wide reranker cache ──────────────────────────────────────────
+# A CrossEncoder is a ~2.3 GB fp32 model. load_reranker() used to construct
+# one per retriever, and kb_search calls it whenever `._reranker is None` —
+# in the incident environment the tokenizer step then failed on a
+# HuggingFace Hub round-trip (offline/GFW, WinError 10060) AFTER the weights
+# were already materialized, so every search re-loaded and discarded 2.3 GB.
+# Concurrent subagent kb_search calls turned that churn into a multi-GB
+# private-memory ratchet (see experiments/probe_wave_repro.py). Successes
+# are cached process-wide; failures are cached briefly so a bad
+# network/config cannot churn multi-GB loads on every search.
+_RERANKER_FAILURE_TTL_S = 300.0
+_CACHED_RERANKER: "CrossEncoder | None" = None
+_CACHED_RERANKER_NAME: str | None = None
+_reranker_failures: dict[str, float] = {}
+_reranker_lock = threading.Lock()
+
+
+def reset_reranker_cache() -> None:
+    """Clear the process-wide reranker cache (tests / config reloads)."""
+    global _CACHED_RERANKER, _CACHED_RERANKER_NAME
+    _CACHED_RERANKER = None
+    _CACHED_RERANKER_NAME = None
+    _reranker_failures.clear()
+
+
+def _build_cross_encoder(cross_encoder_cls, model_name: str) -> "CrossEncoder":
+    """Construct a CrossEncoder, preferring the local HuggingFace snapshot.
+
+    Loading by repo id makes the tokenizer contact HuggingFace Hub; in the
+    incident environment that call timed out AFTER the 2.3 GB weights were
+    already loaded — a full allocation discarded on every attempt. A local
+    path + ``local_files_only`` keeps the whole load offline (mirrors
+    ``embeddings._resolve_local_model_path``).
+    """
+    from agentnexus.rag.embeddings import _resolve_local_model_path
+
+    local_path = _resolve_local_model_path(model_name)
+    if local_path is None:
+        return cross_encoder_cls(model_name)
+    try:
+        return cross_encoder_cls(local_path, local_files_only=True)
+    except TypeError:
+        # older sentence-transformers without local_files_only forwarding
+        return cross_encoder_cls(local_path)
 
 
 @dataclass
@@ -379,6 +426,7 @@ class HybridRetriever:
         return source_uri
 
     def load_reranker(self, model_name: str | None = None):
+        """Load the reranker, cached process-wide (see module-level note)."""
         try:
             from sentence_transformers import CrossEncoder
         except ImportError:
@@ -387,11 +435,32 @@ class HybridRetriever:
             return
 
         settings = get_settings()
-        try:
-            self._reranker = CrossEncoder(model_name or settings.reranker_model)
-        except Exception:
-            logger.warning("Failed to load reranker model '%s'", model_name or settings.reranker_model, exc_info=True)
+        name = model_name or settings.reranker_model
+
+        failed_at = _reranker_failures.get(name)
+        if failed_at is not None and time.monotonic() - failed_at < _RERANKER_FAILURE_TTL_S:
             self._reranker = None
+            return
+
+        global _CACHED_RERANKER, _CACHED_RERANKER_NAME
+        if _CACHED_RERANKER is not None and _CACHED_RERANKER_NAME == name:
+            self._reranker = _CACHED_RERANKER
+            return
+
+        with _reranker_lock:
+            if _CACHED_RERANKER is not None and _CACHED_RERANKER_NAME == name:
+                self._reranker = _CACHED_RERANKER
+                return
+            try:
+                model = _build_cross_encoder(CrossEncoder, name)
+            except Exception:
+                logger.warning("Failed to load reranker model '%s'", name, exc_info=True)
+                _reranker_failures[name] = time.monotonic()
+                self._reranker = None
+                return
+            _CACHED_RERANKER = model
+            _CACHED_RERANKER_NAME = name
+            self._reranker = model
 
     def search(
         self,

@@ -7,7 +7,7 @@ import uuid
 
 from agentnexus.rag.ingestion import ingest_document
 from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
-from agentnexus.rag.retriever import HybridRetriever, expand_queries
+from agentnexus.rag.retriever import _get_retriever, expand_queries
 from agentnexus.rag.store import get_knowledge_base_catalog
 from agentnexus.storage.chroma import (
     chunk_metadata_to_chroma,
@@ -392,8 +392,10 @@ def search_kb(
     has_list: bool | None = None,
     heading_depth: int | None = None,
 ):
-    retriever = HybridRetriever(namespace=namespace)
-    retriever.rebuild_from_catalog()
+    # Reuse the process-wide singleton (same path the kb_search tool uses) —
+    # per-call construction reloads every chunk into RAM and re-triggers
+    # reranker loading, ratcheting private memory upward under concurrency.
+    retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return []
 
