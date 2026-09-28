@@ -98,7 +98,14 @@ function Collapsible({ header, children, defaultExpanded = false, className = ''
  * their first letter, MCP tools to the puzzle glyph. */
 const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; isMcp?: boolean }) {
   const [expanded, setExpanded] = useState(msg.toolStatus === 'running')
-  useEffect(() => { if (msg.toolStatus === 'running') setExpanded(true) }, [msg.toolStatus])
+  const userToggled = useRef(false)
+  useEffect(() => {
+    // auto-expand while running; collapse again when done unless the user
+    // explicitly opened the row (v3: cards rest collapsed — the running
+    // expansion must not leave a wall of gray text behind)
+    if (msg.toolStatus === 'running') setExpanded(true)
+    else if (!userToggled.current) setExpanded(false)
+  }, [msg.toolStatus])
 
   const statusColor = msg.toolStatus === 'running' ? 'var(--amber)' : msg.toolStatus === 'error' ? 'var(--red)' : 'var(--green)'
   const statusLabel = msg.toolStatus === 'running' ? 'running' : msg.toolStatus === 'error' ? 'error' : 'done'
@@ -110,7 +117,7 @@ const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; is
   return (
     <div className="group/tool">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { userToggled.current = true; setExpanded(!expanded) }}
         className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
       >
         <span
@@ -812,7 +819,7 @@ export default function ChatPage() {
           return groups.map((g) => g.kind === 'msg' ? (
             <MessageBubble key={g.msg.id} msg={g.msg} animatedIds={animatedIds} />
           ) : (
-            <div key={g.msgs[0].id} className="py-2">
+            <div key={g.msgs[0].id} className="max-w-3xl mx-auto px-6 py-2">
               <div
                 className="max-w-[608px] overflow-hidden"
                 style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}
