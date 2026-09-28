@@ -714,6 +714,19 @@ class ReActAgent:
             execute_tool=self._execute_tool,
             output=self._output,
         )
+        # 计划被拒绝：立即以"暂停等待用户指示"结束回合，不让模型自行重规划。
+        if self._plan_mode is not None:
+            rejection = self._plan_mode.take_rejection()
+            if rejection:
+                ctx.last_answer = rejection
+                try:
+                    self._persist_round()
+                except Exception as e:
+                    return [ReActEvent(ReActEventType.FAULT, {
+                        "fatal": True,
+                        "detail": f"记忆写入失败，未保存本轮结果: {e}",
+                    })]
+                return [ReActEvent(ReActEventType.ANSWER_READY)]
         # ── 跑飞兜底 L1：闭环检测（连续相同工具调用）→ 用户可见警告 + 软 nudge ──
         self._maybe_warn_loop(ctx)
         ctx.run_state.json_retries = 0  # 成功的工具轮重置 JSON 重试预算

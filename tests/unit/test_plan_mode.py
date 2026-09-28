@@ -14,6 +14,7 @@ import pytest
 
 from agentnexus.agents.plan_mode import (
     EXIT_PLAN_MODE_TOOL,
+    PLAN_REJECTED_ANSWER,
     PLAN_REVIEW_MARKER,
     PlanModeBinding,
     PlanModeManager,
@@ -347,6 +348,102 @@ class TestPlanModeGate:
         assert "read_tool" in _system_text()
         gate.manager.disable("s1")
         assert "计划模式" not in _system_text()
+
+
+class TestRejectedPlanPausesRun:
+    """拒绝后回合必须立即结束并等待用户指示，而不是 agent 自行重新规划。"""
+
+    def _make_llm(self):
+        llm = MagicMock()
+        llm.model = "test/test-model"
+        llm.total_usage = {"input_tokens": 0, "output_tokens": 0}
+        llm.last_error = ""
+        llm.last_truncated = False
+        llm.last_tool_calls = []
+        llm.last_reasoning_content = ""
+        llm.last_usage = {"input_tokens": 0, "output_tokens": 0}
+        llm.capabilities = MagicMock()
+        llm.capabilities.supports_thinking = False
+        llm.capabilities.supports_tool_calling = True
+        llm.capabilities.supports_json_mode = True
+        llm.capabilities.supports_json_schema = False
+        llm.capabilities.supports_parallel_tool_calls = False
+        llm.capabilities.thinking_effort = "none"
+        return llm
+
+    def _make_agent(self, confirm):
+        llm = self._make_llm()
+        reg = ToolRegistry()
+        reg.register_tool("read_tool", "读", lambda **kw: "ok", read_only=True)
+        reg.register(_meta(EXIT_PLAN_MODE_TOOL), lambda **kw: "unreachable")
+        manager = PlanModeManager()
+        manager.enable("s1")
+        agent = ReActAgent(llm, reg, max_steps=5, output=lambda _m: None, confirm_fn=confirm)
+        agent.set_plan_mode(PlanModeBinding(manager, "s1"))
+        return agent, llm, manager
+
+    def test_rejection_ends_run_after_one_round(self):
+        confirm = MagicMock(return_value=False)
+        agent, llm, manager = self._make_agent(confirm)
+        rounds = []
+
+        def mock_think(**kw):
+            rounds.append(1)
+            llm.last_tool_calls = [
+                {"name": EXIT_PLAN_MODE_TOOL, "arguments": {"plan": "# 计划"}, "id": "c1"}
+            ]
+            return "提交计划供审批"
+
+        llm.think.side_effect = mock_think
+
+        result = agent.run("做个方案")
+
+        assert len(rounds) == 1, "拒绝后不得进入第二轮自动重规划"
+        assert result.answer == PLAN_REJECTED_ANSWER
+        assert manager.is_active("s1") is True  # 模式仍开，等待用户反馈后重提
+
+    def test_approval_does_not_end_run(self):
+        """对照：批准后模型继续执行（不触发暂停快路径）。"""
+        confirm = MagicMock(return_value=True)
+        agent, llm, manager = self._make_agent(confirm)
+        rounds = []
+
+        def mock_think(**kw):
+            rounds.append(1)
+            if len(rounds) == 1:
+                llm.last_tool_calls = [
+                    {"name": EXIT_PLAN_MODE_TOOL, "arguments": {"plan": "# 计划"}, "id": "c1"}
+                ]
+                return "提交计划供审批"
+            llm.last_tool_calls = []
+            return "最终答案：已按计划完成。"
+
+        llm.think.side_effect = mock_think
+
+        result = agent.run("做个方案")
+
+        assert len(rounds) == 2
+        assert result.answer == "最终答案：已按计划完成。"
+        assert manager.is_active("s1") is False
+
+    def test_empty_plan_does_not_set_rejection(self, gate):
+        gate.manager.enable("s1")
+        confirm = MagicMock(return_value=False)
+        agent = _make_agent(gate.reg, confirm=confirm)
+        binding = PlanModeBinding(gate.manager, "s1")
+        agent.set_plan_mode(binding)
+        agent._execute_tool(EXIT_PLAN_MODE_TOOL, {"plan": ""})
+        assert binding.take_rejection() is None
+
+    def test_rejection_consumed_once(self, gate):
+        gate.manager.enable("s1")
+        confirm = MagicMock(return_value=False)
+        agent = _make_agent(gate.reg, confirm=confirm)
+        binding = PlanModeBinding(gate.manager, "s1")
+        agent.set_plan_mode(binding)
+        agent._execute_tool(EXIT_PLAN_MODE_TOOL, {"plan": "draft"})
+        assert binding.take_rejection() == PLAN_REJECTED_ANSWER
+        assert binding.take_rejection() is None
 
 
 # ── MCP readOnlyHint ─────────────────────────────────────────────
