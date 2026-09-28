@@ -461,8 +461,8 @@ export default function ChatPage() {
       // due to React batching. loadAndDisplayMessages checks SessionManager's
       // Map first, so it handles both cached and backend-fetched messages correctly.
       loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
-      api.getVersionStatus().then(setVersionStatus).catch(() => {})
-      api.getVersionLog(5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
+      api.getVersionStatus(sid).then(setVersionStatus).catch(() => {})
+      api.getVersionLog(sid, 5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
       // Session's own workspace wins; server default cwd is the chip fallback.
       api.getSession(sid).then((s) => {
@@ -679,27 +679,45 @@ export default function ChatPage() {
     switch (cmd) {
       case '/help': addSys(COMMAND_DEFS.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n')); break
       case '/clear': setMessages([]); animatedIds.clear(); break
-      case '/undo':
+      case '/undo': {
+        const sid = currentSessionIdRef.current
+        if (!sid) { addSys('No active session.'); break }
         try {
-          const r = await api.versionUndo()
-          setVersionStatus(await api.getVersionStatus())
-          setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+          const r = await api.versionUndo(sid)
+          setVersionStatus(await api.getVersionStatus(sid))
+          setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
           await loadAndDisplayMessages()
           addSys(`Undone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
         } catch (e: any) { addSys(`Undo failed: ${e.message}`) }
         break
-      case '/redo':
+      }
+      case '/redo': {
+        const sid = currentSessionIdRef.current
+        if (!sid) { addSys('No active session.'); break }
         try {
-          const r = await api.versionRedo()
-          setVersionStatus(await api.getVersionStatus())
-          setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+          const r = await api.versionRedo(sid)
+          setVersionStatus(await api.getVersionStatus(sid))
+          setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
           await loadAndDisplayMessages()
           addSys(`Redone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
         } catch (e: any) { addSys(`Redo failed: ${e.message}`) }
         break
-      case '/log': try { const { checkpoints: cps } = await api.getVersionLog(10); addSys(cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')) } catch (e: any) { addSys(`Log failed: ${e.message}`) }; break
-      case '/status': try { const s = await api.getVersionStatus(); addSys(`Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`) } catch (e: any) { addSys(`Status failed: ${e.message}`) }; break
-      case '/compact': addSys('Compressing context...'); try { const r = await api.compactContext(args); addSys(`Compacted: ${r.tokens_saved} tokens saved`) } catch (e: any) { addSys(`Compact failed: ${e.message}`) }; break
+      }
+      case '/log': {
+        const sid = currentSessionIdRef.current
+        if (!sid) { addSys('No active session.'); break }
+        try { const { checkpoints: cps } = await api.getVersionLog(sid, 10); addSys(cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')) } catch (e: any) { addSys(`Log failed: ${e.message}`) }; break
+      }
+      case '/status': {
+        const sid = currentSessionIdRef.current
+        if (!sid) { addSys('No active session.'); break }
+        try { const s = await api.getVersionStatus(sid); addSys(`Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`) } catch (e: any) { addSys(`Status failed: ${e.message}`) }; break
+      }
+      case '/compact': {
+        const sid = currentSessionIdRef.current
+        if (!sid) { addSys('No active session.'); break }
+        addSys('Compressing context...'); try { const r = await api.compactContext(sid, args); addSys(`Compacted: ${r.tokens_saved} tokens saved`) } catch (e: any) { addSys(`Compact failed: ${e.message}`) }; break
+      }
       case '/sessions': try { const { sessions } = await api.getRecentSessions(10); addSys(sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')) } catch (e: any) { addSys(`Sessions failed: ${e.message}`) }; break
       case '/switch':
         if (!args) { addSys('Usage: /switch <session_id>'); break }
@@ -802,18 +820,22 @@ export default function ChatPage() {
   const handleCancel = () => { cancelRun() }
   const handleConfirm = (approved: boolean) => { confirmToolCall(approved) }
   const handleUndo = async () => {
+    const sid = currentSessionIdRef.current
+    if (!sid) return
     try {
-      await api.versionUndo()
-      setVersionStatus(await api.getVersionStatus())
-      setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+      await api.versionUndo(sid)
+      setVersionStatus(await api.getVersionStatus(sid))
+      setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
       await loadAndDisplayMessages()
     } catch { }
   }
   const handleRedo = async () => {
+    const sid = currentSessionIdRef.current
+    if (!sid) return
     try {
-      await api.versionRedo()
-      setVersionStatus(await api.getVersionStatus())
-      setCheckpoints((await api.getVersionLog(5)).checkpoints || [])
+      await api.versionRedo(sid)
+      setVersionStatus(await api.getVersionStatus(sid))
+      setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
       await loadAndDisplayMessages()
     } catch { }
   }
@@ -1165,7 +1187,11 @@ export default function ChatPage() {
                 title="重做到下一个 checkpoint" onClick={handleRedo} />
               <HudAction icon={History} label="检查点"
                 title="查看 checkpoint 历史"
-                onClick={() => { setShowCheckpoints(!showCheckpoints); api.getVersionLog(10).then(d => setCheckpoints(d.checkpoints || [])) }} />
+                onClick={() => {
+                  setShowCheckpoints(!showCheckpoints)
+                  const sid = currentSessionIdRef.current
+                  if (sid) api.getVersionLog(sid, 10).then(d => setCheckpoints(d.checkpoints || []))
+                }} />
             </div>
           </div>
         </div>
