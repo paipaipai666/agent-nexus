@@ -389,9 +389,15 @@ class ChatService:
             agent.set_plan_mode(PlanModeBinding(self._plan_mode, session_id))
         # Attachments: validate all-or-nothing BEFORE anything is committed —
         # a dead file must not half-send. Vision gate degrades images to
-        # path-only references when the model can't see. The manifest note
-        # goes to the LLM prompt only; the user's message text stays clean.
-        caps = getattr(getattr(agent, "llm_client", None), "capabilities", None)
+        # path-only references when the model can't see. Read capabilities
+        # via detect_capabilities (config-only) — agent.llm_client.capabilities
+        # triggers a live endpoint probe (3 calls × 90s timeout) that would
+        # stall the first send of every process before run_started.
+        from agentnexus.core.capabilities import detect_capabilities
+        llm = getattr(agent, "llm_client", None)
+        model_id = getattr(llm, "model", "") or ""
+        base_url = getattr(llm, "base_url", "") or ""
+        caps = detect_capabilities(model_id, base_url) if model_id else None
         vision_ok = bool(caps and getattr(caps, "supports_vision", False))
         images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
         # Tools resolve relative paths against this session's workspace folder.

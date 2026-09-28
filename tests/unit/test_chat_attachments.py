@@ -24,7 +24,8 @@ def _att(path: str, mime: str = "text/plain") -> dict:
 def agent():
     a = MagicMock()
     a.run.return_value = "ok"
-    a.llm_client.capabilities.supports_vision = False
+    a.llm_client.model = "test-model"
+    a.llm_client.base_url = ""
     return a
 
 
@@ -110,8 +111,13 @@ class TestSendMessageAttachments:
         # User text still clean.
         assert _committed_texts(chat, session.id) == ["看图"]
 
-    def test_vision_on_sends_image_blocks(self, chat, session, agent, tmp_path):
-        agent.llm_client.capabilities.supports_vision = True
+    def test_vision_on_sends_image_blocks(self, chat, session, agent, tmp_path, monkeypatch):
+        from agentnexus.core import capabilities as caps_mod
+
+        caps = caps_mod.detect_capabilities("test-model", "")
+        caps.supports_vision = True
+        monkeypatch.setattr(caps_mod, "detect_capabilities", lambda *_a, **_k: caps)
+
         img = tmp_path / "shot.png"
         img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
         chat.send_message(session.id, "看图", attachments=[_att(str(img), "image/png")])
@@ -122,6 +128,30 @@ class TestSendMessageAttachments:
         note = agent.run.call_args.kwargs["attachment_note"]
         assert "已随本条消息" in note
         assert _committed_texts(chat, session.id) == ["看图"]
+
+    def test_send_path_never_touches_probing_capabilities_property(self, chat, session, agent, tmp_path, monkeypatch):
+        """Regression: agent.llm_client.capabilities triggers a live endpoint
+        probe (minutes of stall before run_started). The vision gate must use
+        config-only detect_capabilities."""
+        from agentnexus.core import capabilities as caps_mod
+
+        class _NoProbeLLM:
+            model = "test-model"
+            base_url = ""
+
+            @property
+            def capabilities(self):
+                raise AssertionError("capabilities property must not be touched in send path")
+
+        agent.llm_client = _NoProbeLLM()
+        caps = caps_mod.detect_capabilities("test-model", "")
+        caps.supports_vision = True
+        monkeypatch.setattr(caps_mod, "detect_capabilities", lambda *_a, **_k: caps)
+
+        img = tmp_path / "ok.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 8)
+        chat.send_message(session.id, "看图", attachments=[_att(str(img), "image/png")])
+        assert agent.run.call_args.kwargs["images"]
 
     def test_attachment_path_visible_to_tools_during_run_only(self, chat, session, agent, tmp_path):
         """file_read on the attachment works from INSIDE the run (tool threads
