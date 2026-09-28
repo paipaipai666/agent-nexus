@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Brain, Wrench, MessageSquare, Flag, Play, AlertTriangle, Shield,
-  Circle, GitBranch, Clock, Database, RefreshCw, ArrowLeft,
+  Circle, GitBranch, Clock, Database, RefreshCw, ArrowLeft, Cpu,
+  ListTodo, Workflow, Sparkles, Type, Minimize2,
 } from 'lucide-react'
 import { api, type TimelineEvent } from '../services/api'
 
@@ -22,6 +23,10 @@ const NODE_STYLE: Record<string, { icon: typeof Circle; color: string; label: st
   error: { icon: AlertTriangle, color: 'var(--red)', label: 'Error' },
   confirm_request: { icon: Shield, color: 'var(--amber)', label: 'Confirm required' },
   turn_journal: { icon: Brain, color: 'var(--accent)', label: 'Journal' },
+  token_summary: { icon: Type, color: 'var(--fg-faint)', label: 'Stream' },
+  todo_change: { icon: ListTodo, color: 'var(--amber)', label: 'Todo' },
+  workflow_step: { icon: Workflow, color: 'var(--cyan)', label: 'Workflow' },
+  skill_auto_selected: { icon: Sparkles, color: 'var(--cyan)', label: 'Skill route' },
 }
 
 // TurnRecord.status vocabulary: running | finished | empty_answer | failed | interrupted.
@@ -46,6 +51,18 @@ function nodeMeta(e: TimelineEvent): { icon: typeof Circle; color: string; label
     if (inner === 'LOOP_WARNING') return { icon: AlertTriangle, color: 'var(--amber)', label: 'Loop warning' }
     if (inner === 'BUDGET_REMINDER') return { icon: AlertTriangle, color: 'var(--amber)', label: 'Budget reminder' }
     if (inner === 'ANSWER_VETOED') return { icon: Shield, color: 'var(--amber)', label: 'Answer vetoed' }
+    if (inner === 'LLM_CALL') {
+      return e.payload.error
+        ? { icon: Cpu, color: 'var(--red)', label: 'LLM call (error)' }
+        : { icon: Cpu, color: 'var(--blue)', label: 'LLM call' }
+    }
+    if (inner === 'DRIFT_SIGNAL') {
+      return e.payload.severity === 'critical'
+        ? { icon: AlertTriangle, color: 'var(--red)', label: 'Drift (critical)' }
+        : { icon: AlertTriangle, color: 'var(--amber)', label: 'Drift' }
+    }
+    if (inner === 'COMPACTION') return { icon: Minimize2, color: 'var(--purple)', label: 'Compaction' }
+    if (inner === 'MEMORY_REFRESH') return { icon: Database, color: 'var(--fg-muted)', label: 'Memory' }
     return { icon: Circle, color: 'var(--fg-faint)', label: inner || 'Journal' }
   }
   if (e.event_type === 'run_finished') {
@@ -57,21 +74,54 @@ function nodeMeta(e: TimelineEvent): { icon: typeof Circle; color: string; label
 
 function nodeDetail(e: TimelineEvent): string {
   const p = e.payload
+  const join = (parts: unknown[]) => parts.filter(Boolean).join(' · ')
   switch (e.event_type) {
     case 'turn_journal':
-      return [p.thought, p.detail, p.reason,
-          p.warn_count !== undefined ? `warning #${String(p.warn_count)}` : '']
-        .filter(Boolean).join(' · ')
+      if (p.event === 'LLM_CALL') {
+        return join([
+          p.model,
+          p.latency_ms ? `${String(p.latency_ms)}ms` : '',
+          p.input_tokens || p.output_tokens ? `in ${String(p.input_tokens || 0)}/out ${String(p.output_tokens || 0)}` : '',
+          p.cache_hit_tokens ? `cache ${String(p.cache_hit_tokens)}` : '',
+          p.strategy && p.strategy !== 'NATIVE_TOOLS' ? String(p.strategy) : '',
+          p.error,
+        ])
+      }
+      if (p.event === 'DRIFT_SIGNAL') return join([p.signal_type, p.detail])
+      if (p.event === 'COMPACTION') {
+        return join([
+          p.phase,
+          p.tokens_before !== undefined ? `${String(p.tokens_before)}→${String(p.tokens_after ?? '?')} tok` : '',
+          p.drained, p.path,
+        ])
+      }
+      if (p.event === 'MEMORY_REFRESH') return join([p.phase, p.chars !== undefined ? `${String(p.chars)} chars` : '', p.preview])
+      return join([p.thought, p.detail, p.reason,
+          p.warn_count !== undefined ? `warning #${String(p.warn_count)}` : ''])
     case 'tool_start':
       return `${p.name} ${JSON.stringify(p.arguments || {})}`
     case 'tool_done':
-      return `${p.name} → ${p.result || ''}`
+      return join([
+        `${p.name} → ${p.result || ''}`,
+        p.duration_ms ? `${String(p.duration_ms)}ms` : '',
+        p.risk_level ? `risk:${String(p.risk_level)}` : '',
+      ])
     case 'message_delta':
       return String(p.text || '').slice(0, 200)
     case 'run_finished':
       // 真出错时把具体原因顶出来，而不是只标一个 error
-      return [p.status ? `status=${String(p.status)}` : '', p.error, p.reason, p.detail]
-        .filter(Boolean).join(' · ')
+      return join([p.status ? `status=${String(p.status)}` : '', p.error, p.reason, p.detail])
+    case 'token_summary':
+      return join([
+        p.content_chars ? `content ${String(p.content_chars)} chars` : '',
+        p.reasoning_chars ? `reasoning ${String(p.reasoning_chars)} chars` : '',
+      ])
+    case 'todo_change':
+      return join([`${p.action === 'add' ? '+' : '→'} [${String(p.status)}]`, p.description])
+    case 'workflow_step':
+      return join([p.summary, p.status && `status=${String(p.status)}`])
+    case 'skill_auto_selected':
+      return join([p.skill, p.source && `via ${String(p.source)}`, p.reason])
     default:
       return Object.keys(p).length ? JSON.stringify(p) : ''
   }

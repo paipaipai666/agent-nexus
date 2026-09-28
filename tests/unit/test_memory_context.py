@@ -663,11 +663,15 @@ class TestReActAgentConversationMode:
 
         followup = agent._on_tools_requested(ctx, returned[0])
 
-        assert [event_type for event_type, _payload in emitted] == [
+        # 观测事件（LLM_CALL 等）与 UI 旁路断言无关 —— 过滤后再比对
+        _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
+                          ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
+        side_channel = [(t, p) for t, p in emitted if t not in _OBSERVABILITY]
+        assert [event_type for event_type, _payload in side_channel] == [
             ReActEventType.TOOL_START,
             ReActEventType.TOOL_DONE,
         ]
-        done_type, done_payload = emitted[1]
+        done_type, done_payload = side_channel[1]
         assert done_type == ReActEventType.TOOL_DONE
         assert done_payload["name"] == "web_search"
         assert done_payload["arguments"] == {"query": "search"}
@@ -690,7 +694,10 @@ class TestReActAgentConversationMode:
 
         returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
-        assert emitted == [
+        # 观测事件（LLM_CALL 等）与旁路断言无关 —— 过滤后再比对
+        _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
+                          ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
+        assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
             (ReActEventType.ANSWER_THOUGHT, {"thought": "The tool result is sufficient to answer now."})
         ]
         assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]
@@ -712,7 +719,10 @@ class TestReActAgentConversationMode:
 
         returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
-        assert emitted == [
+        # 观测事件（LLM_CALL 等）与旁路断言无关 —— 过滤后再比对
+        _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
+                          ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
+        assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
             (ReActEventType.ANSWER_THOUGHT, {"thought": "The search result is enough to answer now."})
         ]
         assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]

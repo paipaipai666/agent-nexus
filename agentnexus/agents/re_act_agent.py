@@ -7,6 +7,7 @@ Each decision point is an explicit state; each transition is a handler method.
 from __future__ import annotations
 
 import logging
+import time as _time
 from typing import Callable
 
 from agentnexus.agents import decisions, json_helpers, react_runtime
@@ -341,6 +342,12 @@ class ReActAgent:
             memory_manager.append("user", run_state.question)
             try:
                 memory_state.memory_context = memory_manager.init_session(run_state.question)
+                # 时间线可观测：启动时注入了什么记忆上下文
+                if memory_state.memory_context:
+                    ctx.emit(ReActEventType.MEMORY_REFRESH,
+                             phase="init",
+                             chars=len(memory_state.memory_context),
+                             preview=memory_state.memory_context[:200])
             except Exception as e:
                 logger.warning("init_session failed (conversation continues): %s", e)
                 memory_state.memory_context = ""
@@ -384,7 +391,30 @@ class ReActAgent:
                 # Replace exactly the initial block; keep accumulated messages after it
                 ctx.messages[:ctx.initial_count] = new_messages
                 ctx.initial_count = len(new_messages)
-            memory_manager.on_after_compact = rebuild
+
+            def _after_compact():
+                try:
+                    rebuild()
+                finally:
+                    # 时间线可观测：压缩后系统提示词/前缀已重建，上下文将变化
+                    ctx.emit(ReActEventType.COMPACTION, phase="rebuild")
+
+            memory_manager.on_after_compact = _after_compact
+
+            # 压缩过程关键阶段进时间线（过滤细碎事件，payload 只留标量）
+            _COMPACT_PHASES = {"start", "complete", "circuit_open", "ltm_drain", "history_archived"}
+
+            def _on_compact(evt: dict):
+                phase = evt.get("event", "")
+                if phase not in _COMPACT_PHASES:
+                    return
+                # 键名用 phase：bridge 会把 payload.event 覆写成事件类型名
+                payload = {"phase": phase}
+                payload.update({k: v for k, v in evt.items()
+                                if k != "event" and isinstance(v, (str, int, float, bool))})
+                ctx.emit(ReActEventType.COMPACTION, **payload)
+
+            memory_manager.on_compact = _on_compact
 
         return []  # 落点 AWAIT_MODEL，由 auto-advance 触发第一轮 _on_round
 
@@ -447,6 +477,12 @@ class ReActAgent:
                                 signal.step_index, signal.signal_type.value,
                                 signal.severity.value, signal.detail,
                             )
+                # 时间线可观测：所有信号（含 warning）都进事件流，UI 才能解释上下文突变
+                for signal in drift_signals:
+                    ctx.emit(ReActEventType.DRIFT_SIGNAL,
+                             signal_type=signal.signal_type.value,
+                             severity=signal.severity.value,
+                             detail=signal.detail)
                 # 如果检测到 critical 漂移，注入提示让 Agent 重新聚焦
                 critical = [s for s in drift_signals if s.severity.value == "critical"]
                 if critical:
@@ -482,12 +518,27 @@ class ReActAgent:
             except Exception as e:
                 logger.debug("Context observer failed: %s", e)
 
+        _t0 = _time.perf_counter()
         response_text = call_llm(
             self.llm_client,
             ctx,
             json_format_section=self._build_json_format_section(),
             on_token=_stream_token,
         )
+        # 时间线可观测：一次模型调用的量化指标（latency/tokens/cache/策略）
+        try:
+            _usage = self.llm_client.last_usage or {}
+            ctx.emit(ReActEventType.LLM_CALL,
+                     model=getattr(self.llm_client, "model", ""),
+                     strategy=ctx.run_state.strategy.name,
+                     latency_ms=round((_time.perf_counter() - _t0) * 1000, 1),
+                     input_tokens=_usage.get("input_tokens", 0),
+                     output_tokens=_usage.get("output_tokens", 0),
+                     cache_hit_tokens=_usage.get("cache_hit_tokens", 0),
+                     cache_miss_tokens=_usage.get("cache_miss_tokens", 0),
+                     error=self.llm_client.last_error or "")
+        except Exception as e:
+            logger.debug("LLM_CALL emit failed: %s", e)
         if self.llm_client.last_error and not response_text:
             err = self.llm_client.last_error
             self._output(f"错误: {err}")

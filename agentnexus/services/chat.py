@@ -361,6 +361,18 @@ class ChatService:
                         session_id, run.id, step_id, messages,
                     )
                 )
+            # Todo changes during the run → timeline events (observability only).
+            todo_list = getattr(agent, "_todo_list", None)
+            if todo_list is not None:
+                def _on_todo_change(action, item, _run_id=run.id):
+                    self._put_event(_run_id, AgentEvent(
+                        "todo_change",
+                        {"action": action, "id": item.id,
+                         "description": item.description, "status": item.status},
+                        run_id=_run_id, session_id=session_id,
+                        step_id=getattr(agent, "_step_count", 0),
+                    ))
+                todo_list.on_change = _on_todo_change
             # Suppress agent _output (print) — events are sent via WebSocket
             try:
                 agent._output = lambda _msg: None
@@ -380,6 +392,9 @@ class ChatService:
             finally:
                 _tm.end_trace()
                 self._evaluate_run_alerts()
+                # Run ended — detach the per-run todo observer.
+                if todo_list is not None:
+                    todo_list.on_change = None
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
             # Persist cumulative token usage and step count to DB
@@ -602,7 +617,7 @@ class ChatService:
         )
         snapshot = service.snapshot()
         if snapshot.auto_route_reason:
-            events.put(AgentEvent(
+            self._put_event(run_id, AgentEvent(
                 "skill_auto_selected",
                 {
                     "skill": snapshot.current,
@@ -615,7 +630,7 @@ class ChatService:
             ))
         for event in result.events:
             self.record_workflow_event(run_id, event)
-            events.put(AgentEvent(
+            self._put_event(run_id, AgentEvent(
                 "workflow_step",
                 {
                     "step_id": event.step_id,
@@ -644,6 +659,7 @@ class ChatService:
     ) -> None:
         agent = agent or getattr(self, "_agent", None)
         has_reasoning = False
+        stream_counts = {"content": 0, "reasoning": 0}
 
         def _on_event(event, from_state, to_state):
             nonlocal has_reasoning
@@ -665,6 +681,9 @@ class ChatService:
             if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
                 token = payload.get("token", "")
                 if token:
+                    # 逐步流式聚合：逐 token 不落盘，攒到模型响应结束发一条摘要
+                    bucket = "content" if event_type == "STREAM_TOKEN" else "reasoning"
+                    stream_counts[bucket] += len(token)
                     if event_type == "STREAM_TOKEN":
                         tok_seq = self._run_token_seq.get(run_id, 0) + 1
                         self._run_token_seq[run_id] = tok_seq
@@ -693,6 +712,21 @@ class ChatService:
                         ))
                 return
 
+            # 模型响应结束（解释器事件/FAULT 到达）→ 流出该步的流式摘要。
+            # 流事件先于解释器事件到达，且同属一步，此时计数正好完整。
+            if event_type in ("TOOLS_REQUESTED", "ANSWER_READY", "ANSWER_THOUGHT", "FAULT") and (
+                stream_counts["content"] or stream_counts["reasoning"]
+            ):
+                self._put_event(run_id, AgentEvent(
+                    "token_summary",
+                    {"content_chars": stream_counts["content"],
+                     "reasoning_chars": stream_counts["reasoning"]},
+                    run_id=run_id, session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
+                ))
+                stream_counts["content"] = 0
+                stream_counts["reasoning"] = 0
+
             self._record_agent_event(turn, event)
 
             # Skip thought events when reasoning is available
@@ -711,7 +745,7 @@ class ChatService:
                 self._put_event(run_id, AgentEvent(
                     "tool_start",
                     {"name": payload.get("name", ""), "arguments": payload.get("arguments", {}),
-                     "id": payload.get("id", "")},
+                     "id": payload.get("id", ""), "risk_level": payload.get("risk_level", "")},
                     run_id=run_id,
                     session_id=session_id,
                     step_id=getattr(event, "step_id", 0),
@@ -725,6 +759,8 @@ class ChatService:
                         "arguments": payload.get("arguments", {}),
                         "result": collapse_and_truncate(payload.get("result", ""), 300),
                         "id": payload.get("id", ""),
+                        "duration_ms": payload.get("duration_ms", 0),
+                        "risk_level": payload.get("risk_level", ""),
                     },
                     run_id=run_id,
                     session_id=session_id,

@@ -73,6 +73,11 @@ class ReActEventType(Enum):
     ANSWER_THOUGHT = auto() # 答案前的思考展示
     LOOP_WARNING = auto()   # 跑飞兜底 L1：检测到闭环（重复工具调用）
     BUDGET_REMINDER = auto()  # 跑飞兜底 L3：token 预算提醒
+    # ── 旁路观测：时间线可观测性（bridge 透传落盘，不进 FSM 队列）──
+    LLM_CALL = auto()       # 一次模型调用完成（payload: model/strategy/latency/tokens/cache）
+    DRIFT_SIGNAL = auto()   # 漂移检测信号（payload: signal_type/severity/detail）
+    COMPACTION = auto()     # 上下文压缩事件（payload: phase/tokens_before/after）
+    MEMORY_REFRESH = auto()  # LTM/记忆上下文刷新（payload: chars/preview）
     # ── 旧名 alias（兼容 TUI / 下游测试，勿在新代码中使用）──
     TOOLS_FOUND = TOOLS_REQUESTED
     CLASSIFIED_TOOL = TOOLS_REQUESTED

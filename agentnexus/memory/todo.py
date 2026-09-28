@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -50,6 +51,9 @@ class SessionTodoList:
         self._session_id = session_id
         self._items: list[TodoItem] = []
         self._next_id: int = 1
+        # 可观测性回调：add/update 时通知（action, item）。由 chat 服务接线到
+        # 时间线事件；回调抛错不得影响 todo 本身 —— 调用处各自包 try。
+        self.on_change: Callable[[str, TodoItem], None] | None = None
         self._db: sqlite3.Connection | None = None
 
         if db_path and session_id:
@@ -115,7 +119,16 @@ class SessionTodoList:
         self._items.append(item)
         self._next_id += 1
         self._persist_item(item)
+        self._fire_change("add", item)
         return item
+
+    def _fire_change(self, action: str, item: TodoItem) -> None:
+        if self.on_change is None:
+            return
+        try:
+            self.on_change(action, item)
+        except Exception as e:
+            logger.debug("Todo on_change failed: %s", e)
 
     def update(self, item_id: int, status: str) -> TodoItem:
         if status not in self.VALID_STATUSES:
@@ -125,6 +138,7 @@ class SessionTodoList:
                 item.status = status
                 item.updated_at = datetime.now(timezone.utc).isoformat()
                 self._persist_item(item)
+                self._fire_change("update", item)
                 return item
         raise KeyError(f"Todo item {item_id} not found")
 

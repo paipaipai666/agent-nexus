@@ -132,6 +132,9 @@ def execute_pending_tools_batch(
     if not tool_state.pending_tool_calls:
         if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
             memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)
+            ctx.emit(ReActEventType.MEMORY_REFRESH,
+                     phase="post_tools",
+                     chars=len(memory_state.memory_context or ""))
         run_state.json_retries = 0
         return ReActEvent(ReActEventType.ALL_TOOLS_DONE)
 
@@ -140,10 +143,18 @@ def execute_pending_tools_batch(
     )
     tool_state.pending_tool_calls = []
 
+    def _risk_of(name: str) -> str:
+        try:
+            meta = registry.get_meta(name)
+            return meta.risk_level.value if meta is not None else ""
+        except Exception:
+            return ""
+
     # Emit actions for all tools
     for tc in calls:
         output(f"行动: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['arguments'].items())})")
-        ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"], id=tc.get("id", ""))
+        ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"],
+                 id=tc.get("id", ""), risk_level=_risk_of(tc["name"]))
 
     # Dispatch with read/write partitioning
     dispatcher = ToolDispatcher(registry)
@@ -167,10 +178,15 @@ def execute_pending_tools_batch(
             "result": observation,
             "id": tc.get("id", ""),
         })
-        ctx.emit(ReActEventType.TOOL_DONE, name=tc["name"], arguments=tc["arguments"], result=observation, id=tc.get("id", ""))
+        ctx.emit(ReActEventType.TOOL_DONE, name=tc["name"], arguments=tc["arguments"],
+                 result=observation, id=tc.get("id", ""),
+                 duration_ms=result_obj.duration_ms, risk_level=_risk_of(tc["name"]))
 
     if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
         memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)
+        ctx.emit(ReActEventType.MEMORY_REFRESH,
+                 phase="post_tools",
+                 chars=len(memory_state.memory_context or ""))
 
     run_state.json_retries = 0
     return ReActEvent(ReActEventType.ALL_TOOLS_DONE)

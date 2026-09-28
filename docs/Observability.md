@@ -234,6 +234,21 @@ nexus alerts --days 7       # 告警历史
 
 面向单个会话的逐步可观测性：agent 每个 step 干了什么、处于哪个阶段（思考 / 工具调用 / 观察 / 回答 / 错误），以及**每次模型调用前发给 LLM 的完整上下文**。
 
+### 事件词汇
+
+| 事件 | 内容 |
+|------|------|
+| `tool_start` / `tool_done` | 工具调用与结果：name/arguments/result(≤300)/tool_call_id/**duration_ms**/**risk_level** |
+| `turn_journal`（内层事件） | Thought（TOOLS_REQUESTED/ANSWER_THOUGHT）、FAULT、LOOP_WARNING、BUDGET_REMINDER、ANSWER_VETOED |
+| `turn_journal` LLM_CALL | 每次模型调用的量化指标：model/strategy/**latency_ms**/input/output/**cache_hit/miss tokens**/error |
+| `turn_journal` DRIFT_SIGNAL | 漂移检测信号（每 3 步）：signal_type/severity/detail，critical 红色 |
+| `turn_journal` COMPACTION | 上下文压缩：phase(start/complete/circuit_open/ltm_drain/history_archived/rebuild)/tokens_before→after，解释快照突变 |
+| `turn_journal` MEMORY_REFRESH | LTM/记忆上下文注入：phase(init/post_tools)/chars/preview |
+| `token_summary` | 逐步流式聚合（逐 token 不落盘）：content_chars/reasoning_chars |
+| `todo_change` | 运行中 todo 的 add/update：action/id/description/status |
+| `workflow_step` / `skill_auto_selected` | 技能路由决策与工作流步骤（经 `_put_event` 收口，WS/落盘同源） |
+| `message_delta` / `run_*` | 答案与 run 生命周期 |
+
 ### 数据链路
 
 ```text
