@@ -56,6 +56,33 @@ class AgentEvent:
     step_id: int = 0  # ReAct step this event belongs to (timeline grouping)
 
 
+#: Cap for per-run event queues. A disconnected or slow consumer must not
+#: let events pile up in RAM for the entire run (the queue is only popped
+#: when the next run on the session starts). 10k events is far beyond what
+#: a live client lags by; the seq cursor lets a reconnecting client detect
+#: the gap and fall back to REST history.
+_EVENT_QUEUE_MAX = 10_000
+
+
+def _enqueue_bounded(q: "queue.Queue | asyncio.Queue", event: AgentEvent | None) -> bool:
+    """``put_nowait``; when the queue is full, evict the oldest item to make
+    room. Returns False when an eviction happened (consumer gone or too
+    slow — typically a WS that disconnected mid-run)."""
+    try:
+        q.put_nowait(event)
+        return True
+    except (queue.Full, asyncio.QueueFull):
+        try:
+            q.get_nowait()
+        except (queue.Empty, asyncio.QueueEmpty):
+            pass
+        try:
+            q.put_nowait(event)
+        except (queue.Full, asyncio.QueueFull):
+            pass  # extremely contended; dropping one event is acceptable
+        return False
+
+
 class ChatService:
     """UI-neutral interaction facade for chat sessions."""
 
@@ -79,6 +106,7 @@ class ChatService:
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
+        self._dropped_events: dict[str, int] = {}
         self._run_event_seq: dict[str, int] = {}
         self._session_last_run: dict[str, str] = {}
         self._turns: dict[str, TurnRuntime] = {}
@@ -241,14 +269,20 @@ class ChatService:
             except Exception as e:
                 logger.debug("Timeline persist failed: %s", e)
         sync_q = self._run_events.get(run_id)
-        if sync_q is not None:
-            sync_q.put(event)
+        if sync_q is not None and not _enqueue_bounded(sync_q, event):
+            self._count_dropped(run_id)
         async_q = self._async_run_events.get(run_id)
-        if async_q is not None:
-            try:
-                async_q.put_nowait(event)
-            except Exception as e:
-                logger.debug("Async event queue put_nowait failed: %s", e)
+        if async_q is not None and not _enqueue_bounded(async_q, event):
+            self._count_dropped(run_id)
+
+    def _count_dropped(self, run_id: str) -> None:
+        n = self._dropped_events.get(run_id, 0) + 1
+        self._dropped_events[run_id] = n
+        if n == 1 or n % 100 == 0:
+            logger.debug(
+                "Event queue full for %s; evicted oldest events (%d so far) — consumer gone?",
+                run_id, n,
+            )
 
     def _evaluate_run_alerts(self) -> None:
         """Feed recent run metrics into the alert pipeline (non-fatal)."""
@@ -485,13 +519,14 @@ class ChatService:
         if prev_run:
             self._run_events.pop(prev_run, None)
             self._async_run_events.pop(prev_run, None)
+            self._dropped_events.pop(prev_run, None)
             self._turns.pop(prev_run, None)
             self._run_event_seq.pop(prev_run, None)
             self._run_token_seq.pop(prev_run, None)
             self._run_snapshots.pop(prev_run, None)
         run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
-        events: queue.Queue[AgentEvent | None] = queue.Queue()
-        async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+        events: queue.Queue[AgentEvent | None] = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
+        async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue(maxsize=_EVENT_QUEUE_MAX)
         self._run_events[run.id] = events
         self._async_run_events[run.id] = async_events
         self._run_event_seq[run.id] = 0
@@ -823,21 +858,22 @@ class ChatService:
             ))
         else:
             self._put_event(run_id, AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
-        # 同步和异步队列都需要 None 哨兵来终止 stream
+        # 同步和异步队列都需要 None 哨兵来终止 stream。与 _put_event 同策略:
+        # 队列满时淘汰最旧一个腾位(活消费者场景无淘汰,断开场景只丢一条),
+        # 绝不清空——否则可能把刚入队的 run_interrupted 等终止态事件抹掉。
         sync_q = self._run_events.get(run_id)
         if sync_q is not None:
-            sync_q.put(None)
+            _enqueue_bounded(sync_q, None)
         async_q = self._async_run_events.get(run_id)
         if async_q is not None:
-            try:
-                async_q.put_nowait(None)
-            except Exception:
-                pass
+            _enqueue_bounded(async_q, None)
 
     def confirm_tool_call(self, run_id: str, approved: bool) -> None:
         events = self._run_events.get(run_id)
         if events is not None:
-            events.put(AgentEvent("confirmation_requested", {"approved": approved}, run_id=run_id))
+            _enqueue_bounded(
+                events, AgentEvent("confirmation_requested", {"approved": approved}, run_id=run_id)
+            )
 
     def get_session_snapshot(self, session_id: str) -> dict[str, Any]:
         if session_id not in self._sessions:
