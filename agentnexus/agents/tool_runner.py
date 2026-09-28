@@ -65,6 +65,17 @@ def execute_tool(
         # = 立刻停止，参考 pi killProcessTree / codex process_group)。
         worker_tid: list[int] = []
 
+        # The registry (incl. the HITL gate) runs on the pool worker below,
+        # but thread-affine approvers (ConfirmBridge) register their target
+        # under the submitting thread — route the confirm by caller tid.
+        caller_tid = threading.get_ident()
+        confirm_as = getattr(hitl_approver, "confirm_as", None)
+        if confirm_as is not None:
+            def _hitl_approver(summary: str) -> bool:
+                return confirm_as(caller_tid, summary)
+        else:
+            _hitl_approver = hitl_approver
+
         def _invoke_tracked(**kwargs):
             worker_tid.append(threading.get_ident())
             return tool_executor.invoke(**kwargs)
@@ -75,7 +86,7 @@ def execute_tool(
             name=name,
             params=arguments,
             caller=caller,
-            hitl_approver=hitl_approver,
+            hitl_approver=_hitl_approver,
             tool_policy=tool_policy,
         )
         try:

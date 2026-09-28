@@ -174,3 +174,102 @@ class TestExecuteTool:
         )
         calls = mock_mgr.fire.call_args_list
         assert any(c.args[0] == HookType.ON_TOOL_ERROR for c in calls)
+
+
+def _make_hook_ctx(*, aborted=False):
+    ctx = MagicMock(spec=HookContext)
+    ctx.aborted = aborted
+    ctx.payload = {}
+    return ctx
+
+
+class TestHitlAcrossThreadHop:
+    """execute_tool hops to a pool worker thread; thread-affine approvers
+    (ConfirmBridge) must still route to the target registered by the
+    submitting thread — regression for shell_exec always returning
+    '[blocked] 用户取消了该工具调用'."""
+
+    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    def test_confirm_bridge_target_reached_across_pool_hop(self, mock_get_hook):
+        import threading
+
+        from agentnexus.agents.tool_runner import execute_tool
+        from agentnexus.tools.confirm_bridge import ConfirmBridge
+        from agentnexus.tools.registry import ToolRegistry
+
+        hook_ctx = _make_hook_ctx()
+        mock_get_hook.return_value.fire.return_value = hook_ctx
+
+        registry = ToolRegistry()
+        registry.register_tool(
+            "shell_exec",
+            "fake shell",
+            lambda command: f"executed: {command}",
+            param_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+            risk_level="high",
+            require_hitl=True,
+        )
+        bridge = ConfirmBridge()
+        seen = []
+
+        def ws_confirm(summary):
+            seen.append(summary)
+            return True
+
+        def run_agent():
+            tid = threading.get_ident()
+            bridge.set_target(ws_confirm, thread_id=tid)
+            try:
+                return execute_tool(
+                    tool_executor=registry,
+                    name="shell_exec",
+                    arguments={"command": "echo hi"},
+                    caller="react_agent",
+                    hitl_approver=bridge,
+                )
+            finally:
+                bridge.set_target(None, thread_id=tid)
+
+        thread = threading.Thread(target=lambda: results.append(run_agent()))
+        results = []
+        thread.start()
+        thread.join(timeout=30)
+
+        assert not thread.is_alive()
+        assert results == ["executed: echo hi"]
+        assert len(seen) == 1
+
+    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    def test_confirm_bridge_no_target_still_fails_closed(self, mock_get_hook):
+        import threading
+
+        from agentnexus.agents.tool_runner import execute_tool
+        from agentnexus.tools.confirm_bridge import ConfirmBridge
+        from agentnexus.tools.registry import ToolRegistry
+
+        hook_ctx = _make_hook_ctx()
+        mock_get_hook.return_value.fire.return_value = hook_ctx
+
+        registry = ToolRegistry()
+        registry.register_tool(
+            "shell_exec",
+            "fake shell",
+            lambda command: "should not run",
+            param_schema={"type": "object", "properties": {"command": {"type": "string"}},
+                          "required": ["command"]},
+            risk_level="high",
+            require_hitl=True,
+        )
+
+        result = execute_tool(
+            tool_executor=registry,
+            name="shell_exec",
+            arguments={"command": "echo hi"},
+            caller="react_agent",
+            hitl_approver=ConfirmBridge(),
+        )
+        assert "用户取消" in result

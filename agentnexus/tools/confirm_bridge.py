@@ -21,7 +21,17 @@ class ConfirmBridge:
         self._thread_targets[thread_id] = target
 
     def __call__(self, summary: str) -> bool:
-        target = self._thread_targets.get(threading.get_ident(), self._target)
+        return self.confirm_as(threading.get_ident(), summary)
+
+    def confirm_as(self, thread_id: int, summary: str) -> bool:
+        """Route as if called from *thread_id* — for callers that hop threads.
+
+        tool_runner.execute_tool invokes the registry on a pool worker
+        thread, so __call__'s implicit get_ident() would miss the target
+        registered by the submitting (agent) thread. Callers that know
+        their logical thread use this to keep the routing correct.
+        """
+        target = self._thread_targets.get(thread_id, self._target)
         if target is None:
             return False
         return bool(target(summary))
