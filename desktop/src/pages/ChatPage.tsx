@@ -7,6 +7,8 @@ import { BorderBeam } from 'border-beam'
 import { ThinkingOrb } from 'thinking-orbs'
 import { api, type AttachmentRef, mimeForPath, humanSize } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
+import { thinkingEffortArm } from '../services/thinkingEffortArm'
+import ThinkEffortControl from '../components/chat/ThinkEffortControl'
 import { useProjects, pickAndAddProject } from '../services/projects'
 import { animateMessage } from '../utils/animations'
 import { toolIcon } from '../utils/toolIcons'
@@ -755,6 +757,10 @@ export default function ChatPage() {
           if (planModeArm.consume()) {
             try { await api.setPlanMode(session_id, true) } catch { /* best-effort */ }
           }
+          const armedEffort = thinkingEffortArm.consume()
+          if (armedEffort !== null) {
+            try { await api.setThinkingEffort(session_id, armedEffort) } catch { /* best-effort */ }
+          }
           currentSessionIdRef.current = session_id; initNew(session_id)
         }))
     } else {
@@ -823,6 +829,10 @@ export default function ChatPage() {
         // first message can be sent, so the very first run is already gated.
         if (planModeArm.consume()) {
           try { await api.setPlanMode(session_id, true) } catch { /* best-effort; toggle shows off */ }
+        }
+        const armedEffort = thinkingEffortArm.consume()
+        if (armedEffort !== null) {
+          try { await api.setThinkingEffort(session_id, armedEffort) } catch { /* best-effort */ }
         }
         currentSessionIdRef.current = session_id
         initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
@@ -1415,6 +1425,7 @@ export default function ChatPage() {
               currentModel={runtimeStatus?.model_id ?? null}
               onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}
             />
+            <ThinkEffortControl sessionId={sessionId} />
             <PlanModeToggle sessionId={sessionId} />
             {versionStatus?.head && (
               <span className="flex items-center gap-1 shrink-0">

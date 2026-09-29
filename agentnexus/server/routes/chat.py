@@ -481,6 +481,7 @@ def get_session(session_id: str):
             "profile": session.profile,
             "workspace": session.workspace,
             "plan_mode": runtime.chat.is_plan_mode(session_id),
+            "thinking_effort": runtime.chat.get_thinking_effort(session_id),
         }
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
@@ -500,6 +501,25 @@ def set_plan_mode(session_id: str, req: PlanModeRequest):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"session_id": session_id, "plan_mode": active}
+
+
+class ThinkingEffortRequest(BaseModel):
+    # null = follow Settings default; otherwise none|low|medium|high
+    effort: str | None = None
+
+
+@router.post("/session/{session_id}/thinking-effort")
+def set_thinking_effort(session_id: str, req: ThinkingEffortRequest):
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    try:
+        effort = runtime.chat.set_thinking_effort(session_id, req.effort)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"session_id": session_id, "thinking_effort": effort}
 
 
 @router.websocket("/ws/agent/{session_id}")

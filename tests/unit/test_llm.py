@@ -109,7 +109,7 @@ class TestThinkRetryLoop:
 
         call_count = [0]
 
-        def fake_call(messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None, on_token=None):
+        def fake_call(messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None, on_token=None, effort=None):
             call_count[0] += 1
             if call_count[0] == 1:
                 return ""  # simulates transient failure (empty = retry)

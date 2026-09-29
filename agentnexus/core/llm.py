@@ -315,7 +315,8 @@ class AgentLLM:
               projection_fn: Callable | None = None,
               thinking: bool | None = None,
               max_attempts: int | None = None,
-              on_token: Callable[[str], None] | None = None) -> str:
+              on_token: Callable[[str], None] | None = None,
+              effort: str | None = None) -> str:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         if not self.api_key or not self.base_url:
@@ -357,6 +358,7 @@ class AgentLLM:
                 result = self._call(
                     effective_messages, temperature, silent, attempt,
                     tools, response_format, thinking, on_token=on_token,
+                    effort=effort,
                 ) or ""
                 if result:
                     break
@@ -379,7 +381,7 @@ class AgentLLM:
         return result
 
     def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None,
-              on_token=None) -> str:
+              on_token=None, effort=None) -> str:
         model = self.model
 
         ctx = trace_manager.active
@@ -422,7 +424,7 @@ class AgentLLM:
             try:
                 result = self._call_via_provider(
                     provider, messages, temperature, tools,
-                    response_format, thinking, on_token,
+                    response_format, thinking, on_token, effort=effort,
                 )
                 self.last_tool_calls = result.tool_calls
                 self.last_truncated = result.truncated
@@ -505,6 +507,7 @@ class AgentLLM:
         response_format: dict | None,
         thinking: bool | None,
         on_token: Callable[[str], None] | None = None,
+        effort: str | None = None,
     ) -> "StreamResult":
         """Call LLM via a direct provider (OpenAI SDK)."""
         caps = self.capabilities
@@ -519,13 +522,19 @@ class AgentLLM:
 
         # Explicit thinking control — never rely on vendor defaults (DeepSeek
         # thinks even when we "don't ask"). "none" disables, low/medium/high
-        # enables at that depth.
-        should_think = thinking if thinking is not None else caps.supports_thinking
-        if should_think and tracker.is_available("thinking", caps.supports_thinking):
-            effort = caps.thinking_effort if caps.thinking_effort != "none" else "medium"
-            reasoning_effort = effort
-        else:
+        # enables at that depth. `effort` is a per-call override (session
+        # thinking-effort); None falls back to capabilities/settings.
+        if effort == "none":
             reasoning_effort = "none"
+        else:
+            should_think = thinking if thinking is not None else caps.supports_thinking
+            can_think = should_think and tracker.is_available("thinking", caps.supports_thinking)
+            if effort in ("low", "medium", "high"):
+                reasoning_effort = effort if can_think else "none"
+            elif can_think:
+                reasoning_effort = caps.thinking_effort if caps.thinking_effort != "none" else "medium"
+            else:
+                reasoning_effort = "none"
 
         provider_response_format = None
         if response_format:

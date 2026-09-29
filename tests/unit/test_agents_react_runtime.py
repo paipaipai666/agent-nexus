@@ -40,7 +40,7 @@ class TestRoundRecording:
     def _drive(self, agent, ctx, monkeypatch):
         monkeypatch.setattr(
             "agentnexus.agents.re_act_agent.call_llm",
-            lambda llm, ctx, json_format_section="", on_token=None: ctx.last_response_text,
+            lambda llm, ctx, json_format_section="", on_token=None, effort=None: ctx.last_response_text,
         )
         return agent._on_round(ctx, ReActEvent(ReActEventType.ROUND_READY))
 

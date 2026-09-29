@@ -156,7 +156,7 @@ export const api = {
     }),
 
   getSession: (sessionId: string) =>
-    request<{ session_id: string; skill: string | null; profile: string | null; workspace: string | null; plan_mode: boolean }>(
+    request<{ session_id: string; skill: string | null; profile: string | null; workspace: string | null; plan_mode: boolean; thinking_effort: string | null }>(
       `/api/session/${sessionId}`
     ),
 
@@ -164,6 +164,13 @@ export const api = {
     request<{ session_id: string; plan_mode: boolean }>(`/api/session/${sessionId}/plan-mode`, {
       method: 'POST',
       body: JSON.stringify({ enabled }),
+    }),
+
+  /** Session thinking-effort override. `effort` null = follow Settings default. */
+  setThinkingEffort: (sessionId: string, effort: string | null) =>
+    request<{ session_id: string; thinking_effort: string | null }>(`/api/session/${sessionId}/thinking-effort`, {
+      method: 'POST',
+      body: JSON.stringify({ effort }),
     }),
 
   getSessions: () =>

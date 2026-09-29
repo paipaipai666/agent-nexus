@@ -209,6 +209,9 @@ class ChatService:
         # (chat._get_or_create_memory) — restored via restore_session_stm().
         # Per-session plan-mode switches (in-memory; reset on server restart).
         self._plan_mode = PlanModeManager()
+        # Per-session thinking-effort override: "none"|"low"|"medium"|"high" or
+        # None = follow Settings default (model_thinking_effort).
+        self._thinking_effort: dict[str, str | None] = {}
 
     # ── Plan mode ─────────────────────────────────────────────────
 
@@ -220,6 +223,27 @@ class ChatService:
 
     def is_plan_mode(self, session_id: str) -> bool:
         return self._plan_mode.is_active(session_id)
+
+    # ── Thinking effort (session override) ─────────────────────────
+
+    def set_thinking_effort(self, session_id: str, effort: str | None) -> str | None:
+        """Set this session's thinking-effort override.
+
+        ``effort`` is one of ``none|low|medium|high``, or ``None`` to follow
+        the Settings default. Raises KeyError for unknown sessions.
+        """
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        if effort is not None and effort not in ("none", "low", "medium", "high"):
+            raise ValueError(f"不支持的思考强度: {effort}，可选: none, low, medium, high, 或 null")
+        self._thinking_effort[session_id] = effort
+        agent = self._agents.get(session_id)
+        if agent is not None and hasattr(agent, "set_thinking_effort"):
+            agent.set_thinking_effort(effort)
+        return effort
+
+    def get_thinking_effort(self, session_id: str) -> str | None:
+        return self._thinking_effort.get(session_id)
 
     def start_session(
         self,
@@ -283,6 +307,7 @@ class ChatService:
         with self._processing_lock:
             self._processing_sessions.discard(session_id)
         self._plan_mode.clear(session_id)
+        self._thinking_effort.pop(session_id, None)
 
     def is_session_processing(self, session_id: str) -> bool:
         """Check if a specific session is currently processing."""
@@ -387,6 +412,10 @@ class ChatService:
         # Plan-mode gate: live binding so mid-run manual toggles take effect.
         if hasattr(agent, "set_plan_mode"):
             agent.set_plan_mode(PlanModeBinding(self._plan_mode, session_id))
+        # Session thinking-effort override — mid-run switches apply on the
+        # next LLM call.
+        if hasattr(agent, "set_thinking_effort"):
+            agent.set_thinking_effort(self._thinking_effort.get(session_id))
         # Attachments: validate all-or-nothing BEFORE anything is committed —
         # a dead file must not half-send. Vision gate degrades images to
         # path-only references when the model can't see. Read capabilities

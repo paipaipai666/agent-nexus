@@ -467,9 +467,9 @@ export default function SettingsPage() {
             填 base_url 与 api_key，拉取或添加模型即可。思考模式：关闭=只用协议 Thought；低/中/高=请求模型推理。能力自动检测；特殊模型可在 config.yaml 的 override 里覆盖。
           </p>
 
-          {/* Thinking mode — one knob: off / depth. Maps to model_thinking + model_thinking_effort. */}
+          {/* Thinking mode default — session HUD chip overrides per conversation. */}
           <div className="flex items-center gap-3 mb-3">
-            <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>思考模式</label>
+            <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>新会话默认思考强度</label>
             <select
               value={(() => {
                 const enabled = config.model_thinking === true || config.model_thinking === 'true'
@@ -479,7 +479,7 @@ export default function SettingsPage() {
               })()}
               onChange={e => handleThinkingModeChange(e.target.value)}
               className="input-field flex-1 font-mono text-xs"
-              title="关闭=不请求模型推理；低/中/高=开启推理并控制深度。协议层 Thought（工具轮说明）与模型推理分开计"
+              title="新会话的默认强度。会话内可在聊天 HUD 的「思考」滑条上覆盖。关闭=不请求模型推理；低/中/高=开启推理并控制深度"
             >
               <option value="off">关闭（仅协议 Thought）</option>
               <option value="low">低</option>

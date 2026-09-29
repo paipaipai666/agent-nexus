@@ -389,6 +389,13 @@ def update_config(req: ConfigUpdateRequest):
     if req.key in ("llm_model_id", "llm_base_url", "llm_api_key", "llm_timeout", "active_model"):
         from agentnexus.server.app import _get_runtime
         _apply_active_llm(_get_runtime(), get_settings())
+    elif req.key in ("model_thinking", "model_thinking_effort"):
+        # Thinking flags live on the cached ModelCapabilities; drop the cache
+        # so the next LLM call re-detects from the fresh settings.
+        from agentnexus.server.app import _get_runtime
+        llm = getattr(_get_runtime(), "llm", None)
+        if llm is not None and hasattr(llm, "_capabilities"):
+            llm._capabilities = None
 
     return {"status": "updated", "key": req.key}
 

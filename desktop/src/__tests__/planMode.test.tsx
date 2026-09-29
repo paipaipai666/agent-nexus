@@ -22,14 +22,14 @@ describe('PlanModeToggle', () => {
   })
 
   it('reflects initial plan_mode=true from getSession', async () => {
-    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: true })
+    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: true, thinking_effort: null })
     render(<PlanModeToggle sessionId="s1" />)
     const btn = await screen.findByRole('button')
     await waitFor(() => expect(btn).toHaveAttribute('aria-pressed', 'true'))
   })
 
   it('toggles off via setPlanMode and updates pressed state', async () => {
-    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: true })
+    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: true, thinking_effort: null })
     mockedApi.setPlanMode.mockResolvedValue({ session_id: 's1', plan_mode: false })
     render(<PlanModeToggle sessionId="s1" />)
     const btn = await screen.findByRole('button')
@@ -59,7 +59,7 @@ describe('PlanModeToggle', () => {
   })
 
   it('disarmed pre-session stays off when a session appears', async () => {
-    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: false })
+    mockedApi.getSession.mockResolvedValue({ session_id: 's1', skill: null, profile: null, workspace: null, plan_mode: false, thinking_effort: null })
     const { rerender } = render(<PlanModeToggle sessionId={null} />)
     rerender(<PlanModeToggle sessionId="s1" />)
     await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s1'))

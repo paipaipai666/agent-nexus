@@ -39,7 +39,7 @@ def prepare_llm_call(
 
 
 def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
-             on_token: Any = None) -> str:
+             on_token: Any = None, effort: str | None = None) -> str:
     from agentnexus.core.hooks import HookType, get_hook_manager
 
     hook_mgr = get_hook_manager()
@@ -72,6 +72,7 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
         thinking=run_state.thinking_enabled,
         on_token=on_token,
         silent=True,
+        effort=effort,
     )
 
     # ── after model hook (can modify response text) ──────────

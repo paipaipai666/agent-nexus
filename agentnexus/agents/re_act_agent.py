@@ -122,6 +122,7 @@ class ReActAgent:
         self._todo_list = None  # Set externally after construction
         # Plan-mode binding (per-session in server mode); None = plan mode off.
         self._plan_mode: PlanModeBinding | None = None
+        self._thinking_effort: str | None = None
         self._degrade_count = 0
         # Persona and behavioral fragments — loaded once, stable across sessions
         settings = get_settings()
@@ -180,6 +181,10 @@ class ReActAgent:
     def set_plan_mode(self, binding: PlanModeBinding | None) -> None:
         """安装计划模式绑定；None 表示该 agent 不受计划模式约束。"""
         self._plan_mode = binding
+
+    def set_thinking_effort(self, effort: str | None) -> None:
+        """Session thinking-effort override (none|low|medium|high) or None = follow settings."""
+        self._thinking_effort = effort
 
     def set_round_persist(self, fn) -> None:
         """Install per-round durable commit (called after each ReAct iteration)."""
@@ -540,6 +545,7 @@ class ReActAgent:
             ctx,
             json_format_section=self._build_json_format_section(),
             on_token=_stream_token,
+            effort=getattr(self, "_thinking_effort", None),
         )
         # 时间线可观测：一次模型调用的量化指标（latency/tokens/cache/策略）
         try:
