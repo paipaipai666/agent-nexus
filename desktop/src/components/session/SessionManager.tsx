@@ -9,6 +9,14 @@ export interface Message {
   toolName?: string
   toolCallId?: string
   toolStatus?: 'running' | 'done' | 'error'
+  /** Structured tool arguments — powers the collapsed-row arg summary. */
+  toolArgs?: Record<string, unknown>
+  /** Result body (no `tool_name:` prefix). Falls back to `content`. */
+  toolResult?: string
+  /** Wall-clock duration reported by TOOL_DONE. */
+  toolDurationMs?: number
+  /** Risk level from Tool Gateway metadata (empty when low/unknown). */
+  toolRisk?: string
   /** Files attached to a user message — rendered as chips on the bubble. */
   attachments?: AttachmentRef[]
   /** Optional emoji reaction the agent attached under this user message. */
@@ -536,7 +544,16 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           const next = commitStep(prev, { discardAnswer: true })
           return {
             ...next,
-            messages: [...next.messages, { id: `tc-${getSessionCounter(sid)}`, role: 'tool', content: `Calling: ${data.tool_name}`, toolName: data.tool_name, toolCallId: data.tool_call_id, toolStatus: 'running', timestamp: new Date() }],
+            messages: [...next.messages, {
+              id: `tc-${getSessionCounter(sid)}`,
+              role: 'tool',
+              content: '',
+              toolName: data.tool_name,
+              toolCallId: data.tool_call_id,
+              toolArgs: (data.arguments && typeof data.arguments === 'object') ? data.arguments : {},
+              toolStatus: 'running',
+              timestamp: new Date(),
+            }],
           }
         })
       }),
@@ -552,7 +569,15 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           )
           if (idx < 0) return prev
           const messages = [...prev.messages]
-          messages[idx] = { ...messages[idx], toolStatus: 'done' as const, content: `${data.tool_name}: ${data.result || 'done'}` }
+          const resultText = data.result || ''
+          messages[idx] = {
+            ...messages[idx],
+            toolStatus: data.error ? 'error' : 'done',
+            toolResult: resultText,
+            content: resultText,
+            toolDurationMs: typeof data.duration_ms === 'number' ? data.duration_ms : undefined,
+            toolRisk: data.risk_level || undefined,
+          }
           return { ...prev, messages }
         })
       }),

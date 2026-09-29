@@ -52,6 +52,10 @@ interface ToolMsg {
   toolName?: string
   toolCallId?: string
   toolStatus?: string
+  toolArgs?: Record<string, unknown>
+  toolResult?: string
+  toolDurationMs?: number
+  toolRisk?: string
 }
 
 function makeProbe(
@@ -118,8 +122,8 @@ describe('Parallel same-name tool cards (desktop)', () => {
       ws._receive({ type: 'run_started', run_id: 'run-1' })
       ws._receive({ type: 'tool_call', tool_name: 'file_list', arguments: { path: 'a' }, tool_call_id: 'call_1' })
       ws._receive({ type: 'tool_call', tool_name: 'file_list', arguments: { path: 'b' }, tool_call_id: 'call_2' })
-      ws._receive({ type: 'tool_result', tool_name: 'file_list', result: 'dir-a', tool_call_id: 'call_1' })
-      ws._receive({ type: 'tool_result', tool_name: 'file_list', result: 'dir-b', tool_call_id: 'call_2' })
+      ws._receive({ type: 'tool_result', tool_name: 'file_list', result: 'dir-a', tool_call_id: 'call_1', duration_ms: 12 })
+      ws._receive({ type: 'tool_result', tool_name: 'file_list', result: 'dir-b', tool_call_id: 'call_2', duration_ms: 34, error: false })
       await sleep(30)
     })
 
@@ -128,8 +132,14 @@ describe('Parallel same-name tool cards (desktop)', () => {
     expect(cards[0].toolStatus).toBe('done')
     expect(cards[1].toolStatus).toBe('done')
     // The regression: both cards used to show the first result.
-    expect(cards[0].content).toBe('file_list: dir-a')
-    expect(cards[1].content).toBe('file_list: dir-b')
+    // Body is the raw result (no `tool_name:` prefix) — collapsed row shows name+args.
+    expect(cards[0].content).toBe('dir-a')
+    expect(cards[1].content).toBe('dir-b')
+    expect((cards[0] as any).toolArgs).toEqual({ path: 'a' })
+    expect((cards[1] as any).toolArgs).toEqual({ path: 'b' })
+    expect((cards[0] as any).toolDurationMs).toBe(12)
+    expect((cards[1] as any).toolDurationMs).toBe(34)
+    expect((cards[1] as any).toolStatus).toBe('done')
   })
 
   it('fallback without tool_call_id updates only the FIRST running card, not all', async () => {
@@ -143,8 +153,21 @@ describe('Parallel same-name tool cards (desktop)', () => {
 
     const cards = toolCards()
     expect(cards[0].toolStatus).toBe('done')
-    expect(cards[0].content).toBe('file_list: dir-a')
+    expect(cards[0].content).toBe('dir-a')
     // Second card must stay running — the old .map() marked every match done.
     expect(cards[1].toolStatus).toBe('running')
+  })
+
+  it('marks error status from tool_result.error', async () => {
+    await act(async () => {
+      ws._receive({ type: 'run_started', run_id: 'run-1' })
+      ws._receive({ type: 'tool_call', tool_name: 'shell_exec', arguments: { command: 'false' }, tool_call_id: 'call_e' })
+      ws._receive({ type: 'tool_result', tool_name: 'shell_exec', result: 'exit 1', tool_call_id: 'call_e', error: true, duration_ms: 20 })
+      await sleep(30)
+    })
+    const cards = toolCards()
+    expect(cards[0].toolStatus).toBe('error')
+    expect(cards[0].content).toBe('exit 1')
+    expect((cards[0] as any).toolDurationMs).toBe(20)
   })
 })

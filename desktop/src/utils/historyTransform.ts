@@ -28,13 +28,30 @@ const REACTION_EMOJI: Record<string, string> = {
 
 const REACTION_TOOL = 'express_reaction'
 
-const cleanToolContent = (content: string): { name: string; display: string } => {
+const cleanToolContent = (content: string): {
+  name: string
+  display: string
+  args: Record<string, unknown>
+} => {
   const actionMatch = content.match(/^Action:\s*(\w+)\[/)
   const name = actionMatch ? actionMatch[1] : 'tool'
+  let args: Record<string, unknown> = {}
+  if (actionMatch) {
+    const argsStart = actionMatch.index! + actionMatch[0].length - 1 // at '['
+    const obsIdx = content.indexOf('\nObservation:')
+    const searchEnd = obsIdx >= 0 ? obsIdx : content.length
+    const argsEnd = content.lastIndexOf(']', searchEnd)
+    if (argsEnd > argsStart) {
+      try {
+        const parsed = JSON.parse(content.slice(argsStart + 1, argsEnd))
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>
+      } catch { /* keep empty args on malformed JSON */ }
+    }
+  }
   const obsIdx = content.indexOf('\nObservation:')
   let display = obsIdx >= 0 ? content.slice(obsIdx + 13).trim() : content
   if (display.length > 500) display = display.slice(0, 500) + '\n...(truncated)'
-  return { name, display }
+  return { name, display, args }
 }
 
 /** Parse express_reaction arguments out of a journal tool row, if present. */
@@ -119,8 +136,17 @@ export function transformHistoryMessages(
         }
         continue
       }
-      const { name, display } = cleanToolContent(content)
-      pendingTools.push({ id: '', role: 'tool', content: display, toolName: name, toolStatus: 'done', timestamp: ts })
+      const { name, display, args } = cleanToolContent(content)
+      pendingTools.push({
+        id: '',
+        role: 'tool',
+        content: display,
+        toolResult: display,
+        toolName: name,
+        toolArgs: args,
+        toolStatus: 'done',
+        timestamp: ts,
+      })
       continue
     }
 

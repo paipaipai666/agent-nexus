@@ -64,6 +64,21 @@ describe('transformHistoryMessages', () => {
     expect(out.map(m => m.role)).toEqual(['user', 'system', 'tool', 'assistant'])
     expect(out[2].toolName).toBe('web_search')
     expect(out[2].toolStatus).toBe('done')
+    // structured fields for the ToolCard arg summary / typed body
+    expect(out[2].toolArgs).toEqual({ q: '天气' })
+    expect(out[2].toolResult).toBe('晴')
+    expect(out[2].content).toBe('晴')
+  })
+
+  it('parses nested JSON args and keeps observation as body (no tool_name prefix)', () => {
+    const out = transformHistoryMessages(stm([
+      ['user', 'write'],
+      ['tool', 'Action: file_write[{"file_path": "a.py", "content": "x = {1: [2]}"}]\nObservation: [file_write] 已创建 a.py'],
+    ]))
+    const tool = out.find(m => m.role === 'tool')!
+    expect(tool.toolArgs).toEqual({ file_path: 'a.py', content: 'x = {1: [2]}' })
+    expect(tool.content).toBe('[file_write] 已创建 a.py')
+    expect(tool.content).not.toContain('file_write:')
   })
 
   it('plain assistant rows become thinking cards (display_only thoughts)', () => {

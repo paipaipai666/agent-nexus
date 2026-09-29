@@ -892,6 +892,7 @@ class ChatService:
                         "id": payload.get("id", ""),
                         "duration_ms": payload.get("duration_ms", 0),
                         "risk_level": payload.get("risk_level", ""),
+                        "error": bool(payload.get("error", False)),
                     },
                     run_id=run_id,
                     session_id=session_id,

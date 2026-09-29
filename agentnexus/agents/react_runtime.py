@@ -180,7 +180,8 @@ def execute_pending_tools_batch(
         })
         ctx.emit(ReActEventType.TOOL_DONE, name=tc["name"], arguments=tc["arguments"],
                  result=observation, id=tc.get("id", ""),
-                 duration_ms=result_obj.duration_ms, risk_level=_risk_of(tc["name"]))
+                 duration_ms=result_obj.duration_ms, risk_level=_risk_of(tc["name"]),
+                 error=result_obj.error is not None)
 
     if memory_state.memory_manager and memory_state.memory_manager.has_new_memories():
         memory_state.memory_context = memory_state.memory_manager.refresh_ltm_context(run_state.question)

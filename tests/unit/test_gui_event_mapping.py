@@ -219,6 +219,24 @@ class TestChatServiceAnswerFlow:
         assert result["result"] == "search results here"
         assert result["seq"] == 6
 
+    def test_tool_done_forwards_duration_error_risk(self):
+        """GUI cards need duration/error/risk — not just the result string."""
+        event = AgentEvent(
+            type="tool_done",
+            payload={
+                "name": "shell_exec",
+                "result": "[TIMEOUT] timed out",
+                "duration_ms": 290.5,
+                "risk_level": "medium",
+                "error": True,
+            },
+            run_id="run_123",
+        )
+        result = _map_to_gui_event(event, MagicMock(), 7)
+        assert result["duration_ms"] == 290.5
+        assert result["risk_level"] == "medium"
+        assert result["error"] is True
+
     def test_tool_start_with_space_in_name(self):
         """Tool names with spaces are preserved through direct payload."""
         event = AgentEvent(

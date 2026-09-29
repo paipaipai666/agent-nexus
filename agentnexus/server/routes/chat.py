@@ -90,6 +90,9 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
             "tool_name": payload.get("name", ""),
             "result": payload.get("result", ""),
             "tool_call_id": payload.get("id", ""),
+            "duration_ms": payload.get("duration_ms", 0),
+            "risk_level": payload.get("risk_level", ""),
+            "error": bool(payload.get("error", False)),
             "run_id": run_id,
             "seq": seq,
         }
