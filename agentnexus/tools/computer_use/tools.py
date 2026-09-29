@@ -1,7 +1,7 @@
 """Computer Use tool functions — sync wrappers for the async manager.
 
 These are the public API functions registered with the ToolRegistry.
-Each follows the sync wrapper + _run_async() pattern from browser.py.
+Each follows the sync wrapper + _run_async() pattern.
 """
 
 from __future__ import annotations

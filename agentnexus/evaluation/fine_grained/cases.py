@@ -206,10 +206,7 @@ PLANNING_REAL_CASES: list[EvalCase] = [
     EvalCase(id="RPLAN-006", dataset="planning_real_registry",
              user_input="跑一下 pytest 看看测试过没过", expected_tool="shell_exec"),
     EvalCase(id="RPLAN-007", dataset="planning_real_registry",
-             user_input="用 Python 算一下 1024 的平方根",
-             expected_any_tools=["python_execute", "shell_exec"]),
-    EvalCase(id="RPLAN-008", dataset="planning_real_registry",
-             user_input="打开百度看看首页", expected_tool="browser_navigate"),
+             user_input="用 Python 算一下 1024 的平方根", expected_tool="shell_exec"),
 ]
 
 MULTI_TURN_CASES: list[EvalCase] = [

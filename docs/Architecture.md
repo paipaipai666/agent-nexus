@@ -36,8 +36,8 @@
 │              本地基础设施层                                  │
 │  ChromaDB(向量)  SQLite(关系型)  JSONL(追踪)                │
 │  SentenceTransformers + BM25 + BGE-Reranker                │
-│  E2B / bubblewrap / Docker / 本地沙箱                       │
-│  Playwright (浏览器自动化)  OS 无障碍 API (桌面自动化)       │
+│  bubblewrap / Seatbelt / Low-IL / Docker / 本地沙箱         │
+│  外部浏览器 MCP 工具  OS 无障碍 API (桌面自动化)              │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ agentnexus/
 ├── services/                 ── 服务外观层
 ├── skills/                   ── Skill 发现/路由/运行时
 ├── storage/                  ── 存储抽象层
-├── tools/                    ── 注册表/提供者/MCP/浏览器
+├── tools/                    ── 注册表/提供者/MCP
 │   └── computer_use/         ── 桌面自动化 (OS 无障碍 API)
 ├── tui/                      ── Textual 界面
 └── wiki/                     ── 混合 Wiki + RAG 知识管理
@@ -68,18 +68,17 @@ agentnexus/
 
 ## 工具提供者 (Tool Providers)
 
-系统使用 `ToolProvider` 协议，11 个提供者按顺序注册：
+系统使用 `ToolProvider` 协议，10 个提供者按顺序注册：
 
 | 提供者 | 工具 | 说明 |
 | --- | --- | --- |
 | `MemoryToolProvider` | `memory_search`, `memory_save` | 长期记忆检索与保存 |
 | `SearchToolProvider` | `grep_search`, `web_search`, `web_fetch`, `kb_search` | 搜索工具集 |
 | `FilesystemToolProvider` | `file_read`, `file_list`, `file_write` | 文件操作 |
-| `ExecutionToolProvider` | `python_execute`, `shell_exec` | 代码执行 (沙箱) |
+| `ExecutionToolProvider` | `shell_exec` | 代码执行 (沙箱) |
 | `SubagentToolProvider` | `subagent_run` | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | 待办事项管理 |
-| `BrowserToolProvider` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_read`, `browser_screenshot`, `browser_evaluate`, `browser_wait`, `browser_scroll`, `browser_scroll_to` | 浏览器自动化 |
 | `ComputerUseToolProvider` | `computer_snapshot`, `computer_list_windows`, `computer_switch_window`, `computer_launch`, `computer_click`, `computer_type`, `computer_key`, `computer_select`, `computer_toggle`, `computer_scroll` | 桌面自动化 (OS 无障碍 API) |
 
 ## 服务启动顺序
@@ -90,7 +89,7 @@ agentnexus/
 2. 创建 `AgentLLM` + `ToolExecutor` + `ConfirmBridge`
 3. 初始化 `MCPToolManager`（若 `mcp_enabled=True`）
 4. 加载 `ExtensionManager`
-5. `register_all_tools()` — 注册 11 个提供者 + MCP
+5. `register_all_tools()` — 注册 10 个提供者 + MCP
 6. 创建 `MemoryManager` + `ConversationVersionManager`
 7. 创建 `ReActAgent`
 8. `SkillRegistry.discover()` — 扫描 skill 目录
@@ -99,7 +98,7 @@ agentnexus/
 11. 组装 `AppServices`（Chat/Config/Eval/KB/Skill）
 12. 返回 `AppRuntime` 实例
 
-> 见 [ReAct Agent](ReAct-Agent.md) 了解 FSM 细节，[工具治理](Tool-Governance.md) 了解 7 道关卡，[浏览器自动化](Browser-Automation.md) 了解 Playwright 集成，[应用运行时](App-Runtime.md) 了解完整组装流程。
+> 见 [ReAct Agent](ReAct-Agent.md) 了解 FSM 细节，[工具治理](Tool-Governance.md) 了解 7 道关卡，[MCP 集成](MCP-Integration.md) 了解外部浏览器工具接入，[应用运行时](App-Runtime.md) 了解完整组装流程。
 
 ## 模块详细文档
 
@@ -108,7 +107,7 @@ agentnexus/
 | Core 核心 | [Core-Detailed.md](Core-Detailed.md) | 配置、LLM、能力检测、钩子、Provider |
 | App Runtime | [App-Runtime.md](App-Runtime.md) | 统一组装层、依赖注入、生命周期管理 |
 | Agents 代理 | [Agents-Detailed.md](Agents-Detailed.md) | FSM 状态机、16 状态 × 25 转移、四级策略 |
-| Tools 工具 | [Tools-Detailed.md](Tools-Detailed.md) | 7 道关卡、11 个提供者、MCP、浏览器、桌面 |
+| Tools 工具 | [Tools-Detailed.md](Tools-Detailed.md) | 7 道关卡、10 个提供者、MCP、桌面 |
 | Skills 技能 | [Skills-Detailed.md](Skills-Detailed.md) | 发现、路由、运行时、SKILL.md 格式 |
 | Memory + RAG | [Memory-RAG-Detailed.md](Memory-RAG-Detailed.md) | STM/LTM/版本/压缩 + RAG 检索/重排 |
 | Wiki 系统 | [Wiki-System-Detailed.md](Wiki-System-Detailed.md) | 混合 Wiki+RAG、机械验证、图传播、校准 |
@@ -119,7 +118,6 @@ agentnexus/
 | Server + Services | [Server-Services-Detailed.md](Server-Services-Detailed.md) | FastAPI 服务器、服务外观层 |
 | Storage | [Storage-Detailed.md](Storage-Detailed.md) | ChromaDB、SQLite 存储抽象 |
 | CLI + TUI | [CLI-TUI-Detailed.md](CLI-TUI-Detailed.md) | 40+ CLI 命令、Textual TUI |
-| 浏览器自动化 | [Browser-Automation.md](Browser-Automation.md) | Playwright 集成 |
 | 桌面自动化 | [Computer-Use.md](Computer-Use.md) | OS 无障碍 API |
 | MCP 集成 | [MCP-Integration.md](MCP-Integration.md) | 动态工具导入 |
 

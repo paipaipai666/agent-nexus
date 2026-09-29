@@ -53,30 +53,6 @@ class TestApiKeyNotInSpan:
         assert "api_key" not in meta
 
 
-class TestE2BEnvHygiene:
-    """os.environ['E2B_API_KEY'] must not be set when key is empty."""
-
-    @patch("agentnexus.tools.code_executor.get_settings")
-    def test_e2b_env_not_set_without_key(self, mock_settings):
-        """When e2b_api_key is empty, os.environ is not polluted."""
-        mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
-        saved = os.environ.get("E2B_API_KEY")
-        if "E2B_API_KEY" in os.environ:
-            del os.environ["E2B_API_KEY"]
-
-        from agentnexus.tools.code_executor import python_execute
-
-        mock_settings.return_value.code_execution_backend = "auto"
-        mock_settings.return_value.code_execution_timeout = 30
-        with patch("agentnexus.tools.code_executor._execute_native_sandbox") as mock_native:
-            mock_native.return_value = "ok"
-            python_execute("print(1)")
-
-        assert "E2B_API_KEY" not in os.environ
-        if saved is not None:
-            os.environ["E2B_API_KEY"] = saved
-
-
 class TestYamlSecurity:
     """YAML loading — safe_load rejects dangerous payloads."""
 
@@ -211,30 +187,3 @@ class TestPiiInTrace:
         d = {"content": "email: user@example.com"}
         result = _truncate_dict(d)
         assert "user@example.com" in str(result)
-
-
-class TestEnvVarLeakage:
-    """Environment variable leakage — AGENTNEXUS_* env vars."""
-
-    @patch("agentnexus.tools.code_executor.get_settings")
-    def test_agentnexus_env_vars_not_persisted(self, mock_settings):
-        """Other AGENTNEXUS_* env vars are not set in os.environ by code executor."""
-        import os
-        saved = {}
-        for key in list(os.environ.keys()):
-            if key.startswith("AGENTNEXUS_"):
-                saved[key] = os.environ[key]
-                del os.environ[key]
-
-        mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
-        try:
-            from agentnexus.tools.code_executor import python_execute
-            with patch("agentnexus.tools.code_executor._execute_locally") as mock_local:
-                mock_local.return_value = "ok"
-                python_execute("print(1)")
-            active_nexus_vars = {k: v for k, v in os.environ.items()
-                                 if k.startswith("AGENTNEXUS_")}
-            assert len(active_nexus_vars) == 0
-        finally:
-            for k, v in saved.items():
-                os.environ[k] = v

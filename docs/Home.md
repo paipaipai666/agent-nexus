@@ -25,8 +25,8 @@ graph TD
 | **对话与任务** | TUI 交互界面，ReAct 循环自动规划→执行→观察 |
 | **本地记忆** | STM 压缩金字塔 + LTM 双存储（嵌入+结构），评分驱逐 |
 | **知识库 RAG** | 稠密+稀疏+RRF+重排序混合检索，8 种格式 |
-| **浏览器自动化** | Playwright 驱动，支持无障碍树和 CDP 模式 |
-| **安全沙箱** | E2B → bubblewrap/Seatbelt → Docker → 本地兜底 |
+| **浏览器自动化** | 通过外部 MCP 服务器接入浏览器工具（如 Playwright/CDP） |
+| **安全沙箱** | bubblewrap/Seatbelt/Low-IL → Docker → 本地兜底 |
 | **工具审计** | 7 道安全关卡，每步可追溯 |
 | **可观测性** | Trace 树 + Token 成本 + 审计日志 |
 | **评估体系** | 8 个评估器，CI 模式门控 |

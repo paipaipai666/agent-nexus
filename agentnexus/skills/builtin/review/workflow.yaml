@@ -17,7 +17,6 @@ tool_policy:
     - memory_search
   deny:
     - shell_exec
-    - python_execute
     - file_write
   max_risk: low
   allow_subagents: false

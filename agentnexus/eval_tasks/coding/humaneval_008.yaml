@@ -11,7 +11,7 @@ input:
     \ List[str]) -> Optional[str]:\n    \"\"\"Return the longest string in the list.\"\
     \"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

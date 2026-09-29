@@ -245,7 +245,6 @@ class TestHitlAcrossThreadHop:
 
     @patch("agentnexus.agents.tool_runner.get_hook_manager")
     def test_confirm_bridge_no_target_still_fails_closed(self, mock_get_hook):
-        import threading
 
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge

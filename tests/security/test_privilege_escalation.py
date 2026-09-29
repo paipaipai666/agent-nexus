@@ -168,16 +168,27 @@ class TestSubagentToolFiltering:
         """_SAFE_SUBAGENT_TOOLS contains only low/medium-risk tools."""
         from agentnexus.tools.subagent import _SAFE_SUBAGENT_TOOLS
 
-        assert "python_execute" in _SAFE_SUBAGENT_TOOLS
+        assert "python_execute" not in _SAFE_SUBAGENT_TOOLS
         assert "grep_search" in _SAFE_SUBAGENT_TOOLS
         assert "file_read" in _SAFE_SUBAGENT_TOOLS
-        assert len(_SAFE_SUBAGENT_TOOLS) >= 7
+        assert len(_SAFE_SUBAGENT_TOOLS) >= 6
 
     def test_subagent_preset_tools_filtered_by_safe_list(self):
-        """Role presets only include tools from _SAFE_SUBAGENT_TOOLS."""
-        from agentnexus.tools.subagent import _ROLE_TOOL_PRESETS, _SAFE_SUBAGENT_TOOLS
+        """Resolved subagent tools are always filtered to _SAFE_SUBAGENT_TOOLS.
 
-        for role, tools in _ROLE_TOOL_PRESETS.items():
+        The executor preset lists shell_exec, which is in the safe set as the
+        delegated execution tool (replacing removed python_execute); it remains
+        HITL-gated at call time via the subagent confirm bridge.
+        """
+        from agentnexus.tools.subagent import (
+            _ROLE_TOOL_PRESETS,
+            _SAFE_SUBAGENT_TOOLS,
+            _resolve_allowed_tools,
+        )
+
+        for role in _ROLE_TOOL_PRESETS:
+            tools, _ = _resolve_allowed_tools(role, None)
+            assert tools, f"Role '{role}' resolved to no tools"
             for tool in tools:
                 assert tool in _SAFE_SUBAGENT_TOOLS, (
                     f"Role '{role}' includes unsafe tool '{tool}'"

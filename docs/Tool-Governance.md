@@ -13,7 +13,7 @@
 JSON Schema 校验参数结构，注册时自动编译缓存校验器。
 
 ### ③ 速率限制
-滑动窗口计数器（60 秒），`python_execute` 和 `shell_exec` 无限速。
+滑动窗口计数器（60 秒），`shell_exec` 无限速。
 
 ### ④ 超时控制
 `ThreadPoolExecutor(max_workers=4)` + `future.result(timeout=N)`。
@@ -34,20 +34,16 @@ JSON Schema 校验参数结构，注册时自动编译缓存校验器。
 
 ## 工具注册
 
-`ToolProvider` 协议，11 个提供者按顺序注册：
+`ToolProvider` 协议，10 个提供者按顺序注册：
 
 ```text
 MemoryToolProvider       → memory_search, memory_save
 SearchToolProvider       → grep_search, web_search, web_fetch, kb_search
 FilesystemToolProvider   → file_read, file_list, file_write
-ExecutionToolProvider    → python_execute, shell_exec
+ExecutionToolProvider    → shell_exec
 SubagentToolProvider     → subagent_run
 McpBridgeToolProvider    → MCP 动态导入
 TodoToolProvider         → todo_add, todo_update, todo_list
-BrowserToolProvider      → browser_navigate, browser_snapshot, browser_click, browser_type,
-                           browser_read, browser_screenshot, browser_evaluate, browser_wait,
-                           browser_scroll, browser_scroll_to, browser_wait_navigation,
-                           browser_dismiss_popup, browser_list_pages, browser_switch_page
 ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_switch_window,
                            computer_launch, computer_click, computer_type, computer_key,
                            computer_select, computer_toggle, computer_scroll
@@ -66,26 +62,11 @@ ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_
 | `file_read` | `path`, `offset?`, `limit?` | 30/min | LOW |
 | `file_list` | `path?`, `pattern?` | 20/min | LOW |
 | `file_write` | `path`, `content`, `mode?`, `expected_version?` | 20/min | MEDIUM |
-| `python_execute` | `code` | 无限 | HIGH |
 | `shell_exec` | `command`, `cwd?`, `timeout?` | 无限 | HIGH |
 | `subagent_run` | `task`, `role?`, `allowed_tools?`, `max_steps?` | 10/min | LOW |
 | `todo_add` | `description` | 无限 | LOW |
 | `todo_update` | `item_id`, `status` | 无限 | LOW |
 | `todo_list` | 无参数 | 无限 | LOW |
-| `browser_navigate` | `url`, `wait_until?`, `task_id?` | 10/min | LOW |
-| `browser_snapshot` | `scope?`, `mode?`, `include_offscreen?`, `task_id?` | 20/min | LOW |
-| `browser_click` | `ref?`, `role?`, `name?`, `selector?`, `double_click?`, `pos?`, `task_id?` | 20/min | MEDIUM |
-| `browser_type` | `ref?`, `role?`, `name?`, `selector?`, `text`, `clear?`, `press_enter?`, `pos?`, `task_id?` | 20/min | MEDIUM |
-| `browser_read` | `selector?`, `ref?`, `max_chars?`, `task_id?` | 30/min | LOW |
-| `browser_screenshot` | `path?`, `full_page?`, `task_id?` | 10/min | LOW |
-| `browser_evaluate` | `expression`, `task_id?` | 10/min | HIGH |
-| `browser_wait` | `role?`, `name?`, `ref?`, `text?`, `timeout?`, `task_id?` | 20/min | LOW |
-| `browser_scroll` | `direction?`, `amount?`, `task_id?` | 20/min | LOW |
-| `browser_scroll_to` | `landmark?`, `ref?`, `selector?`, `task_id?` | 20/min | LOW |
-| `browser_wait_navigation` | `url_contains?`, `timeout?`, `task_id?` | 10/min | LOW |
-| `browser_dismiss_popup` | 无参数 | 10/min | LOW |
-| `browser_list_pages` | 无参数 | 30/min | LOW |
-| `browser_switch_page` | `index` | 30/min | LOW |
 | `computer_snapshot` | `app_name?`, `window_title?`, `mode?`, `task_id?` | 10/min | LOW |
 | `computer_list_windows` | `task_id?` | 30/min | LOW |
 | `computer_switch_window` | `window_index?`, `app_name?`, `window_title?`, `task_id?` | 30/min | LOW |
@@ -97,7 +78,7 @@ ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_
 | `computer_toggle` | `element_id`, `checked?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
 | `computer_scroll` | `element_id?`, `direction?`, `amount?`, `task_id?` | 30/min | LOW |
 
-> 见 [Code-Execution](Code-Execution.md) 了解沙箱细节，[MCP-Integration](MCP-Integration.md) 了解外部工具集成，[Browser-Automation](Browser-Automation.md) 了解浏览器自动化，[Computer-Use](Computer-Use.md) 了解桌面自动化。
+> 见 [MCP-Integration](MCP-Integration.md) 了解外部工具集成（含外部浏览器 MCP 工具），[Computer-Use](Computer-Use.md) 了解桌面自动化。
 
 ## grep_search glob 模式
 

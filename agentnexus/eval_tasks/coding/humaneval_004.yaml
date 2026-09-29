@@ -10,7 +10,7 @@ input:
   prompt: "编写一个函数 `strlen(string)`，返回字符串长度（不使用 len）。\n\n```python\ndef strlen(string:\
     \ str) -> int:\n    \"\"\"Return length of given string.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

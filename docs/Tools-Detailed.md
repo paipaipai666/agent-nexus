@@ -50,7 +50,7 @@ class ToolMeta:
 | --- | --- | --- |
 | `LOW` | 只读查询 | search, file_read |
 | `MEDIUM` | 写操作、网络请求 | file_write, web_fetch |
-| `HIGH` | 代码执行、数据库写入 | python_execute, shell_exec |
+| `HIGH` | 代码执行、数据库写入 | shell_exec |
 
 ### ToolRegistry（工具注册表）
 
@@ -76,18 +76,17 @@ class ProviderSpec:
     exposed_agents: tuple[str, ...] = ("*",)
 ```
 
-### 11 个内置提供者
+### 10 个内置提供者
 
 | 提供者 | 工具 | 说明 |
 | --- | --- | --- |
 | `MemoryToolProvider` | memory_search, memory_save | 长期记忆检索与保存 |
 | `SearchToolProvider` | grep_search, web_search, web_fetch, kb_search | 搜索工具集 |
 | `FilesystemToolProvider` | file_read, file_list, file_write | 文件操作 |
-| `ExecutionToolProvider` | python_execute, shell_exec | 代码执行 (沙箱) |
+| `ExecutionToolProvider` | shell_exec | 代码执行 (沙箱) |
 | `SubagentToolProvider` | subagent_run | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | todo_add, todo_update, todo_list | 待办事项管理 |
-| `BrowserToolProvider` | browser_navigate, browser_snapshot, browser_click, ... | 浏览器自动化 |
 | `ComputerUseToolProvider` | computer_snapshot, computer_click, computer_type, ... | 桌面自动化 |
 
 ## MCP 集成
@@ -107,24 +106,6 @@ class ProviderSpec:
 | `mcp_capabilities.py` | 能力检测 |
 | `mcp_descriptors.py` | 工具描述符 |
 | `mcp_result.py` | 结果处理 |
-
-## 浏览器自动化
-
-**文件**：`tools/browser.py`
-
-基于 Playwright 的浏览器自动化工具集：
-
-| 工具 | 说明 |
-| --- | --- |
-| `browser_navigate` | 导航到 URL |
-| `browser_snapshot` | 获取页面快照（无障碍树） |
-| `browser_click` | 点击元素 |
-| `browser_type` | 输入文本 |
-| `browser_read` | 读取页面内容 |
-| `browser_screenshot` | 截图 |
-| `browser_evaluate` | 执行 JavaScript |
-| `browser_wait` | 等待条件 |
-| `browser_scroll` / `browser_scroll_to` | 滚动 |
 
 ## 桌面自动化
 
@@ -159,6 +140,5 @@ ToolRegistry (registry.py)
          ├── SubagentToolProvider
          ├── McpBridgeToolProvider
          ├── TodoToolProvider
-         ├── BrowserToolProvider
          └── ComputerUseToolProvider
 ```

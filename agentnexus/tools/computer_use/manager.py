@@ -1,6 +1,6 @@
 """ComputerUseManager — singleton manager for desktop automation.
 
-Follows the same design pattern as BrowserManager:
+Design pattern:
 - Singleton + classmethod instance()
 - Per-task state isolation
 - TTL auto-cleanup
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Error/warning formatting helpers (same pattern as browser.py)
+# Error/warning formatting helpers (shared formatting pattern)
 # ---------------------------------------------------------------------------
 
 
@@ -106,7 +106,7 @@ def _is_allowed_app(app_name: str) -> bool:
 class ComputerUseManager:
     """Singleton manager for desktop automation with per-task isolation.
 
-    Follows the same pattern as BrowserManager:
+    Design pattern:
     - Singleton via classmethod instance()
     - Per-task state tracking (focused window, last access time)
     - TTL auto-cleanup for idle tasks
@@ -356,7 +356,7 @@ class ComputerUseManager:
 
 
 # ---------------------------------------------------------------------------
-# Persistent background event loop (same pattern as browser.py)
+# Persistent background event loop (shared pattern)
 # ---------------------------------------------------------------------------
 
 _bg_loop: asyncio.AbstractEventLoop | None = None

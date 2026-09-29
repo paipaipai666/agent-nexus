@@ -4,7 +4,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.agents.react_types import CallingStrategy
 from agentnexus.memory.manager import MemoryManager
 from agentnexus.tools.registry import ToolRegistry
 

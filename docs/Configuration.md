@@ -48,12 +48,11 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 | `max_agent_steps` | `5` | 最大 ReAct 循环步数 |
 | `append_system_prompt` | `""` | 用户自定义追加指令，注入系统上下文末尾（优先级高于平台默认准则，不覆盖安全约束） |
 
-### 外部服务（2 项）
+### 外部服务（1 项）
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `tavily_api_key` | — | web_search 所需 |
-| `e2b_api_key` | — | 云端沙箱 |
 
 ### RAG（9 项）
 
@@ -80,16 +79,6 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 |------|--------|------|
 | `max_memories` | `1000` | 超限触发驱逐 |
 | `memory_ttl_days` | `90` | 过期天数 |
-
-### 代码执行（5 项）
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `code_execution_backend` | `auto` | auto/e2b/native/docker/disabled/local_unsafe |
-| `code_execution_timeout` | `30` | 秒 |
-| `code_execution_memory_mb` | `256` | Docker 内存 |
-| `code_execution_docker_image` | `python:3.11-slim` | |
-| `code_execution_allow_unsafe_local` | `False` | 裸 subprocess |
 
 ### Shell（5 项）
 
@@ -118,22 +107,6 @@ YAML 文件 (config.yaml)  >  环境变量 (AGENTNEXUS_*)  >  Pydantic 默认值
 | `skill_auto_route_llm_fallback` | `True` | |
 | `skill_auto_route_min_score` | `2.0` | |
 | `skill_auto_route_margin` | `0.75` | |
-
-### 浏览器自动化（12 项）
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `browser_mode` | `isolated` | isolated（全新浏览器）/ cdp（连接用户浏览器） |
-| `browser_cdp_endpoint` | `http://localhost:9222` | CDP 连接地址 |
-| `browser_headless` | `False` | 无头模式（仅 isolated） |
-| `browser_viewport_width` | `1280` | 视口宽度 |
-| `browser_viewport_height` | `720` | 视口高度 |
-| `browser_default_timeout` | `30000` | 操作超时（ms） |
-| `browser_networkidle_timeout` | `5000` | networkidle 超时（ms） |
-| `browser_screenshot_dir` | `""` | 截图保存目录 |
-| `browser_context_ttl` | `600` | 空闲任务回收时间（秒） |
-| `browser_allow_js_execution` | `False` | 允许 JavaScript 执行 |
-| `browser_snapshot_max_nodes` | `100` | 无障碍树最大节点数 |
 
 ### Persona（嵌套对象）
 

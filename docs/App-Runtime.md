@@ -120,7 +120,6 @@ Settings ───────────────────────�
     │        ├──→ SubagentToolProvider                  │
     │        ├──→ McpBridgeToolProvider                 │
     │        ├──→ TodoToolProvider                      │
-    │        ├──→ BrowserToolProvider                   │
     │        └──→ ComputerUseToolProvider               │
     │                                                   │
     ├──→ ExtensionManager                               │

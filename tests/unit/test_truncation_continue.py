@@ -49,7 +49,7 @@ class TestTruncatedAnswerContinues:
 class TestPartialAnswerJoin:
     def test_join_and_clear(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.agents.react_types import ExecutionContext, RunState
+        from agentnexus.agents.react_types import ExecutionContext
 
         ctx = ExecutionContext(question="q")
         ctx.run_state.partial_answer = "第一段"

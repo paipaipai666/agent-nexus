@@ -75,14 +75,14 @@ class TestResourceExhaustion:
     """Sandbox resource exhaustion handling."""
 
     def test_timeout_handled_gracefully(self):
-        with patch("agentnexus.tools.code_executor.get_settings") as mock_settings:
-            mock_settings.return_value.e2b_api_key.get_secret_value.return_value = ""
-            mock_settings.return_value.code_execution_backend = "local_unsafe"
-            mock_settings.return_value.code_execution_allow_unsafe_local = True
-            mock_settings.return_value.code_execution_timeout = 2
+        with patch("agentnexus.tools.shell.get_settings") as mock_settings:
+            mock_settings.return_value.shell_enabled = True
+            mock_settings.return_value.shell_blacklist = []
+            mock_settings.return_value.shell_execution_backend = "local_unsafe"
+            mock_settings.return_value.shell_timeout = 2
 
-            from agentnexus.tools.code_executor import python_execute
-            result = python_execute("print('ok')")
+            from agentnexus.tools.shell import shell_exec
+            result = shell_exec("echo ok")
             assert "ok" in result
 
     def test_large_input_handled(self):

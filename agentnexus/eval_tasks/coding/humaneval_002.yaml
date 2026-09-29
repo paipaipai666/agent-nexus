@@ -11,7 +11,7 @@ input:
     \ separate_paren_groups(paren_string: str) -> List[str]:\n    \"\"\"Separate groups\
     \ of nested parentheses, ignoring spaces.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

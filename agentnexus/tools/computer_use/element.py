@@ -1,7 +1,7 @@
 """Unified desktop element model and cross-platform role mapping.
 
 Maps platform-specific accessibility roles (Windows UIA, Linux AT-SPI, macOS AX)
-to a standardized set of role strings that match browser aria_snapshot conventions.
+to a standardized set of role strings that match accessibility snapshot conventions.
 """
 
 from __future__ import annotations
@@ -162,7 +162,7 @@ def normalize_role(platform: str, platform_role: str) -> str:
 class DesktopElement:
     """Unified representation of a desktop UI element across platforms.
 
-    Mirrors the browser aria_snapshot node structure so the LLM sees
+    Mirrors the accessibility snapshot node structure so the LLM sees
     a consistent YAML format regardless of platform.
     """
 

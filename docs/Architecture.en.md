@@ -39,8 +39,8 @@
 │  ChromaDB (Vectors)  SQLite (Relational)                    │
 │  JSONL (Traces)                                             │
 │  SentenceTransformers + BM25 + BGE-Reranker                 │
-│  E2B / bubblewrap / Docker / Local sandbox                  │
-│  Playwright (Browser Automation)  OS Accessibility (Desktop)│
+│  bubblewrap / Seatbelt / Low-IL / Docker / Local sandbox   │
+│  External browser MCP tools  OS Accessibility (Desktop)     │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -63,7 +63,7 @@ agentnexus/
 ├── services/                 ── service facade
 ├── skills/                   ── Skill discovery/routing/runtime
 ├── storage/                  ── storage abstraction layer
-├── tools/                    ── registry/providers/MCP/browser
+├── tools/                    ── registry/providers/MCP
 │   └── computer_use/         ── desktop automation (OS accessibility APIs)
 ├── tui/                      ── Textual interface
 └── wiki/                     ── hybrid Wiki + RAG knowledge management
@@ -71,18 +71,17 @@ agentnexus/
 
 ## Tool Providers
 
-The system uses `ToolProvider` protocol with 11 providers registered in order:
+The system uses `ToolProvider` protocol with 10 providers registered in order:
 
 | Provider | Tools | Description |
 | --- | --- | --- |
 | `MemoryToolProvider` | `memory_search`, `memory_save` | Long-term memory search and save |
 | `SearchToolProvider` | `grep_search`, `web_search`, `web_fetch`, `kb_search` | Search tools |
 | `FilesystemToolProvider` | `file_read`, `file_list`, `file_write` | File operations |
-| `ExecutionToolProvider` | `python_execute`, `shell_exec` | Code execution (sandboxed) |
+| `ExecutionToolProvider` | `shell_exec` | Code execution (sandboxed) |
 | `SubagentToolProvider` | `subagent_run` | Sub-agent delegation |
 | `McpBridgeToolProvider` | MCP dynamic import | External tool integration |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | Todo list management |
-| `BrowserToolProvider` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_read`, `browser_screenshot`, `browser_evaluate`, `browser_wait`, `browser_scroll`, `browser_scroll_to` | Browser automation |
 | `ComputerUseToolProvider` | `computer_snapshot`, `computer_list_windows`, `computer_switch_window`, `computer_launch`, `computer_click`, `computer_type`, `computer_key`, `computer_select`, `computer_toggle`, `computer_scroll` | Desktop automation (OS accessibility APIs) |
 
 ## Service Startup Sequence
@@ -93,7 +92,7 @@ The system uses `ToolProvider` protocol with 11 providers registered in order:
 2. Create `AgentLLM` + `ToolExecutor` + `ConfirmBridge`
 3. Initialize `MCPToolManager` (if `mcp_enabled=True`)
 4. Load `ExtensionManager`
-5. `register_all_tools()` — register 11 providers + MCP
+5. `register_all_tools()` — register 10 providers + MCP
 6. Create `MemoryManager` + `ConversationVersionManager`
 7. Create `ReActAgent`
 8. `SkillRegistry.discover()` — scan skill directories
@@ -102,7 +101,7 @@ The system uses `ToolProvider` protocol with 11 providers registered in order:
 11. Assemble `AppServices` (Chat/Config/Eval/KB/Skill)
 12. Return `AppRuntime` instance
 
-> See [ReAct Agent](ReAct-Agent.en.md) for FSM details, [Tool Governance](Tool-Governance.en.md) for the 7 security gates, [Browser Automation](Browser-Automation.en.md) for Playwright integration.
+> See [ReAct Agent](ReAct-Agent.en.md) for FSM details, [Tool Governance](Tool-Governance.en.md) for the 7 security gates, [MCP Integration](MCP-Integration.en.md) for external browser tool integration.
 
 ## API Routes
 

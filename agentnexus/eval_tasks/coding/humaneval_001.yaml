@@ -12,7 +12,7 @@ input:
     \ bool:\n    \"\"\"Check if in given list of numbers, are any two numbers closer\
     \ to each other than given threshold.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

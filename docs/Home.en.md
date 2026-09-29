@@ -25,8 +25,8 @@ graph TD
 | **Conversation & Tasks** | TUI interface with ReAct loop: plan→execute→observe |
 | **Local Memory** | STM compression pyramid + LTM dual storage (embedding+structured), score-based eviction |
 | **Knowledge Base RAG** | Dense+sparse+RRF+rerank hybrid retrieval, 8 formats |
-| **Browser Automation** | Playwright-based control with accessibility tree and CDP support |
-| **Security Sandbox** | E2B → bubblewrap/Seatbelt → Docker → local fallback |
+| **Browser Automation** | Via external MCP server — bring your own browser toolset (e.g. Playwright/CDP) |
+| **Security Sandbox** | bubblewrap/Seatbelt/Low-IL → Docker → local fallback |
 | **Tool Audit** | 7 security gates, fully traceable |
 | **Observability** | Trace tree + Token costs + Audit logs |
 | **Evaluation** | 8 evaluators, CI mode gating |

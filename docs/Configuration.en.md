@@ -48,12 +48,11 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 | `max_agent_steps` | `5` | Max ReAct loop steps |
 | `append_system_prompt` | `""` | User-defined appendix injected at the end of the system context (outranks platform defaults, never overrides safety constraints) |
 
-### External Services (2 items)
+### External Services (1 item)
 
 | Field | Default | Description |
 |------|--------|------|
 | `tavily_api_key` | — | Required for web_search |
-| `e2b_api_key` | — | Cloud sandbox |
 
 ### RAG (9 items)
 
@@ -80,16 +79,6 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 |------|--------|------|
 | `max_memories` | `1000` | Overflow triggers eviction |
 | `memory_ttl_days` | `90` | Expiration days |
-
-### Code Execution (5 items)
-
-| Field | Default | Description |
-|------|--------|------|
-| `code_execution_backend` | `auto` | auto/e2b/native/docker/disabled/local_unsafe |
-| `code_execution_timeout` | `30` | Seconds |
-| `code_execution_memory_mb` | `256` | Docker memory |
-| `code_execution_docker_image` | `python:3.11-slim` | |
-| `code_execution_allow_unsafe_local` | `False` | Bare subprocess |
 
 ### Shell (5 items)
 
@@ -118,22 +107,6 @@ YAML file (config.yaml)  >  Environment variables (AGENTNEXUS_*)  >  Pydantic de
 | `skill_auto_route_llm_fallback` | `True` | |
 | `skill_auto_route_min_score` | `2.0` | |
 | `skill_auto_route_margin` | `0.75` | |
-
-### Browser Automation (12 items)
-
-| Field | Default | Description |
-| --- | --- | --- |
-| `browser_mode` | `isolated` | isolated (fresh browser) / cdp (connect user browser) |
-| `browser_cdp_endpoint` | `http://localhost:9222` | CDP connection endpoint |
-| `browser_headless` | `False` | Headless mode (isolated only) |
-| `browser_viewport_width` | `1280` | Viewport width |
-| `browser_viewport_height` | `720` | Viewport height |
-| `browser_default_timeout` | `30000` | Operation timeout (ms) |
-| `browser_networkidle_timeout` | `5000` | networkidle timeout (ms) |
-| `browser_screenshot_dir` | `""` | Screenshot save directory |
-| `browser_context_ttl` | `600` | Idle task cleanup time (seconds) |
-| `browser_allow_js_execution` | `False` | Allow JavaScript execution |
-| `browser_snapshot_max_nodes` | `100` | Max accessibility tree nodes |
 
 ### Persona (nested object)
 

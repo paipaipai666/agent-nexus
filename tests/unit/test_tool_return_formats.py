@@ -46,12 +46,6 @@ class TestToolReturnFormats:
         result = te.get_tool("memory_save")(content="test", category="preference")
         assert result["saved"] is True
 
-    def test_code_executor_returns_string(self):
-        te = ToolRegistry()
-        te.register_tool("python_execute", "执行代码", lambda **kw: "execution result")
-        result = te.get_tool("python_execute")(code="print(1)")
-        assert isinstance(result, str)
-
     def test_tool_failure_returns_error_dict(self):
         te = ToolRegistry()
         def _fail(**kw):

@@ -13,14 +13,10 @@
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from agentnexus.agents.llm_strategy import prepare_llm_call, build_json_format_section
-from agentnexus.agents.react_types import CallingStrategy
 from agentnexus.agents import decisions
-from agentnexus.core.capabilities import ModelCapabilities, SessionCapabilityTracker
+from agentnexus.agents.llm_strategy import build_json_format_section, prepare_llm_call
+from agentnexus.agents.react_types import CallingStrategy
+from agentnexus.core.capabilities import SessionCapabilityTracker
 
 
 class TestThinkingDoesNotDisableProbe:
@@ -60,8 +56,8 @@ class TestProbeThenNativeStrategy:
         import agentnexus.core.config as cfg_mod
         cfg_mod._settings_cache = None
 
-        from agentnexus.core.llm import AgentLLM
         import agentnexus.core.llm as llm_mod
+        from agentnexus.core.llm import AgentLLM
         llm_mod._probe_cache.clear()
 
         real = AgentLLM.__dict__["_merge_probed_capabilities"]

@@ -31,10 +31,6 @@ const GROUPS: Record<string, string[]> = {
     'post_compact_max_files', 'post_compact_token_per_file', 'post_compact_token_budget',
     'transcript_enabled',
   ],
-  'Code Execution': [
-    'code_execution_backend', 'code_execution_timeout', 'code_execution_memory_mb',
-    'code_execution_docker_image', 'code_execution_allow_unsafe_local',
-  ],
   'Shell Execution': [
     'shell_enabled', 'shell_confirm', 'shell_timeout',
     'shell_execution_backend', 'shell_execution_memory_mb', 'shell_execution_docker_image',
@@ -49,18 +45,11 @@ const GROUPS: Record<string, string[]> = {
   ],
   'Extensions & Plugins': ['extensions_enabled', 'extensions_dirs', 'plugins_auto_discover'],
   'MCP': ['mcp_enabled', 'mcp_startup_timeout'],
-  'Browser Automation': [
-    'browser_mode', 'browser_cdp_endpoint', 'browser_headless',
-    'browser_viewport_width', 'browser_viewport_height',
-    'browser_default_timeout', 'browser_networkidle_timeout',
-    'browser_screenshot_dir', 'browser_context_ttl',
-    'browser_allow_js_execution', 'browser_snapshot_max_nodes',
-  ],
   'Desktop Automation': [
     'computer_use_enabled', 'computer_use_backend', 'computer_use_snapshot_max_nodes',
     'computer_use_allowed_apps', 'computer_use_blocked_apps',
   ],
-  'External Services': ['tavily_api_key', 'e2b_api_key'],
+  'External Services': ['tavily_api_key'],
 }
 
 const EMPTY_PERSONA: PersonaData = { agent_name: '', identity: '', tone: '', projects: [] }

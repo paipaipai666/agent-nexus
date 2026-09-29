@@ -11,7 +11,7 @@ input:
     \ str) -> str:\n    \"\"\"Sort a space-separated string of number words from zero\
     \ to nine.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

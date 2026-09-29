@@ -27,7 +27,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | **Data Privacy** | 100% local — vectors, memory, traces on-device | Cloud-dependent, data leaves your machine |
 | **Security Model** | 7-layer tool governance (RBAC, schema, rate-limit, timeout, risk, HITL, audit) | Basic or no tool-level security |
 | **Agent Control** | FSM-driven loop — 16 states, 25 deterministic transitions | Prompt-driven, unpredictable behavior |
-| **Code Sandbox** | 4-tier degradation: E2B → bubblewrap/Seatbelt → Docker → local | Single sandbox or none |
+| **Code Sandbox** | tiered degradation: bubblewrap/Seatbelt/Low-IL → Docker → local | Single sandbox or none |
 | **Security Tests** | 213 dedicated tests across 8 categories | Ad-hoc or no security testing |
 | **Observability** | 6-layer system: trace + drift detection + fault attribution + alerting + health checks + improvement loop | Basic logging |
 | **Evaluation** | 8 built-in evaluators (agent, trajectory, hallucination, RAG, code...) | Manual or none |
@@ -40,10 +40,10 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🗣️ **Conversation & Tasks** | TUI interface with ReAct loop: plan→execute→observe |
 | 🧠 **Local Memory** | STM compression pyramid + LTM (SQLite+ChromaDB, score-based eviction) |
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
-| 🌐 **Browser Automation** | Playwright-based browser control with accessibility tree, CDP support |
+| 🌐 **Browser Automation** | Via external MCP server — bring your own Playwright/CDP browser toolset |
 | 🖥️ **Desktop Automation** | OS-level accessibility API driven: snapshot, click, type, keyboard, window management |
 | 📖 **Wiki System** | Hybrid Wiki + RAG knowledge management, Karpathy's LLM Wiki pattern, mechanical verification, confidence-based routing |
-| 🔒 **Security Sandbox** | E2B cloud → native (bubblewrap/Seatbelt) → Docker → local fallback |
+| 🔒 **Security Sandbox** | native (bubblewrap/Seatbelt/Low-IL) → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
 | 📊 **Evaluation** | 8 evaluators (Agent/Trajectory/Hallucination/RAG/Code, etc.) |
@@ -92,8 +92,6 @@ nexus eval agent --days 1        # Run agent quality evaluation
 | 🏗️ [Architecture](docs/Architecture.en.md) | System architecture, module boundaries, data flow |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.en.md) | FSM state machine, 3-tier LLM strategy, JSON fault tolerance |
 | 🔧 [Tool Governance](docs/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
-| 🌐 [Browser Automation](docs/Browser-Automation.en.md) | Playwright integration, CDP mode, accessibility tree |
-| ⚡ [Code Execution](docs/Code-Execution.en.md) | Sandbox degradation chain, shell blacklist, sub-agents |
 | 🧠 [Memory System](docs/Memory-System.en.md) | STM/LTM architecture, compression pyramid, score eviction |
 | 📚 [RAG System](docs/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
 | 🖥️ [Desktop Automation](docs/Computer-Use.en.md) | OS-level accessibility automation, Windows/Linux/macOS |
@@ -132,8 +130,8 @@ nexus eval agent --days 1        # Run agent quality evaluation
 │  RBAC → Schema → Rate-limit → Timeout → Risk → HITL → Audit    │
 ├─────────────────────────────────────────────────────────────────┤
 │                     Tool Execution Layer                         │
-│  code_executor · shell · file_ops · web_search · kb_search      │
-│  memory_save · subagent · grep_search · web_fetch · browser     │
+│  shell_exec · file_ops · web_search · kb_search                 │
+│  memory_save · subagent · grep_search · web_fetch               │
 │  computer_* · wiki · todo · ...                               │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
@@ -143,7 +141,7 @@ nexus eval agent --days 1        # Run agent quality evaluation
 
 ## Tech Stack
 
-**Backend**: Python 3.11+ · OpenAI-compatible + Anthropic Messages codecs · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
+**Backend**: Python 3.11+ · OpenAI-compatible + Anthropic Messages codecs · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers
 
 **Desktop**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 

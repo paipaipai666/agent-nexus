@@ -10,7 +10,7 @@ input:
   prompt: "编写一个函数 `is_palindrome(text)`，判断字符串是否为回文。\n\n```python\ndef is_palindrome(text:\
     \ str) -> bool:\n    \"\"\"Check if a string is a palindrome.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

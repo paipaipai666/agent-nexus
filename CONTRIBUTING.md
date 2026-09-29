@@ -104,7 +104,7 @@ PR 标题格式：`<type>: <简短描述>`
 - 涉及 ChromaDB/SQLite 的测试使用 `temp_agentnexus_home` fixture（自动隔离 + 清理）
 - 涉及 LLM 调用的测试使用 `mock_llm` fixture（mock `AgentLLM.think()`）
 - CLI 测试使用 `typer.testing.CliRunner` + `isolated_filesystem()`
-- 需要外部服务的测试必须 mock（Tavily、E2B、第三方 API）
+- 需要外部服务的测试必须 mock（Tavily、第三方 API）
 - 性能敏感变更附性能测试（`tests/perf/`，`@pytest.mark.perf` + `pytest-benchmark`）
 - 安全相关变更附安全测试（`tests/security/`）
 
@@ -112,7 +112,7 @@ PR 标题格式：`<type>: <简短描述>`
 
 ### 代码执行
 
-`python_execute` 和 `shell_exec` 是最高风险的入口。
+`shell_exec` 是最高风险的入口。
 
 - 永远不要添加逃逸代码沙箱的方法
 - 修改沙箱逻辑时确保 `tests/security/test_sandbox_escape.py` 通过

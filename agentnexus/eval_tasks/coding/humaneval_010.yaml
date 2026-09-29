@@ -11,7 +11,7 @@ input:
     \ int) -> int:\n    \"\"\"Return the n-th Fibonacci number (0-indexed).\"\"\"\n\
     ```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

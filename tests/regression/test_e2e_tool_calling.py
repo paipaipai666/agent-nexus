@@ -43,12 +43,12 @@ class TestAgentToolCalling:
 
         assert_answer_not_empty(answer)
 
-    def test_agent_uses_code_execution(self, real_agent):
-        """Agent selects code execution for programming tasks."""
+    def test_agent_uses_shell_execution(self, real_agent):
+        """Agent selects shell execution for command-line tasks."""
         if not _has_tool_capability(real_agent):
             pytest.skip("Model does not support tool calling")
 
-        result = real_agent.run("用 Python 写一个函数计算斐波那契数列第10项，然后告诉我结果")
+        result = real_agent.run("用 shell 命令计算斐波那契数列第10项，然后告诉我结果")
         answer = result.answer if hasattr(result, "answer") else str(result)
 
         assert_answer_not_empty(answer)

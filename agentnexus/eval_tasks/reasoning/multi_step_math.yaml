@@ -13,7 +13,7 @@ input:
     3. 如果同时购买 A 和 B，总价再打 9 折
 
     问：同时购买 A 和 B 的最终价格是多少？请给出详细计算过程。
-  tools: ["code_executor"]
+  tools: ["shell_exec"]
 
 graders:
   - type: "llm_rubric"

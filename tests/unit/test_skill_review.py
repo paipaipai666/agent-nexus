@@ -67,7 +67,6 @@ def test_tool_policy_deny():
 
     wf = load_workflow(str(BUILTIN_REVIEW_YAML))
     assert "shell_exec" in wf.tool_policy.deny
-    assert "python_execute" in wf.tool_policy.deny
     assert "file_write" in wf.tool_policy.deny
 
 

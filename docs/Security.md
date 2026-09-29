@@ -6,9 +6,9 @@
 
 所有工具必经 [ToolRegistry](Tool-Governance.md) 的 RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计。
 
-## 代码执行安全
+## 代码执行安全（shell_exec）
 
-- E2B → bubblewrap/Seatbelt → Docker → 本地兜底（[详见图](Code-Execution.md)）
+- `shell_exec` 沙箱降级链：bubblewrap (Linux) / Seatbelt (macOS) / Low-IL 受限令牌+Job Object (Windows) → Docker（含 daemon 探测，daemon 不可用会继续降级） → 本地警告兜底
 - Shell 三层黑名单（通用 + 平台 + 用户自定义）
 - NFKC 归一化防 Unicode 绕过
 

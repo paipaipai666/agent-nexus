@@ -2,7 +2,7 @@
 
 # 桌面自动化 (Computer Use)
 
-AgentNexus 通过操作系统级无障碍 API 实现桌面应用自动化，支持 Windows (UIA)、Linux (AT-SPI2) 和 macOS (AX) 三大平台。LLM 看到的元素树格式与浏览器模式一致（YAML），实现统一的交互体验。
+AgentNexus 通过操作系统级无障碍 API 实现桌面应用自动化，支持 Windows (UIA)、Linux (AT-SPI2) 和 macOS (AX) 三大平台。LLM 直接看到 YAML 格式的元素树。
 
 ## 架构概览
 
@@ -209,7 +209,7 @@ stateDiagram-v2
 
 ## 快照模式
 
-桌面自动化的快照模式与浏览器模式保持一致，使用相同的 YAML 格式输出。
+桌面自动化的快照使用 YAML 格式输出，便于 LLM 直接理解和操作。
 
 | 模式 | 包含元素 | 适用场景 |
 | --- | --- | --- |
@@ -338,32 +338,6 @@ computer_use_blocked_apps:           # 禁止的应用黑名单
   - powershell
   - terminal
 ```
-
-## 与浏览器自动化的对比
-
-| 特性 | 浏览器自动化 | 桌面自动化 |
-| --- | --- | --- |
-| **目标** | Web 页面 | 桌面应用 |
-| **底层技术** | Playwright (CDP) | 操作系统无障碍 API |
-| **元素提取** | 浏览器无障碍树 | 桌面无障碍树 (UIA/AT-SPI/AX) |
-| **输出格式** | YAML 编号/缩进 | 相同的 YAML 格式 |
-| **运行模式** | Isolated / CDP | 无（直接操作目标应用） |
-| **任务隔离** | 每任务独立 Page | 每任务独立聚焦窗口状态 |
-| **截图** | 支持 | 不支持 |
-| **JS 执行** | 可选 | 不适用 |
-| **多窗口** | 多 Page | 多窗口切换 |
-| **配置入口** | `browser_*` | `computer_use_*` |
-
-### 核心一致性
-
-两个模块共享相同的设计模式：
-
-- **单例管理器**：`BrowserManager` / `ComputerUseManager`
-- **异步后台事件循环**：`_run_async()` 同步包装
-- **统一元素模型**：浏览器使用 Playwright `aria_snapshot`，桌面使用 `DesktopElement`，输出格式一致
-- **TTL 自动回收**：空闲任务自动清理
-- **HITL 规则**：危险操作拦截机制
-- **优先级截断**：超过节点限制时按角色重要性截断
 
 ## 故障排除
 

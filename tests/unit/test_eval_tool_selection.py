@@ -34,13 +34,13 @@ class TestToolSelectionReport:
         report = ToolSelectionReport(
             total_queries=10, correct=9, accuracy=0.9,
             by_tool={"web_search": {"total": 5, "correct": 5},
-                     "python_execute": {"total": 5, "correct": 4}},
+                     "shell_exec": {"total": 5, "correct": 4}},
         )
         s = report.summary()
         assert "90.0%" in s or "90%" in s
         assert "9/10" in s
         assert "web_search" in s
-        assert "python_execute" in s
+        assert "shell_exec" in s
 
 
 class TestToolSelectionEvaluatorClassifyQuery:
@@ -53,12 +53,12 @@ class TestToolSelectionEvaluatorClassifyQuery:
         assert self.evaluator._classify_query("查询今天的天气") == "web_search"
         assert self.evaluator._classify_query("最新科技动态") == "web_search"
 
-    def test_python_execute_keyword(self):
-        assert self.evaluator._classify_query("写一段代码计算斐波那契") == "python_execute"
-        assert self.evaluator._classify_query("code a sorting algorithm") == "python_execute"
-        assert self.evaluator._classify_query("计算1到100的和") == "python_execute"
-        assert self.evaluator._classify_query("运行这个python脚本") == "python_execute"
-        assert self.evaluator._classify_query("生成图表展示数据") == "python_execute"
+    def test_shell_exec_keyword(self):
+        assert self.evaluator._classify_query("写一段代码计算斐波那契") == "shell_exec"
+        assert self.evaluator._classify_query("code a sorting algorithm") == "shell_exec"
+        assert self.evaluator._classify_query("计算1到100的和") == "shell_exec"
+        assert self.evaluator._classify_query("运行这个python脚本") == "shell_exec"
+        assert self.evaluator._classify_query("生成图表展示数据") == "shell_exec"
 
     def test_memory_search_keyword(self):
         assert self.evaluator._classify_query("记忆中有没有相关讨论") == "memory_search"
@@ -102,7 +102,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索最新的AI新闻"}},
-            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "shell_exec"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -113,7 +113,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         assert report.accuracy == 0.0
         assert len(report.mismatches) == 1
         assert report.mismatches[0]["expected"] == "web_search"
-        assert report.mismatches[0]["actual"] == "python_execute"
+        assert report.mismatches[0]["actual"] == "shell_exec"
 
     def test_multiple_traces(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"
@@ -121,7 +121,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
             {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
             {"trace_id": "t2", "name": "task", "input": {"task": "写代码排序"}},
-            {"trace_id": "t2", "name": "tool", "input": {"tool_name": "python_execute"}},
+            {"trace_id": "t2", "name": "tool", "input": {"tool_name": "shell_exec"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -131,13 +131,13 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         assert report.correct == 2
         assert report.accuracy == 1.0
         assert report.by_tool["web_search"]["total"] == 1
-        assert report.by_tool["python_execute"]["total"] == 1
+        assert report.by_tool["shell_exec"]["total"] == 1
 
     def test_skip_no_task(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"
         lines = [
             {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
-            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "shell_exec"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")
@@ -162,7 +162,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         lines = [
             {"trace_id": "t1", "name": "task", "input": {"task": "搜索新闻"}},
             {"trace_id": "t1", "name": "tool", "input": {"tool_name": "web_search"}},
-            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "python_execute"}},
+            {"trace_id": "t1", "name": "tool", "input": {"tool_name": "shell_exec"}},
         ]
         trace_file.write_text("\n".join(json.dumps(line) for line in lines) + "\n",
                               encoding="utf-8")

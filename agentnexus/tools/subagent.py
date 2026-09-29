@@ -20,17 +20,19 @@ _SAFE_SUBAGENT_TOOLS = {
     "file_read",
     "file_list",
     "memory_search",
-    "python_execute",
+    # shell_exec replaces the removed python_execute for delegated execution;
+    # it stays HITL-gated via the subagent confirm bridge at call time.
+    "shell_exec",
 }
 
 _ROLE_TOOL_PRESETS = {
     "explorer": ["grep_search", "web_search", "kb_search", "file_read", "file_list", "memory_search"],
-    "executor": ["python_execute", "file_read", "file_list", "grep_search"],
+    "executor": ["shell_exec", "file_read", "file_list", "grep_search"],
 }
 
 _ROLE_DESCRIPTIONS = {
     "explorer": "Explorer 子代理，适合阅读、检索、归纳和信息收集",
-    "executor": "Executor 子代理，适合在受控环境中执行 Python 片段并验证结果",
+    "executor": "Executor 子代理，适合在受控环境中执行命令并验证结果",
 }
 
 _LEGACY_ROLE_ALIASES = {

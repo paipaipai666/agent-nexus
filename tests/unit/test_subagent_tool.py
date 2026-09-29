@@ -86,7 +86,7 @@ class TestSubagentPromptGuidance:
     def test_react_prompt_mentions_explorer_and_executor_contract(self):
         prompt = load_prompt("react")
         assert "默认提供 Explorer 子代理" in prompt
-        assert "当需要在受控环境中实际运行 Python 片段、验证执行结果时，可改用 executor" in prompt
+        assert "当需要在受控环境中实际执行命令（含运行 Python）、验证结果时，可改用 executor" in prompt
         assert "reader/researcher/analyst 仅为兼容字段" in prompt
 
 
@@ -144,7 +144,7 @@ class TestSubagentRun:
         assert captured["agent_id"] == "subagent_explorer"
         assert "memory_search" in captured["tools"]
 
-    def test_subagent_run_supports_executor_role_with_python_execute(self, monkeypatch):
+    def test_subagent_run_supports_executor_role(self, monkeypatch):
         captured = {}
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
 
@@ -164,7 +164,9 @@ class TestSubagentRun:
         assert payload["role"] == "executor"
         assert payload["answer"] == "executor answer"
         assert captured["agent_id"] == "subagent_executor"
-        assert "python_execute" in captured["tools"]
+        # executor preset [shell_exec, file_read, file_list, grep_search] —
+        # shell_exec is in _SAFE_SUBAGENT_TOOLS (HITL-gated at call time).
+        assert captured["tools"] == {"shell_exec", "file_read", "file_list", "grep_search"}
         assert "web_search" not in captured["tools"]
         assert captured["confirm"] is bridge
 

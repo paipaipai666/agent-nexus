@@ -387,7 +387,7 @@ class ToolRegistry:
             # SEC-008: future.result(timeout=) provides a soft timeout — it raises
             # TimeoutError on the caller side but cannot terminate the running thread.
             # Python's ThreadPoolExecutor does not support thread cancellation.
-            # Subprocess-based tools (shell_exec, python_execute) already have their
+            # Subprocess-based tools (shell_exec) already have their
             # own timeout= in subprocess.run calls. For non-subprocess tools (network,
             # database), this is a Python language limitation — multiprocessing.Process
             # would be needed for hard cancellation.

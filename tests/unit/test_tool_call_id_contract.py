@@ -13,8 +13,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.registry import ToolRegistry
 
@@ -172,7 +170,7 @@ class TestToolCallIdContract:
         for i, m in enumerate(captured[1]):
             if m.get("role") != "tool":
                 continue
-            assert f'"tool_call_id"' in raw or "tool_call_id" in m
+            assert '"tool_call_id"' in raw or "tool_call_id" in m
             assert "tool_call_id" in m and str(m["tool_call_id"]).strip(), (
                 f"serialize 后 messages[{i}] 仍缺有效 tool_call_id: {m!r}"
             )

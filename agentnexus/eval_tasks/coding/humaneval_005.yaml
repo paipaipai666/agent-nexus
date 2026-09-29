@@ -11,7 +11,7 @@ input:
     def below_threshold(numbers: List[int], threshold: int) -> bool:\n    \"\"\"Return\
     \ True if all numbers in the list are below threshold.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

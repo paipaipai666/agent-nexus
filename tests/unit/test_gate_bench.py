@@ -67,7 +67,9 @@ class TestRulesLayerProbe:
         """Whitelist contract: A recall 1.0, C/D/E zero leaks. B/F/G denial is
         the expected tightness signal and must not fail the probe."""
         from agentnexus.evaluation.memory_eval import (
-            CaseResult, MemorySandbox, _probe_gatebench_rules,
+            CaseResult,
+            MemorySandbox,
+            _probe_gatebench_rules,
         )
 
         sb = MemorySandbox()
@@ -95,7 +97,9 @@ class TestPipelineProbeWiring:
         from unittest.mock import MagicMock
 
         from agentnexus.evaluation.memory_eval import (
-            CaseResult, MemorySandbox, _probe_gatebench_pipeline,
+            CaseResult,
+            MemorySandbox,
+            _probe_gatebench_pipeline,
         )
 
         sb = MemorySandbox()

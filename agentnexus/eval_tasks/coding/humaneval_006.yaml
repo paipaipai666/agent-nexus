@@ -11,7 +11,7 @@ input:
     \ float, b: float, c: float) -> float:\n    \"\"\"Return area of triangle with\
     \ side lengths a, b, c.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

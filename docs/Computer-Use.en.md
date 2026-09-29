@@ -2,7 +2,7 @@
 
 # Computer Use (Desktop Automation)
 
-AgentNexus implements desktop application automation via OS-level accessibility APIs, supporting Windows (UIA), Linux (AT-SPI2), and macOS (AX). The LLM sees the same YAML-formatted element tree as browser mode, providing a unified interaction experience.
+AgentNexus implements desktop application automation via OS-level accessibility APIs, supporting Windows (UIA), Linux (AT-SPI2), and macOS (AX). The LLM sees a YAML-formatted element tree directly.
 
 ## Architecture Overview
 
@@ -209,7 +209,7 @@ Subject to app blocklist and allowlist restrictions.
 
 ## Snapshot Modes
 
-Desktop automation snapshot modes are consistent with browser mode, using the same YAML output format.
+Desktop automation snapshots use YAML output format, which the LLM can directly understand and act on.
 
 | Mode | Contains | Use Case |
 | --- | --- | --- |
@@ -338,32 +338,6 @@ computer_use_blocked_apps:           # Blocked apps blocklist
   - powershell
   - terminal
 ```
-
-## Comparison with Browser Automation
-
-| Feature | Browser Automation | Desktop Automation |
-| --- | --- | --- |
-| **Target** | Web pages | Desktop applications |
-| **Underlying Technology** | Playwright (CDP) | OS Accessibility APIs |
-| **Element Extraction** | Browser accessibility tree | Desktop accessibility tree (UIA/AT-SPI/AX) |
-| **Output Format** | YAML numbered/indented | Same YAML format |
-| **Operating Modes** | Isolated / CDP | None (direct target app operation) |
-| **Task Isolation** | Per-task independent Page | Per-task focused window state |
-| **Screenshots** | Supported | Not supported |
-| **JS Execution** | Optional | Not applicable |
-| **Multi-window** | Multiple Pages | Window switching |
-| **Config Namespace** | `browser_*` | `computer_use_*` |
-
-### Core Consistency
-
-Both modules share the same design patterns:
-
-- **Singleton Manager**: `BrowserManager` / `ComputerUseManager`
-- **Async Background Event Loop**: `_run_async()` sync wrapper
-- **Unified Element Model**: Browser uses Playwright `aria_snapshot`, desktop uses `DesktopElement`, with identical output format
-- **TTL Auto-reclaim**: Idle tasks are automatically cleaned up
-- **HITL Rules**: Dangerous operation interception mechanism
-- **Priority Truncation**: Elements truncated by role importance when node limits are exceeded
 
 ## Troubleshooting
 

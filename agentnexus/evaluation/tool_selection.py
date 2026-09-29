@@ -52,11 +52,11 @@ LABELED_EVAL_SET: dict[str, str] = {
     "包含": "grep",
     "文档": "search",
     # Code execution
-    "代码": "python_execute",
-    "code": "python_execute",
-    "计算": "python_execute",
-    "运行": "python_execute",
-    "生成图表": "python_execute",
+    "代码": "shell_exec",
+    "code": "shell_exec",
+    "计算": "shell_exec",
+    "运行": "shell_exec",
+    "生成图表": "shell_exec",
     # Memory
     "记忆": "memory_search",
     "偏好": "memory_search",

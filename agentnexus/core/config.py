@@ -224,7 +224,6 @@ class Settings(BaseSettings):
 
     # ── External Service Keys ─────────────────────────────────────────────
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
-    e2b_api_key: SecretStr = Field(default=SecretStr(""))
 
     # ── Agent Runtime ─────────────────────────────────────────────────────
     max_agent_steps: int = Field(default=50, ge=1, le=200)
@@ -308,13 +307,6 @@ class Settings(BaseSettings):
     shell_enabled: bool = Field(default=True)
     shell_confirm: bool = Field(default=True)
     shell_timeout: int = Field(default=30, ge=1, le=300)
-    # Python code execution
-    # auto: e2b -> native OS sandbox -> docker -> disabled
-    code_execution_backend: str = Field(default="auto")
-    code_execution_timeout: int = Field(default=30, ge=1, le=300)
-    code_execution_memory_mb: int = Field(default=256, ge=64, le=8192)
-    code_execution_docker_image: str = Field(default="python:3.11-slim")
-    code_execution_allow_unsafe_local: bool = Field(default=False)
     shell_execution_backend: str = Field(default="auto")
     shell_execution_memory_mb: int = Field(default=256, ge=64, le=8192)
     shell_execution_docker_image: str = Field(default="python:3.11-slim")
@@ -346,22 +338,6 @@ class Settings(BaseSettings):
     budget_complex_max_tokens: int = Field(default=50000, ge=5000, le=500000)
     budget_high_value_max_tokens: int = Field(default=200000, ge=10000, le=2000000)
     budget_exceed_strategy: str = Field(default="compress")
-    # 浏览器自动化配置
-    browser_mode: str = Field(default="isolated", description="浏览器模式: isolated=无状态新浏览器, cdp=连接用户浏览器")
-    browser_cdp_endpoint: str = Field(default="http://localhost:9222", description="CDP连接地址(mode=cdp时使用)")
-    browser_headless: bool = Field(default=False, description="无头模式(仅isolated模式生效,默认有头)")
-    browser_viewport_width: int = Field(default=1280, ge=320, le=3840)
-    browser_viewport_height: int = Field(default=720, ge=240, le=2160)
-    browser_default_timeout: int = Field(default=30000, ge=1000, le=120000, description="Playwright操作超时(ms)")
-    browser_networkidle_timeout: int = Field(default=5000, ge=1000, le=30000, description="networkidle独立超时(ms)")
-    browser_screenshot_dir: str = Field(default="", description="截图保存目录")
-    browser_context_ttl: int = Field(default=600, ge=60, le=3600, description="per-task context无操作自动回收时间(秒)")
-    browser_allow_js_execution: bool = Field(default=False, description="是否允许执行JavaScript(默认禁用)")
-    browser_snapshot_max_nodes: int = Field(default=100, ge=10, le=1000, description="snapshot最大节点数")
-    browser_hitl_rules: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="HITL触发规则列表，格式: [{action:'click', role:'button', name_pattern:'支付|确认'}]",
-    )
     # 桌面自动化配置
     computer_use_enabled: bool = Field(default=False, description="是否启用桌面自动化功能")
     computer_use_backend: str = Field(default="auto", description="后端: auto/windows/linux/macos")
@@ -400,14 +376,6 @@ class Settings(BaseSettings):
             raise ValueError(f"必须以 http:// 或 https:// 开头: {v}")
         return v.rstrip("/")
 
-    @field_validator("browser_mode")
-    @classmethod
-    def normalize_browser_mode(cls, value: str) -> str:
-        normalized = (value or "isolated").strip().lower()
-        if normalized not in {"isolated", "cdp"}:
-            raise ValueError(f"不支持的浏览器模式: {value}，可选: isolated, cdp")
-        return normalized
-
     @field_validator("model_thinking_effort")
     @classmethod
     def normalize_thinking_effort(cls, value: str) -> str:
@@ -424,20 +392,11 @@ class Settings(BaseSettings):
             raise ValueError(f"不支持的桌面自动化后端: {value}，可选: auto, windows, linux, macos")
         return normalized
 
-    @field_validator("code_execution_backend")
-    @classmethod
-    def normalize_code_execution_backend(cls, value: str) -> str:
-        normalized = (value or "auto").strip().lower().replace("-", "_")
-        allowed = {"auto", "e2b", "native", "docker", "disabled", "local_unsafe"}
-        if normalized not in allowed:
-            raise ValueError(f"Unsupported code execution backend: {value}")
-        return normalized
-
     @field_validator("shell_execution_backend")
     @classmethod
     def normalize_shell_execution_backend(cls, value: str) -> str:
         normalized = (value or "auto").strip().lower().replace("-", "_")
-        allowed = {"auto", "e2b", "native", "docker", "disabled", "local_unsafe"}
+        allowed = {"auto", "native", "docker", "disabled", "local_unsafe"}
         if normalized not in allowed:
             raise ValueError(f"Unsupported shell execution backend: {value}")
         return normalized

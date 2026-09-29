@@ -36,7 +36,7 @@ SETTABLE_KEYS = {
     # Agent
     "max_agent_steps",
     # External Services
-    "tavily_api_key", "e2b_api_key",
+    "tavily_api_key",
     # RAG
     "enable_contextual_retrieval", "enable_query_rewrite", "enable_multi_query",
     "enable_hyde", "hyde_question_only", "enable_context_expansion",
@@ -50,9 +50,6 @@ SETTABLE_KEYS = {
     "transcript_enabled",
     # MCP
     "mcp_enabled", "mcp_startup_timeout",
-    # Code Execution
-    "code_execution_backend", "code_execution_timeout",
-    "code_execution_memory_mb", "code_execution_docker_image",
     # Shell Execution
     "shell_enabled", "shell_confirm", "shell_timeout",
     "shell_execution_backend", "shell_execution_memory_mb",
@@ -70,12 +67,6 @@ SETTABLE_KEYS = {
     # Budget
     "budget_simple_max_tokens", "budget_complex_max_tokens",
     "budget_high_value_max_tokens", "budget_exceed_strategy",
-    # Browser Automation
-    "browser_mode", "browser_cdp_endpoint", "browser_headless",
-    "browser_viewport_width", "browser_viewport_height",
-    "browser_default_timeout", "browser_networkidle_timeout",
-    "browser_screenshot_dir", "browser_context_ttl",
-    "browser_allow_js_execution", "browser_snapshot_max_nodes",
     # Desktop Automation
     "computer_use_enabled", "computer_use_backend",
     "computer_use_snapshot_max_nodes",
@@ -85,7 +76,6 @@ SETTABLE_KEYS = {
 # Security-sensitive keys that cannot be modified via the API.
 # These can weaken sandboxing, bypass safety checks, or alter audit behavior.
 _SECURITY_BLOCKED_KEYS = {
-    "code_execution_allow_unsafe_local",
     "shell_blacklist",
 }
 

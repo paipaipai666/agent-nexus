@@ -14,7 +14,7 @@ input:
     def add(a, b):
         return str(a + b)
     ```
-  tools: ["code_executor"]
+  tools: ["shell_exec"]
 
 graders:
   - type: "code_execution"

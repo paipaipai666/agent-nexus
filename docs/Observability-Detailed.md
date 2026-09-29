@@ -73,7 +73,7 @@ trace_id: abc123
 │   ├── llm_call_1 (800ms)
 │   │   └── tool_call: file_read (50ms)
 │   ├── llm_call_2 (600ms)
-│   │   └── tool_call: python_execute (200ms)
+│   │   └── tool_call: shell_exec (200ms)
 │   └── emit_answer (100ms)
 ```
 

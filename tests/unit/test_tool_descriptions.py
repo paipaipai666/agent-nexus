@@ -23,16 +23,7 @@ def registry_with_all_providers() -> ToolRegistry:
 # Tools that are self-explanatory (namespace-scoped action tools) — skip boundary check
 _SKIP_TOOLS = {
     "subagent_run",          # checked separately (complex delegation tool)
-    "browser_evaluate",      # restricted JS execution, self-explanatory
-    "browser_click",         # browser action — namespace-scoped
-    "browser_type",          # browser action
-    "browser_wait",          # browser action
-    "browser_scroll",        # browser action
-    "browser_scroll_to",     # browser action
-    "browser_wait_navigation",  # browser action
-    "browser_dismiss_popup",    # browser action
-    "browser_list_pages",       # browser listing
-    "browser_switch_page",      # browser action
+    "shell_exec",            # description carries a "[!]" confirmation warning instead
     "computer_list_windows",    # computer listing
     "computer_switch_window",   # computer action
     "computer_launch",          # computer action
@@ -70,8 +61,8 @@ class TestBoundaryDescriptions:
         import re
         reg = registry_with_all_providers
         all_names = set(reg.list_tools())
-        # Also accept tool family patterns like "browser_*"
-        family_prefixes = {"browser_", "computer_"}
+        # Also accept tool family patterns like "computer_*"
+        family_prefixes = {"computer_"}
 
         errors = []
         for meta in reg.list_tools_with_meta():

@@ -25,12 +25,7 @@ def config(
 
     SETTABLE_KEYS = [
         "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
-        "tavily_api_key", "e2b_api_key", "max_agent_steps",
-        "code_execution_backend",
-        "code_execution_timeout",
-        "code_execution_memory_mb",
-        "code_execution_docker_image",
-        "code_execution_allow_unsafe_local",
+        "tavily_api_key", "max_agent_steps",
         "shell_execution_backend",
         "shell_execution_memory_mb",
         "shell_execution_docker_image",

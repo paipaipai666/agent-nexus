@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentnexus.tools.shell import (
+    _SYSTEM,
     ShellSandboxUnavailable,
     _apply_timeout,
     _execute_shell_auto,
@@ -109,9 +110,7 @@ class TestRunShellCommand:
 class TestFormatShellResult:
     @staticmethod
     def _make_result(stdout="", stderr="", returncode=0):
-        return subprocess.CompletedProcess(
-            args=[], returncode=returncode, stdout=stdout, stderr=stderr
-        )
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
     def test_stdout_only(self):
         result = self._make_result(stdout="hello world")
@@ -154,10 +153,8 @@ class TestFormatShellResult:
 
 class TestShellUnavailableMessage:
     def test_formats_failures(self):
-        msg = _shell_unavailable_message(
-            ["e2b: not available", "docker: not installed"]
-        )
-        assert "- e2b: not available" in msg
+        msg = _shell_unavailable_message(["native: not available", "docker: not installed"])
+        assert "- native: not available" in msg
         assert "- docker: not installed" in msg
 
     def test_single_failure(self):
@@ -166,60 +163,48 @@ class TestShellUnavailableMessage:
         assert "No safe shell execution sandbox" in msg
 
     def test_mentions_auto_backend(self):
-        msg = _shell_unavailable_message(["e2b: fail"])
+        msg = _shell_unavailable_message(["docker: fail"])
         assert "auto" in msg
         assert "shell_execution_backend" in msg
 
 
 class TestExecuteShellAuto:
-    def test_auto_e2b_first(self, mocker):
-        mock_e2b = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_e2b",
-            return_value="e2b result",
-        )
-        mock_native = mocker.patch("agentnexus.tools.shell._execute_shell_native")
-        mock_docker = mocker.patch("agentnexus.tools.shell._execute_shell_docker")
-        mock_local = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_locally_with_warning"
-        )
-        settings = mocker.MagicMock()
-
-        result = _execute_shell_auto("echo hi", "/tmp", settings, 30)
-
-        assert result == "e2b result"
-        mock_e2b.assert_called_once()
-        mock_native.assert_not_called()
-        mock_docker.assert_not_called()
-        mock_local.assert_not_called()
-
-    def test_auto_e2b_fails_falls_to_native(self, mocker):
-        mock_e2b = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_e2b",
-            side_effect=ShellSandboxUnavailable("e2b fail"),
-        )
+    def test_auto_native_first(self, mocker):
         mock_native = mocker.patch(
             "agentnexus.tools.shell._execute_shell_native",
             return_value="native result",
         )
         mock_docker = mocker.patch("agentnexus.tools.shell._execute_shell_docker")
-        mock_local = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_locally_with_warning"
-        )
+        mock_local = mocker.patch("agentnexus.tools.shell._execute_shell_locally_with_warning")
         settings = mocker.MagicMock()
 
         result = _execute_shell_auto("echo hi", "/tmp", settings, 30)
 
         assert result == "native result"
-        mock_e2b.assert_called_once()
         mock_native.assert_called_once()
         mock_docker.assert_not_called()
         mock_local.assert_not_called()
 
-    def test_auto_all_fail_falls_to_local_with_warning(self, mocker):
-        mock_e2b = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_e2b",
-            side_effect=ShellSandboxUnavailable("e2b fail"),
+    def test_auto_native_fails_falls_to_docker(self, mocker):
+        mock_native = mocker.patch(
+            "agentnexus.tools.shell._execute_shell_native",
+            side_effect=ShellSandboxUnavailable("native fail"),
         )
+        mock_docker = mocker.patch(
+            "agentnexus.tools.shell._execute_shell_docker",
+            return_value="docker result",
+        )
+        mock_local = mocker.patch("agentnexus.tools.shell._execute_shell_locally_with_warning")
+        settings = mocker.MagicMock()
+
+        result = _execute_shell_auto("echo hi", "/tmp", settings, 30)
+
+        assert result == "docker result"
+        mock_native.assert_called_once()
+        mock_docker.assert_called_once()
+        mock_local.assert_not_called()
+
+    def test_auto_all_fail_falls_to_local_with_warning(self, mocker):
         mock_native = mocker.patch(
             "agentnexus.tools.shell._execute_shell_native",
             side_effect=ShellSandboxUnavailable("native fail"),
@@ -237,33 +222,28 @@ class TestExecuteShellAuto:
         result = _execute_shell_auto("echo hi", "/tmp", settings, 30)
 
         assert result == "local result"
-        mock_e2b.assert_called_once()
         mock_native.assert_called_once()
         mock_docker.assert_called_once()
         mock_local.assert_called_once_with(
             "echo hi",
             "/tmp",
             30,
-            ["e2b: e2b fail", "native: native fail", "docker: docker fail"],
+            ["native: native fail", "docker: docker fail"],
         )
 
     def test_auto_timeout_propagates(self, mocker):
-        mock_e2b = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_e2b",
+        mock_native = mocker.patch(
+            "agentnexus.tools.shell._execute_shell_native",
             side_effect=subprocess.TimeoutExpired("cmd", 30),
         )
-        mock_native = mocker.patch("agentnexus.tools.shell._execute_shell_native")
         mock_docker = mocker.patch("agentnexus.tools.shell._execute_shell_docker")
-        mock_local = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_locally_with_warning"
-        )
+        mock_local = mocker.patch("agentnexus.tools.shell._execute_shell_locally_with_warning")
         settings = mocker.MagicMock()
 
         with pytest.raises(subprocess.TimeoutExpired):
             _execute_shell_auto("sleep 100", "/tmp", settings, 30)
 
-        mock_e2b.assert_called_once()
-        mock_native.assert_not_called()
+        mock_native.assert_called_once()
         mock_docker.assert_not_called()
         mock_local.assert_not_called()
 
@@ -275,9 +255,7 @@ class TestExecuteShellNative:
             return_value="bwrap result",
         )
         mock_seatbelt = mocker.patch("agentnexus.tools.shell._execute_shell_seatbelt")
-        mock_windows = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_windows_native"
-        )
+        mock_windows = mocker.patch("agentnexus.tools.shell._execute_windows_native")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Linux")
 
         result = _execute_shell_native("echo hi", "/tmp", 30)
@@ -293,9 +271,7 @@ class TestExecuteShellNative:
             "agentnexus.tools.shell._execute_shell_seatbelt",
             return_value="seatbelt result",
         )
-        mock_windows = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_windows_native"
-        )
+        mock_windows = mocker.patch("agentnexus.tools.shell._execute_windows_native")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Darwin")
 
         result = _execute_shell_native("echo hi", "/tmp", 30)
@@ -309,7 +285,7 @@ class TestExecuteShellNative:
         mock_bwrap = mocker.patch("agentnexus.tools.shell._execute_shell_bubblewrap")
         mock_seatbelt = mocker.patch("agentnexus.tools.shell._execute_shell_seatbelt")
         mock_windows = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_windows_native",
+            "agentnexus.tools.shell._execute_windows_native",
             return_value="windows result",
         )
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
@@ -324,7 +300,7 @@ class TestExecuteShellNative:
     def test_native_unsupported_os(self, mocker):
         mocker.patch("agentnexus.tools.shell._execute_shell_bubblewrap")
         mocker.patch("agentnexus.tools.shell._execute_shell_seatbelt")
-        mocker.patch("agentnexus.tools.shell._execute_shell_windows_native")
+        mocker.patch("agentnexus.tools.shell._execute_windows_native")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "SunOS")
 
         with pytest.raises(ShellSandboxUnavailable, match="unsupported OS"):
@@ -339,11 +315,22 @@ class TestExecuteShellDocker:
         with pytest.raises(ShellSandboxUnavailable, match="Docker CLI"):
             _execute_shell_docker("echo hi", "/workspace", settings, 30)
 
+    def test_docker_daemon_down_raises(self, mocker):
+        """A stopped daemon must raise so the auto chain keeps degrading."""
+        mocker.patch("agentnexus.tools.shell.shutil.which", return_value="/usr/bin/docker")
+        mocker.patch(
+            "agentnexus.tools.shell._docker_daemon_available",
+            return_value=(False, "daemon not running"),
+        )
+        settings = mocker.MagicMock()
+
+        with pytest.raises(ShellSandboxUnavailable, match="daemon unavailable"):
+            _execute_shell_docker("echo hi", "/workspace", settings, 30)
+
     def test_docker_success(self, mocker):
         mocker.patch("agentnexus.tools.shell.shutil.which", return_value="/usr/bin/docker")
-        mock_run = mocker.patch(
-            "agentnexus.tools.shell._run_shell_command", return_value="ok"
-        )
+        mocker.patch("agentnexus.tools.shell._docker_daemon_available", return_value=(True, ""))
+        mock_run = mocker.patch("agentnexus.tools.shell._run_shell_command", return_value="ok")
         settings = mocker.MagicMock()
         settings.shell_execution_docker_image = "python:3.11-slim"
         settings.shell_execution_memory_mb = 256
@@ -355,9 +342,8 @@ class TestExecuteShellDocker:
 
     def test_docker_security_flags_present(self, mocker):
         mocker.patch("agentnexus.tools.shell.shutil.which", return_value="/usr/bin/docker")
-        mock_run = mocker.patch(
-            "agentnexus.tools.shell._run_shell_command", return_value="ok"
-        )
+        mocker.patch("agentnexus.tools.shell._docker_daemon_available", return_value=(True, ""))
+        mock_run = mocker.patch("agentnexus.tools.shell._run_shell_command", return_value="ok")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Linux")
         mocker.patch("agentnexus.tools.shell.os.getuid", return_value=1000, create=True)
         mocker.patch("agentnexus.tools.shell.os.getgid", return_value=1000, create=True)
@@ -379,9 +365,8 @@ class TestExecuteShellDocker:
 
     def test_docker_user_flag_on_unix(self, mocker):
         mocker.patch("agentnexus.tools.shell.shutil.which", return_value="/usr/bin/docker")
-        mock_run = mocker.patch(
-            "agentnexus.tools.shell._run_shell_command", return_value="ok"
-        )
+        mocker.patch("agentnexus.tools.shell._docker_daemon_available", return_value=(True, ""))
+        mock_run = mocker.patch("agentnexus.tools.shell._run_shell_command", return_value="ok")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Linux")
         mocker.patch("agentnexus.tools.shell.os.getuid", return_value=1000, create=True)
         mocker.patch("agentnexus.tools.shell.os.getgid", return_value=1000, create=True)
@@ -397,9 +382,8 @@ class TestExecuteShellDocker:
 
     def test_docker_no_user_flag_on_windows(self, mocker):
         mocker.patch("agentnexus.tools.shell.shutil.which", return_value="docker")
-        mock_run = mocker.patch(
-            "agentnexus.tools.shell._run_shell_command", return_value="ok"
-        )
+        mocker.patch("agentnexus.tools.shell._docker_daemon_available", return_value=(True, ""))
+        mock_run = mocker.patch("agentnexus.tools.shell._run_shell_command", return_value="ok")
         mocker.patch("agentnexus.tools.shell._SYSTEM", "Windows")
         settings = mocker.MagicMock()
         settings.shell_execution_docker_image = "python:3.11-slim"
@@ -470,29 +454,21 @@ class TestExecuteShellLocally:
 
 class TestExecuteShellLocallyWithWarning:
     def test_warning_formatted(self, mocker):
-        mocker.patch(
-            "agentnexus.tools.shell._execute_shell_locally", return_value=""
-        )
-        failures = ["e2b: fail", "native: fail"]
+        mocker.patch("agentnexus.tools.shell._execute_shell_locally", return_value="")
+        failures = ["docker: fail", "native: fail"]
 
-        result = _execute_shell_locally_with_warning(
-            "echo hi", "/tmp", 30, failures
-        )
+        result = _execute_shell_locally_with_warning("echo hi", "/tmp", 30, failures)
 
         assert "[warning]" in result
         assert "unsafe local shell" in result
-        assert "- e2b: fail" in result
+        assert "- docker: fail" in result
         assert "- native: fail" in result
 
     def test_empty_result(self, mocker):
-        mocker.patch(
-            "agentnexus.tools.shell._execute_shell_locally", return_value=""
-        )
-        failures = ["e2b: fail"]
+        mocker.patch("agentnexus.tools.shell._execute_shell_locally", return_value="")
+        failures = ["docker: fail"]
 
-        result = _execute_shell_locally_with_warning(
-            "echo hi", "/tmp", 30, failures
-        )
+        result = _execute_shell_locally_with_warning("echo hi", "/tmp", 30, failures)
 
         assert "[warning]" in result
         assert "shell execution sandboxes are unavailable" in result
@@ -502,11 +478,9 @@ class TestExecuteShellLocallyWithWarning:
             "agentnexus.tools.shell._execute_shell_locally",
             return_value="[stdout]\nhello\nexit_code: 0",
         )
-        failures = ["e2b: fail"]
+        failures = ["docker: fail"]
 
-        result = _execute_shell_locally_with_warning(
-            "echo hi", "/tmp", 30, failures
-        )
+        result = _execute_shell_locally_with_warning("echo hi", "/tmp", 30, failures)
 
         assert "[warning]" in result
         assert "[stdout]" in result
@@ -534,33 +508,13 @@ class TestShellExecBackendDispatch:
         settings.shell_blacklist = []
         mocker.patch("agentnexus.tools.shell.get_settings", return_value=settings)
         mocker.patch("agentnexus.tools.shell._check_blacklist", return_value=None)
-        mock_auto = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_auto", return_value="auto result"
-        )
+        mock_auto = mocker.patch("agentnexus.tools.shell._execute_shell_auto", return_value="auto result")
         mocker.patch("agentnexus.tools.file_ops._resolve_safe", return_value=Path("."))
 
         result = shell_exec("echo hi")
 
         assert result == "auto result"
         mock_auto.assert_called_once()
-
-    def test_backend_e2b(self, mocker):
-        settings = mocker.MagicMock()
-        settings.shell_enabled = True
-        settings.shell_execution_backend = "e2b"
-        settings.shell_timeout = 30
-        settings.shell_blacklist = []
-        mocker.patch("agentnexus.tools.shell.get_settings", return_value=settings)
-        mocker.patch("agentnexus.tools.shell._check_blacklist", return_value=None)
-        mock_e2b = mocker.patch(
-            "agentnexus.tools.shell._execute_shell_e2b", return_value="e2b result"
-        )
-        mocker.patch("agentnexus.tools.file_ops._resolve_safe", return_value=Path("."))
-
-        result = shell_exec("echo hi")
-
-        assert result == "e2b result"
-        mock_e2b.assert_called_once()
 
     def test_backend_native(self, mocker):
         settings = mocker.MagicMock()
@@ -707,3 +661,32 @@ class TestShellExecBackendDispatch:
 
         assert "blocked" in result
         assert "unsupported backend" in result
+
+
+@pytest.mark.skipif(_SYSTEM != "Windows", reason="Windows-only native sandbox")
+class TestWindowsNativeSandboxReal:
+    """Real-execution checks for the Windows Low-IL sandbox (ctypes path).
+
+    Guards the regression where the Windows native backend was an unimplemented
+    placeholder, and verifies token isolation actually holds.
+    """
+
+    def test_runs_at_low_integrity(self, tmp_path):
+        from agentnexus.tools.shell import _execute_windows_native
+
+        result = _execute_windows_native('whoami /groups | findstr /i "Mandatory"', str(tmp_path), 30)
+        assert "Low Mandatory Level" in result
+        assert "exit_code: 0" in result
+
+    def test_writes_workspace_denied_outside(self, tmp_path):
+        from agentnexus.tools.shell import _execute_windows_native
+
+        ok = _execute_windows_native("echo data > w.txt & type w.txt", str(tmp_path), 30)
+        assert "data" in ok
+        assert (tmp_path / "w.txt").exists()
+
+        denied = _execute_windows_native("echo evil > %USERPROFILE%\\agentnexus-pwn-test.txt", str(tmp_path), 30)
+        assert "exit_code: 1" in denied
+        import os
+
+        assert not os.path.exists(os.path.expanduser("~/agentnexus-pwn-test.txt"))

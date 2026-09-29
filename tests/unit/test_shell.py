@@ -3,7 +3,13 @@
 import subprocess
 from unittest.mock import patch
 
-from agentnexus.tools.shell import _check_blacklist, _execute_shell_docker, get_os_info, shell_exec
+from agentnexus.tools.shell import (
+    ShellSandboxUnavailable,
+    _check_blacklist,
+    _execute_shell_docker,
+    get_os_info,
+    shell_exec,
+)
 
 
 class TestCheckBlacklist:
@@ -65,9 +71,10 @@ class TestShellExec:
         result = shell_exec("sleep 100")
         assert "超时" in result or "timeout" in result.lower()
 
+    @patch("agentnexus.tools.shell._windows_api", side_effect=ShellSandboxUnavailable("no win32"))
     @patch("agentnexus.tools.shell.shutil.which")
     @patch("agentnexus.tools.shell.get_settings")
-    def test_auto_warns_and_runs_local_when_no_safe_backend(self, mock_settings, mock_which):
+    def test_auto_warns_and_runs_local_when_no_safe_backend(self, mock_settings, mock_which, _mock_winapi):
         mock_settings.return_value.shell_enabled = True
         mock_settings.return_value.shell_execution_backend = "auto"
         mock_settings.return_value.shell_timeout = 30
@@ -79,9 +86,10 @@ class TestShellExec:
         assert "unsafe local shell" in result
         assert "hello" in result
 
+    @patch("agentnexus.tools.shell._docker_daemon_available", return_value=(True, ""))
     @patch("agentnexus.tools.shell.process_tracker.run_tracked")
     @patch("agentnexus.tools.shell.shutil.which")
-    def test_docker_backend_uses_restricted_container_flags(self, mock_which, mock_run):
+    def test_docker_backend_uses_restricted_container_flags(self, mock_which, mock_run, _mock_daemon):
         mock_which.return_value = "docker"
         mock_run.return_value.stdout = "ok"
         mock_run.return_value.stderr = ""

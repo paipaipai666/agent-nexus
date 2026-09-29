@@ -40,7 +40,7 @@ class ComputerUseToolProvider:
                 "不指定窗口时使用当前聚焦窗口。"
                 "返回元素列表，每个元素包含 role、name、value 等属性。"
                 "[最优] 理解桌面应用结构、发现可交互元素、决策下一步操作。"
-                "[不适用] 操控浏览器网页(用browser_snapshot)。",
+                "[不适用] 操控浏览器网页(通过外部浏览器MCP工具)。",
                 computer_snapshot,
                 param_schema={
                     "type": "object",
@@ -153,7 +153,7 @@ class ComputerUseToolProvider:
                 "参数: element_id(元素标识,从snapshot获取,必填), "
                 "button(left/right/middle,默认left), "
                 "clicks(点击次数,1=单击2=双击,默认1)。"
-                "[不适用] 操控浏览器网页元素(用browser_*系列工具)。",
+                "[不适用] 操控浏览器网页元素(通过外部浏览器MCP工具)。",
                 computer_click,
                 param_schema={
                     "type": "object",
@@ -187,7 +187,7 @@ class ComputerUseToolProvider:
                 "在桌面应用的输入框中键入文本。"
                 "参数: element_id(元素标识,从snapshot获取,必填), "
                 "text(要输入的文本,必填), clear(是否先清空,默认true)。"
-                "[不适用] 操控浏览器网页元素(用browser_*系列工具)。",
+                "[不适用] 操控浏览器网页元素(通过外部浏览器MCP工具)。",
                 computer_type,
                 param_schema={
                     "type": "object",

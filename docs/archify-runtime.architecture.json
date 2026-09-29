@@ -48,14 +48,14 @@
       "sources": [{ "path": "agentnexus/tools/mcp_adapter.py", "label": "MCP 适配器" }]
     },
     {
-      "id": "tools", "type": "backend", "label": "内置工具 ×15", "sublabel": "code·shell·file·web·browser·computer·subagent·wiki",
+      "id": "tools", "type": "backend", "label": "内置工具 ×15", "sublabel": "shell·file·web·computer·subagent·wiki",
       "pos": [540, 284], "size": [290, 96],
       "sources": [{ "path": "agentnexus/tools/registry.py", "label": "15 个内置工具" }]
     },
     {
       "id": "sandbox", "type": "security", "label": "Code Sandbox", "sublabel": "E2B → bwrap/Seatbelt → Docker → 本地",
       "pos": [220, 284], "size": [200, 80],
-      "sources": [{ "path": "agentnexus/tools/code_executor.py", "label": "4 级沙箱降级" }]
+      "sources": [{ "path": "agentnexus/tools/shell.py", "label": "4 级沙箱降级" }]
     },
     {
       "id": "memory", "type": "database", "label": "Memory", "sublabel": "STM 压缩 + LTM 淘汰 · SQLite/ChromaDB",

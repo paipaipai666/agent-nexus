@@ -6,9 +6,9 @@
 
 All tools pass through [ToolRegistry](Tool-Governance.en.md) gates: RBAC → Schema → Rate-limit → Timeout → Risk → HITL → Audit.
 
-## Code Execution Security
+## Code Execution Security (shell_exec)
 
-- E2B → bubblewrap/Seatbelt → Docker → local fallback (see [diagram](Code-Execution.en.md))
+- `shell_exec` sandbox degradation chain: bubblewrap (Linux) / Seatbelt (macOS) / Low-IL restricted token + Job Object (Windows) → Docker (with daemon probe; a stopped daemon keeps the chain degrading) → warned local fallback
 - Shell 3-layer blacklist (general + platform + user-defined)
 - NFKC normalization to prevent Unicode bypass
 

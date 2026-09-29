@@ -10,7 +10,7 @@ input:
   prompt: "编写一个函数 `remove_vowels(text)`，移除字符串中的元音字母。\n\n```python\ndef remove_vowels(text:\
     \ str) -> str:\n    \"\"\"Remove vowels (aeiouAEIOU) from a string.\"\"\"\n```"
   tools:
-  - code_executor
+  - shell_exec
 graders:
 - type: code_execution
   test_files:

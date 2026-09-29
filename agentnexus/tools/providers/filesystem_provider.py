@@ -69,7 +69,7 @@ class FilesystemToolProvider:
                 "mode(create=创建新文件/overwrite=覆盖已有文件/append=追加), "
                 "expected_version(可选，来自 file_read 的 version，用于写前版本校验)。"
                 "覆盖已有文件时需要确认。"
-                "[不适用] 执行代码(用python_execute), 执行命令(用shell_exec)。",
+                "[不适用] 执行命令(用shell_exec)。",
                 file_write,
                 param_schema={
                     "type": "object",

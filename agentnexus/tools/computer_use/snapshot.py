@@ -1,7 +1,7 @@
 """Accessibility tree → YAML formatter for desktop elements.
 
 Converts a DesktopElement tree into the same YAML format used by
-browser aria_snapshot, so the LLM sees a consistent structure.
+accessibility snapshot, so the LLM sees a consistent structure.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def format_desktop_yaml(
 ) -> str:
     """Format a list of DesktopElement trees into YAML-like text.
 
-    Output matches browser aria_snapshot style:
+    Output matches accessibility snapshot style:
         - window "Notepad":
           - menubar "":
             - menuitem "File":
@@ -81,7 +81,7 @@ def format_desktop_numbered(
 ) -> str:
     """Format desktop elements as numbered text for LLM consumption.
 
-    Mirrors browser _format_a11y_tree output:
+    Mirrors the browser-style a11y tree formatter output:
         [1] window "Notepad"
         [2] menubar ""
         [3] menuitem "File"
@@ -131,7 +131,7 @@ def _truncate_by_priority(
 ) -> list[DesktopElement]:
     """Truncate by priority: interactive > reading > other.
 
-    Same logic as browser _truncate_by_priority.
+    Same logic as the shared truncation-by-priority logic.
     """
     if len(elements) <= max_nodes:
         return elements
