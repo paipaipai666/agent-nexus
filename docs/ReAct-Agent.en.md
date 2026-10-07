@@ -28,7 +28,7 @@ User question → INIT → AWAIT_MODEL (per round: call LLM + interpret)
     │
     ├── TOOLS_REQUESTED → EXECUTE_TOOL (whole batch, read/write partitioned)
     │     ├── TOOLS_DONE → AWAIT_MODEL (continue)
-    │     └── ANSWER_READY → ANSWER (bookkeeping-only fast path)
+    │     └── ANSWER_READY → ANSWER (explicit terminate signal: batch's todo_update closed all todos)
     │
     ├── ANSWER_READY → ANSWER → (stop hook veto) ANSWER_VETOED → AWAIT_MODEL
     │

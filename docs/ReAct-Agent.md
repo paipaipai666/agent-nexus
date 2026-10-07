@@ -26,7 +26,7 @@ Agent 的执行循环由一个 **6 状态 × 13 规则** 的 FSM 驱动，而非
     │
     ├── TOOLS_REQUESTED → EXECUTE_TOOL（整批执行，读写分区并发）
     │     ├── TOOLS_DONE → AWAIT_MODEL（继续）
-    │     └── ANSWER_READY → ANSWER（记账类工具的 fast path）
+    │     └── ANSWER_READY → ANSWER（显式终止信号：本批 todo_update 关闭全部 todo）
     │
     ├── ANSWER_READY → ANSWER →(stop 钩子否决)→ ANSWER_VETOED → AWAIT_MODEL
     │

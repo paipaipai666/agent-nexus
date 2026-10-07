@@ -9,6 +9,7 @@ import pytest
 
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.re_act_agent import ReActAgent
+from agentnexus.memory.todo import SessionTodoList
 from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
@@ -177,3 +178,125 @@ class TestE2EReActAgent:
 
         result = agent.run("Trigger error")
         assert result.answer is None or isinstance(result.answer, str)
+
+
+class TestTodoTerminateSignal:
+    """显式终止信号（pi 风格）：只有模型用 todo_update 关闭全部 todo，
+    且同响应携带非空可见文本，批处理后才直接收尾。
+
+    回归 2026-10-07 事故：旧启发式（长文本 + 全是记账工具）把模型
+    更新 todo 时的计划旁白当成最终答案，run 提前结束、子代理从未启动。
+    """
+
+    def _make_agent(self):
+        llm = _make_llm()
+        te = ToolRegistry()
+        todo_list = SessionTodoList()
+
+        def _todo_add(description: str) -> str:
+            item = todo_list.add(description)
+            return f"Added todo #{item.id}: {item.description}"
+
+        def _todo_update(item_id: int, status: str) -> str:
+            item = todo_list.update(item_id, status)
+            return f"Updated todo #{item.id}: {item.status}"
+
+        te.register(
+            ToolMeta(name="todo_add", description="todo", param_schema={"type": "object", "properties": {}}),
+            _todo_add,
+        )
+        te.register(
+            ToolMeta(name="todo_update", description="todo", param_schema={"type": "object", "properties": {}}),
+            _todo_update,
+        )
+        te.register(
+            ToolMeta(name="file_list", description="list", param_schema={"type": "object", "properties": {}}),
+            lambda **kw: "[目录] . (24 项)",
+        )
+        te.register(
+            ToolMeta(name="subagent_run", description="delegate", param_schema={"type": "object", "properties": {}}),
+            lambda **kw: "subagent result",
+        )
+        agent = ReActAgent(llm, te)
+        agent._todo_list = todo_list
+        return agent, llm
+
+    def _scripted(self, llm, script):
+        def mock_think(**kw):
+            idx = min(len(llm.think.call_args_list) - 1, len(script) - 1)
+            item = script[idx]
+            llm.last_tool_calls = item["tool_calls"]
+            llm.last_error = ""
+            return item["text"]
+        llm.think.side_effect = mock_think
+
+    def test_todo_add_batch_with_plan_text_does_not_finish_early(self):
+        # 事故复现路径：todo_add 批 + 计划旁白（旧启发式会误判为最终答案）
+        agent, llm = self._make_agent()
+        plan_text = ("The project is fairly large and has multiple modules. "
+                     "I'll check the packaging configuration myself first, then "
+                     "dispatch sub-agents to explore in parallel.")
+        self._scripted(llm, [
+            {"tool_calls": [{"name": "file_list", "arguments": {"path": "."}}],
+             "text": "Let me look at the root."},
+            {"tool_calls": [{"name": "todo_add", "arguments": {"description": f"调研模块 {i}"}} for i in range(3)],
+             "text": plan_text},
+            {"tool_calls": [{"name": "subagent_run", "arguments": {"task": "explore"}}],
+             "text": "Dispatching subagents now."},
+            {"tool_calls": [], "text": "Real final answer."},
+        ])
+
+        result = agent.run("详细介绍这个项目")
+        assert llm.think.call_count == 4, "计划旁白不得触发提前收尾"
+        assert result.answer == "Real final answer."
+
+    def test_all_todos_done_with_answer_text_terminates(self):
+        # 显式信号：本批 todo_update 关闭全部 todo → 同响应文本即最终答案，
+        # 不必再开一轮（d99d823f 想保留的收益，改由信号驱动）
+        agent, llm = self._make_agent()
+        self._scripted(llm, [
+            {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}},
+                            {"name": "todo_add", "arguments": {"description": "任务B"}}],
+             "text": "我先分解一下任务。"},
+            {"tool_calls": [{"name": "file_list", "arguments": {"path": "."}}],
+             "text": "先做任务A。"},
+            {"tool_calls": [{"name": "todo_update", "arguments": {"item_id": 1, "status": "done"}},
+                            {"name": "todo_update", "arguments": {"item_id": 2, "status": "done"}}],
+             "text": "两个任务都完成了，这是完整最终答案。"},
+            {"tool_calls": [], "text": "多余的一轮。"},
+        ])
+
+        result = agent.run("做任务")
+        assert llm.think.call_count == 3, "全部 todo done + 答案文本应直接收尾"
+        assert result.answer == "两个任务都完成了，这是完整最终答案。"
+
+    def test_all_todos_done_with_empty_text_continues(self):
+        # 信号存在但没有答案文本 → 不收尾，下一轮正常给答案
+        agent, llm = self._make_agent()
+        self._scripted(llm, [
+            {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}}],
+             "text": "分解任务。"},
+            {"tool_calls": [{"name": "todo_update", "arguments": {"item_id": 1, "status": "done"}}],
+             "text": ""},
+            {"tool_calls": [], "text": "真正的最终答案。"},
+        ])
+
+        result = agent.run("做任务")
+        assert llm.think.call_count == 3
+        assert result.answer == "真正的最终答案。"
+
+    def test_todo_update_without_closing_all_continues(self):
+        # 只关闭部分 todo → 不收尾
+        agent, llm = self._make_agent()
+        self._scripted(llm, [
+            {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}},
+                            {"name": "todo_add", "arguments": {"description": "任务B"}}],
+             "text": "分解任务。"},
+            {"tool_calls": [{"name": "todo_update", "arguments": {"item_id": 1, "status": "done"}}],
+             "text": "任务A完成，继续任务B，这是很长的进度说明文本。"},
+            {"tool_calls": [], "text": "最终答案。"},
+        ])
+
+        result = agent.run("做任务")
+        assert llm.think.call_count == 3
+        assert result.answer == "最终答案。"

@@ -58,7 +58,7 @@ class ReActEventType(Enum):
     # ── 队列事件：驱动状态机。决策函数返回值封闭于这几种，
     #    转移表因此是全函数（totality 在测试里断言）。──
     START = auto()          # 用户调用 run(question)
-    TOOLS_REQUESTED = auto()  # 解释器：模型要调工具（payload: tool_calls/thought/terminal_answer）
+    TOOLS_REQUESTED = auto()  # 解释器：模型要调工具（payload: tool_calls/thought/text）
     ANSWER_READY = auto()   # 解释器：这是最终答案（payload 可带 text）
     FAULT = auto()          # 本轮输出不可用 / 致命错误（payload: reason/detail/fatal）
     TOOLS_DONE = auto()     # 整批工具执行完成
@@ -158,9 +158,6 @@ class RunState:
     thinking_enabled: bool = False
     cancel_checker: Any = None
     _current_step_span: Any = None  # TraceSpan for current plan_node (avoid circular import)
-    # Fast-path stash: visible text accompanying a bookkeeping-only tool batch
-    # (todo_add/todo_update), used as the final answer without another LLM round.
-    terminal_answer: str | None = None
     # Partial answer accumulated across length-truncated rounds (continue-on-truncate).
     partial_answer: str = ""
 

@@ -35,15 +35,6 @@ _FINAL_ANSWER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Tools whose results are pure side effects — their observations can never
-# change the final answer, so a batch containing ONLY these can fast-path
-# to EMIT_ANSWER when the response already carries substantive text.
-_BOOKKEEPING_TOOLS = frozenset({"todo_add", "todo_update"})
-
-# Minimum visible-text length for the terminal fast path. Short notes like
-# "我先更新下待办" stay on the normal loop; only answer-grade text qualifies.
-_TERMINAL_TEXT_MIN_CHARS = 30
-
 
 def split_native_thought_answer(text: str) -> tuple[str, str]:
     """把模型的可见文本拆成 (thought, answer)。
@@ -89,7 +80,6 @@ class ModelDecision:
     tool_calls: list[dict] = field(default_factory=list)
     thought: str = ""
     text: str = ""               # answer text (kind=answer) or commentary (kind=tools)
-    terminal_answer: str | None = None   # bookkeeping fast-path stash
     reason: RetryReason | None = None    # kind=fault
     detail: str = ""                     # kind=fault
     # fault sub-flags — handler-side side effects to perform:
@@ -138,17 +128,14 @@ def interpret_native(
     if calls:
         # 决策1（2026-09-24 拍板）：允许模型不做可见思考直接调工具。
         # thought 只是展示材料，不再作为门禁；为空时 handler 跳过展示。
+        # 决策3（2026-10-07）：同响应文本一律是旁白，不当最终答案——
+        # 终止只认显式信号（模型在 todo_update 里关闭全部 todo），见
+        # ReActAgent._on_tools_requested。
         thought = select_visible_thought(response_text, reasoning_text)
         terminal_text = (response_text or "").strip()
-        terminal_answer = None
-        if (
-            len(terminal_text) >= _TERMINAL_TEXT_MIN_CHARS
-            and all(tc.get("name") in _BOOKKEEPING_TOOLS for tc in calls)
-        ):
-            terminal_answer = terminal_text
         return ModelDecision(
             kind="tools", tool_calls=list(calls), thought=thought,
-            text=terminal_text, terminal_answer=terminal_answer,
+            text=terminal_text,
         )
 
     # ── no tool calls ──

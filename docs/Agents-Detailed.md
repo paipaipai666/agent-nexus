@@ -79,7 +79,7 @@
 | 事件 | 说明 |
 | --- | --- |
 | `START` | 用户调用 run(question) |
-| `TOOLS_REQUESTED` | 解释器判定：模型要调工具（payload 带 tool_calls / thought / terminal_answer） |
+| `TOOLS_REQUESTED` | 解释器判定：模型要调工具（payload 带 tool_calls / thought / text） |
 | `ANSWER_READY` | 解释器判定：这是最终答案（含兜底提取） |
 | `FAULT` | 本轮输出不可用或致命错误（payload 带 reason / detail / fatal） |
 | `TOOLS_DONE` | 整批工具执行完成 |

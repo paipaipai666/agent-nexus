@@ -60,23 +60,16 @@ class TestInterpretNative:
                    tool_calls=[{"name": "x", "arguments": {}}])
         assert d.kind == "tools"
         assert d.thought == "先看看文件。"
-        assert d.terminal_answer is None
+        assert not hasattr(d, "terminal_answer")
 
-    def test_bookkeeping_batch_stashes_terminal_answer(self):
-        text = "好，我已经把待办更新完了。这是一个满足长度要求的最终总结文本，应当走 fast path。"
+    def test_bookkeeping_batch_text_is_plain_commentary(self):
+        # 2026-10-07 决策3：记账批次 + 长文本不再触发任何终止语义——
+        # 同响应文本一律是旁白，终止只认 todo 全 done 的显式信号（re_act_agent）。
+        text = "好，我已经把待办更新完了。这是一个满足长度要求的最终总结文本。"
         d = _tools(response_text=text, tool_calls=[{"name": "todo_add", "arguments": {}}])
         assert d.kind == "tools"
-        assert d.terminal_answer == text
-
-    def test_non_bookkeeping_batch_does_not_stash(self):
-        text = "好，我已经把待办更新完了。这是一个满足长度要求的最终总结文本，应当走 fast path。"
-        d = _tools(response_text=text, tool_calls=[{"name": "file_read", "arguments": {}}])
-        assert d.terminal_answer is None
-
-    def test_short_terminal_text_does_not_stash(self):
-        d = _tools(response_text="我先更新下待办。",
-                   tool_calls=[{"name": "todo_add", "arguments": {}}])
-        assert d.terminal_answer is None
+        assert d.text == text
+        assert not hasattr(d, "terminal_answer")
 
     def test_empty_response_and_empty_reasoning_is_no_tools_no_text(self):
         d = _tools()

@@ -55,8 +55,6 @@ logger = logging.getLogger(__name__)
 #    for backward compatibility with internal call sites. ──
 _split_native_thought_answer = decisions.split_native_thought_answer
 _THOUGHT_MARKER_RE = decisions._THOUGHT_MARKER_RE
-_BOOKKEEPING_TOOLS = decisions._BOOKKEEPING_TOOLS
-_TERMINAL_TEXT_MIN_CHARS = decisions._TERMINAL_TEXT_MIN_CHARS
 
 REACT_PROMPT_TEMPLATE = load_prompt("react")
 REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
@@ -648,9 +646,6 @@ class ReActAgent:
             )
             self._on_native_tool_calls(ctx, "")
         elif ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
-            if d.terminal_answer is not None:
-                # Fast path: bookkeeping-only batch carrying answer-grade text.
-                ctx.run_state.terminal_answer = d.terminal_answer
             ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
                 list(d.tool_calls), step=ctx.run_state.current_step,
             )
@@ -666,7 +661,7 @@ class ReActAgent:
         return [ReActEvent(ReActEventType.TOOLS_REQUESTED, {
             "tool_calls": list(ctx.tool_state.pending_tool_calls),
             "thought": d.thought,
-            "terminal_answer": d.terminal_answer,
+            "text": d.text,
             "strategy": ctx.run_state.strategy.name,
         })]
 
@@ -752,18 +747,26 @@ class ReActAgent:
         # ── 跑飞兜底 L1：闭环检测（连续相同工具调用）→ 用户可见警告 + 软 nudge ──
         self._maybe_warn_loop(ctx)
         ctx.run_state.json_retries = 0  # 成功的工具轮重置 JSON 重试预算
-        terminal = ctx.run_state.terminal_answer
-        if terminal:
-            ctx.run_state.terminal_answer = None
-            ctx.last_answer = terminal
-            try:
-                self._persist_round()
-            except Exception as e:
-                return [ReActEvent(ReActEventType.FAULT, {
-                    "fatal": True,
-                    "detail": f"记忆写入失败，未保存本轮结果: {e}",
-                })]
-            return [ReActEvent(ReActEventType.ANSWER_READY)]
+        # ── 显式终止信号（pi 风格）：模型在本批用 todo_update 关闭全部 todo ──
+        # 清单全部 done 是模型的显式收尾声明（对照 2026-10-07 事故：旧启发式
+        # 用"长文本+记账批次"猜答案，把计划旁白当成最终答案提前收尾）。
+        # 三个条件缺一不可：本批有 todo_update（防历史残留误触发）、
+        # 清单非空且全部 done、同响应携带非空可见文本作为答案。
+        closed = any(tc.get("name") == "todo_update" for tc in payload.get("tool_calls", []))
+        if closed and self._todo_list is not None:
+            items = self._todo_list.list_items()
+            if items and all(item.status == "done" for item in items):
+                text = (payload.get("text") or "").strip()
+                if text:
+                    ctx.last_answer = text
+                    try:
+                        self._persist_round()
+                    except Exception as e:
+                        return [ReActEvent(ReActEventType.FAULT, {
+                            "fatal": True,
+                            "detail": f"记忆写入失败，未保存本轮结果: {e}",
+                        })]
+                    return [ReActEvent(ReActEventType.ANSWER_READY)]
         if is_native:
             ctx.messages.append(
                 {"role": "user",

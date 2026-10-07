@@ -1,15 +1,17 @@
-"""Bug reproduction: bookkeeping tool calls (todo_*) force a duplicate final answer.
+"""显式终止信号守卫（2026-10-07 决策3，取代旧的 fast-path 启发式）。
 
-Native-tools mode lets the model return tool_calls AND final-answer text in one
-response. When the tool calls are pure bookkeeping (todo_update — results cannot
-change the answer), the FSM should end the run with the accompanying text.
-Current behavior: the text is downgraded to "thought", the tool executes, and
-the FSM loops back to CALL_LLM, forcing the model to write the final answer a
-second time.
+旧契约（已废除）：批内全是记账工具 + 长文本 → 猜文本是最终答案。该启发式
+把模型更新 todo 时的计划旁白误判为答案，导致 run 提前结束（2026-10-07 事故，
+session 7774923c1358：子代理从未启动）。
+
+新契约：终止只认显式信号 —— 本批含 todo_update 且清单非空全部 done 且同响应
+携带非空可见文本（模型显式关闭全部 todo = 显式收尾声明）。批内是否混有内容
+工具不影响该信号；无 todo_list 时信号不存在，一律正常循环。
 """
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
+from agentnexus.memory.todo import SessionTodoList
 from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
@@ -35,13 +37,15 @@ def _make_llm():
 def _make_agent():
     llm = _make_llm()
     te = ToolRegistry()
+    todo_list = SessionTodoList()
+    todo_list.add("任务")
     te.register(
         ToolMeta(
             name="todo_update",
             description="更新待办",
             param_schema={"type": "object", "properties": {}},
         ),
-        lambda **kw: "ok",
+        lambda item_id, status, **kw: todo_list.update(item_id, status) and "ok",
     )
     te.register(
         ToolMeta(
@@ -51,43 +55,37 @@ def _make_agent():
         ),
         lambda **kw: {"results": ["data"]},
     )
-    return ReActAgent(llm, te, max_steps=5), llm
+    agent = ReActAgent(llm, te, max_steps=5)
+    agent._todo_list = todo_list
+    return agent, llm
 
 
-class TestBookkeepingToolDoubleAnswer:
-    def test_bookkeeping_tool_with_final_text_needs_no_second_round(self):
-        """RED: todo_update + final text in one response should terminate the run.
-
-        Currently fails: the FSM discards the text and loops for round 2.
-        """
+class TestExplicitTerminateSignal:
+    def test_all_todos_done_with_final_text_needs_no_second_round(self):
+        """todo_update 关闭全部 todo + 同响应最终答案文本 → 直接收尾（一轮）。"""
         agent, llm = _make_agent()
         rounds = []
 
         def mock_think(**kw):
             rounds.append(1)
             if len(rounds) == 1:
-                # Work is done; model marks the todo AND states the final answer
                 llm.last_tool_calls = [
-                    {"name": "todo_update", "arguments": {"id": "1", "status": "done"}, "id": "c1"}
+                    {"name": "todo_update", "arguments": {"item_id": 1, "status": "done"}, "id": "c1"}
                 ]
                 return "最终答案：任务已全部完成。报告包含三个章节的分析结果，已保存到输出目录。"
-            # Second round only happens because the FSM forced it
             llm.last_tool_calls = []
-            return "最终答案：任务已全部完成。报告包含三个章节的分析结果，已保存到输出目录。（被迫重复的第二遍）"
+            return "最终答案：任务已全部完成。（被迫重复的第二遍）"
 
         llm.think.side_effect = mock_think
 
         result = agent.run("完成任务")
 
-        assert len(rounds) == 1, (
-            f"BUG: agent needed {len(rounds)} LLM rounds — the final answer text "
-            "accompanying the bookkeeping tool call was discarded"
-        )
+        assert len(rounds) == 1
         assert result.answer == "最终答案：任务已全部完成。报告包含三个章节的分析结果，已保存到输出目录。"
 
     def test_content_tool_still_loops_for_observation(self):
-        """Guard: text + a content-producing tool (web_search) MUST loop —
-        the observation can change the answer, so the fast path must not fire."""
+        """守卫：内容工具（web_search）的 observation 可能改变答案，
+        无 todo 信号时必须继续循环。"""
         agent, llm = _make_agent()
         rounds = []
 
@@ -108,8 +106,9 @@ class TestBookkeepingToolDoubleAnswer:
         assert len(rounds) == 2
         assert result.answer == "基于搜索结果的答案。"
 
-    def test_mixed_bookkeeping_and_content_tool_still_loops(self):
-        """Guard: any non-bookkeeping tool in the batch disables the fast path."""
+    def test_mixed_batch_with_all_todos_done_terminates(self):
+        """新契约：信号来自 todo 状态而非批次纯度 —— 混合批（web_search +
+        todo_update 全 done）+ 答案文本同样收尾。"""
         agent, llm = _make_agent()
         rounds = []
 
@@ -117,16 +116,16 @@ class TestBookkeepingToolDoubleAnswer:
             rounds.append(1)
             if len(rounds) == 1:
                 llm.last_tool_calls = [
-                    {"name": "todo_update", "arguments": {"id": "1", "status": "done"}, "id": "c1"},
+                    {"name": "todo_update", "arguments": {"item_id": 1, "status": "done"}, "id": "c1"},
                     {"name": "web_search", "arguments": {"query": "q"}, "id": "c2"},
                 ]
-                return "差不多完成了。"
+                return "搜索核验完毕，任务全部完成，这是完整最终答案。"
             llm.last_tool_calls = []
-            return "真正的最终答案。"
+            return "被迫重复的第二遍。"
 
         llm.think.side_effect = mock_think
 
         result = agent.run("混合调用")
 
-        assert len(rounds) == 2
-        assert result.answer == "真正的最终答案。"
+        assert len(rounds) == 1
+        assert result.answer == "搜索核验完毕，任务全部完成，这是完整最终答案。"

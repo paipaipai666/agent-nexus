@@ -797,7 +797,7 @@ class TestReActAgentConversationMode:
 
         returned = agent._on_tools_requested(ctx, ReActEvent(ReActEventType.TOOLS_REQUESTED, {
             "tool_calls": [{"id": "", "name": "file_read", "arguments": {"file_path": "README.md"}}],
-            "thought": "", "terminal_answer": None,
+            "thought": "", "text": "",
             "strategy": CallingStrategy.PROMPT_JSON.name,
         }))
         assert [event.type for event in returned] == [ReActEventType.TOOLS_DONE]
@@ -805,7 +805,7 @@ class TestReActAgentConversationMode:
         followup_before = len(ctx.messages)
         ctx.run_state.strategy = CallingStrategy.PROMPT_JSON
         returned = agent._on_tools_requested(ctx, ReActEvent(ReActEventType.TOOLS_REQUESTED, {
-            "tool_calls": [], "thought": "", "terminal_answer": None,
+            "tool_calls": [], "thought": "", "text": "",
             "strategy": CallingStrategy.PROMPT_JSON.name,
         }))
         assert [event.type for event in returned] == [ReActEventType.TOOLS_DONE]
