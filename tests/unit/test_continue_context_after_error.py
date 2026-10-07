@@ -7,7 +7,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -31,7 +31,14 @@ def _make_llm():
 
 def _make_agent(llm):
     te = ToolRegistry()
-    te.register_tool("file_list", "列文件", lambda **kw: "[ToolErrorCode.VALIDATION_FAILED] 路径越界")
+    te.register(
+        ToolMeta(
+            name="file_list",
+            description="列文件",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: "[ToolErrorCode.VALIDATION_FAILED] 路径越界",
+    )
     agent = ReActAgent(llm, te, max_steps=5, conversation_mode=True)
     agent._output = lambda _m: None
     return agent

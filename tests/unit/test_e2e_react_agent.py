@@ -9,7 +9,7 @@ import pytest
 
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -38,8 +38,22 @@ class TestE2EReActAgent:
     def _make_agent(self):
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: {"results": [{"title": "Python"}]})
-        te.register_tool("file_read", "读文件", lambda **kw: "file content")
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"results": [{"title": "Python"}]},
+        )
+        te.register(
+            ToolMeta(
+                name="file_read",
+                description="读文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "file content",
+        )
         agent = ReActAgent(llm, te, max_steps=5)
         return agent, llm
 

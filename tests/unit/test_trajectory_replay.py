@@ -7,7 +7,7 @@ import json
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -49,7 +49,14 @@ class TestTrajectoryReplay:
         llm = _make_llm()
         llm.think.side_effect = lambda **kw: (setattr(llm, 'last_error', '') or trace["answer"])
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: {"results": []})
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"results": []},
+        )
         agent = ReActAgent(llm, te, max_steps=3)
 
         result = agent.run(trace["question"])
@@ -74,7 +81,14 @@ class TestTrajectoryReplay:
         llm.think.side_effect = mock_think
 
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **q: {"results": []})
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **q: {"results": []},
+        )
         agent = ReActAgent(llm, te, max_steps=3)
 
         result = agent.run(trace["question"])
@@ -135,7 +149,14 @@ class TestTrajectoryReplay:
         llm.think.side_effect = mock_think
 
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **q: {"results": ["different"]})
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **q: {"results": ["different"]},
+        )
         agent = ReActAgent(llm, te, max_steps=3)
 
         result = agent.run(trace["question"])

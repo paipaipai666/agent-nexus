@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
+import functools
 import json
 import threading
 import time
@@ -302,6 +304,33 @@ class _SpanContext:
             return
         ctx.end_span(self.span, metadata=md)
         return False  # 不吞掉异常
+
+
+# ── Decorator ───────────────────────────────────────────────────────
+
+def trace_span(name: str, attrs: dict | Callable[..., dict] | None = None):
+    """Decorator: wrap call in trace_manager.span(name, input_data).
+    attrs 为静态 dict 或 callable(*args, **kwargs) -> dict。同步/异步函数都支持。异常正常传播（span.__exit__ 原有失败记录语义不变）。"""
+    def decorator(fn):
+        if asyncio.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def async_wrapper(*args, **kwargs):
+                input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
+                with trace_manager.span(name, input_data):
+                    return await fn(*args, **kwargs)
+
+            return async_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
+            with trace_manager.span(name, input_data):
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

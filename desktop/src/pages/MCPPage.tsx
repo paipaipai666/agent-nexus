@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Server, RefreshCw, Loader2, AlertTriangle, Wrench, Package, FileText } from 'lucide-react'
 import { api } from '../services/api'
 import { animateEntrance } from '../utils/animations'
+import { useApiQuery } from '../hooks/useApiQuery'
+import PageSpinner from '../components/PageSpinner'
 
 interface MCPServer {
   name: string; transport: string; state: string; connected: boolean
@@ -12,18 +14,18 @@ interface MCPServer {
 
 export default function MCPPage() {
   const [servers, setServers] = useState<MCPServer[]>([])
-  const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [expandedServer, setExpandedServer] = useState<string | null>(null)
+  const { data, loading: queryLoading, error: queryError, reload } = useApiQuery(async () => {
+    const data = await api.getMcpStatus()
+    return data.servers || []
+  }, [])
 
-  const loadStatus = async () => {
-    try { const data = await api.getMcpStatus(); setServers(data.servers || []); setError(null) }
-    catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
-  }
+  const loading = queryLoading && data === undefined
+  const error = actionError ?? queryError?.message ?? null
 
-  useEffect(() => { loadStatus() }, [])
+  useEffect(() => { if (data) { setServers(data); setActionError(null) } }, [data])
 
   const handleAction = async (action: string, serverName?: string) => {
     setActionLoading(`${action}-${serverName || 'all'}`)
@@ -32,12 +34,12 @@ export default function MCPPage() {
       else if (action === 'disable' && serverName) await api.disableMcpServer(serverName)
       else if (action === 'reload') await api.reloadMcp(serverName)
       else if (action === 'retry') await api.retryMcp(serverName)
-      await loadStatus()
-    } catch (e: any) { setError(e.message) }
+      reload()
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setActionLoading(null) }
   }
 
-  if (loading) return <div className="flex-1 flex items-center justify-center"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} /></div>
+  if (loading) return <PageSpinner />
 
   const connected = servers.filter(s => s.connected).length
   const totalTools = servers.reduce((sum, s) => sum + s.tool_names.length, 0)

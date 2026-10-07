@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Search, FileText, Upload, Trash2, Loader2, BookOpen, AlertTriangle, CheckCircle, BarChart3, Shield, RefreshCw } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 interface WikiPageItem {
   page_id: string
@@ -57,7 +58,7 @@ export default function WikiPage() {
   const [pages, setPages] = useState<WikiPageItem[]>([])
   const [stats, setStats] = useState<WikiStats | null>(null)
   const [reviews, setReviews] = useState<ReviewItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [linting, setLinting] = useState(false)
   const [selectedPage, setSelectedPage] = useState<any>(null)
 
   // Query state
@@ -72,29 +73,20 @@ export default function WikiPage() {
   const [isBackfilling, setIsBackfilling] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    loadData()
+  const { data, loading, error, reload: reloadData } = useApiQuery(async (): Promise<{ pages?: WikiPageItem[]; stats?: WikiStats; reviews?: ReviewItem[] }> => {
+    if (tab === 'pages') return { pages: (await api.listWikiPages()).pages }
+    if (tab === 'stats') return { stats: await api.getWikiStats() }
+    if (tab === 'review') return { reviews: (await api.listWikiReviews()).items }
+    return {}
   }, [tab])
 
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      if (tab === 'pages') {
-        const { pages } = await api.listWikiPages()
-        setPages(pages)
-      } else if (tab === 'stats') {
-        const s = await api.getWikiStats()
-        setStats(s)
-      } else if (tab === 'review') {
-        const { items } = await api.listWikiReviews()
-        setReviews(items)
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }
+  useEffect(() => {
+    if (!data) return
+    if (data.pages) setPages(data.pages)
+    if (data.stats) setStats(data.stats)
+    if (data.reviews) setReviews(data.reviews)
+  }, [data])
+  useEffect(() => { if (error) console.error(error) }, [error])
 
   const handleQuery = async () => {
     if (!query.trim()) return
@@ -116,7 +108,7 @@ export default function WikiPage() {
       await api.wikiIngestText(ingestText, ingestUri)
       setIngestText('')
       setIngestUri('')
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     } finally {
@@ -130,7 +122,7 @@ export default function WikiPage() {
     setIsIngesting(true)
     try {
       await api.wikiIngestFile(file)
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     } finally {
@@ -143,7 +135,7 @@ export default function WikiPage() {
     if (!confirm('Delete this wiki page?')) return
     try {
       await api.deleteWikiPage(pageId)
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     }
@@ -161,28 +153,28 @@ export default function WikiPage() {
   const handleResolveReview = async (itemId: string) => {
     try {
       await api.resolveWikiReview(itemId)
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     }
   }
 
   const handleRunLint = async () => {
-    setLoading(true)
+    setLinting(true)
     try {
       await api.wikiLint()
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     } finally {
-      setLoading(false)
+      setLinting(false)
     }
   }
 
   const handleProcessReviews = async () => {
     try {
       await api.processWikiReviews()
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
     }
@@ -194,7 +186,7 @@ export default function WikiPage() {
     try {
       const result = await api.wikiBackfill()
       alert(`Done! Deleted ${result.deleted} old pages, created ${result.created} new pages.`)
-      loadData()
+      reloadData()
     } catch (e) {
       console.error(e)
       alert('Backfill failed: ' + e)
@@ -258,7 +250,7 @@ export default function WikiPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {loading ? (
+        {loading || linting ? (
           <div className="flex justify-center py-16">
             <Loader2 size={24} className="animate-spin" style={{ color: 'var(--fg-faint)' }} />
           </div>

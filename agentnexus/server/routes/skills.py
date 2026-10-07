@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from agentnexus.server.deps import get_runtime
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["skills"])
 
@@ -17,10 +20,7 @@ class RecommendRequest(BaseModel):
 
 
 @router.get("")
-def list_skills():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def list_skills(runtime=Depends(get_runtime)):
     service = runtime.skill
     entries = service.list()
     return {
@@ -41,10 +41,7 @@ def list_skills():
 
 
 @router.get("/status")
-def skill_status():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def skill_status(runtime=Depends(get_runtime)):
     snapshot = runtime.skill.snapshot()
     if hasattr(snapshot, "__dict__"):
         return snapshot.__dict__
@@ -52,10 +49,7 @@ def skill_status():
 
 
 @router.post("/use")
-def use_skill(req: UseSkillRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def use_skill(req: UseSkillRequest, runtime=Depends(get_runtime)):
     try:
         entry = runtime.skill.use(req.skill_id)
         return {
@@ -64,27 +58,21 @@ def use_skill(req: UseSkillRequest):
             "description": entry.description,
         }
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
 
 
 @router.post("/reset")
-def reset_skill():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def reset_skill(runtime=Depends(get_runtime)):
     runtime.skill.reset()
     return {"status": "reset"}
 
 
 @router.get("/{skill_id}")
-def get_skill(skill_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def get_skill(skill_id: str, runtime=Depends(get_runtime)):
     service = runtime.skill
     entry = service.registry.get(skill_id)
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+        raise APIError(404, "not_found", f"Skill '{skill_id}' not found")
     return {
         "id": entry.qualified_id,
         "namespace": entry.namespace,
@@ -97,19 +85,13 @@ def get_skill(skill_id: str):
 
 
 @router.post("/validate")
-def validate_skills(skill_id: str | None = None):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def validate_skills(skill_id: str | None = None, runtime=Depends(get_runtime)):
     errors = runtime.skill.validate(target=skill_id)
     return {"valid": len(errors) == 0, "errors": errors}
 
 
 @router.post("/refresh")
-def refresh_skills():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def refresh_skills(runtime=Depends(get_runtime)):
     entries = runtime.skill.refresh()
     return {"count": len(entries), "refreshed": True}
 
@@ -119,24 +101,18 @@ class BulkToggleRequest(BaseModel):
 
 
 @router.post("/bulk-toggle")
-def bulk_toggle_skills(req: BulkToggleRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def bulk_toggle_skills(req: BulkToggleRequest, runtime=Depends(get_runtime)):
     runtime.skill.set_enabled_map(req.enabled)
     return {"status": "updated", "count": len(req.enabled)}
 
 
 @router.get("/context")
-def get_skill_context(query: str | None = None):
+def get_skill_context(query: str | None = None, runtime=Depends(get_runtime)):
     """Skill catalog block for prompts.
 
     When ``query`` is set, rank skills for that text and inject a budget-bounded
     shortlist (same path as chat). Without query, returns the unranked catalog.
     """
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     service = runtime.skill
     recommendations = None
     if query and query.strip():
@@ -158,10 +134,7 @@ def get_skill_context(query: str | None = None):
 
 
 @router.post("/recommend")
-def recommend_skill(req: RecommendRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def recommend_skill(req: RecommendRequest, runtime=Depends(get_runtime)):
     routes = runtime.skill.get_recommendations(req.text)
     return {
         "recommendations": [
@@ -179,18 +152,12 @@ def recommend_skill(req: RecommendRequest):
 
 # Path-based routes MUST come last — :path catches everything after the prefix
 @router.post("/{skill_id:path}/enable")
-def enable_skill(skill_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def enable_skill(skill_id: str, runtime=Depends(get_runtime)):
     runtime.skill.set_enabled(skill_id, True)
     return {"status": "enabled", "skill_id": skill_id}
 
 
 @router.post("/{skill_id:path}/disable")
-def disable_skill(skill_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def disable_skill(skill_id: str, runtime=Depends(get_runtime)):
     runtime.skill.set_enabled(skill_id, False)
     return {"status": "disabled", "skill_id": skill_id}

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
 AGENT_STEP_P95_MAX_MS = 200
 AGENT_FULL_RUN_P95_MAX_MS = 1000
@@ -131,14 +131,18 @@ def test_agent_multi_step(benchmark, perf_env):
     from agentnexus.agents.re_act_agent import ReActAgent
 
     executor = ToolRegistry()
-    executor.register_tool(
-        "echo", "Echo testing tool", _noop_tool,
-        param_schema={
-            "type": "object",
-            "properties": {"msg": {"type": "string"}},
-            "required": ["msg"],
-        },
-        risk_level="low",
+    executor.register(
+        ToolMeta(
+            name="echo",
+            description="Echo testing tool",
+            param_schema={
+                "type": "object",
+                "properties": {"msg": {"type": "string"}},
+                "required": ["msg"],
+            },
+            risk_level=RiskLevel.LOW,
+        ),
+        _noop_tool,
     )
 
     mock_llm = _StatefulMock({
@@ -218,14 +222,18 @@ def test_agent_multi_tool_steps(benchmark, perf_env, steps):
     from agentnexus.agents.re_act_agent import ReActAgent
 
     executor = ToolRegistry()
-    executor.register_tool(
-        "echo", "Echo testing tool", _noop_tool,
-        param_schema={
-            "type": "object",
-            "properties": {"msg": {"type": "string"}},
-            "required": ["msg"],
-        },
-        risk_level="low",
+    executor.register(
+        ToolMeta(
+            name="echo",
+            description="Echo testing tool",
+            param_schema={
+                "type": "object",
+                "properties": {"msg": {"type": "string"}},
+                "required": ["msg"],
+            },
+            risk_level=RiskLevel.LOW,
+        ),
+        _noop_tool,
     )
 
     mock_llm = _MultiStepMock({
@@ -254,14 +262,18 @@ def test_agent_multi_tool_steps(benchmark, perf_env, steps):
 
 def test_tool_executor_invoke_overhead(benchmark):
     ex = ToolRegistry()
-    ex.register_tool(
-        "echo", "Echo testing tool", _noop_tool,
-        param_schema={
-            "type": "object",
-            "properties": {"msg": {"type": "string"}},
-            "required": ["msg"],
-        },
-        risk_level="low",
+    ex.register(
+        ToolMeta(
+            name="echo",
+            description="Echo testing tool",
+            param_schema={
+                "type": "object",
+                "properties": {"msg": {"type": "string"}},
+                "required": ["msg"],
+            },
+            risk_level=RiskLevel.LOW,
+        ),
+        _noop_tool,
     )
 
     benchmark(ex.registry.invoke, "echo", {"msg": "hello"}, "test_agent")
@@ -271,7 +283,7 @@ def test_tool_executor_invoke_overhead(benchmark):
 
 
 def test_registry_audit_overhead(benchmark, perf_env):
-    from agentnexus.tools.registry import ToolMeta, ToolRegistry
+    from agentnexus.tools.registry import ToolMeta, ToolRegistry, RiskLevel
 
     r = ToolRegistry()
     meta = ToolMeta(

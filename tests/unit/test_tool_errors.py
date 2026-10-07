@@ -101,7 +101,7 @@ class TestExecuteToolReturnsToolError:
         ctx.abort_reason = "blocked by policy"
         return ctx
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_hook_abort_returns_tool_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -119,7 +119,7 @@ class TestExecuteToolReturnsToolError:
         assert result.error_code == "PERMISSION_DENIED"
         assert result.recoverable is False
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_cancel_returns_tool_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -136,7 +136,7 @@ class TestExecuteToolReturnsToolError:
         assert result.error_code == ToolErrorCode.CANCELLED
         assert result.recoverable is True
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_permission_error_returns_tool_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -153,7 +153,7 @@ class TestExecuteToolReturnsToolError:
         assert result.error_code == ToolErrorCode.PERMISSION_DENIED
         assert result.recoverable is False
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_value_error_returns_tool_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -170,7 +170,7 @@ class TestExecuteToolReturnsToolError:
         assert result.error_code == ToolErrorCode.VALIDATION_FAILED
         assert "bad input" in result.message
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_generic_error_returns_tool_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -188,7 +188,7 @@ class TestExecuteToolReturnsToolError:
         # Generic errors have message stripped (LOW-02)
         assert "boom" not in result.message
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_success_returns_original_value(self, mock_get_hook):
         """Normal execution path unchanged — still returns str or dict."""
         from agentnexus.agents.tool_runner import execute_tool

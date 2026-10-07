@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from agentnexus.server.deps import get_ltm, get_runtime
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["memory"])
 
@@ -13,55 +16,34 @@ class SearchMemoryRequest(BaseModel):
     limit: int = 5
 
 
-@router.get("/list")
-def list_memories(limit: int = 20):
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
-    memories = ltm.list_recent(limit)
-    return {"memories": memories, "count": len(memories)}
-
-
 @router.get("/long")
-def list_long_term_memories(limit: int = 20):
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
+def list_long_term_memories(limit: int = 20, ltm=Depends(get_ltm)):
     memories = ltm.list_recent(limit)
     return {"memories": memories, "count": len(memories)}
 
 
 @router.post("/search")
-def search_memories(req: SearchMemoryRequest):
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
+def search_memories(req: SearchMemoryRequest, ltm=Depends(get_ltm)):
     try:
         results = ltm.search(query_text=req.query, limit=req.limit)
         return {"results": results, "query": req.query}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.delete("/clear")
-def clear_memories():
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
+def clear_memories(ltm=Depends(get_ltm)):
     ltm.clear_all()
     return {"status": "cleared"}
 
 
 @router.delete("/{memory_id}")
-def delete_memory(memory_id: str):
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
+def delete_memory(memory_id: str, ltm=Depends(get_ltm)):
     try:
         ltm.delete(memory_id)
         return {"status": "deleted", "memory_id": memory_id}
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
 
 
 def _strip_workflow_context(content: str) -> str:
@@ -79,10 +61,7 @@ def _strip_workflow_context(content: str) -> str:
 
 
 @router.get("/short")
-def list_short_term_memories():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def list_short_term_memories(runtime=Depends(get_runtime)):
     stm = runtime.memory_manager.short_term
     messages = stm.get_all()
     result = []
@@ -97,11 +76,8 @@ def list_short_term_memories():
 
 
 @router.post("/short/clear")
-def clear_short_term_memory(session_id: str | None = None):
+def clear_short_term_memory(session_id: str | None = None, runtime=Depends(get_runtime)):
     """Clear short-term memory. If session_id is provided, clears only that session's STM."""
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     if session_id:
         memory = runtime.chat._memory_managers.get(session_id)
         if memory is not None:
@@ -112,7 +88,7 @@ def clear_short_term_memory(session_id: str | None = None):
 
 
 @router.get("/short/history")
-def list_session_history(limit: int = 0, session_id: str | None = None):
+def list_session_history(limit: int = 0, session_id: str | None = None, runtime=Depends(get_runtime)):
     """Read full conversation history from the message journal.
 
     Unlike /short (which reads from the in-memory STM deque, max 50 messages),
@@ -126,9 +102,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
     """
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
-    from agentnexus.server.app import _get_runtime
 
-    runtime = _get_runtime()
     settings = get_settings()
     workspace = str(__import__("pathlib").Path.cwd())
 
@@ -167,7 +141,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None):
 
 
 @router.post("/reflect")
-def run_reflection(days: int = 7, max_memories: int = 50):
+def run_reflection(days: int = 7, max_memories: int = 50, ltm=Depends(get_ltm)):
     """Curator: batch-distill patterns from recent note memories into quarantine.
 
     Reviews note-category memories from the last N days, identifies recurring patterns,
@@ -175,13 +149,8 @@ def run_reflection(days: int = 7, max_memories: int = 50):
     until a pending proposal is explicitly approved.
     """
     from agentnexus.core.llm import AgentLLM
-    from agentnexus.memory.long_term import get_long_term_memory
     from agentnexus.memory.reflection import run_reflection as _run_reflection
     from agentnexus.rag.embeddings import get_embedding_model
-
-    ltm = get_long_term_memory()
-    if not ltm:
-        raise HTTPException(status_code=503, detail="Long-term memory not available")
 
     llm = AgentLLM()
     embed_model = get_embedding_model()
@@ -198,48 +167,37 @@ def run_reflection(days: int = 7, max_memories: int = 50):
 
 
 @router.get("/pending")
-def list_pending_memories(limit: int = 50):
+def list_pending_memories(limit: int = 50, ltm=Depends(get_ltm)):
     """List curator-proposed memories awaiting approval."""
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
     rows = ltm.list_pending(limit=limit)
     return {"pending": rows, "count": len(rows)}
 
 
 @router.post("/pending/{pending_id}/approve")
-def approve_pending_memory(pending_id: int):
+def approve_pending_memory(pending_id: int, ltm=Depends(get_ltm)):
     """Approve a pending memory: user-scope → LTM, project-scope → .agentnexus/."""
-    from agentnexus.memory.long_term import get_long_term_memory
     from agentnexus.rag.embeddings import get_embedding_model
 
-    ltm = get_long_term_memory()
     try:
         embed_model = get_embedding_model()
     except Exception:
         embed_model = None
     result = ltm.approve_pending(pending_id, embed_model=embed_model)
     if result.get("status") == "error":
-        raise HTTPException(status_code=404, detail=result.get("error"))
+        raise APIError(404, "not_found", result.get("error"))
     return result
 
 
 @router.post("/pending/{pending_id}/reject")
-def reject_pending_memory(pending_id: int):
+def reject_pending_memory(pending_id: int, ltm=Depends(get_ltm)):
     """Reject a pending memory (kept for audit)."""
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
     if ltm.get_pending(pending_id) is None:
-        raise HTTPException(status_code=404, detail=f"pending id {pending_id} not found")
+        raise APIError(404, "not_found", f"pending id {pending_id} not found")
     ltm.set_pending_status(pending_id, "rejected")
     return {"status": "rejected", "pending_id": pending_id}
 
 
 @router.get("/stats")
-def memory_stats():
+def memory_stats(ltm=Depends(get_ltm)):
     """Store health: volume, never-retrieved rate, superseded count, pending count."""
-    from agentnexus.memory.long_term import get_long_term_memory
-
-    ltm = get_long_term_memory()
     return ltm.stats()

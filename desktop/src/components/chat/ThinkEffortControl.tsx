@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
 import { thinkingEffortArm } from '../../services/thinkingEffortArm'
+import { useSessionOverride, type SessionOverrideConfig } from '../../hooks/useSessionOverride'
 
 export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'follow'
 
@@ -15,6 +16,15 @@ const FROM_API: Record<string, ThinkingEffort> = {
   low: 'low',
   medium: 'medium',
   high: 'high',
+}
+
+const EFFORT_OVERRIDE: SessionOverrideConfig<ThinkingEffort, string | null> = {
+  arm: thinkingEffortArm,
+  initial: 'follow',
+  toApi: (v) => (v === 'follow' ? null : TO_API[v]),
+  fromApi: (v) => (v ? (FROM_API[v] ?? 'follow') : 'follow'),
+  getServerValue: (sessionId) => api.getSession(sessionId).then(d => d.thinking_effort),
+  setServerValue: (sessionId, v) => api.setThinkingEffort(sessionId, v).then(d => d.thinking_effort),
 }
 
 const LABELS: Record<ThinkingEffort, { en: string; cn: string; code: string }> = {
@@ -36,31 +46,9 @@ interface Props {
  *  Mid-run switches apply on the next LLM call. Pre-session window stores
  *  an armed intent, mirroring PlanModeToggle. */
 export default function ThinkEffortControl({ sessionId }: Props) {
-  const [effort, setEffort] = useState<ThinkingEffort>('follow')
+  const { value: effort, busy, preview, commit } = useSessionOverride(sessionId, EFFORT_OVERRIDE)
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!sessionId) {
-      const armed = thinkingEffortArm.get()
-      setEffort(armed ? (FROM_API[armed] ?? 'follow') : 'follow')
-      return
-    }
-    if (thinkingEffortArm.get() !== null) {
-      const pending = thinkingEffortArm.consume()
-      api.setThinkingEffort(sessionId, pending)
-        .then(res => setEffort(res.thinking_effort ? (FROM_API[res.thinking_effort] ?? 'follow') : 'follow'))
-        .catch(() => {
-          if (pending !== null) thinkingEffortArm.set(pending)
-          setEffort('follow')
-        })
-      return
-    }
-    api.getSession(sessionId)
-      .then(d => setEffort(d.thinking_effort ? (FROM_API[d.thinking_effort] ?? 'follow') : 'follow'))
-      .catch(() => {})
-  }, [sessionId])
 
   useEffect(() => {
     if (!open) return
@@ -78,28 +66,7 @@ export default function ThinkEffortControl({ sessionId }: Props) {
     }
   }, [open])
 
-  const commit = async (next: ThinkingEffort) => {
-    if (busy) return
-    const apiVal = next === 'follow' ? null : TO_API[next]
-    if (!sessionId) {
-      thinkingEffortArm.set(apiVal)
-      setEffort(next)
-      return
-    }
-    setBusy(true)
-    try {
-      const res = await api.setThinkingEffort(sessionId, apiVal)
-      setEffort(res.thinking_effort ? (FROM_API[res.thinking_effort] ?? 'follow') : 'follow')
-      thinkingEffortArm.set(apiVal)
-    } catch {
-      // keep previous state
-    } finally {
-      setBusy(false)
-    }
-  }
-
   /** Live preview during drag; commit on release / click. */
-  const preview = (next: ThinkingEffort) => setEffort(next)
   const apply = (next: ThinkingEffort) => {
     preview(next)
     void commit(next)

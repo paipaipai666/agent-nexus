@@ -8,7 +8,8 @@ conversation context and user preferences.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.normalize import tokenize
@@ -36,6 +37,23 @@ from agentnexus.skills.router.types import (
 def format_reason(entry: SkillEntry, matched: list[str], score: float) -> str:
     terms = ", ".join(matched[:8]) or "-"
     return f"{entry.qualified_id} matched metadata terms: {terms} (score={score:.1f})"
+
+
+@dataclass
+class _QueryScoreContext:
+    """Per-query inputs shared by all index scorers."""
+    terms: set[str]  # meaningful query terms
+    idf: dict[str, float]
+    intent: IntentSignals
+    query_embedding: list[float] | None
+
+
+@dataclass
+class _ItemScoreState:
+    """Per-candidate accumulator written by the scorer chain (reset per item)."""
+    base_score: float = 0.0  # keyword + meta + fuzzy + example
+    semantic_score: float = 0.0
+    matched: list[str] = field(default_factory=list)
 
 
 def _clean_matched_terms(route: SkillRoute) -> set[str]:
@@ -101,6 +119,15 @@ class SkillRecommender:
         self.semantic_threshold = semantic_threshold
         self.index = SkillRouterIndex.build([], compute_embeddings=False)
         self._query_cache: dict[str, list[float]] = {}
+        self._scorers: list[
+            Callable[[_QueryScoreContext, IndexedSkillMetadata, _ItemScoreState], None]
+        ] = [
+            self._score_keyword_exact,
+            self._score_metadata,
+            self._score_fuzzy,
+            self._score_example,
+            self._score_semantic,
+        ]
 
     def rebuild(
         self,
@@ -145,49 +172,29 @@ class SkillRecommender:
             self._get_query_embedding(text) if self.use_embeddings else None
         )
         intent = extract_intent_signals(text, meaningful)
+        ctx = _QueryScoreContext(
+            terms=meaningful,
+            idf=self.index.idf,
+            intent=intent,
+            query_embedding=query_embedding,
+        )
 
         scored: list[SkillRoute] = []
         for item in self.index.items:
-            # ── Exact keyword match ──
-            matched = sorted(meaningful & item.terms)
-            keyword_score = score_indexed_entry(
-                meaningful, item, matched, self.index.idf,
-            )
-
-            # ── Structured metadata match ──
-            meta_score = score_metadata_alignment(
-                meaningful, item, self.index.idf, fuzzy=False, intent=intent,
-            )
-
-            # ── Fuzzy keyword match (only if no exact hit) ──
-            fuzzy_matched: list[str] = []
-            fuzzy_score = 0.0
-            if not matched:
-                fuzzy_matched, fuzzy_score = score_fuzzy_match(
-                    meaningful, item, self.index.idf,
-                )
-
-            # ── Example similarity ──
-            example_matched, example_score = score_example_similarity(
-                meaningful, item, self.index.idf,
-            )
-
-            all_matched = matched + fuzzy_matched + example_matched
-
-            # ── Semantic match ──
-            semantic_score = 0.0
-            if query_embedding and item.embedding:
-                semantic_score = cosine_similarity(query_embedding, item.embedding)
+            state = _ItemScoreState()
+            for scorer in self._scorers:
+                scorer(ctx, item, state)
 
             # ── Hybrid scoring ──
-            base_score = keyword_score + meta_score + fuzzy_score + example_score
+            base_score = state.base_score
+            semantic_score = state.semantic_score
             has_signal = (
                 base_score > 0 or semantic_score > self.semantic_threshold
             )
             if has_signal:
                 combined_score = self._combine_scores(base_score, semantic_score)
                 enhanced = self._enhance_matched_terms(
-                    all_matched, meaningful, item, semantic_score,
+                    state.matched, meaningful, item, semantic_score,
                 )
                 scored.append(SkillRoute(
                     entry=item.entry,
@@ -211,6 +218,58 @@ class SkillRecommender:
             max_k=self.max_candidates,
         )
         return [r for r in scored[:keep] if r.score >= self.min_score]
+
+    # ── Index scorers (run in list order per candidate) ──
+
+    def _score_keyword_exact(
+        self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
+    ) -> None:
+        """Exact keyword match."""
+        matched = sorted(ctx.terms & item.terms)
+        state.matched.extend(matched)
+        state.base_score += score_indexed_entry(ctx.terms, item, matched, ctx.idf)
+
+    def _score_metadata(
+        self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
+    ) -> None:
+        """Structured metadata match."""
+        state.base_score += score_metadata_alignment(
+            ctx.terms, item, ctx.idf, fuzzy=False, intent=ctx.intent,
+        )
+
+    def _score_fuzzy(
+        self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
+    ) -> None:
+        """Fuzzy keyword match — short-circuits when an exact keyword hit exists.
+
+        Only keyword and metadata scorers run before this one, and neither
+        leaves terms in ``state.matched`` except the keyword scorer, so the
+        accumulator is the exact-match list here.
+        """
+        if state.matched:
+            return
+        fuzzy_matched, fuzzy_score = score_fuzzy_match(ctx.terms, item, ctx.idf)
+        state.matched.extend(fuzzy_matched)
+        state.base_score += fuzzy_score
+
+    def _score_example(
+        self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
+    ) -> None:
+        """Worked-example similarity."""
+        example_matched, example_score = score_example_similarity(
+            ctx.terms, item, ctx.idf,
+        )
+        state.matched.extend(example_matched)
+        state.base_score += example_score
+
+    def _score_semantic(
+        self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
+    ) -> None:
+        """Embedding cosine similarity."""
+        if ctx.query_embedding and item.embedding:
+            state.semantic_score = cosine_similarity(
+                ctx.query_embedding, item.embedding,
+            )
 
     def llm_rerank(
         self,
@@ -289,6 +348,23 @@ class SkillRecommender:
             enhanced.append(f"semantic_match({semantic_score:.2f})")
         return enhanced
 
+    # ── Shared top-2 disambiguation predicates ──
+
+    def _top2_gap(self, candidates: list[SkillRoute]) -> float | None:
+        """Score gap between the top two candidates (None when fewer than two)."""
+        if len(candidates) < 2:
+            return None
+        return candidates[0].score - candidates[1].score
+
+    def _intent_breaks_tie(
+        self,
+        best: SkillRoute,
+        runner_up: SkillRoute,
+        intent: IntentSignals,
+    ) -> bool:
+        """Whether intent signals confidently favor `best` over a close runner-up."""
+        return best_candidate_is_intent_confident(best, runner_up, intent, self.index)
+
     # ── Backward-compatible methods (for tests and legacy callers) ──
 
     def decide(self, text: str, entries: list[SkillEntry]) -> SkillRouteDecision:
@@ -310,11 +386,10 @@ class SkillRecommender:
                     secondary_skills=tuple(c.entry.qualified_id for c in selected[1:]),
                 )
         # Detect ambiguity: top candidates too close
-        if len(candidates) > 1 and best.score - candidates[1].score < self.min_score * 0.375:
+        gap = self._top2_gap(candidates)
+        if gap is not None and gap < self.min_score * 0.375:
             # Use intent to disambiguate
-            if best_candidate_is_intent_confident(
-                best, candidates[1], intent, self.index,
-            ):
+            if self._intent_breaks_tie(best, candidates[1], intent):
                 return SkillRouteDecision(
                     best, tuple(candidates), False, best.reason,
                     mode="single", confidence=confidence,
@@ -350,14 +425,12 @@ class SkillRecommender:
         # If only one candidate or clear winner, return directly
         if len(candidates) == 1:
             return candidates[0]
-        gap = candidates[0].score - candidates[1].score
-        if gap >= self.margin:
+        gap = self._top2_gap(candidates)
+        if gap is not None and gap >= self.margin:
             return candidates[0]
         # Close scores — check if intent disambiguates
         intent = extract_intent_signals(text, set(tokenize(text)))
-        if best_candidate_is_intent_confident(
-            candidates[0], candidates[1], intent, self.index,
-        ):
+        if self._intent_breaks_tie(candidates[0], candidates[1], intent):
             return candidates[0]
         # Ambiguous — use LLM if available, else return None
         if llm_client is None:

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.runtime import WorkflowRunState, WorkflowRuntime
 from agentnexus.skills.workflow import Workflow
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
 
 def _profile(steps, tool_policy=None):
@@ -78,7 +78,15 @@ def test_retrieve_uses_visible_kb_search_tool():
         seen.update(kwargs)
         return "retrieved docs"
 
-    executor.register_tool("kb_search", "search kb", kb_search, risk_level="low")
+    executor.register(
+        ToolMeta(
+            name="kb_search",
+            description="search kb",
+            param_schema={"type": "object", "properties": {}},
+            risk_level=RiskLevel.LOW,
+        ),
+        kb_search,
+    )
     profile = _profile([{"type": "retrieve", "id": "docs", "prompt": "Find {target}."}])
 
     result = WorkflowRuntime().prepare("question", profile, tool_executor=executor)
@@ -112,12 +120,14 @@ def test_tool_call_invokes_visible_tool_with_formatted_arguments():
         seen["message"] = message
         return "ok"
 
-    executor.register_tool(
-        "echo",
-        "echo",
+    executor.register(
+        ToolMeta(
+            name="echo",
+            description="echo",
+            param_schema={"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]},
+            risk_level=RiskLevel.LOW,
+        ),
         echo,
-        param_schema={"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]},
-        risk_level="low",
     )
     profile = _profile([
         {"type": "tool_call", "id": "echo", "tool": "echo", "arguments": {"message": "Check {target}"}}
@@ -131,7 +141,15 @@ def test_tool_call_invokes_visible_tool_with_formatted_arguments():
 
 def test_tool_call_denied_by_policy_records_error_event():
     executor = ToolRegistry()
-    executor.register_tool("shell_exec", "shell", lambda command: "ok", risk_level="high")
+    executor.register(
+        ToolMeta(
+            name="shell_exec",
+            description="shell",
+            param_schema={"type": "object", "properties": {}},
+            risk_level=RiskLevel.HIGH,
+        ),
+        lambda command: "ok",
+    )
     profile = _profile([
         {"type": "tool_call", "id": "shell", "tool": "shell_exec", "arguments": {"command": "pwd"}}
     ], tool_policy={"allow": ["shell_exec"], "max_risk": "low"})

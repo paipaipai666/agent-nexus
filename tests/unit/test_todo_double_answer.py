@@ -10,7 +10,7 @@ second time.
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -35,8 +35,22 @@ def _make_llm():
 def _make_agent():
     llm = _make_llm()
     te = ToolRegistry()
-    te.register_tool("todo_update", "更新待办", lambda **kw: "ok")
-    te.register_tool("web_search", "搜索", lambda **kw: {"results": ["data"]})
+    te.register(
+        ToolMeta(
+            name="todo_update",
+            description="更新待办",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: "ok",
+    )
+    te.register(
+        ToolMeta(
+            name="web_search",
+            description="搜索",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: {"results": ["data"]},
+    )
     return ReActAgent(llm, te, max_steps=5), llm
 
 

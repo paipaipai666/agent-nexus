@@ -5,7 +5,7 @@ Validates that the ReAct agent correctly selects tools based on LLM responses.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm(think_return="", tool_calls=None):
@@ -38,8 +38,22 @@ class TestDecisionLevelToolSelection:
     def _make_agent(self, tool_calls=None, think_return=""):
         llm = _make_llm(think_return=think_return, tool_calls=tool_calls or [])
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: {"results": []})
-        te.register_tool("file_read", "读文件", lambda **kw: "content")
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"results": []},
+        )
+        te.register(
+            ToolMeta(
+                name="file_read",
+                description="读文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "content",
+        )
         agent = ReActAgent(llm, te, max_steps=3)
         return agent, llm
 

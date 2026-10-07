@@ -35,20 +35,157 @@ interface Checkpoint { id: string; question: string; answer: string; is_head: bo
 // effect runs first, so "New Chat" navigations never trigger a re-restore.
 let didAutoRestoreLastSession = false
 
-const COMMAND_DEFS = [
-  { cmd: '/help', desc: 'Show command help', category: 'system' },
-  { cmd: '/clear', desc: 'Clear screen', category: 'system' },
-  { cmd: '/undo', desc: 'Revert to previous checkpoint', category: 'system' },
-  { cmd: '/redo', desc: 'Redo to next checkpoint', category: 'system' },
-  { cmd: '/log', desc: 'View checkpoint log', category: 'system' },
-  { cmd: '/status', desc: 'View version status', category: 'system' },
-  { cmd: '/compact', desc: 'Compress conversation context', category: 'system' },
-  { cmd: '/sessions', desc: 'List recent sessions', category: 'system' },
-  { cmd: '/switch', desc: 'Switch session (usage: /switch <id>)', category: 'system' },
-  { cmd: '/skill', desc: 'Manage skills (list/status/use/enable/disable)', category: 'skill' },
-  { cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp' },
-  { cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin' },
-]
+type SkillInfo = { id: string; display_name: string; description: string; enabled: boolean }
+type CommandCategory = 'system' | 'skill' | 'mcp' | 'plugin'
+
+/** State/actions the command runners close over — supplied by ChatPage at dispatch time. */
+interface SlashCtx {
+  sid: string | null
+  /** The live registry, so /help renders from the same source. */
+  defs: CommandDef[]
+  addSys: (c: string) => void
+  skills: SkillInfo[]
+  setSkills: React.Dispatch<React.SetStateAction<SkillInfo[]>>
+  handleSendMessage: (text: string, atts?: AttachmentRef[]) => void
+  /** version status + checkpoints + message reload — shared by /undo and /redo. */
+  refresh: () => Promise<void>
+  clearView: () => void
+}
+
+interface CommandDef {
+  cmd: string
+  desc: string
+  category: CommandCategory
+  needsSession?: boolean
+  /** Error prefix for the dispatcher's unified catch, e.g. 'Undo failed'. */
+  err?: string
+  /** Returns a string to surface via addSys, or void when it emitted/handled output itself. */
+  run: (args: string, ctx: SlashCtx) => Promise<string | void> | string | void
+}
+
+/** Error message for the unified catches — mirrors the old `e.message` on unknown throws. */
+function errMsg(e: unknown): string | undefined {
+  if (e && typeof e === 'object' && 'message' in e && typeof e.message === 'string') return e.message
+  return undefined
+}
+
+/** Full slash-command registry — single source for dispatch, /help, and the palette. */
+function buildCommandDefs(): CommandDef[] {
+  return [
+    {
+      cmd: '/help', desc: 'Show command help', category: 'system',
+      run: (_args, ctx) => ctx.defs.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n'),
+    },
+    { cmd: '/clear', desc: 'Clear screen', category: 'system', run: (_args, ctx) => { ctx.clearView() } },
+    {
+      cmd: '/undo', desc: 'Revert to previous checkpoint', category: 'system', needsSession: true, err: 'Undo failed',
+      run: async (_args, ctx) => {
+        const r = await api.versionUndo(ctx.sid!)
+        await ctx.refresh()
+        return `Undone to checkpoint: ${r.checkpoint?.id || 'ok'}`
+      },
+    },
+    {
+      cmd: '/redo', desc: 'Redo to next checkpoint', category: 'system', needsSession: true, err: 'Redo failed',
+      run: async (_args, ctx) => {
+        const r = await api.versionRedo(ctx.sid!)
+        await ctx.refresh()
+        return `Redone to checkpoint: ${r.checkpoint?.id || 'ok'}`
+      },
+    },
+    {
+      cmd: '/log', desc: 'View checkpoint log', category: 'system', needsSession: true, err: 'Log failed',
+      run: async (_args, ctx) => {
+        const { checkpoints: cps } = await api.getVersionLog(ctx.sid!, 10)
+        return cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')
+      },
+    },
+    {
+      cmd: '/status', desc: 'View version status', category: 'system', needsSession: true, err: 'Status failed',
+      run: async (_args, ctx) => {
+        const s = await api.getVersionStatus(ctx.sid!)
+        return `Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`
+      },
+    },
+    {
+      cmd: '/compact', desc: 'Compress conversation context', category: 'system', needsSession: true, err: 'Compact failed',
+      run: async (args, ctx) => {
+        ctx.addSys('Compressing context...')
+        const r = await api.compactContext(ctx.sid!, args)
+        return `Compacted: ${r.tokens_saved} tokens saved`
+      },
+    },
+    {
+      cmd: '/sessions', desc: 'List recent sessions', category: 'system', err: 'Sessions failed',
+      run: async () => {
+        const { sessions } = await api.getRecentSessions(10)
+        return sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')
+      },
+    },
+    {
+      cmd: '/switch', desc: 'Switch session (usage: /switch <id>)', category: 'system',
+      run: (args) => {
+        if (!args) return 'Usage: /switch <session_id>'
+        window.location.href = `/chat/${args}`
+      },
+    },
+    {
+      cmd: '/skill', desc: 'Manage skills (list/status/use/enable/disable)', category: 'skill',
+      run: async (args, ctx) => {
+        if (!args || args === 'list') {
+          try {
+            const { skills: sk } = await api.listSkills()
+            return sk.length === 0 ? 'No skills registered.' : sk.map(s => {
+              const short = s.id.includes('/') ? s.id.split('/').pop()! : s.id
+              return `${s.enabled ? '●' : '○'} ${short.padEnd(20)} ${s.display_name || s.description || ''}`
+            }).join('\n')
+          } catch (e) { return `Skills failed: ${errMsg(e)}` }
+        }
+        if (args.startsWith('enable ')) {
+          const name = args.slice(7).trim()
+          const full = ctx.skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
+          try { await api.enableSkill(full); ctx.setSkills((await api.listSkills()).skills); return `Skill enabled: ${name}` } catch (e) { return `Enable failed: ${errMsg(e)}` }
+        }
+        if (args.startsWith('disable ')) {
+          const name = args.slice(8).trim()
+          const full = ctx.skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
+          try { await api.disableSkill(full); ctx.setSkills((await api.listSkills()).skills); return `Skill disabled: ${name}` } catch (e) { return `Disable failed: ${errMsg(e)}` }
+        }
+        return 'Usage: /skill [list | enable <id> | disable <id>]'
+      },
+    },
+    {
+      cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp',
+      run: async (args) => {
+        if (!args || args === 'status') {
+          try {
+            const s = await api.getMcpStatus()
+            const servers = s.servers || []
+            return servers.length === 0 ? 'No MCP servers.' : servers.map((sv: any) => `${sv.connected ? '●' : '○'} ${sv.name}  ${sv.tool_names?.length || 0} tools`).join('\n')
+          } catch (e) { return `MCP status failed: ${errMsg(e)}` }
+        }
+        if (args === 'tools') {
+          try {
+            const { tools } = await api.listMcpTools()
+            return tools.length === 0 ? 'No MCP tools.' : tools.map(t => `${t.tool.padEnd(30)} [${t.server}]`).join('\n')
+          } catch (e) { return `MCP tools failed: ${errMsg(e)}` }
+        }
+        if (args === 'reload') {
+          try { await api.reloadMcp(); return 'MCP reloaded.' } catch (e) { return `MCP reload failed: ${errMsg(e)}` }
+        }
+        return 'Usage: /mcp [status | tools | reload]'
+      },
+    },
+    {
+      cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin', err: 'Plugins failed',
+      run: async () => {
+        const ext = await api.getExtensions()
+        const names = Object.keys(ext)
+        return names.length === 0 ? 'No plugins loaded.' : names.map(n => `● ${n}`).join('\n')
+      },
+    },
+  ]
+}
 
 /** Empty-state prompt starters — concrete openers that fill the composer. */
 const STARTERS = [
@@ -938,108 +1075,37 @@ export default function ChatPage() {
   const handleSlashCommand = async (text: string) => {
     const parts = text.trim().split(/\s+/); const cmd = parts[0].toLowerCase(); const args = parts.slice(1).join(' ')
     const addSys = (c: string) => setMessages(prev => [...prev, { id: `cmd-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
-    switch (cmd) {
-      case '/help': addSys(COMMAND_DEFS.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n')); break
-      case '/clear': setMessages([]); animatedIds.clear(); break
-      case '/undo': {
-        const sid = currentSessionIdRef.current
-        if (!sid) { addSys('No active session.'); break }
-        try {
-          const r = await api.versionUndo(sid)
-          setVersionStatus(await api.getVersionStatus(sid))
-          setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
-          await loadAndDisplayMessages()
-          addSys(`Undone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
-        } catch (e: any) { addSys(`Undo failed: ${e.message}`) }
-        break
-      }
-      case '/redo': {
-        const sid = currentSessionIdRef.current
-        if (!sid) { addSys('No active session.'); break }
-        try {
-          const r = await api.versionRedo(sid)
-          setVersionStatus(await api.getVersionStatus(sid))
-          setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
-          await loadAndDisplayMessages()
-          addSys(`Redone to checkpoint: ${r.checkpoint?.id || 'ok'}`)
-        } catch (e: any) { addSys(`Redo failed: ${e.message}`) }
-        break
-      }
-      case '/log': {
-        const sid = currentSessionIdRef.current
-        if (!sid) { addSys('No active session.'); break }
-        try { const { checkpoints: cps } = await api.getVersionLog(sid, 10); addSys(cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')) } catch (e: any) { addSys(`Log failed: ${e.message}`) }; break
-      }
-      case '/status': {
-        const sid = currentSessionIdRef.current
-        if (!sid) { addSys('No active session.'); break }
-        try { const s = await api.getVersionStatus(sid); addSys(`Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`) } catch (e: any) { addSys(`Status failed: ${e.message}`) }; break
-      }
-      case '/compact': {
-        const sid = currentSessionIdRef.current
-        if (!sid) { addSys('No active session.'); break }
-        addSys('Compressing context...'); try { const r = await api.compactContext(sid, args); addSys(`Compacted: ${r.tokens_saved} tokens saved`) } catch (e: any) { addSys(`Compact failed: ${e.message}`) }; break
-      }
-      case '/sessions': try { const { sessions } = await api.getRecentSessions(10); addSys(sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')) } catch (e: any) { addSys(`Sessions failed: ${e.message}`) }; break
-      case '/switch':
-        if (!args) { addSys('Usage: /switch <session_id>'); break }
-        window.location.href = `/chat/${args}`
-        break
-      case '/skill':
-        if (!args || args === 'list') {
-          try {
-            const { skills: sk } = await api.listSkills()
-            addSys(sk.length === 0 ? 'No skills registered.' : sk.map(s => {
-              const short = s.id.includes('/') ? s.id.split('/').pop()! : s.id
-              return `${s.enabled ? '●' : '○'} ${short.padEnd(20)} ${s.display_name || s.description || ''}`
-            }).join('\n'))
-          } catch (e: any) { addSys(`Skills failed: ${e.message}`) }
-        } else if (args.startsWith('enable ')) {
-          const name = args.slice(7).trim()
-          const full = skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
-          try { await api.enableSkill(full); addSys(`Skill enabled: ${name}`); setSkills((await api.listSkills()).skills) } catch (e: any) { addSys(`Enable failed: ${e.message}`) }
-        } else if (args.startsWith('disable ')) {
-          const name = args.slice(8).trim()
-          const full = skills.find(s => (s.id.includes('/') ? s.id.split('/').pop()! : s.id) === name)?.id || name
-          try { await api.disableSkill(full); addSys(`Skill disabled: ${name}`); setSkills((await api.listSkills()).skills) } catch (e: any) { addSys(`Disable failed: ${e.message}`) }
-        } else { addSys('Usage: /skill [list | enable <id> | disable <id>]') }
-        break
-      case '/mcp':
-        if (!args || args === 'status') {
-          try {
-            const s = await api.getMcpStatus()
-            const servers = s.servers || []
-            addSys(servers.length === 0 ? 'No MCP servers.' : servers.map((sv: any) => `${sv.connected ? '●' : '○'} ${sv.name}  ${sv.tool_names?.length || 0} tools`).join('\n'))
-          } catch (e: any) { addSys(`MCP status failed: ${e.message}`) }
-        } else if (args === 'tools') {
-          try {
-            const { tools } = await api.listMcpTools()
-            addSys(tools.length === 0 ? 'No MCP tools.' : tools.map(t => `${t.tool.padEnd(30)} [${t.server}]`).join('\n'))
-          } catch (e: any) { addSys(`MCP tools failed: ${e.message}`) }
-        } else if (args === 'reload') {
-          try { await api.reloadMcp(); addSys('MCP reloaded.') } catch (e: any) { addSys(`MCP reload failed: ${e.message}`) }
-        } else { addSys('Usage: /mcp [status | tools | reload]') }
-        break
-      case '/plugin':
-        try {
-          const ext = await api.getExtensions()
-          const names = Object.keys(ext)
-          addSys(names.length === 0 ? 'No plugins loaded.' : names.map(n => `● ${n}`).join('\n'))
-        } catch (e: any) { addSys(`Plugins failed: ${e.message}`) }
-        break
-      default: {
-        const skillMatch = skills.find(s => {
-          if (!s.enabled) return false
-          const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
-          return `/${shortId}` === cmd
-        })
-        if (skillMatch) {
-          handleSendMessage(text)
-        } else {
-          addSys(`Unknown command: ${cmd}. Type /help for commands.`)
-        }
-      }
+    const sid = currentSessionIdRef.current
+    const ctx: SlashCtx = {
+      sid,
+      defs: [],
+      addSys,
+      skills, setSkills, handleSendMessage,
+      refresh: async () => {
+        setVersionStatus(await api.getVersionStatus(sid!))
+        setCheckpoints((await api.getVersionLog(sid!, 5)).checkpoints || [])
+        await loadAndDisplayMessages()
+      },
+      clearView: () => { setMessages([]); animatedIds.clear() },
     }
+    ctx.defs = buildCommandDefs()
+    const def = ctx.defs.find(d => d.cmd === cmd)
+    if (def) {
+      if (def.needsSession && !sid) { addSys('No active session.'); return }
+      try {
+        const out = await def.run(args, ctx)
+        if (typeof out === 'string') addSys(out)
+      } catch (e) { addSys(`${def.err ?? `${cmd} failed`}: ${errMsg(e)}`) }
+      return
+    }
+    // skill dynamic command fallback: an enabled skill's short id invoked as /cmd
+    const skillMatch = skills.find(s => {
+      if (!s.enabled) return false
+      const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
+      return `/${shortId}` === cmd
+    })
+    if (skillMatch) { handleSendMessage(text); return }
+    addSys(`Unknown command: ${cmd}. Type /help for commands.`)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1103,7 +1169,7 @@ export default function ChatPage() {
   }
 
   const allCommands = [
-    ...COMMAND_DEFS,
+    ...buildCommandDefs(),
     ...skills.filter(s => s.enabled).map(s => {
       const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
       return { cmd: `/${shortId}`, desc: s.display_name || s.description || 'Invoke skill', category: 'skill' as const }

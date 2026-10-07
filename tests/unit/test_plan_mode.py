@@ -127,7 +127,15 @@ class TestReadOnlyMetadata:
 
     def test_register_tool_accepts_read_only(self):
         reg = ToolRegistry()
-        reg.register_tool("r", "d", lambda: "ok", read_only=True)
+        reg.register(
+            ToolMeta(
+                name="r",
+                description="d",
+                param_schema={"type": "object", "properties": {}},
+                read_only=True,
+            ),
+            lambda: "ok",
+        )
         assert reg.get_meta("r").read_only is True
 
     def test_annotation_set_is_exact(self):
@@ -372,7 +380,15 @@ class TestRejectedPlanPausesRun:
     def _make_agent(self, confirm):
         llm = self._make_llm()
         reg = ToolRegistry()
-        reg.register_tool("read_tool", "读", lambda **kw: "ok", read_only=True)
+        reg.register(
+            ToolMeta(
+                name="read_tool",
+                description="读",
+                param_schema={"type": "object", "properties": {}},
+                read_only=True,
+            ),
+            lambda **kw: "ok",
+        )
         reg.register(_meta(EXIT_PLAN_MODE_TOOL), lambda **kw: "unreachable")
         manager = PlanModeManager()
         manager.enable("s1")

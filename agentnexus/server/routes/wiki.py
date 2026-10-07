@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
+
+from agentnexus.server.deps import get_wiki_service
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["wiki"])
 
@@ -25,21 +28,15 @@ class ReviewResolveRequest(BaseModel):
     item_id: str
 
 
-def _get_wiki_service():
-    from agentnexus.wiki.wiki_service import WikiService
-    return WikiService()
-
-
 # ── Wiki Stats ──────────────────────────────────────────────────────
 
 @router.get("/stats")
-def wiki_stats(namespace: str = "default"):
+def wiki_stats(namespace: str = "default", service=Depends(get_wiki_service)):
     """Get wiki health statistics."""
     try:
-        service = _get_wiki_service()
         return service.get_stats(namespace)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 # ── Wiki Pages ──────────────────────────────────────────────────────
@@ -68,7 +65,7 @@ def list_wiki_pages(namespace: str = "default", limit: int = 100):
             })
         return {"pages": result_pages, "total": len(pages)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/pages/{page_id}")
@@ -80,7 +77,7 @@ def get_wiki_page(page_id: str):
         store = get_wiki_store()
         page = store.get_page(page_id)
         if not page:
-            raise HTTPException(status_code=404, detail=f"Page {page_id} not found")
+            raise APIError(404, "not_found", f"Page {page_id} not found")
         return {
             "page_id": page.page_id,
             "title": page.title,
@@ -114,10 +111,8 @@ def get_wiki_page(page_id: str):
             "created_at": page.created_at,
             "updated_at": page.updated_at,
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.delete("/pages/{page_id}")
@@ -130,16 +125,15 @@ def delete_wiki_page(page_id: str):
         store.delete_page(page_id)
         return {"status": "deleted", "page_id": page_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 # ── Wiki Query ──────────────────────────────────────────────────────
 
 @router.post("/query")
-def wiki_query(req: WikiQueryRequest):
+def wiki_query(req: WikiQueryRequest, service=Depends(get_wiki_service)):
     """Query the wiki with confidence-based routing."""
     try:
-        service = _get_wiki_service()
         result = service.query(
             question=req.question,
             source_namespace=req.namespace,
@@ -155,16 +149,15 @@ def wiki_query(req: WikiQueryRequest):
             "rag_results": result.rag_results,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 # ── Wiki Ingest ─────────────────────────────────────────────────────
 
 @router.post("/ingest")
-def wiki_ingest_text(req: WikiIngestRequest):
+def wiki_ingest_text(req: WikiIngestRequest, service=Depends(get_wiki_service)):
     """Ingest text content into the wiki."""
     try:
-        service = _get_wiki_service()
         page = service.ingest_source(
             source_text=req.source_text,
             source_uri=req.source_uri,
@@ -179,7 +172,7 @@ def wiki_ingest_text(req: WikiIngestRequest):
             "confidence": page.confidence,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/ingest/file")
@@ -187,6 +180,7 @@ async def wiki_ingest_file(
     file: UploadFile = File(...),
     namespace: str = "default",
     page_type: str = "concept",
+    service=Depends(get_wiki_service),
 ):
     """Ingest a file into the wiki."""
     import asyncio
@@ -201,7 +195,6 @@ async def wiki_ingest_file(
 
     def _sync_ingest():
         text = Path(tmp_path).read_text(encoding="utf-8")
-        service = _get_wiki_service()
         return service.ingest_source(
             source_text=text,
             source_uri=file.filename or "upload",
@@ -220,7 +213,7 @@ async def wiki_ingest_file(
             "confidence": page.confidence,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -228,14 +221,13 @@ async def wiki_ingest_file(
 # ── Wiki Lint ───────────────────────────────────────────────────────
 
 @router.post("/lint")
-def wiki_lint(namespace: str = "default"):
+def wiki_lint(namespace: str = "default", service=Depends(get_wiki_service)):
     """Run wiki health checks."""
     try:
-        service = _get_wiki_service()
         items = service.run_lint(source_namespace=namespace)
         return {"items": items, "total": len(items)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 # ── Review Queue ────────────────────────────────────────────────────
@@ -265,7 +257,7 @@ def list_review_items(status: str = "pending", limit: int = 50):
             "total": len(items),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/review/resolve")
@@ -278,22 +270,21 @@ def resolve_review_item(req: ReviewResolveRequest):
         store.resolve_review_item(req.item_id)
         return {"status": "resolved", "item_id": req.item_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/review/process")
-def process_overdue_reviews():
+def process_overdue_reviews(service=Depends(get_wiki_service)):
     """Process overdue review items (auto-degradation)."""
     try:
-        service = _get_wiki_service()
         actions = service.process_overdue_reviews()
         return {"actions": actions, "total": len(actions)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/backfill")
-def wiki_backfill(namespace: str = "default"):
+def wiki_backfill(namespace: str = "default", service=Depends(get_wiki_service)):
     """Rebuild wiki from scratch: delete all existing pages, then regenerate from RAG."""
     from agentnexus.rag.store import get_knowledge_base_catalog
     from agentnexus.wiki.store import get_wiki_store
@@ -303,7 +294,7 @@ def wiki_backfill(namespace: str = "default"):
 
     kb = catalog.get_knowledge_base(namespace)
     if not kb:
-        raise HTTPException(status_code=404, detail=f"No RAG knowledge base for namespace '{namespace}'")
+        raise APIError(404, "not_found", f"No RAG knowledge base for namespace '{namespace}'")
 
     docs = catalog.list_documents(kb.kb_id)
     if not docs:
@@ -315,7 +306,6 @@ def wiki_backfill(namespace: str = "default"):
         wiki_store.delete_page(p.page_id)
     deleted = len(existing_pages)
 
-    service = _get_wiki_service()
     created = 0
     errors = []
 
@@ -349,4 +339,4 @@ def get_calibration_status():
         calibration = store.get_latest_calibration()
         return {"calibration": calibration}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))

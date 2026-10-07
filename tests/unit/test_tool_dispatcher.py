@@ -229,11 +229,14 @@ class TestConcurrencySafeField:
 
     def test_register_tool_accepts_concurrency_safe(self):
         reg = ToolRegistry()
-        reg.register_tool(
-            name="read_only_tool",
-            description="A read-only tool",
-            func=lambda: "ok",
-            concurrency_safe=True,
+        reg.register(
+            ToolMeta(
+                name="read_only_tool",
+                description="A read-only tool",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+            ),
+            lambda: "ok",
         )
         meta = reg.get_meta("read_only_tool")
         assert meta is not None
@@ -241,10 +244,13 @@ class TestConcurrencySafeField:
 
     def test_register_tool_default_concurrency_safe_false(self):
         reg = ToolRegistry()
-        reg.register_tool(
-            name="write_tool",
-            description="A write tool",
-            func=lambda: "ok",
+        reg.register(
+            ToolMeta(
+                name="write_tool",
+                description="A write tool",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda: "ok",
         )
         meta = reg.get_meta("write_tool")
         assert meta is not None

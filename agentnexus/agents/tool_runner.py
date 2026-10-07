@@ -9,7 +9,7 @@ import traceback
 from typing import Any, Callable
 
 from agentnexus.agents.exceptions import AgentCancelled
-from agentnexus.core.hooks import HookType, get_hook_manager
+from agentnexus.core.hooks import HookType, fire_hook
 from agentnexus.tools.errors import ToolError, ToolErrorCode
 
 logger = logging.getLogger(__name__)
@@ -100,10 +100,8 @@ def execute_tool(
     tool_policy: Any = None,
     cancel_checker: Callable[[], bool] | None = None,
 ) -> str | dict | ToolError:
-    hook_mgr = get_hook_manager()
-
     # ── before hook (can modify params or abort) ───────────────
-    hook_ctx = hook_mgr.fire(HookType.BEFORE_TOOL_CALL, {
+    hook_ctx = fire_hook(HookType.BEFORE_TOOL_CALL, {
         "name": name,
         "params": arguments,
         "caller": caller,
@@ -178,7 +176,7 @@ def execute_tool(
             executor.shutdown(wait=False)
 
         # ── after hook (observer) ──────────────────────────────
-        hook_mgr.fire(HookType.AFTER_TOOL_CALL, {
+        fire_hook(HookType.AFTER_TOOL_CALL, {
             "name": name,
             "params": arguments,
             "result": result,
@@ -189,7 +187,7 @@ def execute_tool(
         return str(result)
     except Exception as exc:
         # ── error hook (observer) ──────────────────────────────
-        hook_mgr.fire(HookType.ON_TOOL_ERROR, {
+        fire_hook(HookType.ON_TOOL_ERROR, {
             "name": name,
             "params": arguments,
             "error": exc,

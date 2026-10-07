@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react'
 import { BarChart3, Activity, DollarSign, Clock, CheckCircle, AlertTriangle, Layers, ChevronDown, ChevronRight } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { useTilt } from '../utils/useTilt'
 
 /** KPI tile with pointer-follow 3D tilt (parent grid supplies perspective). */
@@ -22,10 +23,19 @@ export default function StatsPage() {
   const [traceSpans, setTraceSpans] = useState<any[]>([])
   const [loadingTrace, setLoadingTrace] = useState(false)
 
-  useEffect(() => {
-    api.getStats(days).then(setStats).catch(console.error)
-    api.getLogs(days).then(({ traces }) => setLogs(traces)).catch(console.error)
+  const { data } = useApiQuery(async () => {
+    const [statsRes, logsRes] = await Promise.all([
+      api.getStats(days).catch(e => { console.error(e); return null }),
+      api.getLogs(days).catch(e => { console.error(e); return null }),
+    ])
+    return { stats: statsRes, logs: logsRes?.traces ?? null }
   }, [days])
+
+  useEffect(() => {
+    if (!data) return
+    if (data.stats) setStats(data.stats)
+    if (data.logs) setLogs(data.logs)
+  }, [data])
 
   const loadTraceDetail = async (traceId: string) => {
     if (expandedTrace === traceId) {

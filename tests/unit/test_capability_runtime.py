@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import yaml
 
 from agentnexus.capabilities.runtime import CapabilityRuntime
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):
@@ -34,7 +34,16 @@ def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):
 
 def test_disable_unloads_source_and_persists_generation(temp_agentnexus_home):
     executor = ToolRegistry()
-    executor.register_tool("hello", "say hello", lambda: "ok", source_type="builtin", source_id="builtin")
+    executor.register(
+        ToolMeta(
+            name="hello",
+            description="say hello",
+            param_schema={"type": "object", "properties": {}},
+            source_type="builtin",
+            source_id="builtin",
+        ),
+        lambda: "ok",
+    )
     runtime = CapabilityRuntime(settings=SimpleNamespace(), executor=executor)
 
     result = runtime.disable("tools")

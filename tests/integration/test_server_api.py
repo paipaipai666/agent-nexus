@@ -71,7 +71,7 @@ def test_create_session(client):
 
 
 def test_list_memories_empty(client):
-    resp = client.get("/api/memory/list")
+    resp = client.get("/api/memory/long")
     assert resp.status_code == 200
     data = resp.json()
     assert "memories" in data

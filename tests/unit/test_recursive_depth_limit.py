@@ -6,7 +6,7 @@ and prevent infinite recursion.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm(response=""):
@@ -52,7 +52,14 @@ class TestRecursiveDepthLimit:
         llm.think.side_effect = mock_think
 
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: "result")
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "result",
+        )
         agent = ReActAgent(llm, te, max_steps=5)
 
         result = agent.run("Complex question")

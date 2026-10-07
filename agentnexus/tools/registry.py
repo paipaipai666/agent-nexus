@@ -149,65 +149,21 @@ class ToolRegistry:
 
     # ── registration ──────────────────────────────────────────────
 
-    def register_tool(
-        self,
-        name: str,
-        description: str,
-        func: Callable,
-        param_schema: dict | None = None,
-        allowed_agents: list[str] | None = None,
-        risk_level: str = "low",
-        require_hitl: bool = False,
-        timeout_sec: int = 30,
-        rate_limit_per_min: int = 0,
-        output_schema: dict | None = None,
-        audit_enabled: bool = True,
-        source_type: str = "unknown",
-        source_id: str = "unknown",
-        enabled: bool = True,
-        generation: int = 0,
-        recoverable: bool = False,
-        max_retention: int = 5,
-        concurrency_safe: bool = False,
-        lane: str = "",
-        read_only: bool = False,
-    ) -> None:
-        """Register a tool with flat parameters (convenience wrapper)."""
-        risk = getattr(RiskLevel, risk_level.upper(), RiskLevel.LOW)
-        meta = ToolMeta(
-            name=name,
-            description=description,
-            param_schema=param_schema or {"type": "object", "properties": {}},
-            allowed_agents=allowed_agents or ["*"],
-            risk_level=risk,
-            require_hitl=require_hitl,
-            timeout_sec=timeout_sec,
-            rate_limit_per_min=rate_limit_per_min,
-            output_schema=output_schema,
-            audit_enabled=audit_enabled,
-            source_type=source_type,
-            source_id=source_id,
-            enabled=enabled,
-            generation=generation,
-            recoverable=recoverable,
-            max_retention=max_retention,
-            concurrency_safe=concurrency_safe,
-            lane=lane,
-            read_only=read_only,
-        )
-        self.register(meta, func)
-
     def register(self, meta: ToolMeta, func: Callable) -> None:
         if meta.name in self._tools:
             existing_meta, _ = self._tools[meta.name]
             existing_source = f"{existing_meta.source_type}:{existing_meta.source_id}"
             incoming_source = f"{meta.source_type}:{meta.source_id}"
-            if existing_source != incoming_source:
+            # A source-less placeholder ("unknown:unknown") may be claimed by any
+            # concrete source — providers stamp their source via
+            # ToolProviderContext.mark_registered() through this public path.
+            if existing_source != incoming_source and existing_source != "unknown:unknown":
                 raise ValueError(
                     f"Tool '{meta.name}' already registered by {existing_source}; "
                     f"cannot replace from {incoming_source}"
                 )
-            logger.warning("Tool '%s' already registered — overwriting", meta.name)
+            if existing_source == incoming_source:
+                logger.warning("Tool '%s' already registered — overwriting", meta.name)
         self._tools[meta.name] = (meta, func)
         self._param_validators[meta.name] = self._build_validator(meta.param_schema)
         self._output_validators[meta.name] = self._build_validator(meta.output_schema)
@@ -258,36 +214,28 @@ class ToolRegistry:
             self._lane_pools[lane] = pool
         return pool
 
-    def unregister_source(self, source_id: str, source_type: str | None = None) -> list[str]:
+    def unregister_where(self, predicate: Callable[[ToolMeta], bool]) -> list[str]:
+        """Unregister every tool whose meta satisfies predicate."""
         removed: list[str] = []
         for name, (meta, _) in list(self._tools.items()):
-            if meta.source_id != source_id:
-                continue
-            if source_type is not None and meta.source_type != source_type:
-                continue
-            if self.unregister(name):
+            if predicate(meta) and self.unregister(name):
                 removed.append(name)
         return removed
+
+    def unregister_source(self, source_id: str, source_type: str | None = None) -> list[str]:
+        return self.unregister_where(
+            lambda m: m.source_id == source_id
+            and (source_type is None or m.source_type == source_type)
+        )
 
     def unregister_source_prefix(self, source_prefix: str, source_type: str | None = None) -> list[str]:
-        removed: list[str] = []
-        for name, (meta, _) in list(self._tools.items()):
-            if not meta.source_id.startswith(source_prefix):
-                continue
-            if source_type is not None and meta.source_type != source_type:
-                continue
-            if self.unregister(name):
-                removed.append(name)
-        return removed
+        return self.unregister_where(
+            lambda m: m.source_id.startswith(source_prefix)
+            and (source_type is None or m.source_type == source_type)
+        )
 
     def unregister_source_type(self, source_type: str) -> list[str]:
-        removed: list[str] = []
-        for name, (meta, _) in list(self._tools.items()):
-            if meta.source_type != source_type:
-                continue
-            if self.unregister(name):
-                removed.append(name)
-        return removed
+        return self.unregister_where(lambda m: m.source_type == source_type)
 
     # ── call path (the governance gate) ───────────────────────────
 

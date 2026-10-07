@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   FlaskConical, Play, CheckCircle, XCircle, BarChart3, Layers, ChevronDown, ChevronRight,
   RefreshCw, Save, GitCompare, AlertTriangle, Clock, Zap, Target,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 interface EvalTask {
   id: string
@@ -62,39 +63,29 @@ export default function EvalPage() {
   const [taskDetail, setTaskDetail] = useState<any>(null)
   const [nTrials, setNTrials] = useState(1)
 
-  const loadTasks = useCallback(async () => {
-    try {
-      const { tasks } = await api.listEvalTasks(filterCategory || undefined, filterDifficulty || undefined)
-      setTasks(tasks)
-    } catch (e) { console.error(e) }
-  }, [filterCategory, filterDifficulty])
-
-  const loadSuites = useCallback(async () => {
-    try {
-      const { suites } = await api.listEvalSuites()
-      setSuites(suites)
-    } catch (e) { console.error(e) }
+  const { data: tasksData, error: tasksError, reload: reloadTasks } = useApiQuery(
+    () => api.listEvalTasks(filterCategory || undefined, filterDifficulty || undefined).then(({ tasks }) => tasks),
+    [filterCategory, filterDifficulty],
+  )
+  const { data: suitesData, error: suitesError, reload: reloadSuites } = useApiQuery(() => api.listEvalSuites().then(({ suites }) => suites), [])
+  const { data: baselinesData, error: baselinesError, reload: reloadBaselines } = useApiQuery(async () => {
+    const { suites } = await api.listEvalSuites()
+    const results: any[] = []
+    for (const s of suites) {
+      try {
+        const bl = await api.getEvalBaseline(s.name)
+        results.push({ suite: s.name, ...bl })
+      } catch { /* no baseline */ }
+    }
+    return results
   }, [])
 
-  const loadBaselines = useCallback(async () => {
-    try {
-      const { suites } = await api.listEvalSuites()
-      const results: any[] = []
-      for (const s of suites) {
-        try {
-          const bl = await api.getEvalBaseline(s.name)
-          results.push({ suite: s.name, ...bl })
-        } catch { /* no baseline */ }
-      }
-      setBaselines(results)
-    } catch (e) { console.error(e) }
-  }, [])
-
+  useEffect(() => { if (tasksData) setTasks(tasksData) }, [tasksData])
+  useEffect(() => { if (suitesData) setSuites(suitesData) }, [suitesData])
+  useEffect(() => { if (baselinesData) setBaselines(baselinesData) }, [baselinesData])
   useEffect(() => {
-    loadTasks()
-    loadSuites()
-    loadBaselines()
-  }, [loadTasks, loadSuites, loadBaselines])
+    for (const e of [tasksError, suitesError, baselinesError]) if (e) console.error(e)
+  }, [tasksError, suitesError, baselinesError])
 
   const handleValidate = async () => {
     setLoading('validate')
@@ -121,7 +112,7 @@ export default function EvalPage() {
     setLoading(`baseline:${suiteName}`)
     try {
       await api.saveEvalBaseline(suiteName)
-      await loadBaselines()
+      reloadBaselines()
     } catch (e) { console.error(e) }
     setLoading(null)
   }
@@ -183,7 +174,7 @@ export default function EvalPage() {
           <button className="btn-ghost text-xs flex items-center gap-1" onClick={handleValidate} disabled={loading === 'validate'}>
             <CheckCircle size={14} /> Validate
           </button>
-          <button className="btn-ghost text-xs flex items-center gap-1" onClick={() => { loadTasks(); loadSuites(); loadBaselines() }}>
+          <button className="btn-ghost text-xs flex items-center gap-1" onClick={() => { reloadTasks(); reloadSuites(); reloadBaselines() }}>
             <RefreshCw size={14} /> Refresh
           </button>
         </div>

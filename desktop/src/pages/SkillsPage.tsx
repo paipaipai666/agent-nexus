@@ -2,17 +2,18 @@ import { useState, useEffect, useRef } from 'react'
 import { Zap, Loader2 } from 'lucide-react'
 import { api } from '../services/api'
 import { animateCardGrid } from '../utils/animations'
+import { useApiQuery } from '../hooks/useApiQuery'
+import PageSpinner from '../components/PageSpinner'
 
 interface Skill { id: string; display_name: string; description: string; enabled: boolean }
 
 export default function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([])
-  const [loading, setLoading] = useState(true)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const { data, loading, error } = useApiQuery(() => api.listSkills().then(({ skills }) => skills), [])
 
-  useEffect(() => {
-    api.listSkills().then(({ skills }) => setSkills(skills)).catch(console.error).finally(() => setLoading(false))
-  }, [])
+  useEffect(() => { if (data) setSkills(data) }, [data])
+  useEffect(() => { if (error) console.error(error) }, [error])
 
   const handleToggle = async (skill: Skill) => {
     setTogglingId(skill.id)
@@ -31,7 +32,7 @@ export default function SkillsPage() {
     if (cards.length > 0) animateCardGrid(cards)
   }, [skills, loading])
 
-  if (loading) return <div className="flex-1 flex items-center justify-center"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} /></div>
+  if (loading) return <PageSpinner />
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">

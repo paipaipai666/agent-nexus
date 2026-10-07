@@ -94,21 +94,21 @@ class TestReactionProvider:
     def test_disabled_by_default(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(enable_user_reaction=False)
         executor = self._register()
-        executor.register_tool.assert_not_called()
+        executor.register.assert_not_called()
 
     @patch("agentnexus.core.config.get_settings")
     def test_enabled_registers_tool(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(enable_user_reaction=True)
         executor = self._register()
-        assert executor.register_tool.call_count == 1
-        name = executor.register_tool.call_args[0][0]
-        assert name == "express_reaction"
+        assert executor.register.call_count == 1
+        meta = executor.register.call_args[0][0]
+        assert meta.name == "express_reaction"
 
     @patch("agentnexus.core.config.get_settings")
     def test_settings_error_disables(self, mock_settings):
         mock_settings.side_effect = RuntimeError("boom")
         executor = self._register()
-        executor.register_tool.assert_not_called()
+        executor.register.assert_not_called()
 
 
 class TestGuiEventOverride:

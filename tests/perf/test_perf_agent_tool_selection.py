@@ -61,7 +61,14 @@ def _populate_executor(executor: ToolRegistry, count: int) -> dict[str, str]:
     for i in range(count):
         name = f"tool_{i:04d}"
         description = f"Tool {i} for testing purposes"
-        executor.register_tool(name, description, _make_handler(name))
+        executor.register(
+            ToolMeta(
+                name=name,
+                description=description,
+                param_schema={"type": "object", "properties": {}},
+            ),
+            _make_handler(name),
+        )
         tool_descriptions[name] = description
     return tool_descriptions
 
@@ -440,7 +447,14 @@ class TestAgentToolSelectionIntegration:
         # Update some tools
         for i in range(0, 80, 10):
             name = f"tool_{i:04d}"
-            executor.register_tool(name, f"Updated tool {i}", _make_handler(name))
+            executor.register(
+                ToolMeta(
+                    name=name,
+                    description=f"Updated tool {i}",
+                    param_schema={"type": "object", "properties": {}},
+                ),
+                _make_handler(name),
+            )
 
         mock_llm = MockAgentLLM(accuracy_rate=0.90)
         mock_llm.set_available_tools(list(executor._tools.keys()))

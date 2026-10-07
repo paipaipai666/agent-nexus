@@ -26,7 +26,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from agentnexus.core.hook_schemas import HookConfig
 from agentnexus.core.hooks import AbortCode
@@ -236,6 +236,61 @@ def _run_async_observer(config: HookConfig, hook_event: str, payload: dict) -> N
     _observer_pool().submit(_job)
 
 
+class ExecutionPolicy(Protocol):
+    """How matched command hooks run for one fired event (async_ configs are
+    submitted as background observers in declared order)."""
+
+    def run(self, configs, hook_event: str, ctx, results: list[CommandResult]) -> None: ...
+
+
+class SequentialBlocking:
+    """Interceptable events: run in declared order; abort short-circuits the rest."""
+
+    def run(self, configs, hook_event: str, ctx, results: list[CommandResult]) -> None:
+        for cfg in configs:
+            if cfg.async_:
+                _run_async_observer(cfg, hook_event, dict(ctx.payload))
+                continue
+            result = execute_command_hook(
+                cfg, hook_event=hook_event, payload=dict(ctx.payload),
+                abort_supported=True,
+            )
+            results.append(result)
+            _apply_result(ctx, result, can_block=True)
+            if ctx.aborted:
+                break
+
+
+class ConcurrentObserver:
+    """Observer events: run concurrently on the observer pool; results are
+    logged via _apply_result and never block the event."""
+
+    def run(self, configs, hook_event: str, ctx, results: list[CommandResult]) -> None:
+        payload = dict(ctx.payload)
+        futures = []
+        max_timeout = 0.0
+        for cfg in configs:
+            if cfg.async_:
+                _run_async_observer(cfg, hook_event, dict(payload))
+                continue
+            max_timeout = max(max_timeout, cfg.timeout)
+            futures.append(
+                _observer_pool().submit(
+                    execute_command_hook, cfg,
+                    hook_event=hook_event, payload=dict(payload),
+                    abort_supported=False,
+                )
+            )
+        for future in futures:
+            try:
+                result = future.result(timeout=max(60.0, max_timeout + 5))
+            except Exception as exc:  # defensive: observer hooks never break the loop
+                logger.debug("observer command hook failed to complete: %s", exc)
+                continue
+            results.append(result)
+            _apply_result(ctx, result, can_block=False)
+
+
 def run_command_hooks_for(ctx) -> list[CommandResult]:
     """Execute declared command hooks for an already-fired HookContext.
 
@@ -251,44 +306,8 @@ def run_command_hooks_for(ctx) -> list[CommandResult]:
         return []
 
     results: list[CommandResult] = []
-    if _is_interceptable(hook_event):
-        # Sequential, can block; abort short-circuits the rest.
-        for loaded in matched:
-            cfg = loaded.config
-            if cfg.async_:
-                _run_async_observer(cfg, hook_event, dict(ctx.payload))
-                continue
-            result = execute_command_hook(
-                cfg, hook_event=hook_event, payload=dict(ctx.payload),
-                abort_supported=True,
-            )
-            results.append(result)
-            _apply_result(ctx, result, can_block=True)
-            if ctx.aborted:
-                break
-    else:
-        # Observer events: concurrent, never block, results only logged.
-        futures = []
-        max_timeout = 0.0
-        for loaded in matched:
-            cfg = loaded.config
-            if cfg.async_:
-                _run_async_observer(cfg, hook_event, dict(ctx.payload))
-                continue
-            max_timeout = max(max_timeout, cfg.timeout)
-            futures.append(
-                _observer_pool().submit(
-                    execute_command_hook, cfg,
-                    hook_event=hook_event, payload=dict(ctx.payload),
-                    abort_supported=False,
-                )
-            )
-        for future in futures:
-            try:
-                result = future.result(timeout=max(60.0, max_timeout + 5))
-            except Exception as exc:  # defensive: observer hooks never break the loop
-                logger.debug("observer command hook failed to complete: %s", exc)
-                continue
-            results.append(result)
-            _apply_result(ctx, result, can_block=False)
+    policy: ExecutionPolicy = (
+        SequentialBlocking() if _is_interceptable(hook_event) else ConcurrentObserver()
+    )
+    policy.run([loaded.config for loaded in matched], hook_event, ctx, results)
     return results

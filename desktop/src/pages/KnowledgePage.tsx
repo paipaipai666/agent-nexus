@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, FileText, Upload, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { BorderBeam } from 'border-beam'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { animateEntrance } from '../utils/animations'
 import { useTheme } from '../components/theme/ThemeProvider'
 import { usePrefersReducedMotion } from '../utils/effects'
@@ -57,20 +58,14 @@ export default function KnowledgePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const loadDocuments = useCallback((signal?: AbortSignal) => {
-    api.listDocuments(signal).then(({ documents, total_chunks }) => {
-      setDocuments(documents)
-      setTotalChunks(total_chunks)
-    }).catch((err) => {
-      if (err.name !== 'AbortError') console.error(err)
-    })
-  }, [])
+  const { data: docData, error: docError, reload: reloadDocuments } = useApiQuery((signal) => api.listDocuments(signal), [])
 
   useEffect(() => {
-    const controller = new AbortController()
-    loadDocuments(controller.signal)
-    return () => controller.abort()
-  }, [loadDocuments])
+    if (!docData) return
+    setDocuments(docData.documents)
+    setTotalChunks(docData.total_chunks)
+  }, [docData])
+  useEffect(() => { if (docError) console.error(docError) }, [docError])
 
   // Cleanup polling and timeouts on unmount
   useEffect(() => {
@@ -127,7 +122,7 @@ export default function KnowledgePage() {
           pollRef.current = null
           setIsUploading(false)
           clearActiveUpload()
-          loadDocuments()
+          reloadDocuments()
           timeoutRef.current = setTimeout(() => setProgress(null), 2000)
         } else if (run.status === 'failed') {
           setProgress({ runId, filename, stage: 'failed', pct: 0, message: run.error_message || 'Ingestion failed', status: 'failed' })
@@ -143,7 +138,7 @@ export default function KnowledgePage() {
         console.error('Poll error:', err)
       }
     }, 1000)
-  }, [loadDocuments])
+  }, [reloadDocuments])
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -178,7 +173,7 @@ export default function KnowledgePage() {
   const handleDelete = async (docId: string) => {
     if (!confirm('Delete this document?')) return
     setDeletingId(docId)
-    try { await api.deleteDocument(docId); loadDocuments() }
+    try { await api.deleteDocument(docId); reloadDocuments() }
     catch (err) { console.error('Delete failed:', err) }
     finally { setDeletingId(null) }
   }

@@ -8,7 +8,7 @@ import pytest
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.mcp.adapter import MCPToolDescriptor
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:
@@ -47,15 +47,18 @@ class FakeMCPManager:
         for desc in self._tool_descriptors.values():
             if include_tools is not None and desc.local_name not in include_tools:
                 continue
-            executor.register_tool(
-                desc.local_name, desc.description,
+            executor.register(
+                ToolMeta(
+                    name=desc.local_name,
+                    description=desc.description,
+                    param_schema=desc.param_schema,
+                    allowed_agents=desc.allowed_agents,
+                    risk_level=getattr(RiskLevel, (desc.risk_level).upper(), RiskLevel.LOW),
+                    require_hitl=desc.require_hitl,
+                    timeout_sec=desc.timeout_sec,
+                    rate_limit_per_min=desc.rate_limit_per_min,
+                ),
                 self._make_callable(desc.local_name),
-                param_schema=desc.param_schema,
-                allowed_agents=desc.allowed_agents,
-                risk_level=desc.risk_level,
-                require_hitl=desc.require_hitl,
-                timeout_sec=desc.timeout_sec,
-                rate_limit_per_min=desc.rate_limit_per_min,
             )
             registered.append(desc.local_name)
         return registered

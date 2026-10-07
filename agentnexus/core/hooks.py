@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
+from agentnexus.observability.tracer import trace_span
+
 logger = logging.getLogger(__name__)
 
 SLOW_HOOK_THRESHOLD_MS = 100
@@ -409,67 +411,74 @@ class HookManager:
 
     # ── dispatch (sync) ────────────────────────────────────────────
 
+    @trace_span("hook_fire", lambda self, hook_type, payload: {"hook_type": hook_type.name})
     def fire(self, hook_type: HookType, payload: dict[str, Any]) -> HookContext:
         """Fire all hooks for *hook_type* synchronously.  Returns the context."""
-        from agentnexus.observability.tracer import get_trace_manager
-
-        trace_mgr = get_trace_manager()
         ctx = HookContext(hook_type, dict(payload))
         self._validate_payload(hook_type, ctx.payload)
         mutable = hook_type in _MUTABLE_HOOKS
         records: list[dict] = []
         t0 = time.perf_counter()
-        with trace_mgr.span("hook_fire", {"hook_type": hook_type.name}):
-            for entry in self._sorted(hook_type):
-                if not entry.enabled:
-                    continue
-                record = {"event": hook_type.value, "hook": entry.name,
-                          "kind": "inprocess", "outcome": "ok", "duration_ms": 0.0}
-                before = dict(ctx.payload) if not mutable else None
-                started = time.perf_counter()
-                exc: Exception | None = None
-                with trace_mgr.span("hook_call", {"hook": entry.name}):
-                    try:
-                        if entry.timeout is not None \
-                                and not asyncio.iscoroutinefunction(entry.callback):
-                            record["outcome"] = self._run_with_timeout(entry, ctx)
-                        elif asyncio.iscoroutinefunction(entry.callback):
-                            self._run_async(entry.callback(ctx))
-                        else:
-                            entry.callback(ctx)
-                    except Exception as err:  # noqa: BLE001 — isolation by design
-                        exc = err
-                record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
-                if exc is not None:
-                    entry.fail_count += 1
-                    record["outcome"] = "raised"
-                    if entry.fail_count == 1:
-                        logger.warning("Hook %r raised (suppressed)", entry.name, exc_info=True)
-                    else:
-                        logger.debug("Hook %r raised again (x%d)", entry.name, entry.fail_count)
-                if before is not None and ctx.payload != before:
-                    changed = sorted(
-                        k for k in set(before) | set(ctx.payload)
-                        if before.get(k) != ctx.payload.get(k)
-                    )
-                    record["changed_keys"] = changed
-                    logger.warning(
-                        "Hook %r mutated read-only %s payload (changed keys: %s)",
-                        entry.name, hook_type.value, changed,
-                    )
-                records.append(record)
-                if ctx.aborted:
-                    break
-            if not ctx.aborted:
-                records.extend(self._run_command_hooks(ctx))
-            elif ctx.aborted:
-                records.append({"event": hook_type.value, "hook": "(chain)",
-                                "kind": "chain", "outcome": "aborted",
-                                "abort_code": ctx.abort_code, "duration_ms": 0.0})
+        for entry in self._sorted(hook_type):
+            if not entry.enabled:
+                continue
+            record = {"event": hook_type.value, "hook": entry.name,
+                      "kind": "inprocess", "outcome": "ok", "duration_ms": 0.0}
+            before = dict(ctx.payload) if not mutable else None
+            started = time.perf_counter()
+            outcome, exc = self._invoke_entry(entry, ctx)
+            if outcome is not None:
+                record["outcome"] = outcome
+            record["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
+            if exc is not None:
+                entry.fail_count += 1
+                record["outcome"] = "raised"
+                if entry.fail_count == 1:
+                    logger.warning("Hook %r raised (suppressed)", entry.name, exc_info=True)
+                else:
+                    logger.debug("Hook %r raised again (x%d)", entry.name, entry.fail_count)
+            if before is not None and ctx.payload != before:
+                changed = sorted(
+                    k for k in set(before) | set(ctx.payload)
+                    if before.get(k) != ctx.payload.get(k)
+                )
+                record["changed_keys"] = changed
+                logger.warning(
+                    "Hook %r mutated read-only %s payload (changed keys: %s)",
+                    entry.name, hook_type.value, changed,
+                )
+            records.append(record)
+            if ctx.aborted:
+                break
+        if not ctx.aborted:
+            records.extend(self._run_command_hooks(ctx))
+        elif ctx.aborted:
+            records.append({"event": hook_type.value, "hook": "(chain)",
+                            "kind": "chain", "outcome": "aborted",
+                            "abort_code": ctx.abort_code, "duration_ms": 0.0})
         ctx.elapsed_ms = (time.perf_counter() - t0) * 1000
         write_hook_journal(records)
         self._check_slow(ctx, hook_type)
         return ctx
+
+    @trace_span("hook_call", lambda self, entry, ctx: {"hook": entry.name})
+    def _invoke_entry(self, entry: _HookEntry, ctx: HookContext) -> tuple[str | None, Exception | None]:
+        """Run one hook callback; return (timeout_outcome, caught_error).
+
+        Callback errors are isolated from the dispatch loop (counted by the
+        caller); the span wraps the callback invocation only.
+        """
+        try:
+            if entry.timeout is not None \
+                    and not asyncio.iscoroutinefunction(entry.callback):
+                return self._run_with_timeout(entry, ctx), None
+            if asyncio.iscoroutinefunction(entry.callback):
+                self._run_async(entry.callback(ctx))
+            else:
+                entry.callback(ctx)
+        except Exception as err:  # noqa: BLE001 — isolation by design
+            return None, err
+        return None, None
 
     # ── internals ──────────────────────────────────────────────────
 
@@ -617,6 +626,25 @@ def _reset_hook_manager() -> None:
     """Reset singleton (for testing only)."""
     global _hook_manager
     _hook_manager = None
+
+
+# ── call-site ritual helper ────────────────────────────────────────
+
+
+def fire_hook(hook_type: HookType, payload: dict[str, Any]) -> HookContext:
+    """Fire a lifecycle hook and return its context.
+
+    统一「fire → aborted 短路 → payload 回写」三步仪式；本函数只负责
+    fire 一步。短路返回值各点不同（str / ToolError / 空串），由调用点
+    在 ``if hook_ctx.aborted:`` 分支自行返回；可变键回写也由调用点完成
+    （Python 无法替调用方重新绑定局部变量）::
+
+        hook_ctx = fire_hook(HookType.BEFORE_X, {...payload...})
+        if hook_ctx.aborted:
+            return <本点特有的短路值>
+        x = hook_ctx.payload.get("key", x)  # 可变键回写
+    """
+    return get_hook_manager().fire(hook_type, payload)
 
 
 # ── decorator API ──────────────────────────────────────────────────

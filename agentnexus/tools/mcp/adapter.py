@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from agentnexus.core.config import MCPServerConfig
+from agentnexus.observability.tracer import trace_span
 from agentnexus.tools.mcp import (
     call as mcp_call,
 )
@@ -41,7 +42,7 @@ from agentnexus.tools.mcp.schema import (
     MCPToolDescriptor,
     ServerRuntime,
 )
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -256,30 +257,31 @@ class MCPToolManager:
             if sigs.get(tool.local_name) == signature:
                 registered.append(tool.local_name)
                 continue
-            executor.register_tool(
-                tool.local_name,
-                tool.description,
+            executor.register(
+                ToolMeta(
+                    name=tool.local_name,
+                    description=tool.description,
+                    param_schema=tool.param_schema,
+                    allowed_agents=tool.allowed_agents,
+                    risk_level=getattr(RiskLevel, (tool.risk_level).upper(), RiskLevel.LOW),
+                    require_hitl=tool.require_hitl,
+                    timeout_sec=tool.timeout_sec,
+                    rate_limit_per_min=tool.rate_limit_per_min,
+                    source_type="mcp",
+                    source_id=f"mcp:{tool.server_name}",
+                    read_only=tool.read_only,
+                ),
                 self._make_tool_callable(tool.local_name),
-                param_schema=tool.param_schema,
-                allowed_agents=tool.allowed_agents,
-                risk_level=tool.risk_level,
-                require_hitl=tool.require_hitl,
-                timeout_sec=tool.timeout_sec,
-                rate_limit_per_min=tool.rate_limit_per_min,
-                read_only=tool.read_only,
-                source_type="mcp",
-                source_id=f"mcp:{tool.server_name}",
             )
             sigs[tool.local_name] = signature
             registered.append(tool.local_name)
         return registered
 
+    @trace_span("mcp_call", lambda self, local_name, params=None: {"tool_name": local_name})
     def call_tool(self, local_name: str, params: dict | None = None) -> str:
         from agentnexus.core.hooks import HookType, get_hook_manager
-        from agentnexus.observability.tracer import get_trace_manager
 
         hook_mgr = get_hook_manager()
-        trace_mgr = get_trace_manager()
         hook_mgr.fire(HookType.BEFORE_MCP_CALL_TOOL, {
             "local_name": local_name, "params": params,
         })
@@ -289,11 +291,10 @@ class MCPToolManager:
             raise KeyError(f"Unknown MCP tool: {local_name}")
 
         try:
-            with trace_mgr.span("mcp_call", {"tool_name": local_name}):
-                result = self._submit(
-                    self._call_descriptor_async(descriptor, params or {}),
-                    timeout=descriptor.timeout_sec + 5,
-                )
+            result = self._submit(
+                self._call_descriptor_async(descriptor, params or {}),
+                timeout=descriptor.timeout_sec + 5,
+            )
             hook_mgr.fire(HookType.AFTER_MCP_CALL_TOOL, {
                 "local_name": local_name, "server_name": descriptor.server_name,
                 "result": str(result)[:500],

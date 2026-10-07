@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 class MockToolRegistry(ToolRegistry):
@@ -86,40 +86,62 @@ def _translate_text(text: str = "", target_lang: str = "英语") -> dict:
 def build_mock_registry() -> MockToolRegistry:
     """构建评测用 mock 工具注册表（4 个工具 + todo 记账桩）。"""
     reg = MockToolRegistry()
-    reg.register_tool(
-        "get_weather", "查询指定城市的实时天气，返回天气/温度/湿度/出行建议",
+    reg.register(
+        ToolMeta(
+            name="get_weather",
+            description="查询指定城市的实时天气，返回天气/温度/湿度/出行建议",
+            param_schema={"type": "object",
+                          "properties": {"city": {"type": "string", "description": "城市名"}},
+                          "required": ["city"]},
+        ),
         _weather,
-        param_schema={"type": "object",
-                      "properties": {"city": {"type": "string", "description": "城市名"}},
-                      "required": ["city"]},
     )
-    reg.register_tool(
-        "query_product", "按商品 ID 查询商品价格、库存和在售状态",
+    reg.register(
+        ToolMeta(
+            name="query_product",
+            description="按商品 ID 查询商品价格、库存和在售状态",
+            param_schema={"type": "object",
+                          "properties": {"product_id": {"type": "string", "description": "商品 ID"}},
+                          "required": ["product_id"]},
+        ),
         _query_product,
-        param_schema={"type": "object",
-                      "properties": {"product_id": {"type": "string", "description": "商品 ID"}},
-                      "required": ["product_id"]},
     )
-    reg.register_tool(
-        "calculator", "计算四则运算表达式，如 23 * 47",
+    reg.register(
+        ToolMeta(
+            name="calculator",
+            description="计算四则运算表达式，如 23 * 47",
+            param_schema={"type": "object",
+                          "properties": {"expression": {"type": "string", "description": "数学表达式"}},
+                          "required": ["expression"]},
+        ),
         _calculator,
-        param_schema={"type": "object",
-                      "properties": {"expression": {"type": "string", "description": "数学表达式"}},
-                      "required": ["expression"]},
     )
-    reg.register_tool(
-        "translate_text", "把文本翻译成指定语言",
+    reg.register(
+        ToolMeta(
+            name="translate_text",
+            description="把文本翻译成指定语言",
+            param_schema={"type": "object",
+                          "properties": {"text": {"type": "string"},
+                                         "target_lang": {"type": "string", "description": "目标语言"}},
+                          "required": ["text", "target_lang"]},
+        ),
         _translate_text,
-        param_schema={"type": "object",
-                      "properties": {"text": {"type": "string"},
-                                     "target_lang": {"type": "string", "description": "目标语言"}},
-                      "required": ["text", "target_lang"]},
     )
     # ReAct 提示词内的记账工具桩——避免 agent 尝试调用时报"未知工具"产生噪音
-    reg.register_tool("todo_add", "记录任务分解（评测桩）",
-                      lambda **kw: {"ok": True},
-                      param_schema={"type": "object", "properties": {}})
-    reg.register_tool("todo_update", "更新任务状态（评测桩）",
-                      lambda **kw: {"ok": True},
-                      param_schema={"type": "object", "properties": {}})
+    reg.register(
+        ToolMeta(
+            name="todo_add",
+            description="记录任务分解（评测桩）",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: {"ok": True},
+    )
+    reg.register(
+        ToolMeta(
+            name="todo_update",
+            description="更新任务状态（评测桩）",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: {"ok": True},
+    )
     return reg

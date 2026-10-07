@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from agentnexus.server.deps import get_runtime
 
 router = APIRouter(tags=["runtime"])
 
@@ -47,10 +49,7 @@ def _resolve_session_refs(runtime, session_id: str | None):
 
 
 @router.get("/status")
-def runtime_status(session_id: str | None = Query(None, description="Session ID for per-session stats")):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def runtime_status(session_id: str | None = Query(None, description="Session ID for per-session stats"), runtime=Depends(get_runtime)):
     settings = runtime.settings
 
     agent, mm = _resolve_session_refs(runtime, session_id)
@@ -125,15 +124,12 @@ def _schedule_process_exit(delay_sec: float = 1.0) -> None:
 
 
 @router.post("/shutdown")
-def shutdown():
+def shutdown(runtime=Depends(get_runtime)):
     """Graceful shutdown for the desktop wrapper.
 
     决策 1/6: closing the app must stop everything — cancel all active runs
     (results persist, terminal events queue) and then exit the process.
     """
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     chat = getattr(getattr(runtime, "services", None), "chat", None)
     if chat is not None and hasattr(chat, "cancel_all_runs"):
         chat.cancel_all_runs(reason="server_shutdown")

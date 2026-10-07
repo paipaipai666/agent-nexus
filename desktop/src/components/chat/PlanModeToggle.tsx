@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { api } from '../../services/api'
 import { planModeArm } from '../../services/planModeArm'
+import { useSessionOverride, type SessionOverrideConfig } from '../../hooks/useSessionOverride'
 
 interface PlanModeToggleProps {
   sessionId: string | null
+}
+
+const PLAN_MODE_OVERRIDE: SessionOverrideConfig<boolean, boolean> = {
+  arm: planModeArm,
+  initial: false,
+  toApi: (v: boolean) => v,
+  fromApi: (v: boolean | null | undefined) => !!v,
+  getServerValue: (sessionId) => api.getSession(sessionId).then(d => d.plan_mode),
+  setServerValue: (sessionId, v) => api.setPlanMode(sessionId, v).then(d => d.plan_mode),
 }
 
 /** Plan-mode switch in the chat input's HUD row. Reflects the per-session
@@ -15,48 +24,10 @@ interface PlanModeToggleProps {
  *  message): the toggle stays clickable and stores an "armed" intent, which
  *  the session-creation path applies before the first message is sent. */
 export default function PlanModeToggle({ sessionId }: PlanModeToggleProps) {
-  const [enabled, setEnabled] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const { value: enabled, busy, commit } = useSessionOverride(sessionId, PLAN_MODE_OVERRIDE)
 
-  useEffect(() => {
-    if (!sessionId) {
-      // No session yet — reflect the armed intent locally.
-      setEnabled(planModeArm.isArmed())
-      return
-    }
-    if (planModeArm.consume()) {
-      // Armed before the session existed — apply now, before any run starts.
-      api.setPlanMode(sessionId, true)
-        .then(res => setEnabled(!!res.plan_mode))
-        .catch(() => {
-          planModeArm.setArmed(true) // retry on the next session attach
-          setEnabled(false)
-        })
-      return
-    }
-    api.getSession(sessionId)
-      .then(d => setEnabled(!!d.plan_mode))
-      .catch(() => {})
-  }, [sessionId])
-
-  const handleToggle = async () => {
-    if (busy) return
-    if (!sessionId) {
-      const next = !planModeArm.isArmed()
-      planModeArm.setArmed(next)
-      setEnabled(next)
-      return
-    }
-    setBusy(true)
-    try {
-      const res = await api.setPlanMode(sessionId, !enabled)
-      setEnabled(!!res.plan_mode)
-      planModeArm.setArmed(!!res.plan_mode)
-    } catch {
-      // keep previous state; transient backend errors surface on next toggle
-    } finally {
-      setBusy(false)
-    }
+  const handleToggle = () => {
+    void commit(!enabled)
   }
 
   return (

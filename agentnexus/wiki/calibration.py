@@ -8,22 +8,18 @@ engineering calibration against a human-labeled sample.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .models import SynthesisLevel, WikiStatement
 from .store import WikiStore
-from .verifier import MechanicalVerifier
+from .verifier import DEFAULT_VERIFY_THRESHOLDS, MechanicalVerifier
 
 logger = logging.getLogger(__name__)
 
-# Default thresholds before calibration
-DEFAULT_THRESHOLDS = {
-    "jaccard_direct_quote": 0.6,
-    "jaccard_paraphrase": 0.4,
-    "cosine_paraphrase": 0.7,
-    "cosine_source": 0.35,
-}
+# Default thresholds before calibration — derived from the verifier's
+# VerifyThresholds defaults so the two never drift apart.
+DEFAULT_THRESHOLDS: dict[str, float] = asdict(DEFAULT_VERIFY_THRESHOLDS)
 
 
 @dataclass

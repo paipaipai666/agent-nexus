@@ -21,7 +21,7 @@ class TestExecuteTool:
         )
         return ctx
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_normal_execution_returns_string(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -38,7 +38,7 @@ class TestExecuteTool:
         )
         assert result == "result_text"
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_dict_result_returned_as_is(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -55,7 +55,7 @@ class TestExecuteTool:
         )
         assert result == {"status": "ok", "data": 42}
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_hook_abort_returns_formatted_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -77,7 +77,7 @@ class TestExecuteTool:
         assert result.error_code == "PERMISSION_DENIED"
         assert "not allowed" in result.message
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_cancel_checker_raises_runtime_error(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -97,7 +97,7 @@ class TestExecuteTool:
         assert result.error_code == "CANCELLED"
         assert "t" in result.message
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_exception_returns_error_string_with_tool_name(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -118,7 +118,7 @@ class TestExecuteTool:
         # LOW-02: ValueError is a safe domain exception, message preserved
         assert "bad input" in result.message
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_hook_can_modify_params(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -136,7 +136,7 @@ class TestExecuteTool:
         call_kwargs = executor.invoke.call_args.kwargs
         assert call_kwargs["params"]["timeout"] == 999
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_after_tool_call_hook_fired_on_success(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -155,7 +155,7 @@ class TestExecuteTool:
         calls = mock_mgr.fire.call_args_list
         assert any(c.args[0] == HookType.AFTER_TOOL_CALL for c in calls)
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_on_tool_error_hook_fired_on_exception(self, mock_get_hook):
         from agentnexus.agents.tool_runner import execute_tool
 
@@ -189,29 +189,31 @@ class TestHitlAcrossThreadHop:
     submitting thread — regression for shell_exec always returning
     '[blocked] 用户取消了该工具调用'."""
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_confirm_bridge_target_reached_across_pool_hop(self, mock_get_hook):
         import threading
 
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge
-        from agentnexus.tools.registry import ToolRegistry
+        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
         hook_ctx = _make_hook_ctx()
         mock_get_hook.return_value.fire.return_value = hook_ctx
 
         registry = ToolRegistry()
-        registry.register_tool(
-            "shell_exec",
-            "fake shell",
+        registry.register(
+            ToolMeta(
+                name="shell_exec",
+                description="fake shell",
+                param_schema={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+                risk_level=RiskLevel.HIGH,
+                require_hitl=True,
+            ),
             lambda command: f"executed: {command}",
-            param_schema={
-                "type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"],
-            },
-            risk_level="high",
-            require_hitl=True,
         )
         bridge = ConfirmBridge()
         seen = []
@@ -243,25 +245,27 @@ class TestHitlAcrossThreadHop:
         assert results == ["executed: echo hi"]
         assert len(seen) == 1
 
-    @patch("agentnexus.agents.tool_runner.get_hook_manager")
+    @patch("agentnexus.core.hooks.get_hook_manager")
     def test_confirm_bridge_no_target_still_fails_closed(self, mock_get_hook):
 
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge
-        from agentnexus.tools.registry import ToolRegistry
+        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
         hook_ctx = _make_hook_ctx()
         mock_get_hook.return_value.fire.return_value = hook_ctx
 
         registry = ToolRegistry()
-        registry.register_tool(
-            "shell_exec",
-            "fake shell",
+        registry.register(
+            ToolMeta(
+                name="shell_exec",
+                description="fake shell",
+                param_schema={"type": "object", "properties": {"command": {"type": "string"}},
+                              "required": ["command"]},
+                risk_level=RiskLevel.HIGH,
+                require_hitl=True,
+            ),
             lambda command: "should not run",
-            param_schema={"type": "object", "properties": {"command": {"type": "string"}},
-                          "required": ["command"]},
-            risk_level="high",
-            require_hitl=True,
         )
 
         result = execute_tool(

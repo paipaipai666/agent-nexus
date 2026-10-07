@@ -2,29 +2,23 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
+
+from agentnexus.server.deps import get_mcp_manager, get_mcp_manager_optional
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["mcp"])
 
 
-def _get_mcp_manager_or_none():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
-    return runtime.mcp_manager
-
-
 @router.get("/status")
-def mcp_status():
-    manager = _get_mcp_manager_or_none()
+def mcp_status(manager=Depends(get_mcp_manager_optional)):
     if manager is None:
         return {"started": False, "servers": [], "total_tools": 0, "total_resources": 0, "total_prompts": 0}
     return manager.status_snapshot()
 
 
 @router.get("/tools")
-def list_mcp_tools(server: str | None = None):
-    manager = _get_mcp_manager_or_none()
+def list_mcp_tools(server: str | None = None, manager=Depends(get_mcp_manager_optional)):
     if manager is None:
         return {"tools": [], "count": 0}
     snapshot = manager.status_snapshot()
@@ -39,8 +33,7 @@ def list_mcp_tools(server: str | None = None):
 
 
 @router.get("/resources")
-def list_mcp_resources(server: str | None = None):
-    manager = _get_mcp_manager_or_none()
+def list_mcp_resources(server: str | None = None, manager=Depends(get_mcp_manager_optional)):
     if manager is None:
         return {"resources": []}
     snapshot = manager.status_snapshot()
@@ -59,8 +52,7 @@ def list_mcp_resources(server: str | None = None):
 
 
 @router.get("/prompts")
-def list_mcp_prompts(server: str | None = None):
-    manager = _get_mcp_manager_or_none()
+def list_mcp_prompts(server: str | None = None, manager=Depends(get_mcp_manager_optional)):
     if manager is None:
         return {"prompts": []}
     snapshot = manager.status_snapshot()
@@ -78,8 +70,7 @@ def list_mcp_prompts(server: str | None = None):
 
 
 @router.get("/failures")
-def list_mcp_failures():
-    manager = _get_mcp_manager_or_none()
+def list_mcp_failures(manager=Depends(get_mcp_manager_optional)):
     if manager is None:
         return {"failures": [], "count": 0}
     snapshot = manager.status_snapshot()
@@ -88,48 +79,36 @@ def list_mcp_failures():
 
 
 @router.post("/retry")
-def retry_mcp(server: str | None = None):
-    manager = _get_mcp_manager_or_none()
-    if manager is None:
-        raise HTTPException(status_code=404, detail="MCP manager not initialized")
+def retry_mcp(server: str | None = None, manager=Depends(get_mcp_manager)):
     try:
         result = manager.retry_failed(server_name=server)
         return {"status": "retried", "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/{server_name}/enable")
-def enable_mcp_server(server_name: str):
-    manager = _get_mcp_manager_or_none()
-    if manager is None:
-        raise HTTPException(status_code=404, detail="MCP manager not initialized")
+def enable_mcp_server(server_name: str, manager=Depends(get_mcp_manager)):
     try:
         result = manager.enable_server(server_name)
         return {"status": "enabled", "server": server_name, "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/{server_name}/disable")
-def disable_mcp_server(server_name: str):
-    manager = _get_mcp_manager_or_none()
-    if manager is None:
-        raise HTTPException(status_code=404, detail="MCP manager not initialized")
+def disable_mcp_server(server_name: str, manager=Depends(get_mcp_manager)):
     try:
         result = manager.disable_server(server_name)
         return {"status": "disabled", "server": server_name, "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/reload")
-def reload_mcp(server: str | None = None):
-    manager = _get_mcp_manager_or_none()
-    if manager is None:
-        raise HTTPException(status_code=404, detail="MCP manager not initialized")
+def reload_mcp(server: str | None = None, manager=Depends(get_mcp_manager)):
     try:
         result = manager.reload_server(server)
         return {"status": "reloaded", "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))

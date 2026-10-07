@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from agentnexus.tools.registry import ToolRegistry
@@ -13,8 +12,6 @@ if TYPE_CHECKING:
     from agentnexus.memory.todo import SessionTodoList
     from agentnexus.tools.confirm_bridge import ConfirmBridge
     from agentnexus.tools.mcp.adapter import MCPManager
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,22 +42,33 @@ class ToolProviderContext:
         return self.include_tools is None or name in self.include_tools
 
     def mark_registered(self, executor: ToolRegistry, before: set[str]) -> None:
+        """Stamp source metadata on the tools this provider just added.
+
+        Providers register with the default source ("unknown:unknown"); the
+        concrete source is claimed here by re-registering through the public
+        register() path (which permits claiming source-less placeholders).
+        """
         after = set(executor.list_tools())
         added = sorted(after - before)
-        for name in added:
-            logger.warning("mark_registered() bypasses register() validation for tool '%s'", name)
         source_id = self.source_id or self.source_type
         for name in added:
-            entry = executor._tools.get(name)
-            if entry is None:
+            meta = executor.get_meta(name)
+            if meta is None:
                 continue
-            meta, func = entry
             if meta.source_type != "unknown" or meta.source_id != "unknown":
                 continue
-            meta.source_type = self.source_type
-            meta.source_id = source_id
-            meta.generation = self.generation
-            executor._tools[name] = (meta, func)
+            func = executor.get_tool(name)
+            if func is None:
+                continue
+            executor.register(
+                replace(
+                    meta,
+                    source_type=self.source_type,
+                    source_id=source_id,
+                    generation=self.generation,
+                ),
+                func,
+            )
         self.registered_tools.extend(added)
 
     def for_provider(self, provider_name: str, source_type: str | None = None, generation: int | None = None):

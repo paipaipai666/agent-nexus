@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from agentnexus.server.error_handlers import APIError
+
 router = APIRouter(tags=["knowledge"])
 
 # Keep references to background tasks to prevent garbage collection
@@ -72,7 +74,7 @@ def search_kb(req: SearchRequest):
                 results_data.append({"text": str(r)})
         return {"results": results_data, "query": req.query}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/documents")
@@ -145,7 +147,7 @@ def get_ingestion_run(run_id: str):
     catalog = get_knowledge_base_catalog()
     run = catalog.get_ingestion_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Ingestion run not found: {run_id}")
+        raise APIError(404, "not_found", f"Ingestion run not found: {run_id}")
     return {
         "run_id": run.run_id,
         "status": run.status,
@@ -183,7 +185,7 @@ def delete_document(doc_id: str):
             "cause": str(e.cause),
         })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/documents/deletions")
@@ -201,9 +203,9 @@ def retry_deletion(log_id: int):
     try:
         return retry_failed_deletion(log_id)
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/documents/deletions/{log_id}/rollback")
@@ -213,9 +215,9 @@ def rollback_deletion(log_id: int):
     try:
         return rollback_failed_deletion(log_id)
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except Exception as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise APIError(409, "conflict", str(e))
 
 
 @router.get("/documents/runs")

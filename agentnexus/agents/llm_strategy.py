@@ -70,15 +70,14 @@ def prepare_llm_call(
 
 def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
              on_token: Any = None, effort: str | None = None) -> str:
-    from agentnexus.core.hooks import HookType, get_hook_manager
+    from agentnexus.core.hooks import HookType, fire_hook
 
-    hook_mgr = get_hook_manager()
     run_state = ctx.run_state
     memory_state = ctx.memory_state
     tool_state = ctx.tool_state
 
     # ── before model hook (can modify messages) ──────────────
-    hook_ctx = hook_mgr.fire(HookType.BEFORE_MODEL_CALL, {
+    hook_ctx = fire_hook(HookType.BEFORE_MODEL_CALL, {
         "messages": ctx.messages,
         "tools": tool_state.tools,
         "strategy": run_state.strategy.name,
@@ -106,7 +105,7 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
     )
 
     # ── after model hook (can modify response text) ──────────
-    hook_ctx = hook_mgr.fire(HookType.AFTER_MODEL_CALL, {
+    hook_ctx = fire_hook(HookType.AFTER_MODEL_CALL, {
         "messages": ctx.messages,
         "response_text": result,
     })

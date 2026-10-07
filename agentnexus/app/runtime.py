@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from agentnexus.tools.confirm_bridge import ConfirmBridge
     from agentnexus.tools.mcp.adapter import MCPManager
     from agentnexus.tools.registry import ToolRegistry
+    from agentnexus.wiki.wiki_service import WikiService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class AppRuntime:
     skill: SkillService
     subagent_confirm: "ConfirmBridge"
     session_id: str
+    wiki_service: "WikiService | None" = None  # lazily built by server/deps.get_wiki_service
 
     @classmethod
     def build(

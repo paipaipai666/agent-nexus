@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone
 
 from agentnexus.core.config import get_settings
+from agentnexus.observability.tracer import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -231,100 +232,101 @@ class LongTermMemory:
         access_boost = 0.1 * min(2.0, math.log(1 + access_count))
         return min(1.0, base + access_boost)
 
+    @trace_span("ltm_save",
+                lambda self, session_id, content, category="general",
+                importance=0.5, metadata=None, embedding=None:
+                {"category": category, "content_len": len(content)})
     def save(self, session_id: str, content: str, category: str = "general",
              importance: float = 0.5, metadata: dict | None = None,
              embedding: list[float] | None = None):
         from agentnexus.core.hooks import HookType, get_hook_manager
-        from agentnexus.observability.tracer import get_trace_manager
 
         hook_mgr = get_hook_manager()
-        trace_mgr = get_trace_manager()
         hook_mgr.fire(HookType.BEFORE_LTM_SAVE, {
             "session_id": session_id, "content": content,
             "category": category, "importance": importance,
         })
 
-        with trace_mgr.span("ltm_save", {"category": category, "content_len": len(content)}):
-            with self._lock:
-                # Pre-save eviction check: if count >= max_memories * 1.1, evict first to avoid burst growth
-                count_row_pre = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
-                if count_row_pre["cnt"] >= self._max_memories * 1.1:
-                    self._evict_if_needed()
+        with self._lock:
+            # Pre-save eviction check: if count >= max_memories * 1.1, evict first to avoid burst growth
+            count_row_pre = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            if count_row_pre["cnt"] >= self._max_memories * 1.1:
+                self._evict_if_needed()
 
-                cur = self._conn.execute(
-                    "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
-                    (content, category)
+            cur = self._conn.execute(
+                "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
+                (content, category)
+            )
+            existing = cur.fetchone()
+            if existing:
+                # Boost importance on repeated mention, cap at 1.0.
+                # Update last_accessed_at (TTL refresh) — not created_at (immutable).
+                boosted = min(existing["importance"] + 0.05, 1.0)
+                new_importance = max(boosted, importance)
+                self._conn.execute(
+                    "UPDATE long_term_memories "
+                    "SET importance = ?, last_accessed_at = datetime('now') "
+                    "WHERE id = ?",
+                    (new_importance, existing["id"]),
                 )
-                existing = cur.fetchone()
-                if existing:
-                    # Boost importance on repeated mention, cap at 1.0.
-                    # Update last_accessed_at (TTL refresh) — not created_at (immutable).
-                    boosted = min(existing["importance"] + 0.05, 1.0)
-                    new_importance = max(boosted, importance)
-                    self._conn.execute(
-                        "UPDATE long_term_memories "
-                        "SET importance = ?, last_accessed_at = datetime('now') "
-                        "WHERE id = ?",
-                        (new_importance, existing["id"]),
-                    )
-                    chroma_id = existing["chroma_id"]
-                    row_id = existing["id"]
-                else:
-                    import uuid
-                    chroma_id = uuid.uuid4().hex
-                    self._conn.execute(
-                        "INSERT INTO long_term_memories "
-                        "(session_id, category, content, importance, metadata_json, chroma_id) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        (
-                            session_id,
-                            category,
-                            content,
-                            importance,
-                            json.dumps(metadata or {}, ensure_ascii=False),
-                            chroma_id,
-                        ),
-                    )
-                    self._write_counter += 1
-                    row_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                chroma_id = existing["chroma_id"]
+                row_id = existing["id"]
+            else:
+                import uuid
+                chroma_id = uuid.uuid4().hex
+                self._conn.execute(
+                    "INSERT INTO long_term_memories "
+                    "(session_id, category, content, importance, metadata_json, chroma_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id,
+                        category,
+                        content,
+                        importance,
+                        json.dumps(metadata or {}, ensure_ascii=False),
+                        chroma_id,
+                    ),
+                )
+                self._write_counter += 1
+                row_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
+            self._conn.commit()
+            # Ordering note: SQLite commit precedes the ChromaDB upsert below.
+            # SQLite is the source of truth; if the upsert fails, the memory is
+            # still persisted and the failure is logged as non-fatal.
+            # The inverse ordering in _evict_if_needed (ChromaDB-first) ensures
+            # we never leave orphan vectors if the ChromaDB delete fails.
+
+            # Post-save eviction (inside lock to keep count check atomic)
+            count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            if count_row["cnt"] > self._max_memories:
+                self._evict_if_needed()
+
+        if embedding:
+            self._ensure_chroma()
+            try:
+                self._chroma_col.upsert(
+                    ids=[chroma_id],
+                    embeddings=[embedding],
+                    documents=[content],
+                    metadatas=[{"category": category, "importance": importance}],
+                )
+            except Exception as e:
+                logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
+                self._conn.execute(
+                    "UPDATE long_term_memories SET embedding_synced = 0 WHERE chroma_id = ?",
+                    (chroma_id,),
+                )
                 self._conn.commit()
-                # Ordering note: SQLite commit precedes the ChromaDB upsert below.
-                # SQLite is the source of truth; if the upsert fails, the memory is
-                # still persisted and the failure is logged as non-fatal.
-                # The inverse ordering in _evict_if_needed (ChromaDB-first) ensures
-                # we never leave orphan vectors if the ChromaDB delete fails.
 
-                # Post-save eviction (inside lock to keep count check atomic)
-                count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
-                if count_row["cnt"] > self._max_memories:
-                    self._evict_if_needed()
+        # ── after ltm save hook ────────────────────────────────
+        hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
+            "session_id": session_id, "content": content,
+            "category": category, "importance": importance,
+            "chroma_id": chroma_id, "total_count": count_row["cnt"],
+        })
 
-            if embedding:
-                self._ensure_chroma()
-                try:
-                    self._chroma_col.upsert(
-                        ids=[chroma_id],
-                        embeddings=[embedding],
-                        documents=[content],
-                        metadatas=[{"category": category, "importance": importance}],
-                    )
-                except Exception as e:
-                    logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
-                    self._conn.execute(
-                        "UPDATE long_term_memories SET embedding_synced = 0 WHERE chroma_id = ?",
-                        (chroma_id,),
-                    )
-                    self._conn.commit()
-
-            # ── after ltm save hook ────────────────────────────────
-            hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
-                "session_id": session_id, "content": content,
-                "category": category, "importance": importance,
-                "chroma_id": chroma_id, "total_count": count_row["cnt"],
-            })
-
-            return row_id
+        return row_id
 
     def _evict_if_needed(self):
         """Evict oldest/lowest-importance memories when over max_memories."""
@@ -462,98 +464,98 @@ class LongTermMemory:
         self._conn.commit()
         logger.info("Cleaned up %d expired memories (category-based TTL)", len(ids_to_delete))
 
+    @trace_span("ltm_search",
+                lambda self, query_embedding=None, category=None, limit=5,
+                min_similarity=0.3: {"category": category, "limit": limit})
     def search(self, query_embedding: list[float] | None = None, category: str | None = None,
                limit: int = 5, min_similarity: float = 0.3) -> list[dict]:
         from agentnexus.core.hooks import HookType, get_hook_manager
-        from agentnexus.observability.tracer import get_trace_manager
 
         hook_mgr = get_hook_manager()
-        trace_mgr = get_trace_manager()
         hook_mgr.fire(HookType.BEFORE_LTM_SEARCH, {
             "category": category, "limit": limit, "min_similarity": min_similarity,
         })
 
-        with trace_mgr.span("ltm_search", {"category": category, "limit": limit}):
-            if query_embedding is None:
-                sql = "SELECT * FROM long_term_memories WHERE superseded_by IS NULL"
-                params = []
-                if category:
-                    sql += " AND category = ?"
-                    params.append(category)
-                sql += " ORDER BY created_at DESC LIMIT ?"
-                params.append(limit)
-                with self._lock:
-                    rows = self._conn.execute(sql, params).fetchall()
-                results = [dict(r) for r in rows]
-                if results:
-                    self._update_last_accessed([r["id"] for r in results])
-                return results
-
-            self._ensure_chroma()
-            where_filter = None
+        if query_embedding is None:
+            sql = "SELECT * FROM long_term_memories WHERE superseded_by IS NULL"
+            params = []
             if category:
-                where_filter = {"category": category}
-
-            try:
-                chroma_results = self._chroma_col.query(
-                    query_embeddings=[query_embedding],
-                    n_results=max(limit * 5, 50),  # wider net to catch entity_facts that rank lower
-                    where=where_filter,
-                )
-            except Exception as e:
-                logger.warning("ChromaDB query failed, falling back to cosine search: %s", e)
-                return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
-
-            if not chroma_results["ids"] or not chroma_results["ids"][0]:
-                return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
-
-            chroma_ids = chroma_results["ids"][0]
-            chroma_distances = chroma_results["distances"][0]
-            id_sim_map = {cid: 1.0 - dist for cid, dist in zip(chroma_ids, chroma_distances)}
-
-            placeholders = ",".join("?" for _ in chroma_ids)
+                sql += " AND category = ?"
+                params.append(category)
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
             with self._lock:
-                rows = self._conn.execute(
-                    f"SELECT * FROM long_term_memories WHERE chroma_id IN ({placeholders})",
-                    chroma_ids,
-                ).fetchall()
-
-            row_map = {r["chroma_id"]: r for r in rows}
-            scored = []
-            for cid, sim in id_sim_map.items():
-                r = row_map.get(cid)
-                if r is None:
-                    continue
-                r = dict(r)
-                if sim < min_similarity or r.get("superseded_by"):
-                    continue
-                try:
-                    ref_time = r.get("last_accessed_at") or r["created_at"]
-                    ref = datetime.fromisoformat(ref_time)
-                except (ValueError, KeyError):
-                    ref = datetime.now(timezone.utc).replace(tzinfo=None)
-                age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
-                half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
-                decay = 2 ** (-age_hours / half_life) if half_life else 1.0
-                eff_imp = self._effective_importance(r)
-                score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
-                scored.append((score, dict(r)))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            results = []
-            for s in scored[:limit]:
-                d = s[1]
-                d["_score"] = round(s[0], 3)
-                results.append(d)
-
-            # ── after ltm search hook ──────────────────────────────
-            hook_mgr.fire(HookType.AFTER_LTM_SEARCH, {
-                "category": category, "limit": limit,
-                "result_count": len(results),
-            })
+                rows = self._conn.execute(sql, params).fetchall()
+            results = [dict(r) for r in rows]
             if results:
                 self._update_last_accessed([r["id"] for r in results])
             return results
+
+        self._ensure_chroma()
+        where_filter = None
+        if category:
+            where_filter = {"category": category}
+
+        try:
+            chroma_results = self._chroma_col.query(
+                query_embeddings=[query_embedding],
+                n_results=max(limit * 5, 50),  # wider net to catch entity_facts that rank lower
+                where=where_filter,
+            )
+        except Exception as e:
+            logger.warning("ChromaDB query failed, falling back to cosine search: %s", e)
+            return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
+
+        if not chroma_results["ids"] or not chroma_results["ids"][0]:
+            return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
+
+        chroma_ids = chroma_results["ids"][0]
+        chroma_distances = chroma_results["distances"][0]
+        id_sim_map = {cid: 1.0 - dist for cid, dist in zip(chroma_ids, chroma_distances)}
+
+        placeholders = ",".join("?" for _ in chroma_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM long_term_memories WHERE chroma_id IN ({placeholders})",
+                chroma_ids,
+            ).fetchall()
+
+        row_map = {r["chroma_id"]: r for r in rows}
+        scored = []
+        for cid, sim in id_sim_map.items():
+            r = row_map.get(cid)
+            if r is None:
+                continue
+            r = dict(r)
+            if sim < min_similarity or r.get("superseded_by"):
+                continue
+            try:
+                ref_time = r.get("last_accessed_at") or r["created_at"]
+                ref = datetime.fromisoformat(ref_time)
+            except (ValueError, KeyError):
+                ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
+            half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
+            decay = 2 ** (-age_hours / half_life) if half_life else 1.0
+            eff_imp = self._effective_importance(r)
+            score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
+            scored.append((score, dict(r)))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for s in scored[:limit]:
+            d = s[1]
+            d["_score"] = round(s[0], 3)
+            results.append(d)
+
+        # ── after ltm search hook ──────────────────────────────
+        hook_mgr.fire(HookType.AFTER_LTM_SEARCH, {
+            "category": category, "limit": limit,
+            "result_count": len(results),
+        })
+        if results:
+            self._update_last_accessed([r["id"] for r in results])
+        return results
 
     def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,
                                  limit: int, min_similarity: float) -> list[dict]:

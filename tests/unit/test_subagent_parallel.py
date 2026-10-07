@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.tools.confirm_bridge import CancelBridge
 from agentnexus.tools.dispatcher import ToolDispatcher
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 from agentnexus.tools.subagent import make_subagent_run
 
 
@@ -18,12 +18,33 @@ def _make_registry(subagent_workers: int = 2) -> ToolRegistry:
     registry = ToolRegistry()
     with patch("agentnexus.core.config.get_settings") as mock_settings:
         mock_settings.return_value.subagent_max_concurrent = subagent_workers
-        registry.register_tool(
-            "subagent_run", "stub", lambda **kw: "ok",
-            concurrency_safe=True, lane="subagent",
+        registry.register(
+            ToolMeta(
+                name="subagent_run",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+                lane="subagent",
+            ),
+            lambda **kw: "ok",
         )
-        registry.register_tool("web_search", "stub", lambda **kw: "ok", concurrency_safe=True)
-        registry.register_tool("file_write", "stub", lambda **kw: "ok")
+        registry.register(
+            ToolMeta(
+                name="web_search",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+            ),
+            lambda **kw: "ok",
+        )
+        registry.register(
+            ToolMeta(
+                name="file_write",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "ok",
+        )
         # Pre-create the lane pool under the patched settings
         registry.get_lane_pool("subagent")
     return registry
@@ -42,10 +63,33 @@ class TestLaneRouting:
                 return "ok"
             return fn
 
-        registry.register_tool("subagent_run", "stub", record("subagent_run"),
-                               concurrency_safe=True, lane="subagent")
-        registry.register_tool("web_search", "stub", record("web_search"), concurrency_safe=True)
-        registry.register_tool("file_write", "stub", record("file_write"))
+        registry.register(
+            ToolMeta(
+                name="subagent_run",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+                lane="subagent",
+            ),
+            record("subagent_run"),
+        )
+        registry.register(
+            ToolMeta(
+                name="web_search",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+            ),
+            record("web_search"),
+        )
+        registry.register(
+            ToolMeta(
+                name="file_write",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            record("file_write"),
+        )
 
         calls = [
             {"name": "subagent_run", "arguments": {}},
@@ -76,7 +120,16 @@ class TestSubagentConcurrencyCap:
                 state["current"] -= 1
             return "done"
 
-        registry.register_tool("subagent_run", "stub", slow, concurrency_safe=True, lane="subagent")
+        registry.register(
+            ToolMeta(
+                name="subagent_run",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+                lane="subagent",
+            ),
+            slow,
+        )
         calls = [{"name": "subagent_run", "arguments": {}} for _ in range(5)]
         results = ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
 
@@ -90,7 +143,16 @@ class TestSubagentConcurrencyCap:
             time.sleep(0.4)
             return "done"
 
-        registry.register_tool("subagent_run", "stub", slow, concurrency_safe=True, lane="subagent")
+        registry.register(
+            ToolMeta(
+                name="subagent_run",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+                lane="subagent",
+            ),
+            slow,
+        )
         calls = [{"name": "subagent_run", "arguments": {}} for _ in range(2)]
         start = time.monotonic()
         ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
@@ -151,7 +213,15 @@ class TestInheritedTraceLinkage:
                 seen.append(trace_manager.get_inherited_trace())
             return "ok"
 
-        registry.register_tool("web_search", "stub", capture, concurrency_safe=True)
+        registry.register(
+            ToolMeta(
+                name="web_search",
+                description="stub",
+                param_schema={"type": "object", "properties": {}},
+                concurrency_safe=True,
+            ),
+            capture,
+        )
 
         ctx = trace_manager.start_trace("parent task")
         try:

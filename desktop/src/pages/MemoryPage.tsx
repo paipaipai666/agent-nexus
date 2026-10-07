@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Brain, Search, Trash2, Loader2, Zap, Sparkles } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   fact: { bg: 'var(--purple-muted)', text: 'var(--purple)', label: 'Fact' },
@@ -45,11 +46,19 @@ export default function MemoryPage() {
   const [isReflecting, setIsReflecting] = useState(false)
   const [reflectResult, setReflectResult] = useState<string | null>(null)
 
-  const loadMemories = () => {
-    api.listMemories(50).then(({ memories }) => setLongMemories(memories)).catch(console.error)
-    api.listShortMemories().then(({ messages }) => setShortMessages(messages)).catch(console.error)
-  }
-  useEffect(() => { loadMemories() }, [])
+  const { data, reload: reloadMemories } = useApiQuery(async () => {
+    const [longRes, shortRes] = await Promise.all([
+      api.listMemories(50).catch(e => { console.error(e); return null }),
+      api.listShortMemories().catch(e => { console.error(e); return null }),
+    ])
+    return { long: longRes?.memories ?? null, short: shortRes?.messages ?? null }
+  }, [])
+
+  useEffect(() => {
+    if (!data) return
+    if (data.long) setLongMemories(data.long)
+    if (data.short) setShortMessages(data.short)
+  }, [data])
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -77,7 +86,7 @@ export default function MemoryPage() {
         setReflectResult(r.error || r.reason || 'Unknown result')
       } else {
         setReflectResult(`Found ${r.patterns_found} patterns, saved ${r.patterns_saved} from ${r.memories_reviewed} memories`)
-        loadMemories()
+        reloadMemories()
       }
     } catch (e: any) {
       setReflectResult(`Error: ${e.message || 'Unknown error'}`)

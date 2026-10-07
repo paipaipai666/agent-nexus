@@ -2,7 +2,7 @@
 
 Validates that tool execution produces actual side effects.
 """
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 class TestToolSideEffects:
@@ -16,7 +16,14 @@ class TestToolSideEffects:
             return {"saved": True}
 
         te = ToolRegistry()
-        te.register_tool("memory_save", "保存记忆", mock_save)
+        te.register(
+            ToolMeta(
+                name="memory_save",
+                description="保存记忆",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            mock_save,
+        )
         result = te.get_tool("memory_save")(content="test", category="preference")
 
         assert len(saved_records) == 1
@@ -31,7 +38,14 @@ class TestToolSideEffects:
             return {"status": "ok", "path": path}
 
         te = ToolRegistry()
-        te.register_tool("file_write", "写文件", mock_write)
+        te.register(
+            ToolMeta(
+                name="file_write",
+                description="写文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            mock_write,
+        )
         result = te.get_tool("file_write")(path=str(tmp_path / "test.txt"), content="hello")
 
         assert result["status"] == "ok"
@@ -45,7 +59,14 @@ class TestToolSideEffects:
             return "output"
 
         te = ToolRegistry()
-        te.register_tool("shell_exec", "执行命令", mock_shell)
+        te.register(
+            ToolMeta(
+                name="shell_exec",
+                description="执行命令",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            mock_shell,
+        )
         result = te.get_tool("shell_exec")(command="echo hello")
 
         assert len(executed_commands) == 1
@@ -60,7 +81,15 @@ class TestToolSideEffects:
             return "result"
 
         te = ToolRegistry()
-        te.register_tool("mock_tool", "测试工具", mock_tool, audit_enabled=True)
+        te.register(
+            ToolMeta(
+                name="mock_tool",
+                description="测试工具",
+                param_schema={"type": "object", "properties": {}},
+                audit_enabled=True,
+            ),
+            mock_tool,
+        )
         te.get_tool("mock_tool")(param="value")
 
         assert len(audit_log) == 1
@@ -74,7 +103,14 @@ class TestToolSideEffects:
             return {"count": call_count[0]}
 
         te = ToolRegistry()
-        te.register_tool("idempotent", "幂等工具", idempotent_tool)
+        te.register(
+            ToolMeta(
+                name="idempotent",
+                description="幂等工具",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            idempotent_tool,
+        )
         result1 = te.get_tool("idempotent")()
         result2 = te.get_tool("idempotent")()
 

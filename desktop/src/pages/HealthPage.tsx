@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Heart, CheckCircle, AlertTriangle, XCircle, Server, Brain, HardDrive, Database, RefreshCw } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 interface HealthCheck {
   status: string
@@ -48,19 +49,13 @@ function StatusIcon({ status, size = 16 }: { status: string; size?: number }) {
 
 export default function HealthPage() {
   const [health, setHealth] = useState<HealthResult | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { data, loading, error: queryError, reload: reloadHealth } = useApiQuery(() => api.getHealth(), [])
 
-  const loadHealth = () => {
-    setLoading(true)
-    setError(null)
-    api.getHealth()
-      .then(setHealth)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { loadHealth() }, [])
+  useEffect(() => {
+    if (data) { setHealth(data); setError(null) }
+  }, [data])
+  useEffect(() => { if (queryError) setError(queryError.message) }, [queryError])
 
   const formatUptime = (seconds: number) => {
     if (seconds < 60) return `${Math.round(seconds)}s`
@@ -77,7 +72,7 @@ export default function HealthPage() {
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>Subsystem readiness checks</p>
         </div>
         <button
-          onClick={loadHealth}
+          onClick={reloadHealth}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors"
           style={{ background: 'var(--surface-2)', color: 'var(--fg-muted)', border: '1px solid var(--border)' }}
           onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}

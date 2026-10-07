@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FileText, Search, Shield, Clock, AlertTriangle } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 interface AuditEntry {
   tool_name: string
@@ -23,18 +24,16 @@ const riskColors: Record<string, string> = {
 
 export default function AuditPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
   const [limit, setLimit] = useState(50)
   const [toolFilter, setToolFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const { data, loading, error } = useApiQuery(
+    () => api.getAudit(limit, toolFilter || undefined).then(({ entries: data }) => data || []),
+    [limit, toolFilter],
+  )
 
-  useEffect(() => {
-    setLoading(true)
-    api.getAudit(limit, toolFilter || undefined)
-      .then(({ entries: data }) => setEntries(data || []))
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [limit, toolFilter])
+  useEffect(() => { if (data) setEntries(data) }, [data])
+  useEffect(() => { if (error) console.error(error) }, [error])
 
   const filtered = entries.filter(e => {
     if (!searchQuery) return true

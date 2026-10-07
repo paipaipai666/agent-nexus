@@ -17,7 +17,7 @@ import pytest
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.hooks import HookType, get_hook_manager
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
 
 @pytest.fixture(autouse=True)
@@ -128,9 +128,15 @@ class TestAgentStop:
 class TestPermissionRequest:
     def _registry_with_hitl_tool(self) -> tuple[ToolRegistry, MagicMock]:
         registry = ToolRegistry()
-        registry.register_tool(
-            "dangerous_op", "destructive", lambda: "ok",
-            risk_level="high", require_hitl=True,
+        registry.register(
+            ToolMeta(
+                name="dangerous_op",
+                description="destructive",
+                param_schema={"type": "object", "properties": {}},
+                risk_level=RiskLevel.HIGH,
+                require_hitl=True,
+            ),
+            lambda: "ok",
         )
         approver = MagicMock(return_value=True)
         return registry, approver

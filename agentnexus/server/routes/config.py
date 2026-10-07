@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from agentnexus.server.deps import get_runtime
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["config"])
 
@@ -256,7 +259,7 @@ def update_llm_providers(req: ProvidersUpdateRequest):
     try:
         validated = _validate_providers(req.providers)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "bad_request", str(e))
 
     data = load_config_yaml()
     stored = {p.get("name"): p for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
@@ -284,12 +287,12 @@ def set_active_llm_provider(req: ActiveProviderRequest):
         pname, _, mid = selector.partition("/")
         provider = stored.get(pname)
         if provider is None:
-            raise HTTPException(status_code=404, detail=f"Unknown provider: {pname}")
+            raise APIError(404, "not_found", f"Unknown provider: {pname}")
         model_ids = [m.get("model_id") for m in (provider.get("models") or []) if isinstance(m, dict)]
         if mid and mid not in model_ids:
-            raise HTTPException(status_code=404, detail=f"Unknown model: {selector}")
+            raise APIError(404, "not_found", f"Unknown model: {selector}")
         if not mid and not model_ids:
-            raise HTTPException(status_code=404, detail=f"Provider '{pname}' has no models")
+            raise APIError(404, "not_found", f"Provider '{pname}' has no models")
     data["active_model"] = selector
     data["active_provider"] = selector.partition("/")[0] if selector else ""
     write_config_yaml(data)
@@ -308,7 +311,7 @@ def discover_models(req: DiscoverRequest):
     """
     base_url = (req.base_url or "").strip().rstrip("/")
     if not base_url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="base_url must start with http(s)://")
+        raise APIError(400, "bad_request", "base_url must start with http(s)://")
     api_key = req.api_key or ""
     if not api_key and req.provider:
         from agentnexus.core.config import get_settings
@@ -326,20 +329,17 @@ def discover_models(req: DiscoverRequest):
         out.sort(key=lambda x: x["id"])
         return {"models": out}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {type(e).__name__}: {e}")
+        raise APIError(502, "upstream_error", f"拉取模型列表失败: {type(e).__name__}: {e}")
 
 
 @router.get("/llm/capabilities")
-def get_llm_capabilities():
+def get_llm_capabilities(runtime=Depends(get_runtime)):
     """Detected capabilities of the active LLM profile.
 
     ``source`` tells the caller how the flags were determined:
     ``probe`` (live endpoint probe), ``config`` (explicit user override),
     or ``unknown`` (conservative defaults, not yet probed).
     """
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     llm = runtime.llm
     caps = llm.capabilities  # detect (+ live probe when still unknown)
     settings = runtime.settings
@@ -370,13 +370,10 @@ def update_config(req: ConfigUpdateRequest):
     from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml
 
     if req.key not in SETTABLE_KEYS:
-        raise HTTPException(status_code=400, detail=f"Key '{req.key}' is not settable")
+        raise APIError(400, "bad_request", f"Key '{req.key}' is not settable")
 
     if req.key in _SECURITY_BLOCKED_KEYS:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Key '{req.key}' is security-sensitive and cannot be modified via API",
-        )
+        raise APIError(403, "forbidden", f"Key '{req.key}' is security-sensitive and cannot be modified via API")
 
     data = load_config_yaml()
     data[req.key] = req.value

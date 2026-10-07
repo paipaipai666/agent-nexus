@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.capabilities import ModelCapabilities
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _openai_chunk(content=None, finish_reason=None, tool_calls=None):
@@ -104,7 +104,14 @@ class TestAgentWithProvider:
 
         llm = _make_llm_with_settings("deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda query: f"Results for: {query}")
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda query: f"Results for: {query}",
+        )
 
         agent = ReActAgent(llm, te, max_steps=3)
 
@@ -145,8 +152,22 @@ class TestAgentWithProvider:
 
         llm = _make_llm_with_settings("openai/gpt-4", "https://api.openai.com")
         te = ToolRegistry()
-        te.register_tool("step_one", "Step 1", lambda input: f"R1:{input}")
-        te.register_tool("step_two", "Step 2", lambda input: f"R2:{input}")
+        te.register(
+            ToolMeta(
+                name="step_one",
+                description="Step 1",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda input: f"R1:{input}",
+        )
+        te.register(
+            ToolMeta(
+                name="step_two",
+                description="Step 2",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda input: f"R2:{input}",
+        )
 
         agent = ReActAgent(llm, te, max_steps=5)
 

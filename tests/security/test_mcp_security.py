@@ -13,7 +13,7 @@ from agentnexus.tools.mcp.adapter import (
     MCPToolManager,
     _sanitize_name,
 )
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:
@@ -121,11 +121,14 @@ class TestAgentAccessControl:
     def test_rbac_enforced_on_invoke(self):
         """Registry must reject calls from unauthorized agents."""
         executor = ToolRegistry()
-        executor.register_tool(
-            "mcp_api__secret",
-            "secret tool",
+        executor.register(
+            ToolMeta(
+                name="mcp_api__secret",
+                description="secret tool",
+                param_schema={"type": "object", "properties": {}},
+                allowed_agents=["admin"],
+            ),
             lambda: "secret",
-            allowed_agents=["admin"],
         )
         with pytest.raises(PermissionError):
             executor.invoke("mcp_api__secret", {}, caller="unauthorized_agent")
@@ -187,11 +190,14 @@ class TestHITLPropagation:
 
     def test_hitl_blocks_when_no_approver(self):
         executor = ToolRegistry()
-        executor.register_tool(
-            "mcp_api__delete",
-            "delete",
+        executor.register(
+            ToolMeta(
+                name="mcp_api__delete",
+                description="delete",
+                param_schema={"type": "object", "properties": {}},
+                require_hitl=True,
+            ),
             lambda: "deleted",
-            require_hitl=True,
         )
         result = executor.invoke("mcp_api__delete", {}, caller="react_agent")
         assert "blocked" in result
@@ -214,11 +220,14 @@ class TestRateLimitPropagation:
 
     def test_rate_limit_exceeded_raises(self):
         executor = ToolRegistry()
-        executor.register_tool(
-            "mcp_api__search",
-            "search",
+        executor.register(
+            ToolMeta(
+                name="mcp_api__search",
+                description="search",
+                param_schema={"type": "object", "properties": {}},
+                rate_limit_per_min=1,
+            ),
             lambda: "ok",
-            rate_limit_per_min=1,
         )
         executor.invoke("mcp_api__search", {}, caller="react_agent")
         with pytest.raises(RuntimeError, match="Rate limit exceeded"):

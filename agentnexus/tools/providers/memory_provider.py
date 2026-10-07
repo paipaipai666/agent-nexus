@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agentnexus.tools.providers.base import ProviderSpec, ToolProviderContext
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 
 class MemoryToolProvider:
@@ -17,75 +17,83 @@ class MemoryToolProvider:
 
         before = set(executor.list_tools())
         if context.want("history_search"):
-            executor.register_tool(
-                "history_search",
-                "检索已折叠归档的早期对话原文（上下文中出现[历史索引目录]时，"
-                "用于取回错误码/ID/路径/配置值/人名/日期等被折叠的具体细节）。"
-                "[不适用] 检索长期记忆偏好(用memory_search), 搜索代码文件(用grep_search)。",
-                history_search,
-                param_schema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "max_results": {"type": "integer", "default": 5},
+            executor.register(
+                ToolMeta(
+                    name="history_search",
+                    description="检索已折叠归档的早期对话原文（上下文中出现[历史索引目录]时，"
+                                "用于取回错误码/ID/路径/配置值/人名/日期等被折叠的具体细节）。"
+                                "[不适用] 检索长期记忆偏好(用memory_search), 搜索代码文件(用grep_search)。",
+                    param_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "max_results": {"type": "integer", "default": 5},
+                        },
+                        "required": ["query"],
                     },
-                    "required": ["query"],
-                },
-                risk_level="low",
-                rate_limit_per_min=15,
-                concurrency_safe=True,
-                read_only=True,
+                    risk_level=RiskLevel.LOW,
+                    rate_limit_per_min=15,
+                    concurrency_safe=True,
+                    read_only=True,
+                ),
+                history_search,
             )
         if context.want("memory_search"):
-            executor.register_tool(
-                "memory_search",
-                "检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词。"
-                "[不适用] 搜索代码文件(用grep_search), 搜索知识库文档(用kb_search)。",
+            executor.register(
+                ToolMeta(
+                    name="memory_search",
+                    description="检索长期记忆中的用户偏好、历史事实和结论，参数为搜索关键词。"
+                                "[不适用] 搜索代码文件(用grep_search), 搜索知识库文档(用kb_search)。",
+                    param_schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                    risk_level=RiskLevel.LOW,
+                    rate_limit_per_min=10,
+                    concurrency_safe=True,
+                    read_only=True,
+                ),
                 memory_search,
-                param_schema={
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                },
-                risk_level="low",
-                rate_limit_per_min=10,
-                concurrency_safe=True,
-                read_only=True,
             )
 
         if context.want("memory_save"):
-            executor.register_tool(
-                "memory_save",
-                "主动保存重要信息。用户个人信息/偏好用默认 scope=user 存入全局长期记忆；"
-                "项目级知识(构建命令/约定/决策理由/踩坑)用 scope=project 写入当前项目 .agentnexus/ 纯文本文件。"
-                "[不适用] 写入普通文件(用file_write)。",
-                memory_save,
-                param_schema={
-                    "type": "object",
-                    "properties": {
-                        "content": {"type": "string"},
-                        "category": {"type": "string", "default": "entity_fact"},
-                        "importance": {"type": "number", "default": 0.7},
-                        "scope": {"type": "string", "enum": ["user", "project"], "default": "user"},
-                        "kind": {"type": "string", "enum": ["memo", "decision", "lesson", "log"], "default": "memo"},
-                        "tags": {"type": "string", "default": ""},
+            executor.register(
+                ToolMeta(
+                    name="memory_save",
+                    description="主动保存重要信息。用户个人信息/偏好用默认 scope=user 存入全局长期记忆；"
+                                "项目级知识(构建命令/约定/决策理由/踩坑)用 scope=project 写入当前项目 .agentnexus/ 纯文本文件。"
+                                "[不适用] 写入普通文件(用file_write)。",
+                    param_schema={
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string"},
+                            "category": {"type": "string", "default": "entity_fact"},
+                            "importance": {"type": "number", "default": 0.7},
+                            "scope": {"type": "string", "enum": ["user", "project"], "default": "user"},
+                            "kind": {"type": "string", "enum": ["memo", "decision", "lesson", "log"], "default": "memo"},
+                            "tags": {"type": "string", "default": ""},
+                        },
+                        "required": ["content"],
                     },
-                    "required": ["content"],
-                },
-                risk_level="low",
-                rate_limit_per_min=10,
+                    risk_level=RiskLevel.LOW,
+                    rate_limit_per_min=10,
+                ),
+                memory_save,
             )
 
         if context.want("memory_project_status"):
-            executor.register_tool(
-                "memory_project_status",
-                "查看当前项目的项目级记忆(.agentnexus/ 目录)的索引和当前状态。"
-                "[不适用] 搜索记忆内容(用memory_search), 写入记忆(用memory_save)。",
+            executor.register(
+                ToolMeta(
+                    name="memory_project_status",
+                    description="查看当前项目的项目级记忆(.agentnexus/ 目录)的索引和当前状态。"
+                                "[不适用] 搜索记忆内容(用memory_search), 写入记忆(用memory_save)。",
+                    param_schema={"type": "object", "properties": {}},
+                    risk_level=RiskLevel.LOW,
+                    rate_limit_per_min=10,
+                    concurrency_safe=True,
+                    read_only=True,
+                ),
                 memory_project_status,
-                param_schema={"type": "object", "properties": {}},
-                risk_level="low",
-                rate_limit_per_min=10,
-                concurrency_safe=True,
-                read_only=True,
             )
         context.mark_registered(executor, before)

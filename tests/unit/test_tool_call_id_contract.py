@@ -14,7 +14,7 @@ import json
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -39,8 +39,22 @@ def _make_llm():
 def _make_agent():
     llm = _make_llm()
     te = ToolRegistry()
-    te.register_tool("grep_search", "搜索", lambda **kw: "[grep_search] 未找到匹配 'hook' 的结果")
-    te.register_tool("file_list", "列文件", lambda **kw: ["a.py", "b.py"])
+    te.register(
+        ToolMeta(
+            name="grep_search",
+            description="搜索",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: "[grep_search] 未找到匹配 'hook' 的结果",
+    )
+    te.register(
+        ToolMeta(
+            name="file_list",
+            description="列文件",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        lambda **kw: ["a.py", "b.py"],
+    )
     agent = ReActAgent(llm, te, max_steps=5)
     agent._output = lambda _msg: None
     return agent, llm

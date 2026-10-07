@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentnexus.core.pii import contains_pii as _contains_pii
 from agentnexus.core.pii import mask_pii as _mask_pii
-from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.circuit_breaker import CircuitBreaker, CircuitOpenError
 from agentnexus.memory.extraction import extract_and_save_memories
 from agentnexus.memory.metrics import get_metrics
 from agentnexus.prompts import load_prompt
@@ -110,28 +110,24 @@ class MemoryExtractionPipeline:
         # uncertain) gets a verdict. Fail-closed: circuit open or exception
         # denies the write.
         gate = self.gate_circuit
-        if not gate.should_allow():
+        try:
+            with gate.protect():
+                prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
+                result = self._mgr._llm.think([{"role": "user", "content": prompt}], silent=True)
+                normalized = result.strip().lower().strip('"').strip("'").strip(".")
+                if normalized == "yes" or normalized.startswith("yes"):
+                    return True
+                if normalized == "no" or normalized.startswith("no"):
+                    metrics.incr("writes_skipped_gate")
+                    return False
+                # Format anomaly — not a failure, but counted separately
+                logger.warning("Gate returned unexpected format: %s", result[:100])
+                metrics.incr("writes_skipped_gate_format_error")
+                return False
+        except CircuitOpenError:
             metrics.incr("writes_skipped_gate")
             return False
-
-        try:
-            prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
-            result = self._mgr._llm.think([{"role": "user", "content": prompt}], silent=True)
-            normalized = result.strip().lower().strip('"').strip("'").strip(".")
-            if normalized == "yes" or normalized.startswith("yes"):
-                gate.record_success()
-                return True
-            if normalized == "no" or normalized.startswith("no"):
-                gate.record_success()
-                metrics.incr("writes_skipped_gate")
-                return False
-            # Format anomaly — not a failure, but counted separately
-            logger.warning("Gate returned unexpected format: %s", result[:100])
-            gate.record_success()
-            metrics.incr("writes_skipped_gate_format_error")
-            return False
         except Exception:
-            gate.record_failure()
             metrics.incr("writes_skipped_gate_error")
             return False
 

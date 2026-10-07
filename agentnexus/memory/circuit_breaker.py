@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
+from contextlib import contextmanager
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class CircuitOpenError(Exception):
+    """Raised by CircuitBreaker.protect() when the circuit rejects a call."""
 
 
 class CircuitState(Enum):
@@ -126,3 +132,33 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._opened_at = 0.0
+
+    @contextmanager
+    def protect(self, on_open: Callable[[], None] | None = None):
+        """Gate + record around a protected call.
+
+        Admission: raises CircuitOpenError if the call is rejected (caller
+        runs its own rejection path). Admission-time half-open state is
+        exposed on the yielded probe. Normal exit records success; exceptional
+        exit records failure, then invokes on_open.
+        """
+        if not self.should_allow():
+            raise CircuitOpenError("circuit breaker open")
+        try:
+            yield _CircuitProbe(self.is_half_open)
+        except Exception:
+            self.record_failure()
+            if on_open is not None:
+                on_open()
+            raise
+        else:
+            self.record_success()
+
+
+class _CircuitProbe:
+    """Handle yielded by protect(); reports admission-time state."""
+
+    __slots__ = ("is_half_open",)
+
+    def __init__(self, is_half_open: bool):
+        self.is_half_open = is_half_open

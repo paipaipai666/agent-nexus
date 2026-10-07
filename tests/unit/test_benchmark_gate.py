@@ -100,9 +100,11 @@ def test_benchmark_api_rejects_unknown_mode():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from agentnexus.server.error_handlers import register_error_handlers
     from agentnexus.server.routes.eval_routes import router
 
     api = FastAPI()
+    register_error_handlers(api)
     api.include_router(router, prefix="/api/eval")
     client = TestClient(api)
     resp = client.post("/api/eval/benchmark/run", json={"suite": "multihop", "mode": "bogus"})

@@ -6,7 +6,7 @@ validating that the full agent maintains context across turns.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm(response=""):
@@ -35,8 +35,22 @@ class TestMultiTurnRegression:
     def _make_agent(self, response=""):
         llm = _make_llm(response)
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: {"results": []})
-        te.register_tool("memory_save", "保存", lambda **kw: {"saved": True})
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"results": []},
+        )
+        te.register(
+            ToolMeta(
+                name="memory_save",
+                description="保存",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"saved": True},
+        )
         agent = ReActAgent(llm, te, max_steps=3)
         return agent, llm
 
@@ -68,7 +82,14 @@ class TestMultiTurnRegression:
 
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("web_search", "搜索", lambda **kw: {"results": []})
+        te.register(
+            ToolMeta(
+                name="web_search",
+                description="搜索",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"results": []},
+        )
 
         with patch("agentnexus.memory.manager.get_embedding_model") as mock_emb:
             mock_emb.return_value.encode.return_value.tolist.return_value = [0.1] * 384

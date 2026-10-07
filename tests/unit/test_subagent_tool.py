@@ -6,7 +6,7 @@ from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.prompts import load_prompt
 from agentnexus.tools import register_all_tools
 from agentnexus.tools.confirm_bridge import ConfirmBridge
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 from agentnexus.tools.subagent import make_subagent_run
 
 
@@ -17,20 +17,22 @@ class FakeMCPManager:
     def register_tools(self, executor, include_tools=None):
         if include_tools is not None and "mcp_demo__echo" not in include_tools:
             return []
-        executor.register_tool(
-            "mcp_demo__echo",
-            "[MCP:demo] echo",
+        executor.register(
+            ToolMeta(
+                name="mcp_demo__echo",
+                description="[MCP:demo] echo",
+                param_schema={
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                    "required": ["message"],
+                },
+                allowed_agents=["react_agent", "subagent_explorer"],
+                risk_level=RiskLevel.MEDIUM,
+                require_hitl=False,
+                timeout_sec=30,
+                rate_limit_per_min=5,
+            ),
             lambda message: message,
-            param_schema={
-                "type": "object",
-                "properties": {"message": {"type": "string"}},
-                "required": ["message"],
-            },
-            allowed_agents=["react_agent", "subagent_explorer"],
-            risk_level="medium",
-            require_hitl=False,
-            timeout_sec=30,
-            rate_limit_per_min=5,
         )
         return ["mcp_demo__echo"]
 
@@ -38,7 +40,15 @@ class FakeMCPManager:
 class TestAgentIdentityAndToolFiltering:
     def test_to_openai_tools_filters_by_agent(self):
         te = ToolRegistry()
-        te.register_tool("restricted", "desc", lambda: 1, allowed_agents=["parent_agent"])
+        te.register(
+            ToolMeta(
+                name="restricted",
+                description="desc",
+                param_schema={"type": "object", "properties": {}},
+                allowed_agents=["parent_agent"],
+            ),
+            lambda: 1,
+        )
 
         parent_tools = te.to_openai_tools("parent_agent")
         child_tools = te.to_openai_tools("child_agent")

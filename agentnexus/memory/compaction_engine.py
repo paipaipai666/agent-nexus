@@ -24,12 +24,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentnexus.core.hooks import HookType, get_hook_manager
 from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.compaction import is_recoverable_tool
 from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
 from agentnexus.memory.projection import build_projection as build_projected_messages
 from agentnexus.memory.projection import microcompact_messages
 from agentnexus.memory.short_term import compute_importance
+from agentnexus.observability.tracer import trace_span
 from agentnexus.prompts import load_prompt
 
 if TYPE_CHECKING:
@@ -104,6 +106,10 @@ def _extract_xml_tag(text: str, tag: str) -> str | None:
     pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     return match.group(1) if match else None
+
+
+class _EmptySummaryResult(Exception):
+    """LLM summarizer returned nothing — a failure, but not an error."""
 
 
 class CompactionEngine:
@@ -329,8 +335,6 @@ class CompactionEngine:
         is_auto=False enables manual /compact mode (accepts custom_instructions,
         does not suppress follow-up questions).
         """
-        from agentnexus.core.hooks import HookType, get_hook_manager
-
         mgr = self._mgr
         hook_mgr = get_hook_manager()
         hook_mgr.fire(HookType.BEFORE_COMPACT, {
@@ -346,7 +350,8 @@ class CompactionEngine:
                 logger.debug("Circuit breaker in cooldown (%.0fs remaining)", remaining)
                 self.microcompact()
                 return 0
-            # Cooldown expired — enter half-open state for probe
+            # Cooldown expired — probe mode; the protect() gate at the LLM
+            # layer performs the OPEN→HALF_OPEN state transition
             half_open_probe = True
             self._fire_compact("circuit_half_open", elapsed=remaining)
 
@@ -388,10 +393,6 @@ class CompactionEngine:
         if not history_text.strip():
             return 0
 
-        from agentnexus.observability.tracer import get_trace_manager
-
-        trace_mgr = get_trace_manager()
-
         # Layer 5: Kairos transcript backup before destructive compact
         self._write_transcript()
 
@@ -402,68 +403,90 @@ class CompactionEngine:
 
         self.compacting = True
         try:
-            with trace_mgr.span("memory_compact", {"is_auto": is_auto}):
-                # 分段索引压缩：每段独立小结、跨轮 append-only，无复利丢失
-                seg_size = getattr(mgr._settings, "memory_index_segment_size", 20)
-                if not isinstance(seg_size, int):
-                    seg_size = 20
-                result = segment_summarize(
-                    all_msgs_after, mgr._llm,
-                    keep_recent=6,
-                    seg_size=seg_size,
-                    custom_instructions=custom_instructions,
+            # Circuit gate + success/failure recording around the LLM layer.
+            # Admission was already checked above, so CircuitOpenError cannot
+            # fire here; protect() owns the record_* protocol.
+            with circuit.protect(on_open=lambda: self._fire_compact("circuit_open")):
+                tokens_saved = self._llm_compact(
+                    all_msgs_after, custom_instructions, tokens_before, hook_mgr,
+                    is_auto=is_auto,
                 )
-                if result is None:
-                    circuit.record_failure()
+                if tokens_saved is None:
                     if half_open_probe:
                         logger.warning("Half-open probe got empty response, re-opening circuit")
-                    self._fire_compact("circuit_open")
-                    return 0
-
-                # 原文先入归档，再移出 STM——任何时刻内容都在某处完整存在
-                self._archive_history(result.archived)
-                stm.compact_indexed(result.entries, keep_recent=6)
-                # 索引超预算时折叠最老条目为归档目录（召回靠 history_search 兜底）
-                index_budget = getattr(mgr._settings, "memory_index_max_tokens", 4000)
-                if not isinstance(index_budget, int):
-                    index_budget = 4000
-                folded = stm.fold_index(index_budget)
-                if folded:
-                    self._fire_compact("index_folded", folded=folded)
-                # Close circuit on success
+                    raise _EmptySummaryResult()
                 if half_open_probe:
                     logger.info("Circuit breaker closed after successful half-open probe")
                     self._fire_compact("circuit_reset")
-                circuit.record_success()
-                self.microcompacts_since_open = 0
-                self.snip_freed_tokens = 0
-                self.recent_reads.clear()
-
-                # A3: File recovery after compact
-                self._restore_files()
-
-                # A6: System prompt rebuild hook
-                if self.on_after_compact:
-                    try:
-                        self.on_after_compact()
-                    except Exception as e:
-                        logger.debug("After-compact callback failed: %s", e)
-
-                tokens_after = stm.token_count or stm.estimate_tokens()
-                tokens_saved = max(0, tokens_before - tokens_after)
-                self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
-
-                hook_mgr.fire(HookType.AFTER_COMPACT, {
-                    "is_auto": is_auto, "tokens_saved": tokens_saved,
-                    "tokens_before": tokens_before, "tokens_after": tokens_after,
-                })
                 return tokens_saved
+        except _EmptySummaryResult:
+            return 0
         except Exception as e:
             logger.warning("Compaction failed: %s", e)
-            circuit.record_failure()
             if half_open_probe:
                 logger.warning("Half-open probe failed, re-opening circuit breaker")
-            self._fire_compact("circuit_open")
             return 0
         finally:
             self.compacting = False
+
+    @trace_span("memory_compact", lambda *a, **k: {"is_auto": k["is_auto"]})
+    def _llm_compact(
+        self,
+        all_msgs_after: list[dict],
+        custom_instructions: str,
+        tokens_before: int,
+        hook_mgr: Any,
+        *,
+        is_auto: bool,
+    ) -> int | None:
+        """Layer 5: full LLM rewrite of history. Returns tokens saved, or None
+        when the summarizer produced nothing (failure, reported by caller)."""
+        mgr = self._mgr
+        stm = mgr.short_term
+
+        # 分段索引压缩：每段独立小结、跨轮 append-only，无复利丢失
+        seg_size = getattr(mgr._settings, "memory_index_segment_size", 20)
+        if not isinstance(seg_size, int):
+            seg_size = 20
+        result = segment_summarize(
+            all_msgs_after, mgr._llm,
+            keep_recent=6,
+            seg_size=seg_size,
+            custom_instructions=custom_instructions,
+        )
+        if result is None:
+            return None
+
+        # 原文先入归档，再移出 STM——任何时刻内容都在某处完整存在
+        self._archive_history(result.archived)
+        stm.compact_indexed(result.entries, keep_recent=6)
+        # 索引超预算时折叠最老条目为归档目录（召回靠 history_search 兜底）
+        index_budget = getattr(mgr._settings, "memory_index_max_tokens", 4000)
+        if not isinstance(index_budget, int):
+            index_budget = 4000
+        folded = stm.fold_index(index_budget)
+        if folded:
+            self._fire_compact("index_folded", folded=folded)
+        self.microcompacts_since_open = 0
+        self.snip_freed_tokens = 0
+        self.recent_reads.clear()
+
+        # A3: File recovery after compact
+        self._restore_files()
+
+        # A6: System prompt rebuild hook
+        if self.on_after_compact:
+            try:
+                self.on_after_compact()
+            except Exception as e:
+                logger.debug("After-compact callback failed: %s", e)
+
+        tokens_after = stm.token_count or stm.estimate_tokens()
+        tokens_saved = max(0, tokens_before - tokens_after)
+        self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
+
+        hook_mgr.fire(HookType.AFTER_COMPACT, {
+            "is_auto": is_auto, "tokens_saved": tokens_saved,
+            "tokens_before": tokens_before, "tokens_after": tokens_after,
+        })
+        return tokens_saved

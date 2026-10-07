@@ -1,5 +1,5 @@
 """Tests for ToolRegistry"""
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
 
 
 class TestToolRegistry:
@@ -9,7 +9,14 @@ class TestToolRegistry:
         def dummy(x):
             return x
 
-        te.register_tool("test", "desc", dummy)
+        te.register(
+            ToolMeta(
+                name="test",
+                description="desc",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            dummy,
+        )
         assert te.get_tool("test") is dummy
 
     def test_get_nonexistent(self):
@@ -18,8 +25,22 @@ class TestToolRegistry:
 
     def test_get_available_tools(self):
         te = ToolRegistry()
-        te.register_tool("a", "first tool", lambda: 1)
-        te.register_tool("b", "second tool", lambda: 2)
+        te.register(
+            ToolMeta(
+                name="a",
+                description="first tool",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda: 1,
+        )
+        te.register(
+            ToolMeta(
+                name="b",
+                description="second tool",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda: 2,
+        )
         desc = te.get_available_tools()
         assert "first tool" in desc
         assert "second tool" in desc
@@ -33,19 +54,35 @@ class TestToolRegistry:
         def f2(x):
             return 2
 
-        te.register_tool("x", "desc1", f1)
-        te.register_tool("x", "desc2", f2)
+        te.register(
+            ToolMeta(
+                name="x",
+                description="desc1",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            f1,
+        )
+        te.register(
+            ToolMeta(
+                name="x",
+                description="desc2",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            f2,
+        )
         assert te.get_tool("x") is f2
 
     def test_hitl_blocks_when_approver_missing(self):
         te = ToolRegistry()
-        te.register_tool(
-            "danger",
-            "desc",
+        te.register(
+            ToolMeta(
+                name="danger",
+                description="desc",
+                param_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
+                risk_level=RiskLevel.HIGH,
+                require_hitl=True,
+            ),
             lambda code: "ok",
-            param_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
-            risk_level="high",
-            require_hitl=True,
         )
         result = te.invoke(
             "danger",
@@ -63,13 +100,15 @@ class TestToolRegistry:
             seen["summary"] = summary
             return False
 
-        te.register_tool(
-            "danger",
-            "desc",
+        te.register(
+            ToolMeta(
+                name="danger",
+                description="desc",
+                param_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
+                risk_level=RiskLevel.HIGH,
+                require_hitl=True,
+            ),
             lambda code: "ok",
-            param_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
-            risk_level="high",
-            require_hitl=True,
         )
         result = te.invoke(
             "danger",

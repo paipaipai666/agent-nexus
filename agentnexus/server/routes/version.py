@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
+
+from agentnexus.server.deps import get_runtime
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["version", "runtime"])
 
@@ -13,7 +16,7 @@ def _get_version_manager():
     runtime = _get_runtime()
     vm = runtime.version_manager
     if vm is None:
-        raise HTTPException(status_code=404, detail="Version manager not initialized")
+        raise APIError(404, "not_found", "Version manager not initialized")
     return vm
 
 
@@ -35,7 +38,7 @@ def version_undo():
     vm = _get_version_manager()
     result = vm.undo()
     if result is None:
-        raise HTTPException(status_code=400, detail="Nothing to undo")
+        raise APIError(400, "bad_request", "Nothing to undo")
     # Restore short-term memory from checkpoint snapshot
     try:
         from agentnexus.server.app import _get_runtime
@@ -57,7 +60,7 @@ def version_redo():
     vm = _get_version_manager()
     result = vm.redo()
     if result is None:
-        raise HTTPException(status_code=400, detail="Nothing to redo")
+        raise APIError(400, "bad_request", "Nothing to redo")
     try:
         from agentnexus.server.app import _get_runtime
 
@@ -81,13 +84,10 @@ def version_reset():
 
 
 @router.post("/compact")
-def compact_context(custom_instructions: str = ""):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def compact_context(custom_instructions: str = "", runtime=Depends(get_runtime)):
     mm = runtime.memory_manager
     if mm is None:
-        raise HTTPException(status_code=404, detail="Memory manager not initialized")
+        raise APIError(404, "not_found", "Memory manager not initialized")
     try:
         tokens_saved = mm.maybe_compact(
             threshold=None,
@@ -96,4 +96,4 @@ def compact_context(custom_instructions: str = ""):
         )
         return {"status": "compacted", "tokens_saved": tokens_saved}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))

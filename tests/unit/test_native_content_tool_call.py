@@ -12,7 +12,7 @@ _on_receive_native 在 pending_tool_calls 为空时把正文直接当最终答�
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm():
@@ -44,7 +44,14 @@ def _make_agent():
         calls.append(kw)
         return {"city": kw.get("city"), "weather": "暴雪", "temp": "-5"}
 
-    te.register_tool("get_weather", "查天气", weather)
+    te.register(
+        ToolMeta(
+            name="get_weather",
+            description="查天气",
+            param_schema={"type": "object", "properties": {}},
+        ),
+        weather,
+    )
     agent = ReActAgent(llm, te, max_steps=5)
     return agent, llm, calls
 
@@ -191,7 +198,14 @@ class TestNativeThoughtAnswerSplit:
         """工具轮 TOOLS_FOUND 的思考同样剥离 Thought 前缀。"""
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("get_weather", "查天气", lambda **kw: {"weather": "晴"})
+        te.register(
+            ToolMeta(
+                name="get_weather",
+                description="查天气",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: {"weather": "晴"},
+        )
         agent = ReActAgent(llm, te, max_steps=5)
         emitted = []
         agent._on_event = lambda evt, f, t: emitted.append(evt)

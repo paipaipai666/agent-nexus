@@ -30,7 +30,7 @@ from agentnexus.agents.react_types import (
     ReActState as S,
 )
 from agentnexus.core.capabilities import SessionCapabilityTracker
-from agentnexus.tools.registry import ToolRegistry
+from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
 
 def _make_llm(supports_tool_calling: bool = True):
@@ -108,7 +108,14 @@ class TestNoThoughtGate:
         printed: list[str] = []
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("file_read", "读文件", lambda **kw: "content")
+        te.register(
+            ToolMeta(
+                name="file_read",
+                description="读文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "content",
+        )
         agent = ReActAgent(llm, te, max_steps=4, output=printed.append)
         ran: list[str] = []
 
@@ -154,8 +161,12 @@ class TestToolBatchMustComplete:
 
         te = ToolRegistry()
         for i in range(5):
-            te.register_tool(
-                f"probe_{i}", "探测",
+            te.register(
+                ToolMeta(
+                    name=f"probe_{i}",
+                    description="探测",
+                    param_schema={"type": "object", "properties": {}},
+                ),
                 lambda i=i, **_kw: order.append(("tool", f"probe_{i}")) or f"r{i}",
             )
 
@@ -197,7 +208,14 @@ class TestRunawayGuards:
         printed: list[str] = []
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("file_read", "读文件", lambda **kw: "same content")
+        te.register(
+            ToolMeta(
+                name="file_read",
+                description="读文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "same content",
+        )
         agent = ReActAgent(llm, te, max_steps=None, output=printed.append)
 
         emitted: list[tuple] = []
@@ -229,7 +247,14 @@ class TestRunawayGuards:
         llm = _make_llm()
         llm.last_usage = {"input_tokens": 400, "output_tokens": 400}
         te = ToolRegistry()
-        te.register_tool("probe", "探测", lambda **kw: "data")
+        te.register(
+            ToolMeta(
+                name="probe",
+                description="探测",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "data",
+        )
         agent = ReActAgent(llm, te, max_steps=None, token_budget=1000, output=printed.append)
 
         emitted: list[tuple] = []
@@ -258,7 +283,14 @@ class TestRunawayGuards:
         printed: list[str] = []
         llm = _make_llm()
         te = ToolRegistry()
-        te.register_tool("file_read", "读文件", lambda **kw: "content")
+        te.register(
+            ToolMeta(
+                name="file_read",
+                description="读文件",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "content",
+        )
         agent = ReActAgent(llm, te, max_steps=None, output=printed.append)
 
         emitted: list[tuple] = []

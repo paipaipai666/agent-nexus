@@ -23,8 +23,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
+
+from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["eval"])
 
@@ -80,7 +82,7 @@ def run_eval(quick: bool = True, top_k: int = 3):
             return {"status": "ok", "results": results if isinstance(results, dict) else str(results)}
         return {"status": "ok", "message": "Full eval triggered (async not yet implemented)"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/reports")
@@ -118,21 +120,21 @@ def compare_reports(req: CompareRequest):
     # Reject path traversal attempts
     for name in (req.baseline, req.candidate):
         if ".." in name or "/" in name or "\\" in name:
-            raise HTTPException(status_code=400, detail=f"Invalid filename: {name}")
+            raise APIError(400, "bad_request", f"Invalid filename: {name}")
 
     baseline_path = (evals_dir / req.baseline).resolve()
     candidate_path = (evals_dir / req.candidate).resolve()
     evals_resolved = evals_dir.resolve()
 
     if not str(baseline_path).startswith(str(evals_resolved)):
-        raise HTTPException(status_code=400, detail="Baseline path outside evals directory")
+        raise APIError(400, "bad_request", "Baseline path outside evals directory")
     if not str(candidate_path).startswith(str(evals_resolved)):
-        raise HTTPException(status_code=400, detail="Candidate path outside evals directory")
+        raise APIError(400, "bad_request", "Candidate path outside evals directory")
 
     if not baseline_path.exists():
-        raise HTTPException(status_code=404, detail=f"Baseline not found: {req.baseline}")
+        raise APIError(404, "not_found", f"Baseline not found: {req.baseline}")
     if not candidate_path.exists():
-        raise HTTPException(status_code=404, detail=f"Candidate not found: {req.candidate}")
+        raise APIError(404, "not_found", f"Candidate not found: {req.candidate}")
 
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -179,7 +181,7 @@ def get_task(task_id: str):
     service = _get_eval_service()
     task = service.get_task(task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+        raise APIError(404, "not_found", f"Task not found: {task_id}")
     return task
 
 
@@ -191,9 +193,9 @@ def run_task(task_id: str, req: RunTaskRequest | None = None):
         result = service.run_task(task_id, n_trials=n_trials)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/suites")
@@ -207,7 +209,7 @@ def get_suite(suite_name: str):
     service = _get_eval_service()
     suite = service.get_suite(suite_name)
     if suite is None:
-        raise HTTPException(status_code=404, detail=f"Suite not found: {suite_name}")
+        raise APIError(404, "not_found", f"Suite not found: {suite_name}")
     return suite
 
 
@@ -220,9 +222,9 @@ def run_suite(suite_name: str, req: RunSuiteRequest | None = None):
         result = service.run_suite(suite_name, n_trials=n_trials, concurrency=concurrency)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/suites/{suite_name}/baseline")
@@ -243,7 +245,7 @@ def save_baseline(suite_name: str):
         path = service.save_baseline(suite_name, result)
         return {"status": "saved", "path": path}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/suites/{suite_name}/compare")
@@ -254,7 +256,7 @@ def compare_with_baseline(suite_name: str):
         regression = service.compare_with_baseline(suite_name, current)
         return regression
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/stats")
@@ -302,13 +304,13 @@ def run_benchmark(req: BenchmarkRunRequest | None = None):
         from agentnexus.eval.benchmarks.schema import RETRIEVAL_MODES
 
         if req.mode not in RETRIEVAL_MODES:
-            raise HTTPException(status_code=400, detail=f"Unknown mode '{req.mode}'")
+            raise APIError(400, "bad_request", f"Unknown mode '{req.mode}'")
         suite = get_suite(req.suite)
         loaded = load_suite_datasets(suite, only=tuple(req.datasets), offline=False)
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "bad_request", str(e))
 
     # optional embedding switch for this run
     settings = original = None
@@ -336,7 +338,7 @@ def run_benchmark(req: BenchmarkRunRequest | None = None):
             })
         return {"suite": suite.name, "results": results}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
     finally:
         if settings is not None and original and settings.embedding_model != original:
             from agentnexus.rag.embeddings import reset_embedding_model

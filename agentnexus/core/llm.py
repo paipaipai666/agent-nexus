@@ -317,7 +317,7 @@ class AgentLLM:
               max_attempts: int | None = None,
               on_token: Callable[[str], None] | None = None,
               effort: str | None = None) -> str:
-        from agentnexus.core.hooks import HookType, get_hook_manager
+        from agentnexus.core.hooks import HookType, fire_hook
 
         if not self.api_key or not self.base_url:
             return ""
@@ -327,8 +327,7 @@ class AgentLLM:
         self._cs().non_transient = False
 
         # ── before llm hook ────────────────────────────────────
-        hook_mgr = get_hook_manager()
-        hook_ctx = hook_mgr.fire(HookType.BEFORE_LLM_CALL, {
+        hook_ctx = fire_hook(HookType.BEFORE_LLM_CALL, {
             "messages": messages,
             "model": self.model,
             "tools": tools,
@@ -372,7 +371,7 @@ class AgentLLM:
             stop_watcher.set()
 
         # ── after llm hook ─────────────────────────────────────
-        hook_mgr.fire(HookType.AFTER_LLM_CALL, {
+        fire_hook(HookType.AFTER_LLM_CALL, {
             "messages": messages,
             "model": self.model,
             "response_text": result,

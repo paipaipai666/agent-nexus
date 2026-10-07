@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Bell, AlertTriangle, AlertOctagon, Info, Shield, Filter } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
 
 interface Alert {
   alert_type: string
@@ -32,18 +33,16 @@ export default function AlertsPage() {
   const [rules, setRules] = useState<Array<{ type: string; index: number }>>([])
   const [days, setDays] = useState(7)
   const [severityFilter, setSeverityFilter] = useState<string>('')
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([
+  const { data, loading, error } = useApiQuery(async () => {
+    const [alertsRes, rulesRes] = await Promise.all([
       api.getAlerts(days, severityFilter || undefined),
       api.getAlertRules(),
-    ]).then(([alertsRes, rulesRes]) => {
-      setAlerts(alertsRes.alerts)
-      setRules(rulesRes.rules)
-    }).catch(console.error).finally(() => setLoading(false))
+    ])
+    return { alerts: alertsRes.alerts, rules: rulesRes.rules }
   }, [days, severityFilter])
+
+  useEffect(() => { if (data) { setAlerts(data.alerts); setRules(data.rules) } }, [data])
+  useEffect(() => { if (error) console.error(error) }, [error])
 
   const formatTime = (ts: number) => {
     const d = new Date(ts * 1000)

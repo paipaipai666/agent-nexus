@@ -1,29 +1,31 @@
 import { useState, useEffect } from 'react'
 import { Puzzle, AlertTriangle, CheckCircle } from 'lucide-react'
 import { api } from '../services/api'
+import { useApiQuery } from '../hooks/useApiQuery'
+import PageSpinner from '../components/PageSpinner'
 
 interface Plugin { name: string; enabled: boolean; path: string; errors: string[] }
 
 export default function PluginsPage() {
   const [plugins, setPlugins] = useState<Plugin[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.getExtensions().then((data) => {
-      const discovered = data.discovered || data.load_report?.loaded || []
-      const disabled = data.load_report?.disabled || []
-      const failed = data.load_report?.failed || []
-      const all: Plugin[] = []
-      for (const d of discovered) all.push({ name: d.name, enabled: true, path: d.path || '', errors: d.errors || [] })
-      for (const d of disabled) all.push({ name: d.name, enabled: false, path: d.path || '', errors: d.errors || [] })
-      for (const d of failed) all.push({ name: d.name, enabled: false, path: d.path || '', errors: d.errors || ['Failed to load'] })
-      const seen = new Set<string>()
-      setPlugins(all.filter(p => { if (seen.has(p.name)) return false; seen.add(p.name); return true }))
-    }).catch(e => setError(e.message)).finally(() => setLoading(false))
+  const { data, loading, error: queryError } = useApiQuery(async () => {
+    const res = await api.getExtensions()
+    const discovered = res.discovered || res.load_report?.loaded || []
+    const disabled = res.load_report?.disabled || []
+    const failed = res.load_report?.failed || []
+    const all: Plugin[] = []
+    for (const d of discovered) all.push({ name: d.name, enabled: true, path: d.path || '', errors: d.errors || [] })
+    for (const d of disabled) all.push({ name: d.name, enabled: false, path: d.path || '', errors: d.errors || [] })
+    for (const d of failed) all.push({ name: d.name, enabled: false, path: d.path || '', errors: d.errors || ['Failed to load'] })
+    const seen = new Set<string>()
+    return all.filter(p => { if (seen.has(p.name)) return false; seen.add(p.name); return true })
   }, [])
 
-  if (loading) return <div className="flex-1 flex items-center justify-center"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} /></div>
+  useEffect(() => { if (data) setPlugins(data) }, [data])
+  useEffect(() => { if (queryError) setError(queryError.message) }, [queryError])
+
+  if (loading) return <PageSpinner />
 
   const enabledCount = plugins.filter(p => p.enabled).length
   const errorCount = plugins.filter(p => p.errors.length > 0).length

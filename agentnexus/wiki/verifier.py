@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from agentnexus.core.config import get_settings
 from agentnexus.rag import embeddings as embedding_service
@@ -84,6 +86,41 @@ def cosine_similarity(text_a: str, text_b: str) -> float:
     return sum(a * b for a, b in zip(vecs[0], vecs[1]))
 
 
+@dataclass(frozen=True)
+class VerifyThresholds:
+    """Mechanical verification thresholds, aggregated from settings + overrides.
+
+    Field names match the ``wiki_*`` settings attributes and the calibration
+    thresholds dict keys.
+    """
+
+    jaccard_direct_quote: float
+    jaccard_paraphrase: float
+    cosine_paraphrase: float
+    cosine_source: float
+
+    @classmethod
+    def from_settings(cls, overrides: dict[str, float] | None = None) -> VerifyThresholds:
+        settings = get_settings()
+        t = overrides or {}
+        return cls(
+            jaccard_direct_quote=t.get("jaccard_direct_quote", settings.wiki_jaccard_direct_quote),
+            jaccard_paraphrase=t.get("jaccard_paraphrase", settings.wiki_jaccard_paraphrase),
+            cosine_paraphrase=t.get("cosine_paraphrase", settings.wiki_cosine_paraphrase),
+            cosine_source=t.get("cosine_source", settings.wiki_cosine_source),
+        )
+
+
+#: Pre-calibration defaults. Single source for calibration's DEFAULT_THRESHOLDS;
+#: values mirror the core settings wiki_* defaults.
+DEFAULT_VERIFY_THRESHOLDS = VerifyThresholds(
+    jaccard_direct_quote=0.6,
+    jaccard_paraphrase=0.4,
+    cosine_paraphrase=0.7,
+    cosine_source=0.35,
+)
+
+
 class MechanicalVerifier:
     """Verifies wiki statements against source chunks using mechanical checks.
 
@@ -92,12 +129,26 @@ class MechanicalVerifier:
     """
 
     def __init__(self, thresholds: dict[str, float] | None = None):
-        settings = get_settings()
-        t = thresholds or {}
-        self.jaccard_direct_quote = t.get("jaccard_direct_quote", settings.wiki_jaccard_direct_quote)
-        self.jaccard_paraphrase = t.get("jaccard_paraphrase", settings.wiki_jaccard_paraphrase)
-        self.cosine_paraphrase = t.get("cosine_paraphrase", settings.wiki_cosine_paraphrase)
-        self.cosine_source = t.get("cosine_source", settings.wiki_cosine_source)
+        t = VerifyThresholds.from_settings(thresholds)
+        # Flat mirrors so verification methods can reference self.<threshold> directly.
+        self.jaccard_direct_quote = t.jaccard_direct_quote
+        self.jaccard_paraphrase = t.jaccard_paraphrase
+        self.cosine_paraphrase = t.cosine_paraphrase
+        self.cosine_source = t.cosine_source
+
+        # Level-keyed dispatch for verify_statement. SynthesisLevel is a str-enum,
+        # so a plain string level (statement.synthesis_level) looks itself up; levels
+        # absent from the table (synthesis, unknown) stay synthesis.
+        def _single(stmt, _texts, primary):
+            return self._verify_single_source(stmt.text, primary)
+
+        self._strategies: dict[SynthesisLevel, Callable[[WikiStatement, dict[str, str], str], str]] = {
+            SynthesisLevel.DIRECT_QUOTE: _single,
+            SynthesisLevel.PARAPHRASE: _single,
+            SynthesisLevel.CROSS_REFERENCE: lambda stmt, texts, _primary: self._verify_multi_source(
+                stmt.text, stmt.source_chunk_ids, texts
+            ),
+        }
 
     def verify_statement(
         self,
@@ -117,7 +168,6 @@ class MechanicalVerifier:
             # No source chunks — must be synthesis
             return SynthesisLevel.SYNTHESIS.value
 
-        assigned = statement.synthesis_level
         primary_chunk_id = statement.source_chunk_ids[0]
         primary_text = chunk_texts.get(primary_chunk_id, "")
 
@@ -125,16 +175,13 @@ class MechanicalVerifier:
             logger.warning("Chunk %s not found in chunk_texts, marking as synthesis", primary_chunk_id)
             return SynthesisLevel.SYNTHESIS.value
 
-        # Step 1: For direct_quote and paraphrase, check string overlap with primary chunk
-        if assigned in (SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value):
-            return self._verify_single_source(statement.text, primary_text)
-
-        # Step 2: For cross_reference, verify each source chunk individually
-        if assigned == SynthesisLevel.CROSS_REFERENCE.value:
-            return self._verify_multi_source(statement.text, statement.source_chunk_ids, chunk_texts)
-
-        # Step 3: synthesis stays synthesis — nothing to verify
-        return SynthesisLevel.SYNTHESIS.value
+        # Step 1/2: direct_quote/paraphrase → single-source check,
+        # cross_reference → per-source-chunk check. Levels absent from the
+        # table (synthesis, unknown) stay synthesis — nothing to verify.
+        strategy = self._strategies.get(statement.synthesis_level)
+        if strategy is None:
+            return SynthesisLevel.SYNTHESIS.value
+        return strategy(statement, chunk_texts, primary_text)
 
     def _verify_single_source(self, statement_text: str, chunk_text: str) -> str:
         """Verify a statement claimed to be direct_quote or paraphrase."""

@@ -153,7 +153,7 @@ class TestWriteFailureBlocksNextRound:
             ReActEventType,
         )
         from agentnexus.memory.manager import MemoryManager
-        from agentnexus.tools.registry import ToolRegistry
+        from agentnexus.tools.registry import ToolRegistry, ToolMeta
 
         llm = MagicMock()
         llm.model = "m"
@@ -170,7 +170,14 @@ class TestWriteFailureBlocksNextRound:
         llm.capabilities.thinking_effort = "none"
 
         te = ToolRegistry()
-        te.register_tool("grep_search", "s", lambda **kw: "ok")
+        te.register(
+            ToolMeta(
+                name="grep_search",
+                description="s",
+                param_schema={"type": "object", "properties": {}},
+            ),
+            lambda **kw: "ok",
+        )
         agent = ReActAgent(llm, te, max_steps=5)
         agent._output = lambda _m: None
 

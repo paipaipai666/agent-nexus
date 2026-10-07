@@ -7,8 +7,11 @@ import logging
 import secrets
 import threading
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+
+from agentnexus.server.deps import get_runtime
+from agentnexus.server.error_handlers import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -181,17 +184,14 @@ def _resolve_workspace_dir(raw: str) -> str:
     try:
         resolved = _Path(raw).expanduser().resolve(strict=True)
     except OSError:
-        raise HTTPException(status_code=400, detail=f"Directory not found: {raw}")
+        raise APIError(400, "bad_request", f"Directory not found: {raw}")
     if not resolved.is_dir():
-        raise HTTPException(status_code=400, detail=f"Not a directory: {raw}")
+        raise APIError(400, "bad_request", f"Not a directory: {raw}")
     return str(resolved)
 
 
 @router.post("/session")
-def create_session(req: CreateSessionRequest | None = None):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def create_session(req: CreateSessionRequest | None = None, runtime=Depends(get_runtime)):
     skill = req.skill if req else None
     profile = req.profile if req else None
     workspace = _resolve_workspace_dir(req.workspace) if req and req.workspace else None
@@ -203,10 +203,7 @@ def create_session(req: CreateSessionRequest | None = None):
 
 
 @router.post("/chat")
-def send_message(req: SendMessageRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def send_message(req: SendMessageRequest, runtime=Depends(get_runtime)):
     try:
         run = runtime.chat.send_message(req.session_id, req.content, attachments=req.attachments)
         snapshot = runtime.chat.get_run_snapshot(run.id)
@@ -217,76 +214,55 @@ def send_message(req: SendMessageRequest):
             "status": snapshot.status if snapshot else "unknown",
         }
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.post("/chat/cancel")
-def cancel_run(req: CancelRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def cancel_run(req: CancelRequest, runtime=Depends(get_runtime)):
     runtime.chat.cancel_run(req.run_id, reason=req.reason)
     return {"status": "cancelled", "run_id": req.run_id}
 
 
 @router.post("/chat/confirm")
-def confirm_tool(req: ConfirmRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def confirm_tool(req: ConfirmRequest, runtime=Depends(get_runtime)):
     runtime.chat.confirm_tool_call(req.run_id, req.approved)
     return {"status": "confirmed" if req.approved else "denied", "run_id": req.run_id}
 
 
 @router.post("/chat/{run_id}/cancel")
-def cancel_run_path(run_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def cancel_run_path(run_id: str, runtime=Depends(get_runtime)):
     runtime.chat.cancel_run(run_id)
     return {"status": "cancelled", "run_id": run_id}
 
 
 @router.post("/chat/{run_id}/confirm")
-def confirm_tool_path(run_id: str, approved: bool = True):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def confirm_tool_path(run_id: str, approved: bool = True, runtime=Depends(get_runtime)):
     runtime.chat.confirm_tool_call(run_id, approved)
     return {"status": "confirmed" if approved else "denied", "run_id": run_id}
 
 
 @router.get("/chat/{run_id}/snapshot")
-def get_run_snapshot(run_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def get_run_snapshot(run_id: str, runtime=Depends(get_runtime)):
     record = runtime.chat.get_run_snapshot(run_id)
     if record is None:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        raise APIError(404, "not_found", f"Run {run_id} not found")
     if hasattr(record, "__dict__"):
         return record.__dict__
     return record
 
 
 @router.get("/sessions/{session_id}/run-snapshot")
-def run_snapshot(session_id: str):
+def run_snapshot(session_id: str, runtime=Depends(get_runtime)):
     """Return current step's accumulated tokens + cursor for WS reconnect (R8).
     MUST be sync def — threading.Lock inside async def would block the event loop.
     FastAPI runs sync handlers in a thread pool automatically."""
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     return runtime.chat.get_run_token_snapshot(session_id)
 
 
 @router.get("/sessions")
-def list_sessions():
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def list_sessions(runtime=Depends(get_runtime)):
     chat = runtime.chat
     sessions = []
     for sid, handle in chat._sessions.items():
@@ -316,7 +292,7 @@ class DeleteSessionsRequest(BaseModel):
 
 
 @router.delete("/sessions")
-def delete_sessions(req: DeleteSessionsRequest):
+def delete_sessions(req: DeleteSessionsRequest, runtime=Depends(get_runtime)):
     """Delete sessions and ALL their data (messages, checkpoints, todos,
     timeline events, context snapshots) — user-initiated, irreversible.
 
@@ -325,8 +301,6 @@ def delete_sessions(req: DeleteSessionsRequest):
     from agentnexus.core.config import get_settings
 
     settings = get_settings()
-    from agentnexus.server.app import _get_runtime
-    runtime = _get_runtime()
     chat = runtime.chat
 
     deleted: list[str] = []
@@ -371,7 +345,7 @@ def delete_sessions(req: DeleteSessionsRequest):
 
 
 @router.post("/session/restore")
-def restore_session(req: CreateSessionRequest):
+def restore_session(req: CreateSessionRequest, runtime=Depends(get_runtime)):
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
 
@@ -385,9 +359,6 @@ def restore_session(req: CreateSessionRequest):
             settings.memory_db_path, None
         )
 
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     chat = runtime.chat
 
     # If session already exists in memory, still ensure its STM is restored —
@@ -401,23 +372,17 @@ def restore_session(req: CreateSessionRequest):
 
 
 @router.get("/session/{session_id}/checkpoints")
-def list_checkpoints(session_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def list_checkpoints(session_id: str, runtime=Depends(get_runtime)):
     try:
         version = runtime.chat._get_version_manager(session_id)
         checkpoints = version.log() if hasattr(version, "log") else []
         return {"session_id": session_id, "checkpoints": checkpoints}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
 
 
 @router.get("/session/{session_id}/todos")
-def list_todos(session_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def list_todos(session_id: str, runtime=Depends(get_runtime)):
     todo_list = getattr(runtime.agent, "_todo_list", None)
     if todo_list is None:
         return {"items": [], "count": 0}
@@ -438,15 +403,12 @@ def list_todos(session_id: str):
 
 
 @router.get("/session/{session_id}/subagents")
-def list_subagents(session_id: str):
+def list_subagents(session_id: str, runtime=Depends(get_runtime)):
     """Current/recent subagents of this session (in-memory registry)."""
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
     try:
         subagents = runtime.chat.list_subagents(session_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise APIError(500, "internal_error", str(e))
     return {"session_id": session_id, "subagents": subagents}
 
 
@@ -467,7 +429,7 @@ def get_context_snapshot(session_id: str, run_id: str, step_id: int):
 
     snapshot = get_timeline_store().get_snapshot(session_id, run_id, step_id)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail=f"No context snapshot for step {step_id}")
+        raise APIError(404, "not_found", f"No context snapshot for step {step_id}")
     return {"session_id": session_id, "run_id": run_id, "step_id": step_id, **snapshot}
 
 
@@ -481,10 +443,7 @@ def list_context_steps(session_id: str, run_id: str):
 
 
 @router.get("/session/{session_id}")
-def get_session(session_id: str):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def get_session(session_id: str, runtime=Depends(get_runtime)):
     try:
         snapshot = runtime.chat.get_session_snapshot(session_id)
         session = snapshot["session"]
@@ -497,7 +456,7 @@ def get_session(session_id: str):
             "thinking_effort": runtime.chat.get_thinking_effort(session_id),
         }
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        raise APIError(404, "not_found", f"Session {session_id} not found")
 
 
 class PlanModeRequest(BaseModel):
@@ -505,14 +464,11 @@ class PlanModeRequest(BaseModel):
 
 
 @router.post("/session/{session_id}/plan-mode")
-def set_plan_mode(session_id: str, req: PlanModeRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def set_plan_mode(session_id: str, req: PlanModeRequest, runtime=Depends(get_runtime)):
     try:
         active = runtime.chat.set_plan_mode(session_id, req.enabled)
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     return {"session_id": session_id, "plan_mode": active}
 
 
@@ -522,16 +478,13 @@ class ThinkingEffortRequest(BaseModel):
 
 
 @router.post("/session/{session_id}/thinking-effort")
-def set_thinking_effort(session_id: str, req: ThinkingEffortRequest):
-    from agentnexus.server.app import _get_runtime
-
-    runtime = _get_runtime()
+def set_thinking_effort(session_id: str, req: ThinkingEffortRequest, runtime=Depends(get_runtime)):
     try:
         effort = runtime.chat.set_thinking_effort(session_id, req.effort)
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise APIError(404, "not_found", str(e))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "bad_request", str(e))
     return {"session_id": session_id, "thinking_effort": effort}
 
 
