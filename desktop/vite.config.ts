@@ -38,6 +38,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 显式钉在 IPv4 loopback：本机 ::1（IPv6 loopback）被 WFP 过滤
+    // （connect 返回 WSAEACCES 10013，2026-10-07 实证），而 vite 解析
+    // 'localhost' 只绑 ::1 → electron 加载被拒 → 黑窗。127.0.0.1 不受影响。
+    host: '127.0.0.1',
   },
   test: {
     globals: true,

@@ -248,7 +248,24 @@ async function createWindow() {
   })
 
   if (isDev()) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
+    // 本机 ::1 被 WFP 过滤（connect → WSAEACCES），localhost 解析可能命中
+    // ::1 导致 ERR_CONNECTION_REFUSED 黑窗——dev URL 显式改 127.0.0.1。
+    const devUrl = (process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/')
+      .replace('://localhost:', '://127.0.0.1:')
+    const loadDev = async (attempt = 0): Promise<void> => {
+      try {
+        await mainWindow!.loadURL(devUrl)
+        console.log(`[dev] renderer loaded: ${devUrl}`)
+      } catch (e) {
+        // vite 未就绪/偶发拒绝：重试而非永久黑窗（dev 服务器通常 1s 内可用）
+        if (attempt < 10) {
+          await new Promise((r) => setTimeout(r, 500))
+          return loadDev(attempt + 1)
+        }
+        console.error(`[dev] giving up loading ${devUrl}:`, e)
+      }
+    }
+    void loadDev()
     mainWindow.webContents.openDevTools()
     mainWindow.show()
   } else {

@@ -200,7 +200,20 @@ async function createWindow() {
     backgroundColor: "#111318"
   });
   if (isDev()) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    const devUrl = (process.env.VITE_DEV_SERVER_URL || "http://localhost:5173/").replace("://localhost:", "://127.0.0.1:");
+    const loadDev = async (attempt = 0) => {
+      try {
+        await mainWindow.loadURL(devUrl);
+        console.log(`[dev] renderer loaded: ${devUrl}`);
+      } catch (e) {
+        if (attempt < 10) {
+          await new Promise((r) => setTimeout(r, 500));
+          return loadDev(attempt + 1);
+        }
+        console.error(`[dev] giving up loading ${devUrl}:`, e);
+      }
+    };
+    void loadDev();
     mainWindow.webContents.openDevTools();
     mainWindow.show();
   } else {
@@ -251,23 +264,23 @@ electron.ipcMain.handle("get-backend-status", () => ({
   ready: backendReady,
   port: BACKEND_PORT
 }));
-electron.ipcMain.handle("pick-directory", async () => {
+async function pickDialog(options) {
   if (!mainWindow) return null;
-  const result = await electron.dialog.showOpenDialog(mainWindow, {
+  const result = await electron.dialog.showOpenDialog(mainWindow, options);
+  return result.canceled ? null : result.filePaths;
+}
+electron.ipcMain.handle("pick-directory", async () => {
+  const files = await pickDialog({
     title: "选择工作区文件夹",
     defaultPath: getProcessCwd(),
     properties: ["openDirectory", "createDirectory"]
   });
-  return result.canceled ? null : result.filePaths[0] ?? null;
+  return (files == null ? void 0 : files[0]) ?? null;
 });
 electron.ipcMain.handle("pick-files", async () => {
-  if (!mainWindow) return null;
-  const result = await electron.dialog.showOpenDialog(mainWindow, {
-    title: "选择附件",
-    properties: ["openFile", "multiSelections"]
-  });
-  if (result.canceled) return null;
-  return result.filePaths.filter((p) => {
+  const files = await pickDialog({ title: "选择附件", properties: ["openFile", "multiSelections"] });
+  if (!files) return null;
+  return files.filter((p) => {
     try {
       return fs.statSync(p).isFile();
     } catch {
@@ -286,31 +299,40 @@ electron.ipcMain.handle("stat-files", (_event, paths) => {
   });
 });
 electron.ipcMain.handle("get-projects", () => loadStore());
-electron.ipcMain.handle("add-project", (_, projectPath) => {
-  const store = loadStore();
-  if (typeof projectPath !== "string" || !projectPath.trim()) return store;
-  const resolved = path.resolve(projectPath.trim());
-  const key = projectKey(resolved);
-  store.projects = [resolved, ...store.projects.filter((p) => projectKey(p) !== key)];
-  store.lastProject = resolved;
-  saveStore(store);
-  return store;
-});
-electron.ipcMain.handle("remove-project", (_, projectPath) => {
-  const store = loadStore();
-  if (typeof projectPath !== "string" || !projectPath) return store;
-  const key = projectKey(projectPath);
-  store.projects = store.projects.filter((p) => projectKey(p) !== key);
-  if (store.lastProject && projectKey(store.lastProject) === key) {
-    store.lastProject = store.projects[0] ?? null;
+function handleStoreUpdate(channel, guard, mutate) {
+  electron.ipcMain.handle(channel, (_event, arg) => {
+    const store = loadStore();
+    if (!guard(arg)) return store;
+    mutate(store, arg);
+    saveStore(store);
+    return store;
+  });
+}
+handleStoreUpdate(
+  "add-project",
+  (p) => typeof p === "string" && p.trim().length > 0,
+  (store, p) => {
+    const resolved = path.resolve(p.trim());
+    const key = projectKey(resolved);
+    store.projects = [resolved, ...store.projects.filter((x) => projectKey(x) !== key)];
+    store.lastProject = resolved;
   }
-  saveStore(store);
-  return store;
-});
-electron.ipcMain.handle("set-last-project", (_, projectPath) => {
-  const store = loadStore();
-  if (typeof projectPath !== "string" || !projectPath) return store;
-  store.lastProject = projectPath;
-  saveStore(store);
-  return store;
-});
+);
+handleStoreUpdate(
+  "remove-project",
+  (p) => typeof p === "string" && p !== "",
+  (store, p) => {
+    const key = projectKey(p);
+    store.projects = store.projects.filter((x) => projectKey(x) !== key);
+    if (store.lastProject && projectKey(store.lastProject) === key) {
+      store.lastProject = store.projects[0] ?? null;
+    }
+  }
+);
+handleStoreUpdate(
+  "set-last-project",
+  (p) => typeof p === "string" && p !== "",
+  (store, p) => {
+    store.lastProject = p;
+  }
+);
