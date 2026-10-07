@@ -19,13 +19,9 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-# Trust ordering: higher number = more trusted
-_TRUST_RANK = {
-    SynthesisLevel.DIRECT_QUOTE.value: 3,
-    SynthesisLevel.PARAPHRASE.value: 2,
-    SynthesisLevel.CROSS_REFERENCE.value: 1,
-    SynthesisLevel.SYNTHESIS.value: 0,
-}
+# High-trust statement ratio thresholds for page confidence
+_HIGH_RATIO = 0.8
+_MEDIUM_RATIO = 0.5
 
 
 @dataclass
@@ -61,29 +57,28 @@ class ConfidenceRouter:
         if not levels:
             return ConfidenceLevel.HIGH.value
 
-        # Rule 1: Any untrusted → page is untrusted
-        if any(lv == ConfidenceLevel.UNTRUSTED.value for lv in levels):
-            return ConfidenceLevel.UNTRUSTED.value
-
-        # Count high-trust statements
+        # Rules evaluated in order, first match wins (see class docstring)
         high_count = sum(
             1 for lv in levels
             if lv in (SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value)
         )
-        total = len(levels)
-        ratio = high_count / total
+        ratio = high_count / len(levels)
 
-        # Rule 2: 80%+ high-trust → high confidence
-        if ratio >= 0.8:
-            return ConfidenceLevel.HIGH.value
-
-        # Rule 3: 50%+ high-trust → medium
-        if ratio >= 0.5:
-            return ConfidenceLevel.MEDIUM.value
-
-        # Rule 4: Has synthesis statements → low
-        if any(lv == SynthesisLevel.SYNTHESIS.value for lv in levels):
-            return ConfidenceLevel.LOW.value
+        rules = [
+            # Rule 1: Any untrusted → page is untrusted
+            (any(lv == ConfidenceLevel.UNTRUSTED.value for lv in levels),
+             ConfidenceLevel.UNTRUSTED.value),
+            # Rule 2: 80%+ high-trust → high confidence
+            (ratio >= _HIGH_RATIO, ConfidenceLevel.HIGH.value),
+            # Rule 3: 50%+ high-trust → medium
+            (ratio >= _MEDIUM_RATIO, ConfidenceLevel.MEDIUM.value),
+            # Rule 4: Has synthesis statements → low
+            (any(lv == SynthesisLevel.SYNTHESIS.value for lv in levels),
+             ConfidenceLevel.LOW.value),
+        ]
+        for applies, level in rules:
+            if applies:
+                return level
 
         # Rule 5: Default
         return ConfidenceLevel.MEDIUM.value
@@ -130,16 +125,10 @@ class ConfidenceRouter:
 
     def is_degradation(self, old_level: str, new_level: str) -> bool:
         """Check if a synthesis level change is a degradation (trust decrease)."""
-        return _TRUST_RANK.get(old_level, 0) > _TRUST_RANK.get(new_level, 0)
+        return SynthesisLevel(old_level).trust_rank > SynthesisLevel(new_level).trust_rank
 
     def min_confidence(self, conf_a: str, conf_b: str) -> str:
         """Return the lower of two confidence levels."""
-        order = {
-            ConfidenceLevel.UNTRUSTED.value: 0,
-            ConfidenceLevel.LOW.value: 1,
-            ConfidenceLevel.MEDIUM.value: 2,
-            ConfidenceLevel.HIGH.value: 3,
-        }
-        if order.get(conf_a, 0) <= order.get(conf_b, 0):
+        if ConfidenceLevel(conf_a).trust_rank <= ConfidenceLevel(conf_b).trust_rank:
             return conf_a
         return conf_b

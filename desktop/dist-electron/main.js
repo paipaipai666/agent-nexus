@@ -260,6 +260,31 @@ electron.ipcMain.handle("pick-directory", async () => {
   });
   return result.canceled ? null : result.filePaths[0] ?? null;
 });
+electron.ipcMain.handle("pick-files", async () => {
+  if (!mainWindow) return null;
+  const result = await electron.dialog.showOpenDialog(mainWindow, {
+    title: "选择附件",
+    properties: ["openFile", "multiSelections"]
+  });
+  if (result.canceled) return null;
+  return result.filePaths.filter((p) => {
+    try {
+      return fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  }).map((p) => ({ path: p, name: path.basename(p), size: fs.statSync(p).size }));
+});
+electron.ipcMain.handle("stat-files", (_event, paths) => {
+  return (paths || []).map((p) => {
+    try {
+      const s = fs.statSync(p);
+      return { path: p, ok: s.isFile(), size: s.size };
+    } catch {
+      return { path: p, ok: false, size: 0 };
+    }
+  });
+});
 electron.ipcMain.handle("get-projects", () => loadStore());
 electron.ipcMain.handle("add-project", (_, projectPath) => {
   const store = loadStore();

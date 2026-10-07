@@ -87,15 +87,26 @@ class ShortTermMemory:
         with self._lock:
             return list(self._messages)
 
+    def _rewrite(self, head_messages: list[dict], recent_pool: list[dict],
+                 keep_recent: int, summary: str):
+        """共享压缩骨架：清空后用 head + 尾部 recent 重建，赋摘要并重算 token。
+
+        recent 从 recent_pool 尾部截取（compact_indexed 的 pool 需排除索引消息）。
+        """
+        recent = recent_pool[-keep_recent:] if keep_recent > 0 else []
+        self._messages.clear()
+        for m in head_messages:
+            self._messages.append(m)
+        for m in recent:
+            self._messages.append(m)
+        self._summary = summary
+        self._recalc_token_count()
+
     def compact(self, summary: str, keep_recent: int = 4):
         with self._lock:
-            recent = list(self._messages)[-keep_recent:] if len(self._messages) > keep_recent else list(self._messages)
-            self._messages.clear()
-            self._messages.append({"role": "system", "content": f"[会话摘要] {summary}", "ts": time.time()})
-            for e in recent:
-                self._messages.append(e)
-            self._summary = summary
-            self._recalc_token_count()
+            self._rewrite(
+                [{"role": "system", "content": f"[会话摘要] {summary}", "ts": time.time()}],
+                list(self._messages), keep_recent, summary)
 
     def compact_full(self, summary: str, message_count: int = 0, is_auto: bool = True,
                      keep_recent: int = 6):
@@ -105,23 +116,15 @@ class ShortTermMemory:
         user vs assistant messages after compaction.
         """
         with self._lock:
-            recent = list(self._messages)[-keep_recent:] if keep_recent > 0 else []
-            self._messages.clear()
             boundary = (
                 "本会话是从之前一次因上下文耗尽而中断的对话延续过来的。"
                 "以下摘要概述了之前的对话内容：\n\n"
             ) if is_auto else (
                 "对话已被手动压缩。以下是压缩后的摘要：\n\n"
             )
-            self._messages.append({
-                "role": "system",
-                "content": boundary + summary,
-                "ts": time.time(),
-            })
-            for msg in recent:
-                self._messages.append(msg)
-            self._summary = summary
-            self._recalc_token_count()
+            self._rewrite(
+                [{"role": "system", "content": boundary + summary, "ts": time.time()}],
+                list(self._messages), keep_recent, summary)
 
     def compact_indexed(self, new_entries: list[tuple[int, int, str]],
                         keep_recent: int = 6):
@@ -133,26 +136,20 @@ class ShortTermMemory:
         """
         with self._lock:
             all_msgs = list(self._messages)
-            old_index = [m for m in all_msgs
-                         if m.get("metadata", {}).get("memory_index")]
+            head = [m for m in all_msgs
+                    if m.get("metadata", {}).get("memory_index")]
             raw = [m for m in all_msgs
                    if not m.get("metadata", {}).get("memory_index")]
-            recent = raw[-keep_recent:] if keep_recent > 0 else []
-            self._messages.clear()
-            for m in old_index:
-                self._messages.append(m)
             for seg_start, seg_end, summary in new_entries:
-                self._messages.append({
+                head.append({
                     "role": "system",
                     "content": f"[历史索引 消息{seg_start + 1}-{seg_end}] {summary}",
                     "ts": time.time(),
                     "metadata": {"memory_index": True,
                                  "seg_start": seg_start, "seg_end": seg_end},
                 })
-            for m in recent:
-                self._messages.append(m)
-            self._summary = "\n".join(s for _, _, s in new_entries)
-            self._recalc_token_count()
+            self._rewrite(head, raw, keep_recent,
+                          "\n".join(s for _, _, s in new_entries))
 
     def fold_index(self, max_tokens: int) -> int:
         """索引超预算时把最老的索引条目折叠成一条归档目录。

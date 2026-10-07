@@ -119,13 +119,15 @@ export interface ProviderSaveInput {
   models: ModelDraft[]
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit & { query?: Record<string, string> } = {}): Promise<T> {
+  const { query, headers: optsHeaders, ...rest } = options
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+    ...(optsHeaders as Record<string, string>),
   }
+  const qs = query ? `?${new URLSearchParams(query).toString()}` : ''
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
+  const res = await fetch(`${BASE_URL}${path}${qs}`, { ...rest, headers })
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
@@ -133,24 +135,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
-async function requestWithSignal<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-
-  const res = await fetch(`${BASE_URL}${path}`, { headers, signal })
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
-  }
-  return res.json()
-}
-
-async function uploadRequest<T>(path: string, file: File): Promise<T> {
+async function uploadRequest<T>(path: string, file: File, query?: Record<string, string>): Promise<T> {
   const formData = new FormData()
   formData.append('file', file)
+  const qs = query ? `?${new URLSearchParams(query).toString()}` : ''
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${BASE_URL}${path}${qs}`, {
     method: 'POST',
     body: formData,
   })
@@ -242,7 +232,7 @@ export const api = {
 
   // Knowledge
   listDocuments: (signal?: AbortSignal) =>
-    requestWithSignal<{ documents: any[]; total_chunks: number }>('/api/kb/documents', signal),
+    request<{ documents: any[]; total_chunks: number }>('/api/kb/documents', { signal }),
 
   searchKnowledge: (query: string, topK = 5) =>
     request<{ results: any[] }>('/api/kb/search', {
@@ -601,19 +591,9 @@ export const api = {
       body: JSON.stringify({ source_text: sourceText, source_uri: sourceUri, namespace, page_type: pageType }),
     }),
 
-  wikiIngestFile: async (file: File, namespace = 'default', pageType = 'concept') => {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch(`${BASE_URL}/api/wiki/ingest/file?namespace=${namespace}&page_type=${pageType}`, {
-      method: 'POST',
-      body: formData,
-    })
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: res.statusText }))
-      throw new Error(error.detail || `HTTP ${res.status}`)
-    }
-    return res.json()
-  },
+  wikiIngestFile: (file: File, namespace = 'default', pageType = 'concept') =>
+    uploadRequest<{ status: string; page_id: string; title: string; statement_count: number; confidence: string }>(
+      '/api/wiki/ingest/file', file, { namespace, page_type: pageType }),
 
   wikiLint: (namespace = 'default') =>
     request<{ items: Array<{ item_id: string; priority: number; page_id: string; description: string }>; total: number }>(

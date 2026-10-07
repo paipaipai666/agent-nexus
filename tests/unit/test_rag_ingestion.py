@@ -135,7 +135,7 @@ class TestRagIngestion:
 
         fake_pdf = FakePdfDocument([FakePdfPage("")])
         monkeypatch.setattr(loaders.fitz, "open", lambda _: fake_pdf)
-        monkeypatch.setattr(loaders, "_extract_pdf_page_text_with_ocr", lambda page: "OCR text")
+        monkeypatch.setattr("agentnexus.rag.loaders.pdf._extract_pdf_page_text_with_ocr", lambda page: "OCR text")
 
         document = load_structured_document("scan.pdf")
 

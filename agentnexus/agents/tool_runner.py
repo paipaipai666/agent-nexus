@@ -29,6 +29,67 @@ def _log_tool_error(name: str, exc: Exception) -> None:
         logger.debug("Failed to write tool error log: %s", io_err)
 
 
+_ERROR_CLASSIFIERS: list[tuple[
+    Callable[[Exception], bool],
+    ToolErrorCode,
+    Callable[[str, Exception], str],
+    bool,
+    str,
+]] = [
+    (
+        lambda exc: isinstance(exc, AgentCancelled),
+        ToolErrorCode.CANCELLED,
+        lambda name, exc: f"工具 '{name}' 调用被取消",
+        True,
+        "Retry if cancellation was unintended",
+    ),
+    (
+        # Registry-enforced ToolMeta.timeout_sec expiry.
+        lambda exc: isinstance(exc, TimeoutError),
+        ToolErrorCode.TIMEOUT,
+        lambda name, exc: str(exc),
+        True,
+        "Retry with simpler request or increase tool timeout_sec",
+    ),
+    (
+        lambda exc: isinstance(exc, RuntimeError) and "rate limit" in str(exc).lower(),
+        ToolErrorCode.RATE_LIMITED,
+        lambda name, exc: str(exc),
+        True,
+        "Wait and retry after the rate limit window resets",
+    ),
+    (
+        lambda exc: isinstance(exc, PermissionError),
+        ToolErrorCode.PERMISSION_DENIED,
+        lambda name, exc: str(exc),
+        False,
+        "Check agent permissions and tool RBAC configuration",
+    ),
+    (
+        lambda exc: isinstance(exc, (ValueError, TypeError)),
+        ToolErrorCode.VALIDATION_FAILED,
+        lambda name, exc: str(exc),
+        False,
+        "Verify input parameters match the tool schema",
+    ),
+    (
+        lambda exc: isinstance(exc, KeyError),
+        ToolErrorCode.EXECUTION_FAILED,
+        lambda name, exc: str(exc),
+        False,
+        "Check that the requested resource exists",
+    ),
+    # default fallback
+    (
+        lambda exc: True,
+        ToolErrorCode.EXECUTION_FAILED,
+        lambda name, exc: f"工具 '{name}' 执行失败",
+        False,
+        "Check tool_errors.log for details",
+    ),
+]
+
+
 def execute_tool(
     *,
     tool_executor: Any,
@@ -135,52 +196,11 @@ def execute_tool(
         })
         _log_tool_error(name, exc)
         # LOW-02: Include message for safe domain exceptions, strip for generic ones
-        if isinstance(exc, AgentCancelled):
-            return ToolError(
-                error_code=ToolErrorCode.CANCELLED,
-                message=f"工具 '{name}' 调用被取消",
-                recoverable=True,
-                suggested_action="Retry if cancellation was unintended",
-            )
-        if isinstance(exc, TimeoutError):
-            # Registry-enforced ToolMeta.timeout_sec expiry.
-            return ToolError(
-                error_code=ToolErrorCode.TIMEOUT,
-                message=str(exc),
-                recoverable=True,
-                suggested_action="Retry with simpler request or increase tool timeout_sec",
-            )
-        if isinstance(exc, RuntimeError) and "rate limit" in str(exc).lower():
-            return ToolError(
-                error_code=ToolErrorCode.RATE_LIMITED,
-                message=str(exc),
-                recoverable=True,
-                suggested_action="Wait and retry after the rate limit window resets",
-            )
-        if isinstance(exc, PermissionError):
-            return ToolError(
-                error_code=ToolErrorCode.PERMISSION_DENIED,
-                message=str(exc),
-                recoverable=False,
-                suggested_action="Check agent permissions and tool RBAC configuration",
-            )
-        if isinstance(exc, (ValueError, TypeError)):
-            return ToolError(
-                error_code=ToolErrorCode.VALIDATION_FAILED,
-                message=str(exc),
-                recoverable=False,
-                suggested_action="Verify input parameters match the tool schema",
-            )
-        if isinstance(exc, KeyError):
-            return ToolError(
-                error_code=ToolErrorCode.EXECUTION_FAILED,
-                message=str(exc),
-                recoverable=False,
-                suggested_action="Check that the requested resource exists",
-            )
-        return ToolError(
-            error_code=ToolErrorCode.EXECUTION_FAILED,
-            message=f"工具 '{name}' 执行失败",
-            recoverable=False,
-            suggested_action="Check tool_errors.log for details",
-        )
+        for predicate, error_code, message_fn, recoverable, suggested_action in _ERROR_CLASSIFIERS:
+            if predicate(exc):
+                return ToolError(
+                    error_code=error_code,
+                    message=message_fn(name, exc),
+                    recoverable=recoverable,
+                    suggested_action=suggested_action,
+                )

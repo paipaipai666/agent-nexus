@@ -63,16 +63,10 @@ class ConfusionMatrix:
         if total == 0:
             return 0.0
         # Degradation: actual is higher trust than predicted
-        trust_order = {
-            SynthesisLevel.DIRECT_QUOTE.value: 3,
-            SynthesisLevel.PARAPHRASE.value: 2,
-            SynthesisLevel.CROSS_REFERENCE.value: 1,
-            SynthesisLevel.SYNTHESIS.value: 0,
-        }
         degraded = 0
         for actual in self.labels:
             for predicted in self.labels:
-                if trust_order.get(actual, 0) > trust_order.get(predicted, 0):
+                if SynthesisLevel(actual).trust_rank > SynthesisLevel(predicted).trust_rank:
                     degraded += self.matrix[actual][predicted]
         return degraded / total
 
@@ -81,16 +75,10 @@ class ConfusionMatrix:
         total = sum(self.matrix[a][p] for a in self.matrix for p in self.matrix[a])
         if total == 0:
             return 0.0
-        trust_order = {
-            SynthesisLevel.DIRECT_QUOTE.value: 3,
-            SynthesisLevel.PARAPHRASE.value: 2,
-            SynthesisLevel.CROSS_REFERENCE.value: 1,
-            SynthesisLevel.SYNTHESIS.value: 0,
-        }
         missed = 0
         for actual in self.labels:
             for predicted in self.labels:
-                if trust_order.get(actual, 0) < trust_order.get(predicted, 0):
+                if SynthesisLevel(actual).trust_rank < SynthesisLevel(predicted).trust_rank:
                     missed += self.matrix[actual][predicted]
         return missed / total
 

@@ -88,21 +88,7 @@ class StateMachine:
             if t is None:
                 raise FSMError(f"no transition for {self._state.name}+{event.type.name}")
 
-            from_state = self._state
-            self._state = t.next_state
-            self._notify(event, from_state, t.next_state)
-
-            # Invoke handler BEFORE DONE check — handler may set ctx.last_answer
-            handler_fn = handlers.get(t.handler)
-            if handler_fn:
-                self._raise_if_cancelled(ctx)
-                new_events = handler_fn(ctx, event)
-                self._raise_if_cancelled(ctx)
-                if new_events:
-                    for ne in new_events:
-                        ne.step_id = ctx.current_step
-                        ne.seq = ctx.next_seq()
-                        self._queue.append(ne)
+            self._fire(t, event, ctx, handlers)
 
             if t.next_state == ReActState.DONE:
                 return (ctx.last_answer, ctx.steps)
@@ -124,22 +110,27 @@ class StateMachine:
         if t is None:
             return False
 
-        from_state = self._state
-        self._state = t.next_state
-        self._notify(None, from_state, t.next_state)
+        self._fire(t, None, ctx, handlers)
+        return True
 
-        handler_fn = handlers.get(t.handler)
+    def _fire(self, transition: Transition, event: ReActEvent | None,
+              ctx: ExecutionContext, handlers: dict) -> None:
+        """Migrate state, notify observers, invoke handler, enqueue new events."""
+        from_state = self._state
+        self._state = transition.next_state
+        self._notify(event, from_state, transition.next_state)
+
+        # Invoke handler BEFORE DONE check — handler may set ctx.last_answer
+        handler_fn = handlers.get(transition.handler)
         if handler_fn:
             self._raise_if_cancelled(ctx)
-            new_events = handler_fn(ctx, None)
+            new_events = handler_fn(ctx, event)
             self._raise_if_cancelled(ctx)
             if new_events:
                 for ne in new_events:
                     ne.step_id = ctx.current_step
                     ne.seq = ctx.next_seq()
                     self._queue.append(ne)
-
-        return True
 
     @staticmethod
     def _raise_if_cancelled(ctx) -> None:

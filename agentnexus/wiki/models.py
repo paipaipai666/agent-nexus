@@ -21,6 +21,19 @@ class SynthesisLevel(str, Enum):
     CROSS_REFERENCE = "cross_reference"
     SYNTHESIS = "synthesis"
 
+    @property
+    def trust_rank(self) -> int:
+        """Trust ordering: higher number = more trusted."""
+        return _SYNTHESIS_TRUST_RANK[self]
+
+
+_SYNTHESIS_TRUST_RANK = {
+    SynthesisLevel.DIRECT_QUOTE: 3,
+    SynthesisLevel.PARAPHRASE: 2,
+    SynthesisLevel.CROSS_REFERENCE: 1,
+    SynthesisLevel.SYNTHESIS: 0,
+}
+
 
 class ConfidenceLevel(str, Enum):
     """Page-level or statement-level confidence for query routing."""
@@ -29,6 +42,19 @@ class ConfidenceLevel(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
     UNTRUSTED = "untrusted"
+
+    @property
+    def trust_rank(self) -> int:
+        """Trust ordering: higher number = more trusted."""
+        return _CONFIDENCE_TRUST_RANK[self]
+
+
+_CONFIDENCE_TRUST_RANK = {
+    ConfidenceLevel.HIGH: 3,
+    ConfidenceLevel.MEDIUM: 2,
+    ConfidenceLevel.LOW: 1,
+    ConfidenceLevel.UNTRUSTED: 0,
+}
 
 
 class QueryDecision(str, Enum):

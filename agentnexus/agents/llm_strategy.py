@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from agentnexus.agents.react_types import CallingStrategy
+
+# Markers checked to detect whether the JSON format section is already appended
+# to the last message. The garbled twin is the mojibake form that can appear in
+# content corrupted by historical encoding damage; matching must cover BOTH
+# forms. Do NOT normalize the encoding here — that would change behavior.
+_JSON_SECTION_MARKER = "== 输出格式"
+_JSON_SECTION_MARKER_MOJIBAKE = "== 杈撳嚭鏍煎紡"
 
 
 def build_json_format_section() -> str:
@@ -19,23 +26,46 @@ def build_json_format_section() -> str:
     )
 
 
+_STRATEGY_RESULT = tuple[list[dict] | None, dict[str, str] | None]
+
+
+def _apply_native_tools(messages, tools, json_format_section) -> _STRATEGY_RESULT:
+    return tools, None
+
+
+def _apply_json_mode(messages, tools, json_format_section) -> _STRATEGY_RESULT:
+    return None, {"type": "json_object"}
+
+
+def _apply_prompt_json(messages, tools, json_format_section) -> _STRATEGY_RESULT:
+    last_msg = messages[-1]
+    section = json_format_section or build_json_format_section()
+    content = last_msg.get("content", "")
+    if _JSON_SECTION_MARKER not in content and _JSON_SECTION_MARKER_MOJIBAKE not in content:
+        last_msg["content"] += "\n\n" + section
+    return None, None
+
+
+def _apply_noop(messages, tools, json_format_section) -> _STRATEGY_RESULT:
+    return None, None
+
+
+_STRATEGY_APPLIERS: dict[CallingStrategy, Callable[..., _STRATEGY_RESULT]] = {
+    CallingStrategy.NATIVE_TOOLS: _apply_native_tools,
+    CallingStrategy.JSON_MODE: _apply_json_mode,
+    CallingStrategy.PROMPT_JSON: _apply_prompt_json,
+    CallingStrategy.PLAIN_TEXT: _apply_noop,
+}
+
+
 def prepare_llm_call(
     strategy: CallingStrategy,
     messages: list[dict],
     tools: list[dict],
     *,
     json_format_section: str | None = None,
-) -> tuple[list[dict] | None, dict[str, str] | None]:
-    if strategy == CallingStrategy.NATIVE_TOOLS:
-        return tools, None
-    if strategy == CallingStrategy.JSON_MODE:
-        return None, {"type": "json_object"}
-    if strategy == CallingStrategy.PROMPT_JSON:
-        last_msg = messages[-1]
-        section = json_format_section or build_json_format_section()
-        if "== 输出格式" not in last_msg.get("content", "") and "== 杈撳嚭鏍煎紡" not in last_msg.get("content", ""):
-            last_msg["content"] += "\n\n" + section
-    return None, None
+) -> _STRATEGY_RESULT:
+    return _STRATEGY_APPLIERS.get(strategy, _apply_noop)(messages, tools, json_format_section)
 
 
 def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,

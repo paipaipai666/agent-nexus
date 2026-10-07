@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from agentnexus.rag.models import SourceDocument
 
-from . import pdf as _pdf
 from .common import (
     _build_sectioned_document,
     _build_single_section_document,
@@ -18,43 +18,31 @@ from .html import _load_html, _StructuredHtmlParser
 from .json_loader import _load_json
 from .markdown import _load_markdown, _split_markdown_sections
 from .office import _load_docx, _load_xlsx
-from .pdf import _extract_pdf_page_text_with_ocr, fitz
+from .pdf import _extract_pdf_page_payload, _extract_pdf_page_text_with_ocr, _load_pdf, fitz
 from .text import _load_text
 
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".md", ".txt", ".html", ".htm", ".json", ".docx", ".xlsx"})
+
+_LOADERS: dict[str, Callable[[str], SourceDocument]] = {
+    ".pdf": _load_pdf,
+    ".md": _load_markdown,
+    ".html": _load_html,
+    ".htm": _load_html,
+    ".json": _load_json,
+    ".docx": _load_docx,
+    ".xlsx": _load_xlsx,
+}
 
 
 def load_document(file_path: str) -> str:
     return load_structured_document(file_path).raw_text
 
 
-def _extract_pdf_page_payload(page) -> dict[str, object]:
-    _pdf._extract_pdf_page_text_with_ocr = _extract_pdf_page_text_with_ocr
-    return _pdf._extract_pdf_page_payload(page)
-
-
-def _load_pdf(file_path: str) -> SourceDocument:
-    _pdf._extract_pdf_page_text_with_ocr = _extract_pdf_page_text_with_ocr
-    return _pdf._load_pdf(file_path)
-
-
 def load_structured_document(file_path: str) -> SourceDocument:
     ext = Path(file_path).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"不支持的文件格式: {ext}，支持: {SUPPORTED_EXTENSIONS}")
-    if ext == ".pdf":
-        return _load_pdf(file_path)
-    if ext == ".md":
-        return _load_markdown(file_path)
-    if ext in {".html", ".htm"}:
-        return _load_html(file_path)
-    if ext == ".json":
-        return _load_json(file_path)
-    if ext == ".docx":
-        return _load_docx(file_path)
-    if ext == ".xlsx":
-        return _load_xlsx(file_path)
-    return _load_text(file_path)
+    return _LOADERS.get(ext, _load_text)(file_path)
 
 
 __all__ = [

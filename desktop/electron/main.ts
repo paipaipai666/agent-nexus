@@ -314,25 +314,26 @@ ipcMain.handle('get-backend-status', () => ({
   port: BACKEND_PORT,
 }))
 // Workspace IPC
-ipcMain.handle('pick-directory', async () => {
+async function pickDialog(options: Electron.OpenDialogOptions): Promise<string[] | null> {
   if (!mainWindow) return null
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(mainWindow, options)
+  return result.canceled ? null : result.filePaths
+}
+
+ipcMain.handle('pick-directory', async () => {
+  const files = await pickDialog({
     title: '选择工作区文件夹',
     defaultPath: getProcessCwd(),
     properties: ['openDirectory', 'createDirectory'],
   })
-  return result.canceled ? null : (result.filePaths[0] ?? null)
+  return files?.[0] ?? null
 })
 
 // Chat attachments — local files are referenced by absolute path, never copied.
 ipcMain.handle('pick-files', async () => {
-  if (!mainWindow) return null
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: '选择附件',
-    properties: ['openFile', 'multiSelections'],
-  })
-  if (result.canceled) return null
-  return result.filePaths
+  const files = await pickDialog({ title: '选择附件', properties: ['openFile', 'multiSelections'] })
+  if (!files) return null
+  return files
     .filter(p => { try { return fs.statSync(p).isFile() } catch { return false } })
     .map(p => ({ path: p, name: path.basename(p), size: fs.statSync(p).size }))
 })
@@ -351,34 +352,43 @@ ipcMain.handle('stat-files', (_event, paths: string[]) => {
 
 ipcMain.handle('get-projects', () => loadStore())
 
-ipcMain.handle('add-project', (_, projectPath: string) => {
-  const store = loadStore()
-  if (typeof projectPath !== 'string' || !projectPath.trim()) return store
-  const resolved = path.resolve(projectPath.trim())
-  const key = projectKey(resolved)
-  store.projects = [resolved, ...store.projects.filter((p) => projectKey(p) !== key)]
-  store.lastProject = resolved
-  saveStore(store)
-  return store
-})
+// load → guard → mutate → persist → return updated store.
+function handleStoreUpdate<TArg>(
+  channel: string,
+  guard: (arg: TArg) => boolean,
+  mutate: (store: ProjectStore, arg: TArg) => void,
+): void {
+  ipcMain.handle(channel, (_event, arg: TArg) => {
+    const store = loadStore()
+    if (!guard(arg)) return store
+    mutate(store, arg)
+    saveStore(store)
+    return store
+  })
+}
 
-ipcMain.handle('remove-project', (_, projectPath: string) => {
-  const store = loadStore()
-  if (typeof projectPath !== 'string' || !projectPath) return store
-  const key = projectKey(projectPath)
-  store.projects = store.projects.filter((p) => projectKey(p) !== key)
-  if (store.lastProject && projectKey(store.lastProject) === key) {
-    store.lastProject = store.projects[0] ?? null
-  }
-  saveStore(store)
-  return store
-})
+handleStoreUpdate<string>('add-project',
+  (p) => typeof p === 'string' && p.trim().length > 0,
+  (store, p) => {
+    const resolved = path.resolve(p.trim())
+    const key = projectKey(resolved)
+    store.projects = [resolved, ...store.projects.filter((x) => projectKey(x) !== key)]
+    store.lastProject = resolved
+  })
 
-ipcMain.handle('set-last-project', (_, projectPath: string) => {
-  const store = loadStore()
-  if (typeof projectPath !== 'string' || !projectPath) return store
-  store.lastProject = projectPath
-  saveStore(store)
-  return store
-})
+handleStoreUpdate<string>('remove-project',
+  (p) => typeof p === 'string' && p !== '',
+  (store, p) => {
+    const key = projectKey(p)
+    store.projects = store.projects.filter((x) => projectKey(x) !== key)
+    if (store.lastProject && projectKey(store.lastProject) === key) {
+      store.lastProject = store.projects[0] ?? null
+    }
+  })
+
+handleStoreUpdate<string>('set-last-project',
+  (p) => typeof p === 'string' && p !== '',
+  (store, p) => {
+    store.lastProject = p
+  })
 
