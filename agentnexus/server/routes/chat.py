@@ -143,7 +143,7 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
     elif event_type == "run_persisted":
         return {"type": "done", "run_id": run_id, "seq": seq}
 
-    elif event_type in ("skill_auto_selected", "workflow_step"):
+    elif event_type in ("skill_auto_selected", "workflow_step", "subagent_event"):
         return {**payload, "type": event_type, "run_id": run_id, "seq": seq}
 
     return None
@@ -435,6 +435,19 @@ def list_todos(session_id: str):
         ],
         "count": len(items),
     }
+
+
+@router.get("/session/{session_id}/subagents")
+def list_subagents(session_id: str):
+    """Current/recent subagents of this session (in-memory registry)."""
+    from agentnexus.server.app import _get_runtime
+
+    runtime = _get_runtime()
+    try:
+        subagents = runtime.chat.list_subagents(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"session_id": session_id, "subagents": subagents}
 
 
 @router.get("/session/{session_id}/events")
@@ -794,6 +807,12 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                 if run_id:
                     chat.cancel_run(run_id)
                     await ws.send_json({"type": "cancelled", "run_id": run_id})
+
+            elif msg_type == "cancel_subagent":
+                sub_id = data.get("subagent_id", "")
+                if sub_id:
+                    chat.cancel_subagent(session_id, sub_id)
+                    await ws.send_json({"type": "subagent_cancel_requested", "subagent_id": sub_id})
 
             elif msg_type == "confirm":
                 approved = data.get("approved", False)

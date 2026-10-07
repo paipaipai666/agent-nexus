@@ -141,8 +141,9 @@ class ToolRegistry:
         # Lazily created per lane name; intentionally never shut down (same lifetime
         # as the registry, mirroring self._executor above).
         self._lane_pools: dict[str, ThreadPoolExecutor] = {}
-        from agentnexus.tools.confirm_bridge import CancelBridge
+        from agentnexus.tools.confirm_bridge import CancelBridge, SubagentBridge
         self.cancel_bridge = CancelBridge()
+        self.subagent_bridge = SubagentBridge()
         if jsonschema is None:
             logger.warning("jsonschema package not installed — tool parameter validation is disabled")
 

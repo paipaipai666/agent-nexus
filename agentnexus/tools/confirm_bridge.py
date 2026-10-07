@@ -54,3 +54,23 @@ class CancelBridge:
     def check(self) -> bool:
         """Return True when the parent run has been cancelled."""
         return bool(self._checker and self._checker())
+
+
+class SubagentBridge:
+    """Publish the active run's subagent context to subagent_run closures.
+
+    Same single-slot tradeoff as CancelBridge: sessions sharing one registry
+    share this slot — the last run to start wins (see the comment at
+    re_act_agent.py where cancel_bridge.set_checker runs). The context exposes
+    the run/session identity and the emit path the subagent tool forwards
+    child-agent events through.
+    """
+
+    def __init__(self):
+        self._ctx = None
+
+    def set_context(self, ctx) -> None:
+        self._ctx = ctx
+
+    def get_context(self):
+        return self._ctx

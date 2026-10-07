@@ -24,7 +24,8 @@ class SubagentToolProvider:
                 "（阅读、检索、归纳）；使用 executor 时可在受控条件下运行 Python 片段验证结果。"
                 "优先通过 task 和 allowed_tools 约束子代理范围。旧 role 值"
                 " reader/researcher/analyst 会映射到 explorer。返回结构化结果供父代理继续综合。"
-                "参数: task(必填), role(兼容字段,可选), allowed_tools(可选白名单), max_steps(默认4)。"
+                "参数: task(必填), role(兼容字段,可选), allowed_tools(可选白名单), max_steps(默认4),"
+                "name(可选，子代理显示名称，便于在界面中识别)。"
                 "[不适用] 简单单步任务(直接调用具体工具), 需要实时交互的任务。"
             ),
             make_subagent_run(
@@ -33,6 +34,7 @@ class SubagentToolProvider:
                 subagent_confirm=context.subagent_confirm,
                 mcp_manager=context.mcp_manager,
                 cancel_bridge=executor.cancel_bridge,
+                subagent_bridge=getattr(executor, "subagent_bridge", None),
             ),
             param_schema={
                 "type": "object",
@@ -45,6 +47,7 @@ class SubagentToolProvider:
                     },
                     "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []},
                     "max_steps": {"type": "integer", "default": 4},
+                    "name": {"type": "string", "description": "子代理显示名称（可选，如「竞品调研」）；留空自动生成"},
                 },
                 "required": ["task"],
             },

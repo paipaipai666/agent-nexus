@@ -33,6 +33,16 @@ interface QueuedMessage {
   attachments?: AttachmentRef[]
 }
 
+/** Live sidebar metadata for one subagent (trajectory lives on SubagentPage). */
+export interface SubagentMeta {
+  id: string
+  name: string
+  role: string
+  task: string
+  status: 'thinking' | 'tool_calling' | 'interrupted' | 'completed' | 'failed'
+  currentTool?: string
+}
+
 interface SessionState {
   sessionId: string
   messages: Message[]
@@ -61,6 +71,8 @@ interface SessionState {
   // Sidebar indicators (Phase 4)
   unreadCount: number
   pendingConfirm: boolean
+  // Subagent visibility — live metadata by subagent_id (Sidebar/InfoPanel)
+  subagents: Map<string, SubagentMeta>
   // Animation tracking
   animatedIds: Set<string>
   // Message queue
@@ -108,6 +120,7 @@ function createEmptySession(sessionId: string): SessionState {
     todoCount: 0,
     unreadCount: 0,
     pendingConfirm: false,
+    subagents: new Map(),
     animatedIds: new Set(),
     messageQueue: [],
   }
@@ -753,6 +766,31 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         // session-updated races that write and usually sees nothing —
         // this is the confirmation point (codex/opencode refresh here).
         window.dispatchEvent(new Event('session-updated'))
+      }),
+      // Subagent visibility: keep sidebar metadata (name/status/current tool)
+      // fresh. token/reasoning kinds are trajectory-only — the detail page
+      // subscribes to those; sidebar meta never changes on them.
+      wsPool.on(sid, 'subagent_event', (data) => {
+        const id = data?.subagent_id
+        if (!id) return
+        if (data.kind === 'token' || data.kind === 'reasoning') return
+        updateSession(sid, prev => {
+          const subs = new Map(prev.subagents)
+          const cur: SubagentMeta = subs.get(id) ?? {
+            id, name: data.name || id, role: '', task: '',
+            status: 'thinking' as const,
+          }
+          subs.set(id, {
+            ...cur,
+            name: data.name || cur.name,
+            role: data.role || cur.role,
+            task: data.kind === 'started' ? (data.task || cur.task) : cur.task,
+            status: data.status || cur.status,
+            currentTool: data.kind === 'tool_call' ? data.tool_name
+              : (data.status === 'tool_calling' ? cur.currentTool : undefined),
+          })
+          return { ...prev, subagents: subs }
+        })
       }),
       wsPool.on(sid, 'confirm_request', (data) => {
         updateSession(sid, prev => ({

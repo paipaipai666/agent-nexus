@@ -52,6 +52,20 @@ export interface TimelineEvent {
   payload: Record<string, unknown>
 }
 
+// ── Subagent visibility types ───────────────────────────────────────────
+export interface SubagentInfo {
+  subagent_id: string
+  name: string
+  role: string
+  task: string
+  status: 'thinking' | 'tool_calling' | 'interrupted' | 'completed' | 'failed'
+  current_tool: string
+  started_at: number
+  finished_at: number | null
+  steps_used: number
+  error: string
+}
+
 // ── LLM provider profile types ──────────────────────────────────────────
 /** Opaque capability override — YAML/advanced only, never edited in the UI.
  *  Round-tripped on save so UI edits don't wipe config.yaml overrides. */
@@ -190,6 +204,12 @@ export const api = {
   getTodos: (sessionId: string) =>
     request<{ items: Array<{ id: number; description: string; status: string }>; count: number }>(
       `/api/session/${sessionId}/todos`
+    ),
+
+  // Subagents (visibility)
+  getSubagents: (sessionId: string) =>
+    request<{ session_id: string; subagents: SubagentInfo[] }>(
+      `/api/session/${sessionId}/subagents`
     ),
 
   // Timeline (observability)

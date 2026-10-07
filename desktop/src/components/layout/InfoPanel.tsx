@@ -1,7 +1,28 @@
 import { useState, useEffect } from 'react'
-import { ChevronDown, ChevronRight, CheckCircle, Circle, Clock, Wrench, Server, Zap, ListTodo, PanelRightOpen, PanelRightClose } from 'lucide-react'
-import { api } from '../../services/api'
+import { useNavigate } from 'react-router-dom'
+import { ChevronDown, ChevronRight, CheckCircle, Circle, Clock, Wrench, Server, Zap, ListTodo, PanelRightOpen, PanelRightClose, Bot, Square } from 'lucide-react'
+import { api, type SubagentInfo } from '../../services/api'
+import { wsPool } from '../../services/ws'
 import { useUIStore } from '../../services/ui'
+import { useSession, type SubagentMeta } from '../session/SessionManager'
+
+const SUBAGENT_STATUS_LABEL: Record<string, string> = {
+  thinking: '思考中',
+  tool_calling: '调用工具中',
+  interrupted: '已中断',
+  completed: '已完成',
+  failed: '失败',
+}
+
+const SUBAGENT_STATUS_COLOR: Record<string, string> = {
+  thinking: 'var(--amber)',
+  tool_calling: 'var(--blue)',
+  interrupted: 'var(--red)',
+  completed: 'var(--green)',
+  failed: 'var(--red)',
+}
+
+const SUBAGENT_ACTIVE: Record<string, true> = { thinking: true, tool_calling: true }
 
 interface Todo {
   id: number
@@ -26,9 +47,15 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
   const [todos, setTodos] = useState<Todo[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
+  // Subagents: REST hydrates on mount/session switch (covers reload mid-run);
+  // live updates arrive via subagent_event into SessionManager's store.
+  const [restSubagents, setRestSubagents] = useState<SubagentInfo[]>([])
+  const navigate = useNavigate()
+  const { getLiveSessionState } = useSession()
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     todos: true,
     tools: true,
+    subagents: true,
   })
   const { infoPanelCollapsed, toggleInfoPanel } = useUIStore()
 
@@ -39,6 +66,7 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
       api.getTodos(sessionId).then(d => setTodos(d.items || [])).catch(() => {})
       api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
       api.getMcpStatus().then(d => setMcpServers(d.servers || [])).catch(() => {})
+      api.getSubagents(sessionId).then(d => setRestSubagents(d.subagents || [])).catch(() => {})
     }
 
     fetchData()
@@ -55,12 +83,77 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
   const mcpToolCount = mcpServers.reduce((sum, s) => sum + s.tool_names.length, 0)
   const totalTools = mcpToolCount + enabledSkills.length
 
+  // Merge REST hydration with live store entries (store is fresher — wins on id).
+  const storeSubagents = (sessionId ? getLiveSessionState(sessionId)?.subagents : undefined)
+  const mergedSubagents = new Map<string, SubagentMeta>()
+  for (const s of restSubagents) {
+    mergedSubagents.set(s.subagent_id, {
+      id: s.subagent_id, name: s.name, role: s.role, task: s.task,
+      status: s.status, currentTool: s.current_tool,
+    })
+  }
+  if (storeSubagents) {
+    for (const [id, meta] of storeSubagents) mergedSubagents.set(id, meta)
+  }
+
   return (
     <InfoPanelCard
       totalTools={totalTools}
       collapsed={infoPanelCollapsed}
       onToggleCollapse={toggleInfoPanel}
     >
+      {/* Subagents */}
+      {mergedSubagents.size > 0 && (
+        <Section
+          title={`Subagents (${mergedSubagents.size})`}
+          icon={<Bot size={14} />}
+          expanded={expandedSections.subagents}
+          onToggle={() => toggleSection('subagents')}
+        >
+          <div className="space-y-1">
+            {[...mergedSubagents.values()].map(s => {
+              const status = s.status
+              const active = status in SUBAGENT_ACTIVE
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors hover:bg-[var(--surface-2)]"
+                  style={{ background: 'var(--surface-3)' }}
+                  title={s.task || s.name}
+                  onClick={() => sessionId && navigate(`/chat/${sessionId}/subagent/${s.id}`)}
+                >
+                  <Bot size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  <span className="text-[12.5px] truncate" style={{ color: 'var(--fg)' }}>{s.name}</span>
+                  <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: SUBAGENT_STATUS_COLOR[status] || 'var(--fg-faint)' }}
+                      title={SUBAGENT_STATUS_LABEL[status] || status}
+                    />
+                    <span className="text-[11px]" style={{ color: SUBAGENT_STATUS_COLOR[status] || 'var(--fg-faint)' }}>
+                      {SUBAGENT_STATUS_LABEL[status] || status}
+                    </span>
+                    {active && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation()
+                          if (sessionId) wsPool.cancelSubagent(sessionId, s.id)
+                        }}
+                        className="p-0.5 rounded"
+                        style={{ color: 'var(--red)' }}
+                        title="中断该子代理"
+                      >
+                        <Square size={10} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+      )}
+
       {/* Todo List */}
       <Section
         title="Todo List"

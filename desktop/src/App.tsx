@@ -18,6 +18,7 @@ import AlertsPage from './pages/AlertsPage'
 import AuditPage from './pages/AuditPage'
 import EvalPage from './pages/EvalPage'
 import TimelinePage from './pages/TimelinePage'
+import SubagentPage from './pages/SubagentPage'
 import WikiPage from './pages/WikiPage'
 
 const DEFAULT_BACKEND_PORT = 18765
@@ -57,6 +58,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<ChatPage />} />
             <Route path="/chat/:sessionId/timeline" element={<TimelinePage />} />
+            <Route path="/chat/:sessionId/subagent/:subagentId" element={<SubagentPage />} />
             <Route path="/chat/:sessionId" element={<ChatPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/knowledge" element={<KnowledgePage />} />

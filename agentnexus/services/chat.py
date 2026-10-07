@@ -19,6 +19,7 @@ from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.plan_mode import PlanModeBinding, PlanModeManager
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.observability.timeline import get_timeline_store
+from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
 from agentnexus.services.turn import TurnRecord, TurnRuntime
 
 if TYPE_CHECKING:
@@ -209,6 +210,11 @@ class ChatService:
         # (chat._get_or_create_memory) — restored via restore_session_stm().
         # Per-session plan-mode switches (in-memory; reset on server restart).
         self._plan_mode = PlanModeManager()
+        # Subagent visibility: entries live for the process (same as _turns).
+        self._subagents = SubagentRegistry()
+        # _put_event is now called from dispatcher lane-pool threads too
+        # (subagent child events) — serialize seq assignment + queue puts.
+        self._put_event_lock = threading.Lock()
         # Per-session thinking-effort override: "none"|"low"|"medium"|"high" or
         # None = follow Settings default (model_thinking_effort).
         self._thinking_effort: dict[str, str | None] = {}
@@ -351,27 +357,37 @@ class ChatService:
                 if not processing:
                     self._processing_sessions.clear()
 
-    def _put_event(self, run_id: str, event: AgentEvent) -> None:
-        """Put event into both sync and async queues."""
+    def _put_event(self, run_id: str, event: AgentEvent, persist: bool = True) -> None:
+        """Put event into both sync and async queues (thread-safe).
+
+        `persist=False` skips the timeline write — used for high-volume
+        subagent token/reasoning streams, mirroring `_SKIP_TYPES` (main-agent
+        stream_token events are likewise not persisted). The SQLite write
+        stays OUTSIDE the seq/queue lock: a slow commit must never stall
+        other producers behind the lock.
+        """
         if event is not None:
-            seq = self._run_event_seq.get(run_id, 0) + 1
-            self._run_event_seq[run_id] = seq
-            # frozen dataclass — assign via object.__setattr__
-            object.__setattr__(event, "seq", seq)
+            with self._put_event_lock:
+                seq = self._run_event_seq.get(run_id, 0) + 1
+                self._run_event_seq[run_id] = seq
+                # frozen dataclass — assign via object.__setattr__
+                object.__setattr__(event, "seq", seq)
             # Timeline persistence — observability never blocks the loop.
-            try:
-                get_timeline_store().record_event(
-                    event.session_id, run_id, seq, event.type,
-                    event.payload, step_id=event.step_id,
-                )
-            except Exception as e:
-                logger.debug("Timeline persist failed: %s", e)
-        sync_q = self._run_events.get(run_id)
-        if sync_q is not None and not _enqueue_bounded(sync_q, event):
-            self._count_dropped(run_id)
-        async_q = self._async_run_events.get(run_id)
-        if async_q is not None and not _enqueue_bounded(async_q, event):
-            self._count_dropped(run_id)
+            if persist:
+                try:
+                    get_timeline_store().record_event(
+                        event.session_id, run_id, seq, event.type,
+                        event.payload, step_id=event.step_id,
+                    )
+                except Exception as e:
+                    logger.debug("Timeline persist failed: %s", e)
+        with self._put_event_lock:
+            sync_q = self._run_events.get(run_id)
+            if sync_q is not None and not _enqueue_bounded(sync_q, event):
+                self._count_dropped(run_id)
+            async_q = self._async_run_events.get(run_id)
+            if async_q is not None and not _enqueue_bounded(async_q, event):
+                self._count_dropped(run_id)
 
     def _count_dropped(self, run_id: str) -> None:
         n = self._dropped_events.get(run_id, 0) + 1
@@ -381,6 +397,41 @@ class ChatService:
                 "Event queue full for %s; evicted oldest events (%d so far) — consumer gone?",
                 run_id, n,
             )
+
+    # ── Subagent visibility ───────────────────────────────────────
+
+    def _subagent_emit(self, entry, kind: str, status: str | None = None,
+                       **fields) -> None:
+        """Update registry state and forward a child-agent event into the
+        parent run's queue as a `subagent_event` AgentEvent."""
+        updates = {}
+        if status is not None:
+            updates["status"] = status
+        if kind == "tool_call":
+            updates["current_tool"] = fields.get("tool_name", "")
+        if kind == "finished":
+            updates["steps_used"] = fields.get("steps_used", 0)
+            updates["error"] = fields.get("error", "")
+        if updates:
+            self._subagents.update(entry, **updates)
+        # Token/reasoning streams are high-volume and meaningless per-row in
+        # the timeline — live-only, exactly like main-agent _SKIP_TYPES.
+        self._put_event(entry.run_id, AgentEvent(
+            "subagent_event",
+            {"subagent_id": entry.subagent_id, "name": entry.name,
+             "kind": kind, "status": entry.status, **fields},
+            run_id=entry.run_id, session_id=entry.session_id,
+        ), persist=kind not in ("token", "reasoning"))
+
+    def cancel_subagent(self, session_id: str, subagent_id: str) -> bool:
+        entry = self._subagents.get(subagent_id)
+        if entry is None or entry.session_id != session_id:
+            return False
+        return self._subagents.cancel(subagent_id)
+
+    def list_subagents(self, session_id: str) -> list[dict]:
+        return [SubagentRegistry.to_dict(e)
+                for e in self._subagents.list_for_session(session_id)]
 
     def _evaluate_run_alerts(self) -> None:
         """Feed recent run metrics into the alert pipeline (non-fatal)."""
@@ -463,6 +514,13 @@ class ChatService:
             on_run_started(run)
         old_on_event = getattr(agent, "_on_event", None)
         old_output = getattr(agent, "_output", None)
+        # Publish the subagent visibility context for the duration of this run
+        # so subagent_run closures (lane-pool threads) can attribute and
+        # forward child-agent events. Single slot, same tradeoff as
+        # CancelBridge — the last run to start wins.
+        subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
+        if subagent_bridge is not None:
+            subagent_bridge.set_context(SubagentRunContext(self, session_id, run.id))
         try:
             if self._capability_runtime is not None:
                 self._capability_runtime.refresh_if_stale()
@@ -591,6 +649,8 @@ class ChatService:
                 ))
             raise
         finally:
+            if subagent_bridge is not None:
+                subagent_bridge.set_context(None)
             current_workspace.reset(_ws_token)
             unregister_attachment_paths(attach_paths)
             self.mark_processing(False, session_id=session_id)
