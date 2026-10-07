@@ -16,6 +16,10 @@ import json
 import logging
 from typing import Any
 
+from agentnexus.core.config import get_settings
+from agentnexus.memory.versioned import ConversationVersionManager
+from agentnexus.rag.embeddings import embedding_to_list
+
 logger = logging.getLogger(__name__)
 
 _REFLECTION_PROMPT = """\
@@ -135,8 +139,7 @@ def run_reflection(
 
         # Semantic dedup against LTM: skip if the pattern is already stored
         try:
-            raw = embed_model.encode(content, normalize_embeddings=True)
-            vec = raw.tolist() if hasattr(raw, "tolist") else list(raw)
+            vec = embedding_to_list(embed_model.encode(content, normalize_embeddings=True))
         except Exception:
             vec = []
         if vec:
@@ -148,7 +151,7 @@ def run_reflection(
         # Project-scope proposals need a workspace: take it from the source notes' sessions
         workspace_path = ""
         if scope == "project":
-            workspace_path = _workspace_for_memories(long_term, memories) or ""
+            workspace_path = _workspace_for_memories(memories) or ""
             if not workspace_path:
                 scope = "user"  # can't place it — fall back to user review
 
@@ -175,19 +178,10 @@ def run_reflection(
     return result
 
 
-def _workspace_for_memories(long_term: Any, memories: list[dict]) -> str | None:
+def _workspace_for_memories(memories: list[dict]) -> str | None:
     """Resolve the workspace owning the source memories (same SQLite db)."""
     session_ids = [m.get("session_id") for m in memories if m.get("session_id")]
     if not session_ids:
         return None
-    placeholders = ",".join("?" for _ in session_ids)
-    try:
-        row = long_term._conn.execute(
-            f"SELECT workspace_path, MAX(updated_at) AS latest "
-            f"FROM conversation_sessions WHERE session_id IN ({placeholders}) "
-            f"AND workspace_path != '' GROUP BY workspace_path ORDER BY latest DESC LIMIT 1",
-            session_ids,
-        ).fetchone()
-    except Exception:
-        return None
-    return row["workspace_path"] if row else None
+    return ConversationVersionManager.latest_workspace_for_sessions(
+        get_settings().memory_db_path, session_ids)

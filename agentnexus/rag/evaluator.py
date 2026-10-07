@@ -473,6 +473,16 @@ class RAGEvaluator:
     # Keeps full_ranked intact for hit_rate/MRR computation.
     RELEVANCE_FILTER_THRESHOLD = 0.35
 
+    def _filter_and_budget(
+        self, pairs: list[tuple[str, float]], full_ranked: list[str], max_tokens: int,
+    ) -> tuple[list[str], list[str]]:
+        """Shared retrieval tail: threshold-filter, fall back to the first
+        candidate, then fit the token budget."""
+        filtered = [text for text, score in pairs if score >= self.RELEVANCE_FILTER_THRESHOLD]
+        if not filtered:
+            filtered = [pairs[0][0]] if pairs else []
+        return full_ranked, _fit_token_budget(filtered, max_tokens)
+
     def _retrieve(
         self, query, retriever, use_hybrid, max_tokens: int,
         min_score: float = 0.3, top_k: int = 10,
@@ -488,25 +498,17 @@ class RAGEvaluator:
         if not use_hybrid:
             raw = search(query, limit=top_k, namespace="eval")
             full_ranked = [r["text"] for r in raw]
-            # Filter: keep only chunks with score above threshold for generation
-            filtered = [r["text"] for r in raw if r.get("score", 0) >= self.RELEVANCE_FILTER_THRESHOLD]
-            if not filtered:
-                filtered = full_ranked[:1] if full_ranked else []
-            return full_ranked, _fit_token_budget(filtered, max_tokens)
+            # Dense branch pairs raw chroma text with the raw chroma score.
+            pairs = [(r["text"], r.get("score", 0)) for r in raw]
+            return self._filter_and_budget(pairs, full_ranked, max_tokens)
         dense_results = search(query, limit=top_k * 2, namespace="eval")
         dense = [(r["id"], r["score"]) for r in dense_results]
         results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
         full_ranked = [r.text for r in results]
         expanded = retriever.expand_contexts(results) if hasattr(retriever, "expand_contexts") else results
-        expanded_contexts = [result_display_text(r) for r in expanded]
-        # Filter by relevance score for generation context
-        filtered = [
-            result_display_text(r) for r in expanded
-            if getattr(r, "score", 0) >= self.RELEVANCE_FILTER_THRESHOLD
-        ]
-        if not filtered:
-            filtered = expanded_contexts[:1] if expanded_contexts else []
-        return full_ranked, _fit_token_budget(filtered, max_tokens)
+        # Hybrid branch pairs expanded display text with the result objects' scores.
+        pairs = [(result_display_text(r), getattr(r, "score", 0)) for r in expanded]
+        return self._filter_and_budget(pairs, full_ranked, max_tokens)
 
     def _generate_answer(self, question: str, contexts: list[str], _timeout: int = 0) -> str:
         ctx = "\n---\n".join(contexts)

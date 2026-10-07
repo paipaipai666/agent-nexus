@@ -545,6 +545,68 @@ class ConversationVersionManager:
         finally:
             conn.close()
 
+    @classmethod
+    def session_exists(cls, db_path: str, session_id: str) -> bool:
+        """Return True when a row exists in conversation_sessions for the session."""
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    @classmethod
+    def delete_session(cls, db_path: str, session_id: str) -> None:
+        """Cascade-delete every per-session table row for a session.
+
+        Timeline tables are created lazily by their stores — skip when absent.
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            existing = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ("conversation_messages", "conversation_checkpoints",
+                          "conversation_sessions", "session_events",
+                          "context_snapshots", "session_todos"):
+                if table in existing:
+                    conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def latest_workspace_for_sessions(cls, db_path: str, session_ids: list[str]) -> str | None:
+        """Most recently updated non-empty workspace across the given sessions."""
+        if not session_ids:
+            return None
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            placeholders = ",".join("?" for _ in session_ids)
+            try:
+                row = conn.execute(
+                    f"SELECT workspace_path, MAX(updated_at) AS latest "
+                    f"FROM conversation_sessions WHERE session_id IN ({placeholders}) "
+                    f"AND workspace_path != '' GROUP BY workspace_path ORDER BY latest DESC LIMIT 1",
+                    session_ids,
+                ).fetchone()
+            except Exception:
+                return None
+            return row["workspace_path"] if row else None
+        finally:
+            conn.close()
+
     def undo(self) -> dict | None:
         """Move HEAD to parent checkpoint. Returns the new current checkpoint, or None."""
         with self._lock:

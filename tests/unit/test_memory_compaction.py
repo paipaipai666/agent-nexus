@@ -1,15 +1,12 @@
 import time
 from unittest.mock import MagicMock
 
+from agentnexus.core.pii import _contains_pii
 from agentnexus.memory.circuit_breaker import CircuitBreaker
-from agentnexus.memory.compaction_engine import CompactionEngine
+from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
+from agentnexus.memory.compaction_engine import CompactionEngine, _extract_xml_tag
 from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
-from agentnexus.memory.manager import (
-    MemoryManager,
-    _contains_pii,
-    _extract_xml_tag,
-    _parse_tool_message,
-)
+from agentnexus.memory.manager import MemoryManager
 from agentnexus.memory.projection import project_aggressive, project_mild
 from agentnexus.memory.short_term import ShortTermMemory
 

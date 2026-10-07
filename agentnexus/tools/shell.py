@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import unicodedata
 from pathlib import Path
+from typing import Protocol
 
 from agentnexus.core.config import get_settings
 from agentnexus.tools import process_tracker
@@ -115,16 +116,12 @@ def shell_exec(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     try:
         if backend == "disabled":
             result = "[blocked] Shell execution is disabled by shell_execution_backend=disabled."
-        elif backend == "auto":
-            result = _execute_shell_auto(command, work_dir, settings, timeout_sec)
-        elif backend == "native":
-            result = _execute_shell_native(command, work_dir, timeout_sec)
-        elif backend == "docker":
-            result = _execute_shell_docker(command, work_dir, settings, timeout_sec)
-        elif backend == "local_unsafe":
-            result = _execute_shell_locally(command, work_dir, timeout_sec)
         else:
-            result = _shell_unavailable_message([f"{backend}: unsupported backend"])
+            impl = _BACKENDS.get(backend)
+            if impl is None:
+                result = _shell_unavailable_message([f"{backend}: unsupported backend"])
+            else:
+                result = impl.execute(command, work_dir, timeout_sec, settings)
     except subprocess.TimeoutExpired:
         result = f"错误: 命令超时 (>{timeout_sec}秒): {command[:200]}"
     except FileNotFoundError:
@@ -147,26 +144,152 @@ def shell_exec(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     return result
 
 
+class SandboxBackend(Protocol):
+    """One named shell execution strategy (sandbox backend).
+
+    `available()` is host introspection: it returns why the backend cannot
+    run here, or None when it can. The execution paths keep the original
+    try/except degradation semantics and do not pre-check `available()`.
+    """
+
+    def available(self) -> str | None:
+        """Return the reason this backend is unusable on this host, or None."""
+        ...
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        """Run `command`; raise ShellSandboxUnavailable when unusable here."""
+        ...
+
+
+class _BubblewrapBackend:
+    """Linux bubblewrap sandbox."""
+
+    def available(self) -> str | None:
+        if _SYSTEM != "Linux":
+            return f"unsupported OS: {_SYSTEM}"
+        if not (shutil.which("bwrap") or shutil.which("bubblewrap")):
+            return "bubblewrap is not installed"
+        return None
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_bubblewrap(command, work_dir, timeout_sec)
+
+
+class _SeatbeltBackend:
+    """macOS sandbox-exec (Seatbelt)."""
+
+    def available(self) -> str | None:
+        if _SYSTEM != "Darwin":
+            return f"unsupported OS: {_SYSTEM}"
+        if not shutil.which("sandbox-exec"):
+            return "macOS sandbox-exec/Seatbelt is not available"
+        return None
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_seatbelt(command, work_dir, timeout_sec)
+
+
+class _WindowsNativeBackend:
+    """Windows restricted-token + Low-IL sandbox (Win32 via ctypes)."""
+
+    def available(self) -> str | None:
+        if _SYSTEM != "Windows":
+            return f"unsupported OS: {_SYSTEM}"
+        return None
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_windows_native(command, work_dir, timeout_sec)
+
+
+class _DockerBackend:
+    """Docker container sandbox."""
+
+    def available(self) -> str | None:
+        docker = shutil.which("docker")
+        if not docker:
+            return "Docker CLI is not installed or not on PATH"
+        daemon_ok, daemon_err = _docker_daemon_available(docker)
+        if not daemon_ok:
+            return f"docker daemon unavailable: {daemon_err}"
+        return None
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_docker(command, work_dir, settings, timeout_sec)
+
+
+class _LocalUnsafeBackend:
+    """Unsandboxed local execution (last resort, always applicable)."""
+
+    def available(self) -> str | None:
+        return None
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_locally(command, work_dir, timeout_sec)
+
+
+_BUBBLEWRAP_BACKEND = _BubblewrapBackend()
+_SEATBELT_BACKEND = _SeatbeltBackend()
+_WINDOWS_NATIVE_BACKEND = _WindowsNativeBackend()
+
+
+class _NativeBackend:
+    """OS-native sandbox: dispatches to the backend matching the host OS."""
+
+    def _os_backend(self) -> SandboxBackend:
+        if _SYSTEM == "Linux":
+            return _BUBBLEWRAP_BACKEND
+        if _SYSTEM == "Darwin":
+            return _SEATBELT_BACKEND
+        if _SYSTEM == "Windows":
+            return _WINDOWS_NATIVE_BACKEND
+        raise ShellSandboxUnavailable(f"unsupported OS: {_SYSTEM}")
+
+    def available(self) -> str | None:
+        try:
+            return self._os_backend().available()
+        except ShellSandboxUnavailable as e:
+            return str(e)
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_native(command, work_dir, timeout_sec)
+
+
+class _AutoBackend:
+    """auto chain: native sandbox, then docker, then warned local fallback."""
+
+    def available(self) -> str | None:
+        return None  # always degrades to local fallback
+
+    def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
+        return _execute_shell_auto(command, work_dir, settings, timeout_sec)
+
+
+_BACKENDS: dict[str, SandboxBackend] = {
+    "auto": _AutoBackend(),
+    "native": _NativeBackend(),
+    "docker": _DockerBackend(),
+    "local_unsafe": _LocalUnsafeBackend(),
+}
+
+# Ordered degradation chain for backend="auto". Resolution happens at call
+# time through each adapter, so module-level monkeypatching keeps working.
+_AUTO_CHAIN: tuple[tuple[str, SandboxBackend], ...] = (
+    ("native", _BACKENDS["native"]),
+    ("docker", _BACKENDS["docker"]),
+)
+
+
 def _execute_shell_auto(command: str, work_dir: str, settings, timeout_sec: int) -> str:
     failures: list[str] = []
-
-    try:
-        return _execute_shell_native(command, work_dir, timeout_sec)
-    except subprocess.TimeoutExpired:
-        raise
-    except ShellSandboxUnavailable as e:
-        failures.append(f"native: {e}")
-    except Exception as e:
-        failures.append(f"native: {e}")
-
-    try:
-        return _execute_shell_docker(command, work_dir, settings, timeout_sec)
-    except subprocess.TimeoutExpired:
-        raise
-    except ShellSandboxUnavailable as e:
-        failures.append(f"docker: {e}")
-    except Exception as e:
-        failures.append(f"docker: {e}")
+    for name, backend in _AUTO_CHAIN:
+        try:
+            return backend.execute(command, work_dir, timeout_sec, settings)
+        except subprocess.TimeoutExpired:
+            raise
+        except ShellSandboxUnavailable as e:
+            failures.append(f"{name}: {e}")
+        except Exception as e:
+            failures.append(f"{name}: {e}")
 
     return _execute_shell_locally_with_warning(command, work_dir, timeout_sec, failures)
 

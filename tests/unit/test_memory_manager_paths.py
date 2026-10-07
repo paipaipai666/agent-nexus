@@ -141,7 +141,7 @@ class TestWriteTranscript:
         mm.short_term.append("user", "hello")
         mm.short_term.append("assistant", "world")
 
-        mm._write_transcript()
+        mm._engine._write_transcript()
 
         transcript_dir = Path(mm._engine.transcript_dir)
         jsonl_files = list(transcript_dir.glob("*.jsonl"))

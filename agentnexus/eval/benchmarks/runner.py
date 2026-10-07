@@ -132,7 +132,9 @@ class BenchmarkIndex:
                 self._bm25_source = None  # release tokenized corpus memory
             fused_ranked: list[list[str]] = []
             for query, dense_ranking in zip(queries, dense_ranked, strict=True):
-                dense_scores = [(doc_id, 1.0 / (60 + rank + 1)) for rank, doc_id in enumerate(dense_ranking)]
+                # reciprocal_rank_fusion consumes rank order only (it re-derives
+                # 1/(k+rank+1), k=60, itself), so the score field is a placeholder.
+                dense_scores = [(doc_id, 0.0) for doc_id in dense_ranking]
                 sparse_scores = self._bm25.search(query, top_k=depth)
                 fused = _ranking.reciprocal_rank_fusion(dense_scores, sparse_scores, k=60)
                 fused_ranked.append(

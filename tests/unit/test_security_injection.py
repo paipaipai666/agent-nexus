@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentnexus.memory.manager import _contains_pii, _mask_pii
+from agentnexus.core.pii import _contains_pii, _mask_pii
 from agentnexus.tools.file_ops import _resolve_safe, file_list, file_read
 from agentnexus.tools.memory_save import memory_save
 from agentnexus.tools.shell import _check_blacklist, shell_exec

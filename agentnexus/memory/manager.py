@@ -16,10 +16,7 @@ from pathlib import Path
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
-from agentnexus.core.pii import contains_pii as _contains_pii  # noqa: F401  (re-export)
-from agentnexus.core.pii import mask_pii as _mask_pii  # noqa: F401  (re-export)
-from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message  # noqa: F401  (re-export)
-from agentnexus.memory.compaction_engine import CompactionEngine, _extract_xml_tag  # noqa: F401  (re-export)
+from agentnexus.memory.compaction_engine import CompactionEngine
 from agentnexus.memory.extraction import CATEGORY_LABELS
 from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 from agentnexus.memory.long_term import get_long_term_memory
@@ -72,35 +69,33 @@ class MemoryManager:
     # ── Compaction state properties (delegating to the engine) ───────
 
     @property
-    def ctx_max(self) -> int:
-        return self._engine.ctx_max
-
-    @ctx_max.setter
-    def ctx_max(self, value: int) -> None:
-        self._engine.ctx_max = value
-
-    @property
     def compact_threshold(self) -> int:
+        """Compaction token threshold. Assignment writes through to the engine."""
         return self._engine.compact_threshold
 
     @compact_threshold.setter
     def compact_threshold(self, value: int) -> None:
+        """Set the engine's compaction threshold (mutates engine state, not manager state)."""
         self._engine.compact_threshold = value
 
     @property
     def on_compact(self):
+        """Compact-event callback. Assignment writes through to the engine."""
         return self._engine.on_compact
 
     @on_compact.setter
     def on_compact(self, callback) -> None:
+        """Set the engine's compact-event callback (mutates engine state, not manager state)."""
         self._engine.on_compact = callback
 
     @property
     def on_after_compact(self):
+        """Post-compact callback. Assignment writes through to the engine."""
         return self._engine.on_after_compact
 
     @on_after_compact.setter
     def on_after_compact(self, callback) -> None:
+        """Set the engine's post-compact callback (mutates engine state, not manager state)."""
         self._engine.on_after_compact = callback
 
     def _resolve_ctx_max_async(self) -> None:
@@ -300,18 +295,6 @@ class MemoryManager:
 
     def bridge_read(self, filepath: str, content_preview: str = "") -> None:
         self._engine.bridge_read(filepath, content_preview)
-
-    def _fire_compact(self, event_type: str, **kwargs):
-        self._engine._fire_compact(event_type, **kwargs)
-
-    def _write_transcript(self):
-        self._engine._write_transcript()
-
-    def _restore_files(self):
-        self._engine._restore_files()
-
-    def _drain_to_ltm(self, messages: list[dict]):
-        self._engine._drain_to_ltm(messages)
 
     # ── Extraction delegates (see MemoryExtractionPipeline) ──────────
 

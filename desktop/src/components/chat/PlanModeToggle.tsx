@@ -2,10 +2,7 @@ import { ClipboardList } from 'lucide-react'
 import { api } from '../../services/api'
 import { planModeArm } from '../../services/planModeArm'
 import { useSessionOverride, type SessionOverrideConfig } from '../../hooks/useSessionOverride'
-
-interface PlanModeToggleProps {
-  sessionId: string | null
-}
+import { useSession } from '../session/SessionManager'
 
 const PLAN_MODE_OVERRIDE: SessionOverrideConfig<boolean, boolean> = {
   arm: planModeArm,
@@ -23,7 +20,8 @@ const PLAN_MODE_OVERRIDE: SessionOverrideConfig<boolean, boolean> = {
  *  Pre-session window (new chat defers session creation until the first
  *  message): the toggle stays clickable and stores an "armed" intent, which
  *  the session-creation path applies before the first message is sent. */
-export default function PlanModeToggle({ sessionId }: PlanModeToggleProps) {
+export default function PlanModeToggle() {
+  const { sessionId } = useSession()
   const { value: enabled, busy, commit } = useSessionOverride(sessionId, PLAN_MODE_OVERRIDE)
 
   const handleToggle = () => {

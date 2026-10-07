@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
 import { thinkingEffortArm } from '../../services/thinkingEffortArm'
 import { useSessionOverride, type SessionOverrideConfig } from '../../hooks/useSessionOverride'
+import { useSession } from '../session/SessionManager'
 
 export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'follow'
 
@@ -36,16 +37,13 @@ const LABELS: Record<ThinkingEffort, { en: string; cn: string; code: string }> =
 }
 const LEVEL_ORDER: ThinkingEffort[] = ['off', 'low', 'medium', 'high']
 
-interface Props {
-  sessionId: string | null
-}
-
 /** Thinking-effort chip + popover slider in the chat HUD.
  *
  *  Session override (none/low/medium/high) or follow Settings default.
  *  Mid-run switches apply on the next LLM call. Pre-session window stores
  *  an armed intent, mirroring PlanModeToggle. */
-export default function ThinkEffortControl({ sessionId }: Props) {
+export default function ThinkEffortControl() {
+  const { sessionId } = useSession()
   const { value: effort, busy, preview, commit } = useSessionOverride(sessionId, EFFORT_OVERRIDE)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)

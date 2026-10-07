@@ -20,6 +20,21 @@ def _get_version_manager():
     return vm
 
 
+def _restore_stm_from_checkpoint(result: dict) -> None:
+    """Restore the runtime STM from a checkpoint's stm_snapshot (legacy JSON checkpoints)."""
+    try:
+        from agentnexus.server.app import _get_runtime
+
+        runtime = _get_runtime()
+        snapshot = result.get("stm_snapshot", "")
+        if snapshot:
+            from agentnexus.memory.short_term import ShortTermMemory
+            restored = ShortTermMemory.from_json(snapshot)
+            runtime.memory_manager.short_term.restore(restored)
+    except Exception:
+        pass
+
+
 @router.get("/status")
 def version_status():
     vm = _get_version_manager()
@@ -39,19 +54,7 @@ def version_undo():
     result = vm.undo()
     if result is None:
         raise APIError(400, "bad_request", "Nothing to undo")
-    # Restore short-term memory from checkpoint snapshot
-    try:
-        from agentnexus.server.app import _get_runtime
-
-        runtime = _get_runtime()
-        snapshot = result.get("stm_snapshot", "")
-        if snapshot:
-            from agentnexus.memory.short_term import ShortTermMemory
-            restored = ShortTermMemory.from_json(snapshot)
-            runtime.memory_manager.short_term._messages = restored._messages
-            runtime.memory_manager.short_term._summary = restored._summary
-    except Exception:
-        pass
+    _restore_stm_from_checkpoint(result)
     return {"status": "undone", "checkpoint": result}
 
 
@@ -61,18 +64,7 @@ def version_redo():
     result = vm.redo()
     if result is None:
         raise APIError(400, "bad_request", "Nothing to redo")
-    try:
-        from agentnexus.server.app import _get_runtime
-
-        runtime = _get_runtime()
-        snapshot = result.get("stm_snapshot", "")
-        if snapshot:
-            from agentnexus.memory.short_term import ShortTermMemory
-            restored = ShortTermMemory.from_json(snapshot)
-            runtime.memory_manager.short_term._messages = restored._messages
-            runtime.memory_manager.short_term._summary = restored._summary
-    except Exception:
-        pass
+    _restore_stm_from_checkpoint(result)
     return {"status": "redone", "checkpoint": result}
 
 

@@ -299,48 +299,33 @@ def delete_sessions(req: DeleteSessionsRequest, runtime=Depends(get_runtime)):
     Sessions with a run in flight are skipped, not killed.
     """
     from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
 
     settings = get_settings()
     chat = runtime.chat
+    db_path = settings.memory_db_path
 
     deleted: list[str] = []
     skipped: list[str] = []
-    import sqlite3
-    conn = sqlite3.connect(settings.memory_db_path)
-    try:
-        existing = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        for sid in req.session_ids:
-            known = sid in chat._sessions
-            if not known and "conversation_sessions" in existing:
-                known = conn.execute(
-                    "SELECT 1 FROM conversation_sessions WHERE session_id = ?",
-                    (sid,)).fetchone() is not None
-            if not known:
-                continue  # no such session — nothing to delete
-            if chat.is_session_processing(sid):
-                skipped.append(sid)
-                continue
-            # In-memory: agent/memory/token state + handle + version manager + run artifacts
-            chat.delete_session(sid)
-            chat._sessions.pop(sid, None)
-            chat._version_managers.pop(sid, None)
-            last_run = chat._session_last_run.pop(sid, None)
-            if last_run:
-                for attr in ("_run_events", "_async_run_events", "_turns",
-                             "_run_event_seq", "_run_token_seq", "_run_snapshots"):
-                    getattr(chat, attr).pop(last_run, None)
-            # Database: cascade every per-session table (timeline tables are
-            # created lazily by TimelineStore — skip when absent)
-            for table in ("conversation_messages", "conversation_checkpoints",
-                          "conversation_sessions", "session_events",
-                          "context_snapshots", "session_todos"):
-                if table in existing:
-                    conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (sid,))
-            conn.commit()
-            deleted.append(sid)
-    finally:
-        conn.close()
+    for sid in req.session_ids:
+        known = sid in chat._sessions or ConversationVersionManager.session_exists(db_path, sid)
+        if not known:
+            continue  # no such session — nothing to delete
+        if chat.is_session_processing(sid):
+            skipped.append(sid)
+            continue
+        # In-memory: agent/memory/token state + handle + version manager + run artifacts
+        chat.delete_session(sid)
+        chat._sessions.pop(sid, None)
+        chat._version_managers.pop(sid, None)
+        last_run = chat._session_last_run.pop(sid, None)
+        if last_run:
+            for attr in ("_run_events", "_async_run_events", "_turns",
+                         "_run_event_seq", "_run_token_seq", "_run_snapshots"):
+                getattr(chat, attr).pop(last_run, None)
+        # Database: cascade every per-session table
+        ConversationVersionManager.delete_session(db_path, sid)
+        deleted.append(sid)
     return {"deleted": deleted, "skipped": skipped, "count": len(deleted)}
 
 

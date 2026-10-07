@@ -295,6 +295,18 @@ class ShortTermMemory:
             if self._wal_path:
                 self._flush_wal()
 
+    def restore(self, other: "ShortTermMemory") -> None:
+        """Replace messages/summary from another STM instance (checkpoint undo/redo).
+
+        Mirrors the legacy direct private-field assignment: the deque is
+        replaced (not copied), and the incremental token counter is
+        intentionally left untouched — it stays stale until the next
+        structural rewrite recalculates it.
+        """
+        with self._lock:
+            self._messages = other._messages
+            self._summary = other._summary
+
     def clear(self):
         with self._lock:
             self._messages.clear()

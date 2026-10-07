@@ -624,6 +624,28 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
     _retriever = retriever
 
 
+def _expand_rag_queries(query: str) -> tuple[list[str], str]:
+    """Query-variant stage: multi-query expansion + hypothetical document (HyDE)."""
+    return expand_queries(query), generate_hypothetical_document(query)
+
+
+def _fuse_dense_candidates(
+    queries: list[str], hypothetical_document: str, namespace: str,
+) -> list[tuple[str, float]]:
+    """Dense stage: RRF-pre-fuse per-query Chroma hits, plus the HyDE hit."""
+    fused: dict[str, float] = {}
+    for search_query in queries:
+        hits = chroma_search(search_query, limit=10, namespace=namespace)
+        for rank, item in enumerate(hits):
+            fused[item["id"]] = fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
+    if hypothetical_document:
+        hyde_hits = chroma_search(hypothetical_document, limit=10, namespace=namespace)
+        # HyDE weight reduced from 0.8 to 0.5 to mitigate hallucination bias
+        for rank, item in enumerate(hyde_hits):
+            fused[item["id"]] = fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
+    return sorted(fused.items(), key=lambda x: x[1], reverse=True)
+
+
 @trace_span("rag_search", lambda query, namespace="default": {"query": query[:200]})
 def search_knowledge_base(query: str, namespace: str = "default") -> str:
     from agentnexus.core.hooks import HookType, get_hook_manager
@@ -639,19 +661,8 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
     should_load_reranker = _retriever_reranker_requested.get(namespace, True)
     if should_load_reranker and retriever._reranker is None:
         retriever.load_reranker()
-    queries = expand_queries(query)
-    hypothetical_document = generate_hypothetical_document(query)
-    dense_fused: dict[str, float] = {}
-    for search_query in queries:
-        dense_results = chroma_search(search_query, limit=10, namespace=namespace)
-        for rank, item in enumerate(dense_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
-    if hypothetical_document:
-        hyde_results = chroma_search(hypothetical_document, limit=10, namespace=namespace)
-        # HyDE weight reduced from 0.8 to 0.5 to mitigate hallucination bias
-        for rank, item in enumerate(hyde_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
-    dense_results = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
+    queries, hypothetical_document = _expand_rag_queries(query)
+    dense_results = _fuse_dense_candidates(queries, hypothetical_document, namespace)
     if not dense_results:
         return "未找到相关知识。"
     results = retriever.search(query, dense_results, top_k=5)

@@ -41,7 +41,7 @@ describe('useApiQuery', () => {
   })
 
   it('re-runs when deps change', async () => {
-    const fetcher = vi.fn((signal: AbortSignal) => Promise.resolve('y'))
+    const fetcher = vi.fn((_signal: AbortSignal) => Promise.resolve('y'))
     const { result, rerender } = renderHook(({ q }) => useApiQuery(fetcher, [q]), { initialProps: { q: 'a' } })
     await waitFor(() => expect(result.current.loading).toBe(false))
 

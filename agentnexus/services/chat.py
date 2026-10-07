@@ -104,6 +104,14 @@ def _prepare_attachments(
     return (images or None), tuple(str(a.get("path")) for a in attachments), "\n\n[附件]\n" + "\n".join(note_lines)
 
 
+def _bind_optional(agent: Any, method: str, value: Any) -> None:
+    """Duck-typed setter guard. The agent interface has no contract for these
+    hooks — agents may be mocks or legacy implementations — so probe with
+    hasattr before invoking. Replaces the seven hand-spelled guard blocks."""
+    if hasattr(agent, method):
+        getattr(agent, method)(value)
+
+
 @dataclass(frozen=True)
 class SessionHandle:
     id: str
@@ -128,6 +136,26 @@ class AgentEvent:
     tok_seq: int = 0  # per-run monotonic index over stream_token events only;
                       # absolute (queue-position independent) reconnect skip key
     step_id: int = 0  # ReAct step this event belongs to (timeline grouping)
+
+
+@dataclass
+class _RunSetup:
+    """State _prepare_run establishes and _teardown_run must restore — one
+    bundle instead of the god method's dozen loose locals."""
+    session_id: str
+    agent: Any
+    memory: Any
+    run: RunHandle
+    turn: TurnRuntime
+    events: queue.Queue[AgentEvent | None]
+    images: list[dict] | None
+    attach_paths: tuple[str, ...]
+    attach_note: str
+    version_mgr: ConversationVersionManager | None
+    subagent_bridge: Any
+    ws_token: Any
+    old_on_event: Any
+    old_output: Any
 
 
 #: Cap for per-run event queues. A disconnected or slow consumer must not
@@ -455,109 +483,11 @@ class ChatService:
         *,
         attachments: list[dict] | None = None,
     ) -> RunHandle:
-        if session_id not in self._sessions:
-            raise KeyError(f"Unknown session_id: {session_id}")
-        # Per-session agent and memory — no shared lock needed (R1)
-        agent = self._get_or_create_agent(session_id)
-        memory = self._get_or_create_memory(session_id)
-        # Plan-mode gate: live binding so mid-run manual toggles take effect.
-        if hasattr(agent, "set_plan_mode"):
-            agent.set_plan_mode(PlanModeBinding(self._plan_mode, session_id))
-        # Session thinking-effort override — mid-run switches apply on the
-        # next LLM call.
-        if hasattr(agent, "set_thinking_effort"):
-            agent.set_thinking_effort(self._thinking_effort.get(session_id))
-        # Attachments: validate all-or-nothing BEFORE anything is committed —
-        # a dead file must not half-send. Vision gate degrades images to
-        # path-only references when the model can't see. Read capabilities
-        # via detect_capabilities (config-only) — agent.llm_client.capabilities
-        # triggers a live endpoint probe (3 calls × 90s timeout) that would
-        # stall the first send of every process before run_started.
-        from agentnexus.core.capabilities import detect_capabilities
-        llm = getattr(agent, "llm_client", None)
-        model_id = getattr(llm, "model", "") or ""
-        base_url = getattr(llm, "base_url", "") or ""
-        caps = detect_capabilities(model_id, base_url) if model_id else None
-        vision_ok = bool(caps and getattr(caps, "supports_vision", False))
-        images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
-        # Tools resolve relative paths against this session's workspace folder.
-        from agentnexus.tools.workspace import (
-            current_workspace,
-            register_attachment_paths,
-            unregister_attachment_paths,
-        )
-        _ws_token = current_workspace.set(self._sessions[session_id].workspace)
-        register_attachment_paths(attach_paths)
-        # Reset token buffers for new run (R8)
-        with self._get_session_lock(session_id):
-            self._token_buffers[session_id] = ""
-            self._token_cursors[session_id] = 0
-            self._token_step_base[session_id] = 0
-        # Mark this session as processing
-        self.mark_processing(True, session_id=session_id)
-        # Persist user question BEFORE the run starts so it is durable the
-        # moment on_run_started fires (run_started ⇒ user message already
-        # on disk — a disconnect/cancel from the event-loop thread can no
-        # longer win the first commit slot).
+        setup = self._prepare_run(session_id, text, attachments, on_run_started)
+        agent, memory = setup.agent, setup.memory
+        run, turn = setup.run, setup.turn
         try:
-            version_mgr = self._get_version_manager(session_id)
-            existing = version_mgr.get_messages(limit=0)
-            if not existing or existing[-1].get("content") != text:
-                version_mgr.commit_with_messages(
-                    messages=[{"role": "user", "content": text}],
-                    question=text, answer="",
-                )
-        except Exception as e:
-            logger.debug("Failed to persist user question immediately: %s", e)
-        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
-        if on_run_started is not None:
-            on_run_started(run)
-        old_on_event = getattr(agent, "_on_event", None)
-        old_output = getattr(agent, "_output", None)
-        # Publish the subagent visibility context for the duration of this run
-        # so subagent_run closures (lane-pool threads) can attribute and
-        # forward child-agent events. Single slot, same tradeoff as
-        # CancelBridge — the last run to start wins.
-        subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
-        if subagent_bridge is not None:
-            subagent_bridge.set_context(SubagentRunContext(self, session_id, run.id))
-        try:
-            if self._capability_runtime is not None:
-                self._capability_runtime.refresh_if_stale()
-            if hasattr(agent, "set_cancel_checker"):
-                agent.set_cancel_checker(turn.cancel_checker)
-            agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
-            self._install_agent_event_bridge(turn, events, run.id, session_id, old_on_event, agent=agent)
-            # Per-round durable commit: after each ReAct iteration (tools/answer)
-            # flush new STM rows to SQLite before the next round starts.
-            # Crash after commit keeps the round; crash before loses only it.
-            if hasattr(agent, "set_round_persist"):
-                agent.set_round_persist(turn.commit_round)
-            # Per-model-call context snapshots for the timeline UI. Wrapped in
-            # try/except inside the agent — observability never breaks the run.
-            if hasattr(agent, "set_context_observer"):
-                agent.set_context_observer(
-                    lambda step_id, messages: get_timeline_store().record_snapshot(
-                        session_id, run.id, step_id, messages,
-                    )
-                )
-            # Todo changes during the run → timeline events (observability only).
-            todo_list = getattr(agent, "_todo_list", None)
-            if todo_list is not None:
-                def _on_todo_change(action, item, _run_id=run.id):
-                    self._put_event(_run_id, AgentEvent(
-                        "todo_change",
-                        {"action": action, "id": item.id,
-                         "description": item.description, "status": item.status},
-                        run_id=_run_id, session_id=session_id,
-                        step_id=getattr(agent, "_step_count", 0),
-                    ))
-                todo_list.on_change = _on_todo_change
-            # Suppress agent _output (print) — events are sent via WebSocket
-            try:
-                agent._output = lambda _msg: None
-            except Exception as e:
-                logger.debug("Failed to suppress agent output: %s", e)
+            agent_text, todo_list = self._wire_agent_for_run(setup, text)
             # 启动 trace，记录任务级元数据
             from agentnexus.observability.tracer import trace_manager as _tm
             _tm.start_trace(agent_text, metadata={
@@ -568,10 +498,10 @@ class ChatService:
                 "session_id": session_id,
             })
             try:
-                if images or attach_note:
+                if setup.images or setup.attach_note:
                     result = agent.run(
                         agent_text, memory_manager=memory,
-                        images=images, attachment_note=attach_note or None,
+                        images=setup.images, attachment_note=setup.attach_note or None,
                     )
                 else:
                     result = agent.run(agent_text, memory_manager=memory)
@@ -586,7 +516,7 @@ class ChatService:
             # Persist cumulative token usage and step count to DB
             try:
                 usage = getattr(agent, "_total_usage", {}) or {}
-                version_mgr.update_session_stats(
+                setup.version_mgr.update_session_stats(
                     input_tokens=usage.get("input_tokens", 0),
                     output_tokens=usage.get("output_tokens", 0),
                     step_count=getattr(agent, "_step_count", 0),
@@ -649,35 +579,171 @@ class ChatService:
                 ))
             raise
         finally:
-            if subagent_bridge is not None:
-                subagent_bridge.set_context(None)
-            current_workspace.reset(_ws_token)
-            unregister_attachment_paths(attach_paths)
-            self.mark_processing(False, session_id=session_id)
-            if hasattr(agent, "set_cancel_checker"):
-                agent.set_cancel_checker(None)
-            try:
-                agent._on_event = old_on_event
-            except Exception as e:
-                logger.debug("Failed to restore agent _on_event: %s", e)
-            try:
-                agent._output = old_output
-            except Exception as e:
-                logger.debug("Failed to restore agent _output: %s", e)
-            try:
-                if hasattr(agent, "set_round_persist"):
-                    agent.set_round_persist(None)
-            except Exception as e:
-                logger.debug("Failed to clear round persist: %s", e)
-            # Run ended — the token snapshot is only meaningful mid-run. Left
-            # populated, a post-run reconnect would overwrite the finalized
-            # answer with raw streamed tokens (reconnect_snapshot).
-            with self._get_session_lock(session_id):
-                self._token_buffers.pop(session_id, None)
-                self._token_cursors.pop(session_id, None)
-                self._token_step_base.pop(session_id, None)
-            self._put_event(run.id, None)
+            self._teardown_run(setup)
         return run
+
+    def _prepare_run(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[dict] | None,
+        on_run_started: Callable[[RunHandle], None] | None,
+    ) -> _RunSetup:
+        """Everything that must exist before the run's try scope: session
+        resolution, attachment validation, workspace contextvar, token-buffer
+        reset, pre-persistence, turn begin, subagent bridge. Runs BEFORE the
+        try on purpose — a failure here has no run to settle and no
+        teardown debt yet (same leak profile as the original method)."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        # Per-session agent and memory — no shared lock needed (R1)
+        agent = self._get_or_create_agent(session_id)
+        memory = self._get_or_create_memory(session_id)
+        # Plan-mode gate: live binding so mid-run manual toggles take effect.
+        _bind_optional(agent, "set_plan_mode", PlanModeBinding(self._plan_mode, session_id))
+        # Session thinking-effort override — mid-run switches apply on the
+        # next LLM call.
+        _bind_optional(agent, "set_thinking_effort", self._thinking_effort.get(session_id))
+        # Attachments: validate all-or-nothing BEFORE anything is committed —
+        # a dead file must not half-send. Vision gate degrades images to
+        # path-only references when the model can't see. Read capabilities
+        # via detect_capabilities (config-only) — agent.llm_client.capabilities
+        # triggers a live endpoint probe (3 calls × 90s timeout) that would
+        # stall the first send of every process before run_started.
+        from agentnexus.core.capabilities import detect_capabilities
+        llm = getattr(agent, "llm_client", None)
+        model_id = getattr(llm, "model", "") or ""
+        base_url = getattr(llm, "base_url", "") or ""
+        caps = detect_capabilities(model_id, base_url) if model_id else None
+        vision_ok = bool(caps and getattr(caps, "supports_vision", False))
+        images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
+        # Tools resolve relative paths against this session's workspace folder.
+        from agentnexus.tools.workspace import (
+            current_workspace,
+            register_attachment_paths,
+        )
+        ws_token = current_workspace.set(self._sessions[session_id].workspace)
+        register_attachment_paths(attach_paths)
+        # Reset token buffers for new run (R8)
+        with self._get_session_lock(session_id):
+            self._token_buffers[session_id] = ""
+            self._token_cursors[session_id] = 0
+            self._token_step_base[session_id] = 0
+        # Mark this session as processing
+        self.mark_processing(True, session_id=session_id)
+        # Persist user question BEFORE the run starts so it is durable the
+        # moment on_run_started fires (run_started ⇒ user message already
+        # on disk — a disconnect/cancel from the event-loop thread can no
+        # longer win the first commit slot).
+        version_mgr = None  # stays None if creation itself fails; stats block tolerates it
+        try:
+            version_mgr = self._get_version_manager(session_id)
+            existing = version_mgr.get_messages(limit=0)
+            if not existing or existing[-1].get("content") != text:
+                version_mgr.commit_with_messages(
+                    messages=[{"role": "user", "content": text}],
+                    question=text, answer="",
+                )
+        except Exception as e:
+            logger.debug("Failed to persist user question immediately: %s", e)
+        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
+        if on_run_started is not None:
+            on_run_started(run)
+        old_on_event = getattr(agent, "_on_event", None)
+        old_output = getattr(agent, "_output", None)
+        # Publish the subagent visibility context for the duration of this run
+        # so subagent_run closures (lane-pool threads) can attribute and
+        # forward child-agent events. Single slot, same tradeoff as
+        # CancelBridge — the last run to start wins.
+        subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
+        if subagent_bridge is not None:
+            subagent_bridge.set_context(SubagentRunContext(self, session_id, run.id))
+        return _RunSetup(
+            session_id=session_id, agent=agent, memory=memory, run=run, turn=turn,
+            events=events, images=images, attach_paths=attach_paths,
+            attach_note=attach_note, version_mgr=version_mgr,
+            subagent_bridge=subagent_bridge, ws_token=ws_token,
+            old_on_event=old_on_event, old_output=old_output,
+        )
+
+    def _wire_agent_for_run(self, setup: _RunSetup, text: str) -> tuple[str, Any]:
+        """Per-run agent wiring, inside the run's try scope so a failure here
+        still settles the turn and tears down. Returns (agent_text, todo_list)
+        — todo_list is detached from the agent in send_message's run-finally."""
+        agent, memory = setup.agent, setup.memory
+        run, turn, session_id, events = (
+            setup.run, setup.turn, setup.session_id, setup.events,
+        )
+        if self._capability_runtime is not None:
+            self._capability_runtime.refresh_if_stale()
+        _bind_optional(agent, "set_cancel_checker", turn.cancel_checker)
+        agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
+        self._install_agent_event_bridge(turn, events, run.id, session_id, setup.old_on_event, agent=agent)
+        # Per-round durable commit: after each ReAct iteration (tools/answer)
+        # flush new STM rows to SQLite before the next round starts.
+        # Crash after commit keeps the round; crash before loses only it.
+        _bind_optional(agent, "set_round_persist", turn.commit_round)
+        # Per-model-call context snapshots for the timeline UI. Wrapped in
+        # try/except inside the agent — observability never breaks the run.
+        _bind_optional(
+            agent, "set_context_observer",
+            lambda step_id, messages: get_timeline_store().record_snapshot(
+                session_id, run.id, step_id, messages,
+            ),
+        )
+        # Todo changes during the run → timeline events (observability only).
+        todo_list = getattr(agent, "_todo_list", None)
+        if todo_list is not None:
+            def _on_todo_change(action, item, _run_id=run.id):
+                self._put_event(_run_id, AgentEvent(
+                    "todo_change",
+                    {"action": action, "id": item.id,
+                     "description": item.description, "status": item.status},
+                    run_id=_run_id, session_id=session_id,
+                    step_id=getattr(agent, "_step_count", 0),
+                ))
+            todo_list.on_change = _on_todo_change
+        # Suppress agent _output (print) — events are sent via WebSocket
+        try:
+            agent._output = lambda _msg: None
+        except Exception as e:
+            logger.debug("Failed to suppress agent output: %s", e)
+        return agent_text, todo_list
+
+    def _teardown_run(self, setup: _RunSetup) -> None:
+        """Restore everything prepare/wire touched — runs on every exit path
+        (success, failure, cancel) via send_message's finally."""
+        from agentnexus.tools.workspace import (
+            current_workspace,
+            unregister_attachment_paths,
+        )
+        agent, run, session_id = setup.agent, setup.run, setup.session_id
+        if setup.subagent_bridge is not None:
+            setup.subagent_bridge.set_context(None)
+        current_workspace.reset(setup.ws_token)
+        unregister_attachment_paths(setup.attach_paths)
+        self.mark_processing(False, session_id=session_id)
+        _bind_optional(agent, "set_cancel_checker", None)
+        try:
+            agent._on_event = setup.old_on_event
+        except Exception as e:
+            logger.debug("Failed to restore agent _on_event: %s", e)
+        try:
+            agent._output = setup.old_output
+        except Exception as e:
+            logger.debug("Failed to restore agent _output: %s", e)
+        try:
+            _bind_optional(agent, "set_round_persist", None)
+        except Exception as e:
+            logger.debug("Failed to clear round persist: %s", e)
+        # Run ended — the token snapshot is only meaningful mid-run. Left
+        # populated, a post-run reconnect would overwrite the finalized
+        # answer with raw streamed tokens (reconnect_snapshot).
+        with self._get_session_lock(session_id):
+            self._token_buffers.pop(session_id, None)
+            self._token_cursors.pop(session_id, None)
+            self._token_step_base.pop(session_id, None)
+        self._put_event(run.id, None)
 
     def _get_version_manager(self, session_id: str):
         """Return a per-session ConversationVersionManager, creating one if needed."""

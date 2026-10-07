@@ -1156,7 +1156,7 @@ class TestTranscriptBackup:
         mgr._settings.transcript_enabled = True
         mgr._engine.on_compact = None
 
-        mgr._write_transcript()
+        mgr._engine._write_transcript()
         files = list(transcript_dir.glob("*.jsonl"))
         assert len(files) == 1
         content = files[0].read_text()
@@ -1176,7 +1176,7 @@ class TestTranscriptBackup:
         mgr._settings = MagicMock()
         mgr._settings.transcript_enabled = False
 
-        mgr._write_transcript()
+        mgr._engine._write_transcript()
         files = list(transcript_dir.glob("*.jsonl"))
         assert len(files) == 0
 

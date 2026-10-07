@@ -5,6 +5,14 @@ import ThinkEffortControl from '../components/chat/ThinkEffortControl'
 import { api } from '../services/api'
 import { thinkingEffortArm } from '../services/thinkingEffortArm'
 
+// The control reads sessionId from useSession() instead of a prop — tests
+// drive it through this mock, mirroring provider-backed session switches.
+const sessionMock = vi.hoisted(() => ({ sessionId: null as string | null }))
+
+vi.mock('../components/session/SessionManager', () => ({
+  useSession: () => ({ sessionId: sessionMock.sessionId }),
+}))
+
 vi.mock('../services/api', () => ({
   api: {
     getSession: vi.fn(),
@@ -18,6 +26,7 @@ describe('ThinkEffortControl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     thinkingEffortArm.set(null)
+    sessionMock.sessionId = null
   })
 
   it('loads session override and shows code on chip', async () => {
@@ -25,7 +34,8 @@ describe('ThinkEffortControl', () => {
       session_id: 's1', skill: null, profile: null, workspace: null,
       plan_mode: false, thinking_effort: 'high',
     })
-    render(<ThinkEffortControl sessionId="s1" />)
+    sessionMock.sessionId = 's1'
+    render(<ThinkEffortControl />)
     await waitFor(() => expect(screen.getByText('HIGH')).toBeInTheDocument())
   })
 
@@ -34,7 +44,8 @@ describe('ThinkEffortControl', () => {
       session_id: 's1', skill: null, profile: null, workspace: null,
       plan_mode: false, thinking_effort: null,
     })
-    render(<ThinkEffortControl sessionId="s1" />)
+    sessionMock.sessionId = 's1'
+    render(<ThinkEffortControl />)
     await waitFor(() => expect(screen.getByText('AUTO')).toBeInTheDocument())
   })
 
@@ -44,7 +55,8 @@ describe('ThinkEffortControl', () => {
       plan_mode: false, thinking_effort: null,
     })
     mockedApi.setThinkingEffort.mockResolvedValue({ session_id: 's1', thinking_effort: 'high' })
-    render(<ThinkEffortControl sessionId="s1" />)
+    sessionMock.sessionId = 's1'
+    render(<ThinkEffortControl />)
     await screen.findByText('AUTO')
     await userEvent.click(screen.getByRole('button', { name: /思考/ }))
     await userEvent.click(screen.getByRole('button', { name: /HIGH/ }))
@@ -57,7 +69,8 @@ describe('ThinkEffortControl', () => {
       plan_mode: false, thinking_effort: 'high',
     })
     mockedApi.setThinkingEffort.mockResolvedValue({ session_id: 's1', thinking_effort: null })
-    render(<ThinkEffortControl sessionId="s1" />)
+    sessionMock.sessionId = 's1'
+    render(<ThinkEffortControl />)
     await screen.findByText('HIGH')
     await userEvent.click(screen.getByRole('button', { name: /思考/ }))
     await userEvent.click(screen.getByRole('button', { name: 'AUTO' }))
@@ -66,14 +79,16 @@ describe('ThinkEffortControl', () => {
 
   it('pre-session arms the override once a session appears', async () => {
     mockedApi.setThinkingEffort.mockResolvedValue({ session_id: 's1', thinking_effort: 'low' })
-    const { rerender } = render(<ThinkEffortControl sessionId={null} />)
+    const { rerender } = render(<ThinkEffortControl />)
     await userEvent.click(screen.getByRole('button', { name: /思考/ }))
     await userEvent.click(screen.getByRole('button', { name: /LOW/ }))
     expect(mockedApi.setThinkingEffort).not.toHaveBeenCalled()
-    rerender(<ThinkEffortControl sessionId="s1" />)
+    sessionMock.sessionId = 's1'
+    rerender(<ThinkEffortControl />)
     await waitFor(() => expect(mockedApi.setThinkingEffort).toHaveBeenCalledWith('s1', 'low'))
     // consumed once
-    rerender(<ThinkEffortControl sessionId="s2" />)
+    sessionMock.sessionId = 's2'
+    rerender(<ThinkEffortControl />)
     await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s2'))
     expect(mockedApi.setThinkingEffort).toHaveBeenCalledTimes(1)
   })

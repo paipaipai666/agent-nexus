@@ -43,7 +43,7 @@ interface MCPServer {
   tool_names: string[]
 }
 
-export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
+export default function InfoPanel() {
   const [todos, setTodos] = useState<Todo[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -51,7 +51,7 @@ export default function InfoPanel({ sessionId }: { sessionId: string | null }) {
   // live updates arrive via subagent_event into SessionManager's store.
   const [restSubagents, setRestSubagents] = useState<SubagentInfo[]>([])
   const navigate = useNavigate()
-  const { getLiveSessionState } = useSession()
+  const { sessionId, getLiveSessionState } = useSession()
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     todos: true,
     tools: true,
