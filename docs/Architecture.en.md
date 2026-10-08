@@ -64,14 +64,13 @@ agentnexus/
 ├── skills/                   ── Skill discovery/routing/runtime
 ├── storage/                  ── storage abstraction layer
 ├── tools/                    ── registry/providers/MCP
-│   └── computer_use/         ── desktop automation (OS accessibility APIs)
 ├── tui/                      ── Textual interface
 └── wiki/                     ── hybrid Wiki + RAG knowledge management
 ```
 
 ## Tool Providers
 
-The system uses `ToolProvider` protocol with 10 providers registered in order:
+The system uses `ToolProvider` protocol with 9 providers registered in order:
 
 | Provider | Tools | Description |
 | --- | --- | --- |
@@ -82,7 +81,6 @@ The system uses `ToolProvider` protocol with 10 providers registered in order:
 | `SubagentToolProvider` | `subagent_run` | Sub-agent delegation |
 | `McpBridgeToolProvider` | MCP dynamic import | External tool integration |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | Todo list management |
-| `ComputerUseToolProvider` | `computer_snapshot`, `computer_list_windows`, `computer_switch_window`, `computer_launch`, `computer_click`, `computer_type`, `computer_key`, `computer_select`, `computer_toggle`, `computer_scroll` | Desktop automation (OS accessibility APIs) |
 
 ## Service Startup Sequence
 
@@ -92,7 +90,7 @@ The system uses `ToolProvider` protocol with 10 providers registered in order:
 2. Create `AgentLLM` + `ToolExecutor` + `ConfirmBridge`
 3. Initialize `MCPToolManager` (if `mcp_enabled=True`)
 4. Load `ExtensionManager`
-5. `register_all_tools()` — register 10 providers + MCP
+5. `register_all_tools()` — register 9 providers + MCP
 6. Create `MemoryManager` + `ConversationVersionManager`
 7. Create `ReActAgent`
 8. `SkillRegistry.discover()` — scan skill directories

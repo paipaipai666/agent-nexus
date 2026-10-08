@@ -2,7 +2,7 @@
 
 # AgentNexus
 
-**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 浏览器自动化 + 桌面自动化 + 269 个测试文件。**
+**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 269 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
@@ -40,8 +40,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🗣️ **对话与任务执行** | TUI 交互界面，ReAct 循环自动规划→执行→观察 |
 | 🧠 **本地记忆** | 短期（STM 压缩金字塔）+ 长期（SQLite+ChromaDB，评分驱逐） |
 | 📚 **知识库 RAG** | 混合检索（稠密+稀疏+RRF+重排序），8 种文件格式导入 |
-| 🌐 **浏览器自动化** | Playwright 驱动的浏览器控制，支持无障碍树和 CDP 模式 |
-| 🖥️ **桌面自动化** | OS 级无障碍 API 驱动：快照、点击、输入、键盘、窗口管理 |
+| 🌐 **浏览器自动化** | 经外部 MCP 服务器接入浏览器工具（如 Playwright/CDP） |
 | 📖 **Wiki 系统** | 混合 Wiki + RAG 知识管理，Karpathy 的 LLM Wiki 模式，机械验证，置信度路由 |
 | 🔒 **安全沙箱** | E2B 云端 → 原生 (bubblewrap/Seatbelt) → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
@@ -91,11 +90,9 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 | 🏗️ [系统架构](docs/Architecture.md) | 系统架构、模块边界、数据流 |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
 | 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
-| 🌐 [浏览器自动化](docs/Browser-Automation.md) | Playwright 集成、CDP 模式、无障碍树 |
 | ⚡ [代码执行](docs/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
 | 🧠 [记忆系统](docs/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
 | 📚 [RAG 检索](docs/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
-| 🖥️ [桌面自动化](docs/Computer-Use.md) | OS 级无障碍自动化，Windows/Linux/macOS |
 | 📖 [Wiki 系统](docs/Wiki-System.md) | 混合 Wiki + RAG、Karpathy 模式、置信度路由 |
 | 📖 [Wiki 系统（详细）](docs/Wiki-System-Detailed.md) | Wiki 内部机制、验证管线、路由逻辑 |
 | 🎭 [Persona 系统](docs/Persona.md) | Agent 身份、行为原则、任务地图 |
@@ -132,8 +129,8 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 ├─────────────────────────────────────────────────────────────────┤
 │                     工具执行层                                   │
 │  code_executor · shell · file_ops · web_search · kb_search      │
-│  memory_save · subagent · grep_search · web_fetch · browser     │
-│  computer_* · wiki · todo · ...                               │
+│  memory_save · subagent · grep_search · web_fetch ·             │
+│  wiki · todo · ...                                              │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace 日志                     │
 │ (向量)   │  (关系型)    │  (可观测性)                           │

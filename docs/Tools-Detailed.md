@@ -87,7 +87,6 @@ class ProviderSpec:
 | `SubagentToolProvider` | subagent_run | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | todo_add, todo_update, todo_list | 待办事项管理 |
-| `ComputerUseToolProvider` | computer_snapshot, computer_click, computer_type, ... | 桌面自动化 |
 
 ## MCP 集成
 
@@ -107,22 +106,6 @@ class ProviderSpec:
 | `mcp_descriptors.py` | 工具描述符 |
 | `mcp_result.py` | 结果处理 |
 
-## 桌面自动化
-
-**目录**：`tools/computer_use/`
-
-基于 OS 无障碍 API 的桌面自动化：
-
-| 文件 | 职责 |
-| --- | --- |
-| `manager.py` | 计算机使用管理器 |
-| `snapshot.py` | 桌面快照（无障碍树） |
-| `element.py` | UI 元素抽象 |
-| `tools.py` | 工具注册 |
-| `backends/base.py` | 后端抽象基类 |
-| `backends/windows_backend.py` | Windows 后端 |
-| `backends/macos_backend.py` | macOS 后端 |
-| `backends/linux_backend.py` | Linux 后端 |
 
 ## 模块依赖关系
 
@@ -139,6 +122,5 @@ ToolRegistry (registry.py)
          ├── ExecutionToolProvider
          ├── SubagentToolProvider
          ├── McpBridgeToolProvider
-         ├── TodoToolProvider
-         └── ComputerUseToolProvider
+         └── TodoToolProvider
 ```

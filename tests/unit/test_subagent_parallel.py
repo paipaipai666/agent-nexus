@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from agentnexus.observability.tracer import trace_manager
 from agentnexus.tools.confirm_bridge import CancelBridge
 from agentnexus.tools.dispatcher import ToolDispatcher
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 from agentnexus.tools.subagent import make_subagent_run
 
 
@@ -178,7 +178,7 @@ class TestCancelBridgePropagation:
         bridge.set_checker(lambda: flag["cancelled"])
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True, cancel_bridge=bridge)
-        tool(task="t", role="explorer", max_steps=1)
+        tool(task="t", role="explorer")
 
         assert received["checker"] is not None
         assert received["checker"]() is False
@@ -197,7 +197,7 @@ class TestCancelBridgePropagation:
         monkeypatch.setattr("agentnexus.tools.subagent._register_child_tools", lambda *a, **k: None)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        tool(task="t", role="explorer", max_steps=1)
+        tool(task="t", role="explorer")
 
         # The checker is always installed now: the wall-clock deadline cancels
         # the child through it even when no cancel bridge exists.
@@ -255,7 +255,7 @@ class TestInheritedTraceLinkage:
         monkeypatch.setattr("agentnexus.tools.subagent.trace_manager", mock_trace)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        tool(task="t", role="explorer", max_steps=1)
+        tool(task="t", role="explorer")
 
         span_inputs = [c.args[1] for c in mock_trace.span.call_args_list]
         attempt_inputs = [i for i in span_inputs if i.get("role") == "explorer"]

@@ -12,7 +12,6 @@
 - [🤖 ReAct Agent](ReAct-Agent.en.md)
 - [🎭 Persona System](Persona.en.md)
 - [🔧 Tool Governance](Tool-Governance.en.md)
-- [🖥 Desktop Automation](Computer-Use.en.md)
 - [🧠 Memory System](Memory-System.en.md)
 - [📚 RAG System](RAG-System.en.md)
 - [📖 Wiki System](Wiki-System.en.md)

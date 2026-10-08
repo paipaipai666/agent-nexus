@@ -70,10 +70,6 @@ SETTABLE_KEYS = {
     # Budget
     "budget_simple_max_tokens", "budget_complex_max_tokens",
     "budget_high_value_max_tokens", "budget_exceed_strategy",
-    # Desktop Automation
-    "computer_use_enabled", "computer_use_backend",
-    "computer_use_snapshot_max_nodes",
-    "computer_use_allowed_apps", "computer_use_blocked_apps",
 }
 
 # Security-sensitive keys that cannot be modified via the API.

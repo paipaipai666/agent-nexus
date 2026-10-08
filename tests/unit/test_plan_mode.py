@@ -29,7 +29,6 @@ EXPECTED_READ_ONLY = {
     "grep_search", "web_search", "kb_search", "web_fetch",
     "history_search", "memory_search", "memory_project_status",
     "todo_list",
-    "computer_snapshot", "computer_list_windows",
     "express_reaction",
 }
 

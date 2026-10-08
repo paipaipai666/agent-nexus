@@ -12,7 +12,6 @@
 - [🤖 ReAct Agent](ReAct-Agent.md)
 - [🎭 Persona 系统](Persona.md)
 - [🔧 工具治理](Tool-Governance.md)
-- [🖥 桌面自动化](Computer-Use.md)
 - [🧠 记忆系统](Memory-System.md)
 - [📚 RAG 检索](RAG-System.md)
 - [📖 Wiki 知识系统](Wiki-System.md)

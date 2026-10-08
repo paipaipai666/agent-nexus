@@ -6,7 +6,7 @@ from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.prompts import load_prompt
 from agentnexus.tools import register_all_tools
 from agentnexus.tools.confirm_bridge import ConfirmBridge
-from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 from agentnexus.tools.subagent import make_subagent_run
 
 
@@ -119,7 +119,6 @@ class TestSubagentRun:
             task="请阅读 README.md 并总结",
             role="reader",
             allowed_tools=["file_read", "python_execute", "subagent_run"],
-            max_steps=3,
         ))
 
         assert payload["status"] == "ok"
@@ -145,7 +144,7 @@ class TestSubagentRun:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = json.loads(tool(task="请总结 README", role="researcher", max_steps=3))
+        payload = json.loads(tool(task="请总结 README", role="researcher"))
 
         assert payload["status"] == "ok"
         assert payload["role"] == "explorer"
@@ -168,7 +167,7 @@ class TestSubagentRun:
 
         bridge = ConfirmBridge()
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=False, subagent_confirm=bridge)
-        payload = json.loads(tool(task="请执行这段 Python 并验证输出", role="executor", max_steps=3))
+        payload = json.loads(tool(task="请执行这段 Python 并验证输出", role="executor"))
 
         assert payload["status"] == "ok"
         assert payload["role"] == "executor"
@@ -192,7 +191,6 @@ class TestSubagentRun:
             task="请总结 README",
             role="reader",
             allowed_tools=["python_execute", "subagent_run"],
-            max_steps=3,
         ))
 
         assert payload["status"] == "fallback"
@@ -216,7 +214,7 @@ class TestSubagentRun:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = json.loads(tool(task="请执行并验证", role="executor", max_steps=2))
+        payload = json.loads(tool(task="请执行并验证", role="executor"))
 
         assert payload["status"] == "fallback"
         assert payload["role"] == "explorer"
@@ -238,7 +236,7 @@ class TestSubagentRun:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = json.loads(tool(task="请执行并验证", role="executor", max_steps=2))
+        payload = json.loads(tool(task="请执行并验证", role="executor"))
 
         assert payload["status"] == "fallback"
         assert payload["role"] == "executor"
@@ -264,7 +262,6 @@ class TestSubagentRun:
             task="请调用外部 MCP echo 工具",
             role="reader",
             allowed_tools=["mcp_demo__echo"],
-            max_steps=3,
         ))
 
         assert payload["status"] == "ok"

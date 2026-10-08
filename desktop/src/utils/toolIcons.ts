@@ -3,12 +3,9 @@
 // designs/mockups/v3-redesign-test.html ("icon map" overlay).
 // Resolution chain: exact name → first letter fallback (see ToolCard).
 import {
-  AlignLeft, AppWindow, ArrowRightLeft, ArrowUpDown, Ban, BookOpen, Bot, Brain,
-  Camera, ClipboardCheck, Clock, Code2, Command, Compass, Copy, Download,
-  FileText, FolderOpen, Globe, History, Info, Keyboard, Layers, ListChecks,
-  ListPlus, ListTodo, Locate, Monitor, MousePointerClick, PenLine, Puzzle,
-  Rocket, Save, Scan, Smile, SquareTerminal, Terminal, TextSearch, Timer,
-  ToggleLeft, type LucideIcon,
+  BookOpen, Bot, Brain, ClipboardCheck, Download, FileText, FolderOpen, Globe,
+  History, Info, ListChecks, ListPlus, ListTodo, PenLine, Puzzle, Save, Smile,
+  SquareTerminal, Terminal, TextSearch, type LucideIcon,
 } from 'lucide-react'
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -36,32 +33,6 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   exit_plan_mode: ClipboardCheck,
   subagent_run: Bot,
   express_reaction: Smile,
-  // browser
-  browser_navigate: Compass,
-  browser_snapshot: Scan,
-  browser_read: AlignLeft,
-  browser_click: MousePointerClick,
-  browser_type: Keyboard,
-  browser_screenshot: Camera,
-  browser_evaluate: Code2,
-  browser_wait: Clock,
-  browser_wait_navigation: Timer,
-  browser_scroll: ArrowUpDown,
-  browser_scroll_to: Locate,
-  browser_dismiss_popup: Ban,
-  browser_list_pages: Layers,
-  browser_switch_page: Copy,
-  // computer use
-  computer_snapshot: Monitor,
-  computer_list_windows: AppWindow,
-  computer_switch_window: ArrowRightLeft,
-  computer_launch: Rocket,
-  computer_click: MousePointerClick,
-  computer_type: Keyboard,
-  computer_key: Command,
-  computer_select: ArrowUpDown,
-  computer_toggle: ToggleLeft,
-  computer_scroll: ArrowUpDown,
   // dynamic MCP tools
   mcp_default: Puzzle,
 }

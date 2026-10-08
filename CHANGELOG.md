@@ -4,6 +4,10 @@ All notable changes to AgentNexus will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **彻底清理废弃功能：子代理 max-step、computer-use、browser-use** — ① 子代理 `max_steps` 参数早已是死代码（子代理 ReActAgent 恒 `max_steps=None`，真实护栏是 `subagent_timeout_sec` 时间预算）：删除 `subagent.py`/`subagent_provider.py` 的参数、schema、`BEFORE/AFTER_SUBAGENT_RUN` hook payload 键与 trace span 字段，5 个测试文件的 `max_steps=` kwargs 及 Tool-Governance 参数表列；② computer-use 整体下线：`tools/computer_use/`（element/snapshot/manager/tools + 三平台 backends）、`ComputerUseToolProvider`、Settings 6 字段（`computer_use_*`）+ `normalize_computer_use_backend` 校验器、config API 5 个 SETTABLE_KEYS、`pyproject` 的 `computer-use` extra（pywinauto/pyobjc/pyperclip，pyperclip 仅 backends 使用）与 `all` 引用、`test_computer_use.py`、`test_plan_mode`/`test_tool_descriptions`（含 `computer_` family-prefix 特例）/`test_tool_providers` 中的对应项、桌面端 SettingsPage「Desktop Automation」组 + toolIcons 10 个 computer 图标 + effects orb 规则、`docs/Computer-Use.{md,en.md}` 及 Architecture/Home/Tools-Detailed/Tool-Governance/App-Runtime/_Sidebar/README（zh/en）全部相关行（提供者 10→9）；③ browser-use 主树源码此前已删，本次清残余：桌面 toolIcons 14 个 browser 图标 + 孤儿 lucide 导入、effects 正则、设计稿 mockup 图标表、README.zh 过期行（内置 Playwright 表述改外部 MCP、死链、ASCII 图 token）、`archify-runtime.architecture.json` 节点。清理后内置工具 15→13 个提供者 10→9；浏览器自动化仍经外部 MCP 提供（README/Home 保留 MCP 表述）。全量单测/安全套件 + 桌面 vitest(182) + tsc 通过
+
 ### New Features
 
 - **越界路径 HITL 放行通道（"禁止"→"提示"）** — file 工具（file_read/file_write/file_list）路径越界不再只是硬错误：tool_runner 调用前预检 `_resolve_safe`（`path_guard_violation`，不触盘仅解析），越界且存在确认通道时弹一次提示（摘要含请求路径/解析结果/允许根目录），批准 = 该路径加入按 workspace 作用域的会话级批准集（`workspace.approve_extra_path`，进程存活期有效、并发会话不串），并顺带消费 file_write 的 registry HITL 门（避免连弹两次）；拒绝 = `ToolError(HITL_BLOCKED)` 且工具不执行。永久放行走 config.yaml 新增 `allowed_paths`（Settings 字段，合并进 `_get_allowed_roots`；**刻意不进 config API 白名单**——放宽沙箱与 shell_blacklist 同级信任类）。无确认通道（非交互/无桥）保持旧硬错误语义。新增异常 `PathEscapesAllowedRootsError(ValueError)`（消息前缀"路径越界"不变，全部既有安全测试兼容）；新增 `tests/unit/test_path_permission_prompt.py`（7 用例）+ 全量单测/安全套件通过。顺带修复两处测试 cwd 泄漏（`test_file_ops.py` 18 处、`test_cli_sessions.py` 2 处裸 `os.chdir` 改 `monkeypatch.chdir`）——泄漏此前良性，越界预检上线后会把后续测试的 workspace 带偏，根因堵住

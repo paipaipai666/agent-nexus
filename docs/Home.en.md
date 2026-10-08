@@ -35,7 +35,6 @@ graph TD
 | **Sub-agents** | Agent-in-Agent isolated delegation |
 | **Code Knowledge Graph** | AST parsing, semantic search, relationship queries |
 | **Wiki Knowledge System** | Hybrid Wiki + RAG, confidence routing, calibration, propagation, review queue |
-| **Desktop Automation** | OS accessibility API driven, screenshot/window management/keyboard-mouse actions |
 
 ## Quick Links
 

@@ -45,10 +45,6 @@ const GROUPS: Record<string, string[]> = {
   ],
   'Extensions & Plugins': ['extensions_enabled', 'extensions_dirs', 'plugins_auto_discover'],
   'MCP': ['mcp_enabled', 'mcp_startup_timeout'],
-  'Desktop Automation': [
-    'computer_use_enabled', 'computer_use_backend', 'computer_use_snapshot_max_nodes',
-    'computer_use_allowed_apps', 'computer_use_blocked_apps',
-  ],
   'External Services': ['tavily_api_key'],
 }
 

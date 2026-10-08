@@ -345,22 +345,6 @@ class Settings(BaseSettings):
     budget_complex_max_tokens: int = Field(default=50000, ge=5000, le=500000)
     budget_high_value_max_tokens: int = Field(default=200000, ge=10000, le=2000000)
     budget_exceed_strategy: str = Field(default="compress")
-    # 桌面自动化配置
-    computer_use_enabled: bool = Field(default=False, description="是否启用桌面自动化功能")
-    computer_use_backend: str = Field(default="auto", description="后端: auto/windows/linux/macos")
-    computer_use_snapshot_max_nodes: int = Field(default=100, ge=10, le=1000, description="snapshot最大节点数")
-    computer_use_hitl_rules: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="HITL触发规则列表，格式: [{action:'click', role:'button', name_pattern:'支付|确认'}]",
-    )
-    computer_use_allowed_apps: list[str] = Field(
-        default_factory=list,
-        description="允许操控的应用白名单（空=全部允许）",
-    )
-    computer_use_blocked_apps: list[str] = Field(
-        default_factory=lambda: ["taskmgr", "regedit", "cmd", "powershell", "terminal"],
-        description="禁止操控的应用黑名单",
-    )
     # ── Wiki 系统 ─────────────────────────────────────────────────
     wiki_enabled: bool = Field(default=False, description="启用混合 Wiki + RAG 知识系统")
     wiki_namespace: str = Field(default="wiki", description="Wiki 页面的 ChromaDB 命名空间")
@@ -389,14 +373,6 @@ class Settings(BaseSettings):
         normalized = (value or "medium").strip().lower()
         if normalized not in {"none", "low", "medium", "high"}:
             raise ValueError(f"不支持的思考强度: {value}，可选: none, low, medium, high")
-        return normalized
-
-    @field_validator("computer_use_backend")
-    @classmethod
-    def normalize_computer_use_backend(cls, value: str) -> str:
-        normalized = (value or "auto").strip().lower()
-        if normalized not in {"auto", "windows", "linux", "macos"}:
-            raise ValueError(f"不支持的桌面自动化后端: {value}，可选: auto, windows, linux, macos")
         return normalized
 
     @field_validator("shell_execution_backend")

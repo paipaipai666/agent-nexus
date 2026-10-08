@@ -2,7 +2,7 @@
 
 # AgentNexus
 
-**A production-grade, fully local AI agent with FSM-driven safety, browser automation, desktop automation, and 269 test files.**
+**A production-grade, fully local AI agent with FSM-driven safety and 269 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
@@ -41,7 +41,6 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🧠 **Local Memory** | STM compression pyramid + LTM (SQLite+ChromaDB, score-based eviction) |
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
 | 🌐 **Browser Automation** | Via external MCP server — bring your own Playwright/CDP browser toolset |
-| 🖥️ **Desktop Automation** | OS-level accessibility API driven: snapshot, click, type, keyboard, window management |
 | 📖 **Wiki System** | Hybrid Wiki + RAG knowledge management, Karpathy's LLM Wiki pattern, mechanical verification, confidence-based routing |
 | 🔒 **Security Sandbox** | native (bubblewrap/Seatbelt/Low-IL) → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
@@ -94,7 +93,6 @@ nexus eval agent --days 1        # Run agent quality evaluation
 | 🔧 [Tool Governance](docs/Tool-Governance.en.md) | 7 security gates, 18 tool parameter tables |
 | 🧠 [Memory System](docs/Memory-System.en.md) | STM/LTM architecture, compression pyramid, score eviction |
 | 📚 [RAG System](docs/RAG-System.en.md) | Hybrid retrieval pipeline, dual ChromaDB clients |
-| 🖥️ [Desktop Automation](docs/Computer-Use.en.md) | OS-level accessibility automation, Windows/Linux/macOS |
 | 📖 [Wiki System](docs/Wiki-System.en.md) | Hybrid Wiki + RAG, Karpathy pattern, confidence routing |
 | 📖 [Wiki System (Detailed)](docs/Wiki-System-Detailed.en.md) | Wiki internals, verification pipeline, routing logic |
 | 🎭 [Persona System](docs/Persona.en.md) | Agent identity, behavioral principles, mission map |
@@ -132,7 +130,7 @@ nexus eval agent --days 1        # Run agent quality evaluation
 │                     Tool Execution Layer                         │
 │  shell_exec · file_ops · web_search · kb_search                 │
 │  memory_save · subagent · grep_search · web_fetch               │
-│  computer_* · wiki · todo · ...                               │
+│  wiki · todo · ...                                              │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
 │ (vectors)│  (relational)│  (observability)                      │

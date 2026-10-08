@@ -24,13 +24,13 @@ export function usePrefersReducedMotion(): boolean {
 /** Tool name → ThinkingOrb state. One animation per activity kind. */
 export function toolOrbState(name: string | undefined | null): OrbState {
   const n = name ?? ''
-  if (/search|grep|kb_search|web_fetch|history_search|snapshot|browser_read|computer_snapshot/.test(n)) {
+  if (/search|grep|kb_search|web_fetch|history_search|snapshot/.test(n)) {
     return 'searching'
   }
-  if (/python_execute|shell_exec|browser_evaluate|computer_(click|type|key|launch|select|toggle|scroll)/.test(n)) {
+  if (/python_execute|shell_exec/.test(n)) {
     return 'solving'
   }
-  if (/file_write|memory_save|browser_type/.test(n)) {
+  if (/file_write|memory_save/.test(n)) {
     return 'composing'
   }
   if (n === 'exit_plan_mode') return 'weaving'

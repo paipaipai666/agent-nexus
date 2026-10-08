@@ -190,7 +190,7 @@ def _make_child_forwarder(sctx, entry):
 
 
 def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
-                          task: str, role: str, tool_names: list[str], max_steps: int,
+                          task: str, role: str, tool_names: list[str],
                           retry_reason: str | None = None,
                           subagent_confirm: Callable[[str], bool] | None = None,
                           mcp_manager: "MCPToolManager | None" = None,
@@ -201,7 +201,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
     hook_mgr = get_hook_manager()
     hook_mgr.fire(HookType.BEFORE_SUBAGENT_RUN, {
         "task": task, "role": role, "tool_names": tool_names,
-        "max_steps": max_steps, "retry_reason": retry_reason,
+        "retry_reason": retry_reason,
     })
 
     child_llm = _clone_llm(parent_llm)
@@ -218,7 +218,11 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
         child_agent = ReActAgent(
             child_llm,
             child_executor,
-            max_steps=max(1, min(int(max_steps), 8)),
+            # No step cap: the child runs until the task completes. The
+            # wall-clock budget (subagent_timeout_sec) is the real guard —
+            # a hard step cap truncated long investigations mid-work
+            # ("已达到最大步数") while buying nothing the timeout doesn't.
+            max_steps=None,
             output=lambda *_args, **_kwargs: None,
             confirm_fn=subagent_confirm,
             conversation_mode=False,
@@ -244,7 +248,6 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
             with trace_manager.span("subagent_attempt", {
                 "role": role,
                 "tool_names": tool_names,
-                "max_steps": max_steps,
                 "retry_reason": retry_reason or "",
                 "task_preview": task[:200],
                 "parent_trace_id": trace_manager.get_inherited_trace() or "",
@@ -348,14 +351,13 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                       cancel_bridge=None, subagent_bridge=None):
     def subagent_run(task: str, role: str = "explorer",
                      allowed_tools: list[str] | None = None,
-                     max_steps: int = 4, name: str | None = None) -> str:
+                     name: str | None = None) -> str:
         effective_role = _normalize_role(role)
         tool_names, tool_recovery = _resolve_allowed_tools(effective_role, allowed_tools, mcp_manager)
         with trace_manager.span("subagent", {
             "requested_role": role,
             "effective_role": effective_role,
             "allowed_tools": tool_names,
-            "max_steps": max_steps,
             "task_preview": (task or "")[:200],
         }) as span:
             if not tool_names:
@@ -397,7 +399,6 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 task,
                 effective_role,
                 tool_names,
-                max_steps,
                 subagent_confirm=subagent_confirm,
                 mcp_manager=mcp_manager,
                 cancel_bridge=cancel_bridge,
@@ -479,7 +480,6 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 task,
                 fallback_role,
                 fallback_tools,
-                min(max_steps + 1, 8),
                 retry_reason=fallback_reason,
                 subagent_confirm=subagent_confirm,
                 mcp_manager=mcp_manager,

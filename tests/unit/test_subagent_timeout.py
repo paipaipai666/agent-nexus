@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
 
@@ -46,8 +45,7 @@ def test_deadline_cancels_child_without_orphan(tiny_deadline, tool_then_answer):
     t0 = time.monotonic()
     payload, err = _run_subagent_attempt(
         parent_llm=None, non_interactive=True,
-        task="probe", role="explorer", tool_names=["file_list"], max_steps=4,
-    )
+        task="probe", role="explorer", tool_names=["file_list"],    )
     elapsed = time.monotonic() - t0
 
     assert payload is None

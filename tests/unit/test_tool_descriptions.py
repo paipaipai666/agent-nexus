@@ -24,13 +24,6 @@ def registry_with_all_providers() -> ToolRegistry:
 _SKIP_TOOLS = {
     "subagent_run",          # checked separately (complex delegation tool)
     "shell_exec",            # description carries a "[!]" confirmation warning instead
-    "computer_list_windows",    # computer listing
-    "computer_switch_window",   # computer action
-    "computer_launch",          # computer action
-    "computer_key",             # computer action
-    "computer_select",          # computer action
-    "computer_toggle",          # computer action
-    "computer_scroll",          # computer action
 }
 
 
@@ -61,8 +54,6 @@ class TestBoundaryDescriptions:
         import re
         reg = registry_with_all_providers
         all_names = set(reg.list_tools())
-        # Also accept tool family patterns like "computer_*"
-        family_prefixes = {"computer_"}
 
         errors = []
         for meta in reg.list_tools_with_meta():
@@ -74,9 +65,6 @@ class TestBoundaryDescriptions:
             # Extract tool references like "(用grep_search)" — ASCII tool names only
             refs = re.findall(r"用([a-zA-Z_][a-zA-Z0-9_]*)", boundary)
             for ref in refs:
-                if ref.endswith("_"):
-                    if ref not in family_prefixes:
-                        errors.append(f"{meta.name}: unknown family '{ref}'")
-                elif ref not in all_names and not any(ref.startswith(p) for p in family_prefixes):
+                if ref not in all_names:
                     errors.append(f"{meta.name}: references unknown tool '{ref}'")
         assert not errors, f"Boundary reference errors: {errors}"

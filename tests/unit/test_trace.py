@@ -177,7 +177,7 @@ class TestTraceManager:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = tool(task="请总结 README", role="explorer", max_steps=2)
+        payload = tool(task="请总结 README", role="explorer")
         assert "child answer" in payload
 
         tm.end_trace()
@@ -199,7 +199,7 @@ class TestTraceManager:
         )
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = tool(task="请总结 README", role="reader", allowed_tools=["python_execute"], max_steps=2)
+        payload = tool(task="请总结 README", role="reader", allowed_tools=["python_execute"])
         assert "fallback answer" in payload
 
         tm.end_trace()

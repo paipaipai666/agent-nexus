@@ -44,9 +44,6 @@ ExecutionToolProvider    → shell_exec
 SubagentToolProvider     → subagent_run
 McpBridgeToolProvider    → MCP 动态导入
 TodoToolProvider         → todo_add, todo_update, todo_list
-ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_switch_window,
-                           computer_launch, computer_click, computer_type, computer_key,
-                           computer_select, computer_toggle, computer_scroll
 ```
 
 ## 内置工具参数
@@ -63,22 +60,12 @@ ComputerUseToolProvider  → computer_snapshot, computer_list_windows, computer_
 | `file_list` | `path?`, `pattern?` | 20/min | LOW |
 | `file_write` | `path`, `content`, `mode?`, `expected_version?` | 20/min | MEDIUM |
 | `shell_exec` | `command`, `cwd?`, `timeout?` | 无限 | HIGH |
-| `subagent_run` | `task`, `role?`, `allowed_tools?`, `max_steps?` | 10/min | LOW |
+| `subagent_run` | `task`, `role?`, `allowed_tools?` | 10/min | LOW |
 | `todo_add` | `description` | 无限 | LOW |
 | `todo_update` | `item_id`, `status` | 无限 | LOW |
 | `todo_list` | 无参数 | 无限 | LOW |
-| `computer_snapshot` | `app_name?`, `window_title?`, `mode?`, `task_id?` | 10/min | LOW |
-| `computer_list_windows` | `task_id?` | 30/min | LOW |
-| `computer_switch_window` | `window_index?`, `app_name?`, `window_title?`, `task_id?` | 30/min | LOW |
-| `computer_launch` | `app_path`, `args?`, `task_id?` | 10/min | MEDIUM |
-| `computer_click` | `element_id`, `button?`, `clicks?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
-| `computer_type` | `element_id`, `text`, `clear?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
-| `computer_key` | `keys`, `task_id?` | 30/min | MEDIUM |
-| `computer_select` | `element_id`, `value`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
-| `computer_toggle` | `element_id`, `checked?`, `role?`, `name?`, `task_id?` | 20/min | MEDIUM |
-| `computer_scroll` | `element_id?`, `direction?`, `amount?`, `task_id?` | 30/min | LOW |
 
-> 见 [MCP-Integration](MCP-Integration.md) 了解外部工具集成（含外部浏览器 MCP 工具），[Computer-Use](Computer-Use.md) 了解桌面自动化。
+> 见 [MCP-Integration](MCP-Integration.md) 了解外部工具集成（含外部浏览器 MCP 工具）。
 
 ## grep_search glob 模式
 

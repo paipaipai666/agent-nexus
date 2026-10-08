@@ -104,7 +104,7 @@ class TestSubagentVisibilityEvents:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service)
-        payload = json.loads(tool(task="总结 README", name="调研A", max_steps=3))
+        payload = json.loads(tool(task="总结 README", name="调研A"))
 
         kinds = [e["kind"] for e in service.events]
         assert kinds[0] == "started"
@@ -139,7 +139,7 @@ class TestSubagentVisibilityEvents:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service, ctx_cls=_AutoCancelContext)
-        payload = json.loads(tool(task="queued task", max_steps=3))
+        payload = json.loads(tool(task="queued task"))
 
         assert runs == []  # child never started
         assert "打断" in payload["summary"]
@@ -159,7 +159,7 @@ class TestSubagentVisibilityEvents:
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service)
-        payload = json.loads(tool(task="slow task", max_steps=3))
+        payload = json.loads(tool(task="slow task"))
 
         assert len(runs) == 1  # no explorer fallback retry after cancel
         assert payload["status"] == "error"
@@ -177,7 +177,7 @@ class TestSubagentVisibilityEvents:
         )
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
-        payload = json.loads(tool(task="t", max_steps=3))
+        payload = json.loads(tool(task="t"))
 
         assert payload["status"] == "ok"
         assert payload["subagent_id"] == ""

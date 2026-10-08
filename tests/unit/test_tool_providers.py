@@ -18,7 +18,6 @@ def test_default_providers_expose_specs():
         "mcp-bridge",
         "subagent",
         "todo",
-        "computer-use",
         "reaction",
         "plan_mode",
     ]

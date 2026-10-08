@@ -119,8 +119,7 @@ Settings ───────────────────────�
     │        ├──→ ExecutionToolProvider                 │
     │        ├──→ SubagentToolProvider                  │
     │        ├──→ McpBridgeToolProvider                 │
-    │        ├──→ TodoToolProvider                      │
-    │        └──→ ComputerUseToolProvider               │
+    │        └──→ TodoToolProvider                      │
     │                                                   │
     ├──→ ExtensionManager                               │
     ├──→ MCPToolManager                                 │
