@@ -12,11 +12,11 @@
 
 AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI 工具，完全运行在本地。无云端依赖，无数据泄露。向量、记忆、Trace 日志全部留在你的设备上。
 
-与纯 Prompt 驱动的 Agent 不同，AgentNexus 使用**有限状态机**（16 个状态、25 条转移规则）管控每个推理循环 —— 让 Agent 行为可确定、可审计。
+与纯 Prompt 驱动的 Agent 不同，AgentNexus 使用**有限状态机**（6 个状态、14 条转移规则）管控每个推理循环 —— 让 Agent 行为可确定、可审计。
 
 ```text
 用户 → CLI/TUI/桌面端 → ReAct Agent (FSM + 三级 LLM 策略)
-       → 工具网关 (7 道安全关卡) → 18 种内置工具 + MCP
+       → 工具网关 (7 道安全关卡) → 15 种内置工具 + MCP
        → 本地存储: ChromaDB | SQLite | JSONL
 ```
 
@@ -26,11 +26,11 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | --- | --- | --- |
 | **数据隐私** | 100% 本地 — 向量、记忆、Trace 全部在设备上 | 依赖云端，数据离开本机 |
 | **安全模型** | 7 层工具治理（RBAC、Schema、限流、超时、风险、HITL、审计） | 基础或无工具级安全 |
-| **Agent 控制** | FSM 驱动循环 — 16 状态、25 条确定性转移 | Prompt 驱动，行为不可预测 |
-| **代码沙箱** | 4 级降级：E2B → bubblewrap/Seatbelt → Docker → 本地 | 单一沙箱或无沙箱 |
-| **安全测试** | 213 项专项测试，覆盖 8 个类别 | 临时或无安全测试 |
+| **Agent 控制** | FSM 驱动循环 — 6 状态、14 条确定性转移 | Prompt 驱动，行为不可预测 |
+| **代码沙箱** | 分级降级：bubblewrap/Seatbelt/Low-IL → Docker → 本地兜底 | 单一沙箱或无沙箱 |
+| **安全测试** | 229 项专项测试，覆盖 13 个攻击面 | 临时或无安全测试 |
 | **可观测性** | 6 层体系：Trace + 漂移检测 + 故障归因 + 告警 + 健康检查 + 改进闭环 | 基础日志 |
-| **评估体系** | 8 个内置评估器（Agent、轨迹、幻觉、RAG、代码...） | 手动或无评估 |
+| **评估体系** | 9 个内置评估器（Agent、轨迹、幻觉、RAG、代码、记忆...） | 手动或无评估 |
 | **交互方式** | TUI + 桌面端 (Electron) + API Server | 单一界面 |
 
 ## 功能
@@ -45,7 +45,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🔒 **安全沙箱** | 工作区路径沙箱 + 越界一键放行提示；Shell 链：bubblewrap/Seatbelt/Low-IL → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
 | 📈 **可观测性** | 6 层体系：JSONL Trace + 漂移检测 + 工具故障归因 + 告警管道 + 健康检查 + 改进闭环 |
-| 📊 **评估体系** | 8 个评估器（Agent/Trajectory/幻觉/RAG/代码等） |
+| 📊 **评估体系** | 9 个评估器（Agent/Trajectory/幻觉/RAG/代码/记忆等） |
 | 🎭 **Persona 系统** | Agent 身份、行为原则（立场/自主权/问责）、用户任务地图 |
 | 🎯 **技能系统** | 可复用工作流模板，TF-IDF + 学习型重排序路由 |
 | 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理 |
@@ -89,8 +89,7 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 | 🏠 [Wiki 首页](docs/Home.md) | 架构图、核心能力表格 |
 | 🏗️ [系统架构](docs/Architecture.md) | 系统架构、模块边界、数据流 |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
-| 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、14 个工具参数表 |
-| ⚡ [代码执行](docs/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
+| 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
 | 🧠 [记忆系统](docs/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
 | 📚 [RAG 检索](docs/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
 | 📖 [Wiki 系统](docs/Wiki-System.md) | 混合 Wiki + RAG、Karpathy 模式、置信度路由 |
@@ -99,8 +98,8 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 | ⌨️ [CLI & TUI](docs/CLI-TUI-Detailed.md) | CLI 命令、TUI 界面、快捷键 |
 | 🖥️ [应用运行时](docs/App-Runtime.md) | 桌面应用运行时、Electron 集成 |
 | ⚙️ [配置参考](docs/Configuration.md) | 全部配置项速查 |
-| ⌨️ [命令参考](docs/Commands.md) | 40+ 个命令速查 |
-| 📊 [评估体系](docs/Evaluation.md) | 8 个评估器、RAG 指标 |
+| ⌨️ [命令参考](docs/Commands.md) | 83 个命令速查 |
+| 📊 [评估体系](docs/Evaluation.md) | 9 个评估器、RAG 指标 |
 | 🔒 [安全模型](docs/Security.md) | PII 脱敏、沙箱逃逸防护 |
 | 🎯 [技能系统](docs/Skill-System.md) | Skill 发现、路由、工作流执行 |
 | 🔌 [MCP 集成](docs/MCP-Integration.md) | 外部工具导入、治理融合 |
@@ -121,16 +120,17 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 │                    ReAct Agent 核心                              │
 │  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐        │
 │  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │        │
-│  │ (16→25)  │  │ (三级)       │  │ (模板)             │        │
+│  │ (6→14)   │  │ (三级)       │  │ (模板)             │        │
 │  └──────────┘  └──────────────┘  └────────────────────┘        │
 ├─────────────────────────────────────────────────────────────────┤
 │               工具网关 (7 道安全关卡)                            │
 │  RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计               │
 ├─────────────────────────────────────────────────────────────────┤
 │                     工具执行层                                   │
-│  code_executor · shell · file_ops · web_search · kb_search      │
-│  memory_save · subagent · grep_search · web_fetch ·             │
-│  wiki · todo · ...                                              │
+│  file_read · file_write · file_list · shell_exec                │
+│  grep_search · web_search · web_fetch · kb_search               │
+│  memory_search · memory_save · history_search · todo_*          │
+│  subagent_run · express_reaction · exit_plan_mode · MCP         │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace 日志                     │
 │ (向量)   │  (关系型)    │  (可观测性)                           │
@@ -139,11 +139,11 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 
 ## 技术栈
 
-**后端**: Python 3.11+ · OpenAI 兼容 + Anthropic Messages 编解码 · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers · Playwright
+**后端**: Python 3.11+ · OpenAI 兼容 + Anthropic Messages 编解码 · Pydantic · Typer+Rich · FastAPI · ChromaDB · sentence-transformers
 
 **桌面端**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**测试**: pytest · 193 单元测试 · 16 安全测试 · 40 性能基准测试 · 10 集成测试 · 9 回归测试
+**测试**: pytest · 329 个测试文件 —— 246 单元 · 40 性能基准 · 14 集成 · 13 安全（229 用例）· 9 回归 · 4 评估 · 3 其他
 
 ## 贡献
 

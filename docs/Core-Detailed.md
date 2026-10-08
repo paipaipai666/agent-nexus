@@ -1,4 +1,4 @@
-> **[中文](Core-Detailed.md) | [English](Core-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # ⚙️ Core 核心模块（详细版）
 

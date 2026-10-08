@@ -18,7 +18,7 @@ All three share a context: they're technically sophisticated, value transparency
 
 ## Product Purpose
 
-AgentNexus exists to prove that a local-first AI agent can be both powerful and safe. It's a ReAct (Thought→Action→Observe) single-agent tool that runs entirely on the user's machine — no data leaves the device. The FSM (16 states, 25 transitions) makes agent behavior deterministic and auditable, unlike prompt-driven agents that are unpredictable.
+AgentNexus exists to prove that a local-first AI agent can be both powerful and safe. It's a ReAct (Thought→Action→Observe) single-agent tool that runs entirely on the user's machine — no data leaves the device. The FSM (6 states, 14 transition rules) makes agent behavior deterministic and auditable, unlike prompt-driven agents that are unpredictable.
 
 Success looks like: a developer installs it, runs `nexus init`, and has a fully functional AI agent with memory, knowledge base, and tool governance — all without sending a single byte to the cloud.
 

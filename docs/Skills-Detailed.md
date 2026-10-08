@@ -1,4 +1,4 @@
-> **[中文](Skills-Detailed.md) | [English](Skills-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🎯 Skills 技能模块（详细版）
 

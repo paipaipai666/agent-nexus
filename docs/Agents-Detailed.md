@@ -1,4 +1,4 @@
-> **[中文](Agents-Detailed.md) | [English](Agents-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🤖 Agents 代理模块（详细版）
 
@@ -275,9 +275,9 @@ AFTER_TOOL_CALL 钩子
 
 | 模式 | 应用 |
 | --- | --- |
-| **State Machine** | 16 状态 × 25 转移规则的 FSM |
-| **Transfer Table** | 转移表驱动，非硬编码 if-else |
-| **Strategy Pattern** | 四级 CallingStrategy 降级 |
+| **State Machine** | 6 状态 × 14 转移规则的 FSM |
+| **Transfer Table** | 转移表驱动，非硬编码 if-else；totality 由单测 AST 静态断言守护 |
+| **Strategy Pattern** | 三级 CallingStrategy 降级 |
 | **Observer** | FSM 状态变化订阅机制 |
 | **Command** | 每条转移规则对应一个处理方法 |
 | **Chain of Responsibility** | 钩子链式调用 |

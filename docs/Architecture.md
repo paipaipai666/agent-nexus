@@ -7,9 +7,10 @@
 ```
 ┌───────────────────────────────────────────────────────────┐
 │              CLI 层 (Typer + Rich)                          │
-│  6 顶层命令 + 7 子命令组 = 40+ 入口                         │
-│  nexus init / config / tui / stats / audit / ver           │
-│  nexus kb / wiki / memory / logs / eval / skill           │
+│  10 顶层命令 + 7 子命令组 = 83 个叶子命令                   │
+│  nexus init / config / tui / stats / audit / serve          │
+│  nexus health / alerts / sessions / version                 │
+│  nexus kb / wiki / memory / logs / eval / skill / hooks     │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -20,16 +21,16 @@
                    │
 ┌──────────────────▼────────────────────────────────────────┐
 │           ReActAgent (FSM 驱动)                             │
-│  16 状态 × 25 转移规则                                      │
+│  6 状态 × 14 转移规则                                       │
 │  CallingStrategy 三级: Native → JSON → Prompt JSON          │
 │  AgentLLM (litellm 流式, 3 次指数退避)                       │
-│  工具 batch 顺序执行, max_steps 硬终止                        │
+│  工具 batch 顺序执行, max_steps 只提示不硬终止               │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
 │         ToolRegistry 治理网关 (7 道关卡)                     │
 │  RBAC → Schema → 限流 → 超时 → 风险 → HITL → 审计           │
-│  18 内置工具 + MCP 动态导入 + 子代理隔离                      │
+│  15 内置工具 + 3 会话级 todo 工具 + MCP + 子代理隔离         │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -50,7 +51,7 @@ agentnexus/
 ├── cli/                      ── Typer CLI 层
 ├── agents/                   ── ReActAgent + FSM
 ├── core/                     ── Settings + LLM
-├── evaluation/               ── 8 个评估器
+├── evaluation/               ── 9 个评估器
 ├── extensions/               ── 插件系统
 ├── memory/                   ── STM/LTM/版本控制/压缩/反射/卸载/投影/提取
 ├── observability/            ── Trace + Token 统计
@@ -106,27 +107,31 @@ agentnexus/
 | --- | --- | --- |
 | Core 核心 | [Core-Detailed.md](Core-Detailed.md) | 配置、LLM、能力检测、钩子、Provider |
 | App Runtime | [App-Runtime.md](App-Runtime.md) | 统一组装层、依赖注入、生命周期管理 |
-| Agents 代理 | [Agents-Detailed.md](Agents-Detailed.md) | FSM 状态机、16 状态 × 25 转移、四级策略 |
+| Agents 代理 | [Agents-Detailed.md](Agents-Detailed.md) | FSM 状态机、6 状态 × 14 转移、三级策略 |
 | Tools 工具 | [Tools-Detailed.md](Tools-Detailed.md) | 7 道关卡、9 个提供者、MCP |
 | Skills 技能 | [Skills-Detailed.md](Skills-Detailed.md) | 发现、路由、运行时、SKILL.md 格式 |
 | Memory + RAG | [Memory-RAG-Detailed.md](Memory-RAG-Detailed.md) | STM/LTM/版本/压缩 + RAG 检索/重排 |
 | Wiki 系统 | [Wiki-System-Detailed.md](Wiki-System-Detailed.md) | 混合 Wiki+RAG、机械验证、图传播、校准 |
 | Prompts 提示词 | [Prompts-Detailed.md](Prompts-Detailed.md) | 模板加载、片段组合 |
-| Evaluation 评估 | [Evaluation-Detailed.md](Evaluation-Detailed.md) | 8 个评估器、任务系统 |
+| Evaluation 评估 | [Evaluation-Detailed.md](Evaluation-Detailed.md) | 9 个评估器、任务系统 |
 | Observability | [Observability-Detailed.md](Observability-Detailed.md) | Trace/Token 统计/审计/告警 |
 | Extensions 扩展 | [Extensions-Detailed.md](Extensions-Detailed.md) | 插件系统、能力运行时 |
 | Server + Services | [Server-Services-Detailed.md](Server-Services-Detailed.md) | FastAPI 服务器、服务外观层 |
 | Storage | [Storage-Detailed.md](Storage-Detailed.md) | ChromaDB、SQLite 存储抽象 |
-| CLI + TUI | [CLI-TUI-Detailed.md](CLI-TUI-Detailed.md) | 40+ CLI 命令、Textual TUI |
+| CLI + TUI | [CLI-TUI-Detailed.md](CLI-TUI-Detailed.md) | 83 个 CLI 命令、Textual TUI |
 | MCP 集成 | [MCP-Integration.md](MCP-Integration.md) | 动态工具导入 |
 
 ## 架构图
 
+交互式 HTML 图（浏览器直接打开，支持明暗主题 + 导出 PNG/SVG/PDF）：
+
 | 图 | 文件 | 说明 |
 | --- | --- | --- |
-| 整体架构 | [diagrams/overall-architecture.drawio](diagrams/overall-architecture.drawio) | 分层架构 + 模块组 |
-| Wiki 系统 | [diagrams/wiki-architecture.drawio](diagrams/wiki-architecture.drawio) | Wiki 内部组件交互 |
-| AppRuntime 构建 | [diagrams/app-runtime-build.drawio](diagrams/app-runtime-build.drawio) | 17 步组装流程 |
+| 运行时架构 | [AgentNexus-Runtime-Architecture.html](AgentNexus-Runtime-Architecture.html) | 分层调用链：CLI/TUI/Desktop → Agent → 工具 → 存储 |
+| 子系统架构 | [AgentNexus-Subsystems-Architecture.html](AgentNexus-Subsystems-Architecture.html) | 子系统边界与依赖方向 |
+| 记忆数据流 | [AgentNexus-Memory-Dataflow.html](AgentNexus-Memory-Dataflow.html) | STM 压缩金字塔 → LTM 提取/驱逐 |
+| 治理与可观测 | [AgentNexus-Governance-Observability.html](AgentNexus-Governance-Observability.html) | 7 道关卡 + Trace/告警/健康检查 |
+| Wiki 引擎 | [AgentNexus-Wiki-Engine.html](AgentNexus-Wiki-Engine.html) | Wiki 内部组件交互与验证管道 |
 
 ## API 路由
 

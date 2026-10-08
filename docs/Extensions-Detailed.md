@@ -1,4 +1,4 @@
-> **[中文](Extensions-Detailed.md) | [English](Extensions-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🧩 Extensions 扩展模块（详细版）
 

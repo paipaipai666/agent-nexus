@@ -6,6 +6,8 @@ All notable changes to AgentNexus will be documented in this file.
 
 ### Changed
 
+- **文档事实性对齐（FSM 重设计后全量复核）** — 上一轮清理只对齐了工具/提供者计数，**FSM 重设计的数字从没同步**，README/文档仍在宣传重设计前的形态。逐条对着代码与 `register_all_tools` 实测输出核，本轮修正：① **FSM 16 状态/25 转移 → 6 状态/14 转移**（`react_transitions.py` 实际 14 行；README zh/en、PRODUCT、CLAUDE、Architecture zh/en、Home zh/en、Agents-Detailed 汇总表，共 11 处）；② 内置工具 18 → **15**（运行时注册实测；另 3 个 `todo_*` 按会话绑定，已在 README/Architecture/Tool-Governance 三处写明，工具参数表从 14 行补到 18 行）；③ 安全测试 213/8 类 → **229 用例 / 13 个攻击面**（`pytest tests/security --collect-only`）；④ 测试分布 193/16/10/40/9 → **246 单元/13 安全/14 集成/40 性能/9 回归/4 评估/3 其他 = 329 文件**（此前把文件数写成用例数）；⑤ 命令 40+ → **83 个叶子命令 / 10 顶层命令 + 7 子命令组**（typer 命令树实测）；⑥ 评估器 8 → **9**（补上一直没进表的 `memory_eval.py`，`nexus eval memory`）；⑦ `max_steps 硬终止` → **只提示不终止**（决策 3，`hard_stop_on_max_steps` 在代码里根本不存在）；⑧ 清残余：README.zh 沙箱行仍写 E2B 四级降级、技术栈仍列 Playwright（依赖已删）、ASCII 图里的 `code_executor`/`shell`/`file_ops`/`wiki` 等不存在的工具名换成真实工具名、Home 的「11 内置 Provider」→9、Architecture.en 的 OS Accessibility 残留（computer-use 已下线）、Tool-Governance 参数表补 `history_search`/`memory_project_status`/`express_reaction`/`exit_plan_mode` 四行并修正 `memory_search`/`memory_save`/`web_fetch`/`web_search`/`kb_search`/`subagent_run` 的过期参数与限流。死链清理：README.zh 的 `docs/Code-Execution.md`（文件不存在）、11 个 `-Detailed` 文档顶部指向从未存在的 `.en.md` 英文链接、Architecture.md 的 3 个 `.drawio` 链接（仓库零 drawio 文件，改指实际存在的 5 份交互式 HTML 架构图）
+
 - **文档事实性刷新（清理后对齐）** — README（zh/en）徽标/标语测试文件数 269→329（全量递归计数）、安全沙箱行补工作区路径沙箱 + 越界一键放行；README.zh 工具参数表计数 18→14；Tool-Governance（zh/en）/Tools-Detailed/Architecture（zh/en）提供者表统一补齐 Reaction/PlanMode 两行并修正计数（10→9）；archify-runtime JSON 内置工具 ×13→×15（对齐实际注册数）
 
 ### Removed

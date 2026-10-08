@@ -1,10 +1,10 @@
-> **[中文](Evaluation-Detailed.md) | [English](Evaluation-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 📈 Evaluation 评估模块（详细版）
 
 ## 概述
 
-`evaluation` 模块实现了 AgentNexus 的全面评估系统，包括 RAG 评估、轨迹评估、组件评估、幻觉检测、工具选择评估、连贯性评估等 8 个评估器。
+`evaluation` 模块实现了 AgentNexus 的全面评估系统，包括 RAG 评估、轨迹评估、组件评估、幻觉检测、工具选择评估、连贯性评估、记忆评估等 9 个评估器。
 
 ## 评估器架构
 
@@ -21,6 +21,11 @@
 │  │ToolSelect│  │Coherence │  │Agent Eval│  │Code Bench│   │
 │  │工具选择  │  │ 连贯性   │  │ 代理评估 │  │ 代码评估 │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│                                                              │
+│  ┌──────────────┐                                           │
+│  │  Memory Eval │                                           │
+│  │   记忆评估   │                                           │
+│  └──────────────┘                                           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -36,6 +41,7 @@
 | 连贯性 | `coherence.py` | 多步推理连贯性（独立 Judge 模型） |
 | 代理评估 | `agent_eval.py` | 单 Agent 执行质量 |
 | 代码评估 | `humaneval.py`, `swebench.py` | HumanEval/SWE-bench 代码质量 |
+| 记忆评估 | `memory_eval.py` | LTM 写入/召回质量（`nexus eval memory`） |
 
 ## 评估任务系统
 

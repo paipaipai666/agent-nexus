@@ -16,6 +16,7 @@ All evaluators read from JSONL Traces (except Coherence, which does not depend o
 | **Tool Selection** | Keyword match vs actual | accuracy≥92% | `eval tool-selection` |
 | **HumanEval** | Isolated subprocess test run | pass@1 | `eval humaneval` |
 | **SWE-bench** | Patch application test | resolve_rate | `eval swe-bench` |
+| **Memory** | Sandboxed LTM/STM probes (zero-LLM by default, optional Judge) | recall/freshness/forgetting/isolation + admission/retention/quality | `eval memory` |
 
 ## RAG Layer
 

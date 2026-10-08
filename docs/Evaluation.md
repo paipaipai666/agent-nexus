@@ -16,6 +16,7 @@
 | **Tool Selection** | 关键词匹配 vs 实际 | accuracy≥92% | `eval tool-selection` |
 | **HumanEval** | 隔离子进程运行测试 | pass@1 | `eval humaneval` |
 | **SWE-bench** | 补丁应用测试 | resolve_rate | `eval swe-bench` |
+| **Memory** | 沙箱化 LTM/STM 探针（默认零 LLM，可选 Judge） | recall/freshness/forgetting/isolation + admission/retention/quality | `eval memory` |
 
 ## RAG 层
 

@@ -1,4 +1,4 @@
-> **[中文](Storage-Detailed.md) | [English](Storage-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 💾 Storage 模块（详细版）
 

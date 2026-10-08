@@ -52,19 +52,25 @@ PlanModeToolProvider     → exit_plan_mode
 
 | Tool | Parameters | Rate Limit | Risk |
 | --- | --- | --- | --- |
-| `memory_search` | `query`, `category?` | 10/min | LOW |
-| `memory_save` | `content`, `category?`, `importance?` | 10/min | LOW |
+| `memory_search` | `query` | 10/min | LOW |
+| `memory_save` | `content`, `category?`, `importance?`, `scope?`, `kind?`, `tags?` | 10/min | LOW |
+| `memory_project_status` | No parameters | 10/min | LOW |
+| `history_search` | `query`, `max_results?` | 15/min | LOW |
 | `grep_search` | `pattern`, `path?`, `glob?`, `max_results?`, `literal?` | 20/min | LOW |
-| `web_search` | `query`, `max_results?`, `search_depth?`, `time_range?`, `topic?`, `include_answer?` | 10/min | LOW |
-| `web_fetch` | `url`, `max_chars?`, `extract_mode?` | 10/min | LOW |
-| `kb_search` | `query`, `namespace?`, `top_k?`, `view?`, 6 filters | 20/min | LOW |
+| `web_search` | `query`, `max_results?`, `search_depth?`, `time_range?`, `topic?`, `include_answer?`, `include_domains?`, `exclude_domains?` | 10/min | LOW |
+| `web_fetch` | `urls`, `extract_depth?`, `format?` | 5/min | LOW |
+| `kb_search` | `query`, `namespace?`, `top_k?`, `view?`, 8 filters | 20/min | LOW |
 | `file_read` | `path`, `offset?`, `limit?` | 30/min | LOW |
 | `file_list` | `path?`, `pattern?` | 20/min | LOW |
 | `file_write` | `path`, `content`, `mode?`, `expected_version?` | 20/min | MEDIUM |
 | `shell_exec` | `command`, `cwd?`, `timeout?` | Unlimited | HIGH |
-| `subagent_run` | `task`, `role?`, `allowed_tools?` | 10/min | LOW |
+| `subagent_run` | `task`, `role?`, `allowed_tools?`, `name?` | 10/min | LOW |
+| `express_reaction` | `reaction`, `comment?` | 10/min | LOW |
+| `exit_plan_mode` | `plan` | Unlimited | LOW |
 | `todo_add` | `description` | Unlimited | LOW |
 | `todo_update` | `item_id`, `status` | Unlimited | LOW |
 | `todo_list` | No parameters | Unlimited | LOW |
+
+> `todo_*` are bound per session (interactive TUI/Desktop); the other 15 register at startup.
 
 > See [MCP Integration](MCP-Integration.en.md) for external tool integration (including external browser MCP tools).

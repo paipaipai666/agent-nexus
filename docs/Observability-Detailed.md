@@ -1,4 +1,4 @@
-> **[中文](Observability-Detailed.md) | [English](Observability-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 📊 Observability 可观测性模块（详细版）
 

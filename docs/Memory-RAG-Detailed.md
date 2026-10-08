@@ -1,4 +1,4 @@
-> **[中文](Memory-RAG-Detailed.md) | [English](Memory-RAG-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🧠 Memory + RAG 模块（详细版）
 

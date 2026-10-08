@@ -1,4 +1,4 @@
-> **[中文](Server-Services-Detailed.md) | [English](Server-Services-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🌐 Server + Services 模块（详细版）
 

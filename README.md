@@ -12,11 +12,11 @@
 
 AgentNexus is a **ReAct (Thought→Action→Observe) single-agent** CLI tool that runs entirely on your machine. No cloud dependency. No data leakage. Your vectors, memory, and trace logs never leave your device.
 
-Unlike prompt-only agents, AgentNexus uses a **formal finite state machine** (16 states, 25 transitions) to govern every reasoning loop — making agent behavior deterministic and auditable.
+Unlike prompt-only agents, AgentNexus uses a **formal finite state machine** (6 states, 14 transition rules) to govern every reasoning loop — making agent behavior deterministic and auditable.
 
 ```text
 User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
-       → Tool Gateway (7 Security Gates) → 18 Built-in Tools + MCP
+       → Tool Gateway (7 Security Gates) → 15 Built-in Tools + MCP
        → Local Storage: ChromaDB | SQLite | JSONL
 ```
 
@@ -26,11 +26,11 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | --- | --- | --- |
 | **Data Privacy** | 100% local — vectors, memory, traces on-device | Cloud-dependent, data leaves your machine |
 | **Security Model** | 7-layer tool governance (RBAC, schema, rate-limit, timeout, risk, HITL, audit) | Basic or no tool-level security |
-| **Agent Control** | FSM-driven loop — 16 states, 25 deterministic transitions | Prompt-driven, unpredictable behavior |
+| **Agent Control** | FSM-driven loop — 6 states, 14 deterministic transitions | Prompt-driven, unpredictable behavior |
 | **Code Sandbox** | tiered degradation: bubblewrap/Seatbelt/Low-IL → Docker → local | Single sandbox or none |
-| **Security Tests** | 213 dedicated tests across 8 categories | Ad-hoc or no security testing |
+| **Security Tests** | 229 tests across 13 attack surfaces | Ad-hoc or no security testing |
 | **Observability** | 6-layer system: trace + drift detection + fault attribution + alerting + health checks + improvement loop | Basic logging |
-| **Evaluation** | 8 built-in evaluators (agent, trajectory, hallucination, RAG, code...) | Manual or none |
+| **Evaluation** | 9 built-in evaluators (agent, trajectory, hallucination, RAG, code, memory...) | Manual or none |
 | **Interface** | TUI + Desktop (Electron) + API server | Single interface |
 
 ## Features
@@ -45,7 +45,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🔒 **Security Sandbox** | Workspace path sandbox with one-click out-of-bounds approval; shell chain: bubblewrap/Seatbelt/Low-IL → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
-| 📊 **Evaluation** | 8 evaluators (Agent/Trajectory/Hallucination/RAG/Code, etc.) |
+| 📊 **Evaluation** | 9 evaluators (Agent/Trajectory/Hallucination/RAG/Code/Memory, etc.) |
 | 🎭 **Persona System** | Agent identity, behavioral principles (stance/autonomy/accountability), and user-defined mission map |
 | 🎯 **Skill System** | Reusable workflow templates, TF-IDF + learned reranker routing |
 | 🔌 **MCP Integration** | Import external tools via stdio/HTTP, full governance |
@@ -99,8 +99,8 @@ nexus eval agent --days 1        # Run agent quality evaluation
 | ⌨️ [CLI & TUI](docs/CLI-TUI-Detailed.en.md) | CLI commands, TUI interface, keybindings |
 | 🖥️ [App Runtime](docs/App-Runtime.en.md) | Desktop app runtime, Electron integration |
 | ⚙️ [Configuration](docs/Configuration.en.md) | All configuration items reference |
-| ⌨️ [Commands](docs/Commands.en.md) | 40+ commands reference |
-| 📊 [Evaluation](docs/Evaluation.en.md) | 8 evaluators, RAG metrics |
+| ⌨️ [Commands](docs/Commands.en.md) | 83 commands reference |
+| 📊 [Evaluation](docs/Evaluation.en.md) | 9 evaluators, RAG metrics |
 | 🔒 [Security](docs/Security.en.md) | PII masking, sandbox escape protection |
 | 🎯 [Skill System](docs/Skill-System.en.md) | Skill discovery, routing, workflow execution |
 | 🔌 [MCP Integration](docs/MCP-Integration.en.md) | External tool import, governance fusion |
@@ -121,16 +121,17 @@ nexus eval agent --days 1        # Run agent quality evaluation
 │                    ReAct Agent Core                              │
 │  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐        │
 │  │ FSM      │  │ LLM Strategy │  │ Prompt Builder     │        │
-│  │ (16→25)  │  │ (3-tier)     │  │ (templates)        │        │
+│  │ (6→14)   │  │ (3-tier)     │  │ (templates)        │        │
 │  └──────────┘  └──────────────┘  └────────────────────┘        │
 ├─────────────────────────────────────────────────────────────────┤
 │               Tool Gateway (7 Security Gates)                   │
 │  RBAC → Schema → Rate-limit → Timeout → Risk → HITL → Audit    │
 ├─────────────────────────────────────────────────────────────────┤
 │                     Tool Execution Layer                         │
-│  shell_exec · file_ops · web_search · kb_search                 │
-│  memory_save · subagent · grep_search · web_fetch               │
-│  wiki · todo · ...                                              │
+│  file_read · file_write · file_list · shell_exec                │
+│  grep_search · web_search · web_fetch · kb_search               │
+│  memory_search · memory_save · history_search · todo_*          │
+│  subagent_run · express_reaction · exit_plan_mode · MCP         │
 ├──────────┬──────────────┬───────────────────────────────────────┤
 │ ChromaDB │   SQLite     │  JSONL Trace Logs                     │
 │ (vectors)│  (relational)│  (observability)                      │
@@ -143,7 +144,7 @@ nexus eval agent --days 1        # Run agent quality evaluation
 
 **Desktop**: Electron · React 19 · TypeScript · Vite · TailwindCSS · Zustand
 
-**Testing**: pytest · 193 unit tests · 16 security tests · 40 performance benchmarks · 10 integration tests · 9 regression tests
+**Testing**: pytest · 329 test files — 246 unit · 40 performance · 14 integration · 13 security (229 cases) · 9 regression · 4 eval · 3 misc
 
 ## Contributing
 

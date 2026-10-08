@@ -1,4 +1,4 @@
-> **[中文](Tools-Detailed.md) | [English](Tools-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 🔧 Tools 工具模块（详细版）
 

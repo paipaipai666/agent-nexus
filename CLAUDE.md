@@ -164,10 +164,10 @@ When I use a Chinese term with multiple English meanings, infer from context. If
 | Concept | Definition |
 |---------|------------|
 | Agent / ReAct Agent | ReAct 循环实体 (`agentnexus/agents/`) |
-| FSM | 有限状态机，16 状态 25 转移 (`agentnexus/agents/fsm.py`) |
+| FSM | 有限状态机，6 状态 14 转移 (`agentnexus/agents/fsm.py`) |
 | Persona | Agent 身份 + 行为原则 (`agentnexus/core/config.py`) |
 | STM / LTM | 短期记忆（压缩金字塔）/ 长期记忆（SQLite + ChromaDB） |
 | RAG / Hybrid Retriever | 检索增强生成 / Dense + Sparse + RRF + Rerank |
 | Tool Gateway | 7 道安全关卡：RBAC/Schema/限流/超时/风险/HITL/审计 |
-| Evaluator | 8 种质量评估器 (`agentnexus/evaluation/`) |
+| Evaluator | 9 种质量评估器 (`agentnexus/evaluation/`) |
 | Wiki | 混合 Wiki + RAG 知识管理 |

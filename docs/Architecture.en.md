@@ -7,9 +7,10 @@
 ```text
 ┌───────────────────────────────────────────────────────────┐
 │              CLI Layer (Typer + Rich)                       │
-│  6 top-level commands + 7 subcommand groups = 40+          │
-│  nexus init / config / tui / stats / audit / ver           │
-│  nexus kb / wiki / memory / logs / eval / skill           │
+│  10 top-level commands + 7 subcommand groups = 83 leaves    │
+│  nexus init / config / tui / stats / audit / serve          │
+│  nexus health / alerts / sessions / version                 │
+│  nexus kb / wiki / memory / logs / eval / skill / hooks     │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -20,10 +21,10 @@
                    │
 ┌──────────────────▼────────────────────────────────────────┐
 │           ReActAgent (FSM Driven)                           │
-│  16 states × 25 transitions                                 │
+│  6 states × 14 transition rules                             │
 │  CallingStrategy 3-tier: Native → JSON → Prompt             │
 │  AgentLLM (litellm streaming, 3x exponential backoff)       │
-│  Batch sequential execution, max_steps hard limit           │
+│  Batch sequential execution, max_steps nudges (never hard)  │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -31,7 +32,8 @@
 │         (7 Security Gates)                                  │
 │  RBAC → Schema → Rate-limit → Timeout                      │
 │  → Risk → HITL → Audit                                     │
-│  18 built-in tools + MCP dynamic import + sub-agent         │
+│  15 built-in tools + 3 session-scoped todo tools           │
+│  + MCP dynamic import + sub-agent isolation                 │
 └──────────────────┬────────────────────────────────────────┘
                    │
 ┌──────────────────▼────────────────────────────────────────┐
@@ -40,7 +42,7 @@
 │  JSONL (Traces)                                             │
 │  SentenceTransformers + BM25 + BGE-Reranker                 │
 │  bubblewrap / Seatbelt / Low-IL / Docker / Local sandbox   │
-│  External browser MCP tools  OS Accessibility (Desktop)     │
+│  External browser MCP tools                                 │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +55,7 @@ agentnexus/
 ├── cli/                      ── Typer CLI layer
 ├── agents/                   ── ReActAgent + FSM
 ├── core/                     ── Settings + LLM
-├── evaluation/               ── 8 evaluators
+├── evaluation/               ── 9 evaluators
 ├── extensions/               ── plugin system
 ├── memory/                   ── STM/LTM/version control/compaction/reflection/offload/projection/extraction
 ├── observability/            ── Trace + Token statistics

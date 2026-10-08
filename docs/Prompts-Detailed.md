@@ -1,4 +1,4 @@
-> **[中文](Prompts-Detailed.md) | [English](Prompts-Detailed.en.md)**
+> 中文版（暂无英文版）
 
 # 💬 Prompts 提示词模块（详细版）
 
