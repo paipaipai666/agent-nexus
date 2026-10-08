@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentnexus.core.config import get_settings
 from agentnexus.tools.providers.base import ProviderSpec, ToolProviderContext
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
@@ -46,6 +47,7 @@ class SubagentToolProvider:
                 rate_limit_per_min=10,
                 concurrency_safe=True,
                 lane="subagent",
+                timeout_sec=get_settings().subagent_timeout_sec,
             ),
             make_subagent_run(
                 parent_llm=context.llm_client,

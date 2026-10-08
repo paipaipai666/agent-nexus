@@ -166,9 +166,12 @@ class TestTraceManager:
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
 
         def fake_run(self, question, memory_manager=None):
-            ctx = trace_manager.active
-            llm_span = ctx.start_span("llm", {"messages_count": 1})
-            ctx.end_span(llm_span, metadata={"status": "ok"})
+            # Child runs on a dedicated runner thread without an active
+            # TraceContext — spans must go through span() which handles
+            # orphan flushing (dispatcher stamps the parent trace id for
+            # joinability instead of sharing the context stack).
+            with trace_manager.span("llm", {"messages_count": 1}) as llm_span:
+                llm_span.metadata = {"status": "ok"}
             return SimpleNamespace(answer="child answer", steps=[])
 
         monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)

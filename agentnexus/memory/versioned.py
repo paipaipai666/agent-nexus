@@ -403,13 +403,16 @@ class ConversationVersionManager:
         desktop per-session workspace model); pass a path to scope the list
         to one workspace (CLI/TUI behavior).
         """
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=5)
         conn.row_factory = sqlite3.Row
         try:
-            try:
+            # Sidebar hot path: skip the schema bootstrap DDL unless the db is
+            # brand new — executescript on every request serializes against
+            # the agent loop's write commits on the same file.
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions'"
+            ).fetchone() is None:
                 conn.executescript(SCHEMA)
-            except sqlite3.OperationalError:
-                return []
             # Skip content-less rows (e.g. the server build session registered
             # on every `nexus serve` launch); sessions with a checkpoint,
             # message, or persisted preview all count as having content.
@@ -435,6 +438,7 @@ class ConversationVersionManager:
             ).fetchall()
 
             sessions = []
+            pending_previews: list[tuple[str, str]] = []
             for row in rows:
                 session_id = row["session_id"]
                 preview = row["preview"] or ""
@@ -467,13 +471,9 @@ class ConversationVersionManager:
                         if last_msg:
                             preview = last_msg["content"][:100] or ""
 
-                    # Persist generated preview for future queries
+                    # Persist generated preview for future queries (batched below)
                     if preview:
-                        conn.execute(
-                            "UPDATE conversation_sessions SET preview = ? WHERE session_id = ?",
-                            (preview, session_id),
-                        )
-                        conn.commit()
+                        pending_previews.append((preview, session_id))
 
                 sessions.append({
                     "session_id": session_id,
@@ -484,6 +484,18 @@ class ConversationVersionManager:
                     "profile": row["profile"],
                     "workspace_path": row["workspace_path"],
                 })
+
+            # One commit for all generated previews — cosmetic cache, so a lock
+            # failure must not fail the read either.
+            if pending_previews:
+                try:
+                    conn.executemany(
+                        "UPDATE conversation_sessions SET preview = ? WHERE session_id = ?",
+                        pending_previews,
+                    )
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    conn.rollback()
             return sessions
         finally:
             conn.close()

@@ -228,6 +228,9 @@ class Settings(BaseSettings):
     # ── Agent Runtime ─────────────────────────────────────────────────────
     max_agent_steps: int = Field(default=50, ge=1, le=200)
     subagent_max_concurrent: int = Field(default=3, ge=1, le=8)
+    # Subagent wall-clock budget. The child agent is cancelled cooperatively
+    # at the next step boundary when this expires (see tools/subagent.py).
+    subagent_timeout_sec: int = Field(default=1800, ge=1)
     # 用户自定义追加指令：注入系统上下文末尾，优先级高于平台默认行为
     # 准则，但不得覆盖安全约束。支持多行文本。
     append_system_prompt: str = Field(default="")

@@ -185,7 +185,7 @@ class TestCancelBridgePropagation:
         flag["cancelled"] = True
         assert received["checker"]() is True
 
-    def test_no_bridge_leaves_child_without_checker(self, monkeypatch):
+    def test_no_bridge_still_installs_cancel_checker(self, monkeypatch):
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
         received = {}
 
@@ -199,7 +199,10 @@ class TestCancelBridgePropagation:
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         tool(task="t", role="explorer", max_steps=1)
 
-        assert received["checker"] is None
+        # The checker is always installed now: the wall-clock deadline cancels
+        # the child through it even when no cancel bridge exists.
+        assert received["checker"] is not None
+        assert received["checker"]() is False
 
 
 class TestInheritedTraceLinkage:

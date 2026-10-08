@@ -517,7 +517,11 @@ class HybridRetriever:
     ) -> list[SearchResult]:
         pairs = [(query, self._chunks[chunk_id].text) for chunk_id, _ in candidates if chunk_id in self._chunks]
         chunk_ids = [chunk_id for chunk_id, _ in candidates if chunk_id in self._chunks]
-        scores = self._reranker.predict(pairs)
+        # ponytail: fixed batch caps activation memory so the torch CPU
+        # allocator high-water stays bounded under concurrent subagent load
+        # (unbatched predict scales with candidate count — was the 16-22GB RSS
+        # driver). Batch 16 × 512 tokens peaks in the hundreds of MB.
+        scores = _predict_in_batches(self._reranker, pairs)
         scored = [(chunk_id, float(score)) for chunk_id, score in zip(chunk_ids, scores)]
         filtered = [
             item
@@ -536,6 +540,29 @@ class HybridRetriever:
             )
             for chunk_id, score in reranked
         ]
+
+
+_RERANK_BATCH_SIZE = 16
+
+
+def _predict_in_batches(reranker, pairs: list[tuple[str, str]]) -> list[float]:
+    """CrossEncoder.predict in fixed batches under torch.inference_mode.
+
+    inference_mode drops autograd bookkeeping (~half the intermediate memory);
+    batching keeps the peak flat regardless of candidate count.
+    """
+    try:
+        import torch
+        ctx = torch.inference_mode()
+    except Exception:  # torch absent (hash-fallback embeddings) — predict still works
+        import contextlib
+        ctx = contextlib.nullcontext()
+    all_scores: list[float] = []
+    with ctx:
+        for start in range(0, len(pairs), _RERANK_BATCH_SIZE):
+            batch = pairs[start:start + _RERANK_BATCH_SIZE]
+            all_scores.extend(float(s) for s in reranker.predict(batch))
+    return all_scores
 
 
 _retriever: HybridRetriever | None = None

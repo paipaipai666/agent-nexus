@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TYPE_CHECKING, Callable, Iterable
 
 logger = logging.getLogger(__name__)
@@ -221,19 +224,21 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
             conversation_mode=False,
             agent_id=f"subagent_{role}",
         )
+        # Timeout cancel signal — set when the wall-clock budget expires so the
+        # child stops at the next FSM boundary instead of orphaning its thread.
+        local_cancel = threading.Event()
+        # Cooperative cancellation: parent run cancelled, UI interrupt on this
+        # subagent, or the wall-clock budget expired → stop at next boundary.
+        # Always installed — a child without any checker cannot be cancelled.
+        child_agent.set_cancel_checker(
+            lambda: local_cancel.is_set()
+                    or (cancel_bridge is not None and cancel_bridge.check())
+                    or (subagent_entry is not None and subagent_entry.cancel_event.is_set())
+        )
         if subagent_ctx is not None and subagent_entry is not None:
             # Visibility: forward child FSM events into the parent run's
             # queue so the UI can show this subagent's trajectory/status.
             child_agent._on_event = _make_child_forwarder(subagent_ctx, subagent_entry)
-            # Cooperative cancellation: parent run cancelled OR this specific
-            # subagent was interrupted via the UI → stop at next boundary.
-            child_agent.set_cancel_checker(
-                lambda: (cancel_bridge is not None and cancel_bridge.check())
-                        or subagent_entry.cancel_event.is_set())
-        elif cancel_bridge is not None:
-            # Cooperative cancellation: parent run cancelled → child loop stops
-            # at the next step boundary instead of running to max_steps.
-            child_agent.set_cancel_checker(cancel_bridge.check)
 
         try:
             with trace_manager.span("subagent_attempt", {
@@ -244,7 +249,49 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                 "task_preview": task[:200],
                 "parent_trace_id": trace_manager.get_inherited_trace() or "",
             }) as span:
-                result = child_agent.run(_build_subagent_prompt(task, role, retry_reason), memory_manager=None)
+                try:
+                    from agentnexus.core.config import get_settings
+                    deadline = get_settings().subagent_timeout_sec
+                except Exception:
+                    deadline = 1800
+                runner = ThreadPoolExecutor(max_workers=1, thread_name_prefix="subagent-runner")
+                parent_trace_id = trace_manager.get_inherited_trace()
+
+                def _run_child(prompt: str):
+                    # Runner thread has no active TraceContext; stamp the
+                    # parent's trace id so child spans stay joinable
+                    # (same pattern as tools/dispatcher.py).
+                    trace_manager.set_inherited_trace(parent_trace_id)
+                    try:
+                        return child_agent.run(prompt, memory_manager=None)
+                    finally:
+                        trace_manager.set_inherited_trace(None)
+
+                try:
+                    future = runner.submit(
+                        _run_child,
+                        _build_subagent_prompt(task, role, retry_reason),
+                    )
+                    try:
+                        result = future.result(timeout=deadline)
+                    except FutureTimeout:
+                        # Budget expired: signal cooperative cancel. The child FSM
+                        # checks the cancel flag at every step boundary, raises
+                        # AgentCancelled, and the runner thread exits — no orphan.
+                        local_cancel.set()
+                        if subagent_entry is not None:
+                            subagent_entry.cancel_event.set()
+                        logger.warning(
+                            "Subagent attempt exceeded %ss — cancelling cooperatively", deadline,
+                        )
+                        try:
+                            result = future.result(timeout=120)  # grace for in-flight LLM call
+                        except FutureTimeout:
+                            raise TimeoutError(
+                                f"subagent ignored cancel and ran past {deadline}s + 120s grace"
+                            )
+                finally:
+                    runner.shutdown(wait=False)
                 answer = (result.answer or "").strip()
                 salvaged = _extract_step_summary(result)
                 span.output = {
