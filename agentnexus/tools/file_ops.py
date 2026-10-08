@@ -21,9 +21,30 @@ LARGE_FILE_LINES = 1000
 LARGE_FILE_PREVIEW_LINES = 20
 
 
+class PathEscapesAllowedRootsError(ValueError):
+    """Path resolves outside every allowed root.
+
+    Subclasses ValueError so legacy callers/tests matching ``ValueError`` +
+    "路径越界" keep working. Carries the offending path, its resolved form,
+    and the roots it was checked against — the HITL prompt needs all three.
+    """
+
+    def __init__(self, path: str, resolved: str, roots: list[Path],
+                 *, via_symlink: bool = False):
+        self.path = path
+        self.resolved = resolved
+        self.roots = [str(r) for r in roots]
+        link_note = " (符号链接)" if via_symlink else ""
+        super().__init__(
+            f"路径越界: '{path}'{link_note} 解析为 '{resolved}'，不在允许的目录范围内。"
+            f" 允许的根目录: {', '.join(self.roots)}"
+        )
+
+
 def _get_allowed_roots() -> list[Path]:
     """Build the set of allowed root directories (recomputed each call)."""
     from agentnexus.tools.workspace import (
+        get_approved_extra_paths,
         get_effective_workspace,
         get_registered_attachment_paths,
     )
@@ -37,7 +58,7 @@ def _get_allowed_roots() -> list[Path]:
     # Allow the agentnexus package directory itself (for built-in resources)
     try:
         import agentnexus as _pkg
-        pkg_dir = Path(_pkg.__file__).resolve().parent
+        pkg_dir = Path(_pkg.__file__).resolve(strict=False).parent
         if pkg_dir not in roots:
             roots.append(pkg_dir)
     except Exception:
@@ -52,14 +73,34 @@ def _get_allowed_roots() -> list[Path]:
         if resolved not in roots:
             roots.append(resolved)
 
+    # Mid-run user approvals (out-of-bounds HITL prompt) + the persistent
+    # allowlist from config. Both widen the sandbox only by explicit consent.
+    for p in get_approved_extra_paths():
+        resolved = Path(p).resolve(strict=False)
+        if resolved not in roots:
+            roots.append(resolved)
+    try:
+        from agentnexus.core.config import get_settings
+        configured = getattr(get_settings(), "allowed_paths", None) or []
+    except Exception:
+        configured = []
+    for p in configured:
+        try:
+            resolved = Path(p).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+
     return roots
 
 
 def _resolve_safe(path: str) -> Path:
     """Resolve path and verify it stays within allowed directories.
 
-    Allowed roots: workspace (cwd), ~/.agentnexus, and the agentnexus package dir.
-    Raises ValueError if the resolved path escapes all allowed roots.
+    Allowed roots: workspace (cwd), ~/.agentnexus, the agentnexus package dir,
+    per-run attachments, mid-run user approvals, and config ``allowed_paths``.
+    Raises PathEscapesAllowedRootsError (a ValueError) on escape.
 
     Two-layer defense:
     1. normpath — catches ".." traversal on non-existent paths
@@ -81,22 +122,40 @@ def _resolve_safe(path: str) -> Path:
     # Layer 1: normpath resolves ".." without requiring the path to exist.
     normalized = Path(os.path.normpath(str(candidate)))
     if not is_allowed(normalized):
-        root_names = ", ".join(str(r) for r in roots)
-        raise ValueError(
-            f"路径越界: '{path}' 解析为 '{normalized}'，不在允许的目录范围内。"
-            f" 允许的根目录: {root_names}"
-        )
+        raise PathEscapesAllowedRootsError(path, str(normalized), roots)
 
     # Layer 2: resolve follows symlinks to catch link -> ../../outside.
     resolved = normalized.resolve(strict=False)
     if not is_allowed(resolved):
-        root_names = ", ".join(str(r) for r in roots)
-        raise ValueError(
-            f"路径越界: '{path}' (符号链接) 解析为 '{resolved}'，不在允许的目录范围内。"
-            f" 允许的根目录: {root_names}"
-        )
+        raise PathEscapesAllowedRootsError(path, str(resolved), roots,
+                                           via_symlink=True)
 
     return resolved
+
+
+# File tools whose path argument is guarded by _resolve_safe. Used by
+# tool_runner to pre-flight the guard and ask the user before hard-failing.
+_PATH_GUARDED_TOOLS = {"file_read": "path", "file_write": "path", "file_list": "path"}
+
+
+def path_guard_violation(name: str, arguments: dict) -> PathEscapesAllowedRootsError | None:
+    """Pre-flight _resolve_safe for a tool call; returns the violation if any.
+
+    Runs the same guard the tool will apply, without touching the filesystem
+    beyond resolution — so the HITL prompt can offer "放行该路径" before the
+    call is rejected inside the tool.
+    """
+    param = _PATH_GUARDED_TOOLS.get(name)
+    if param is None:
+        return None
+    raw = arguments.get(param)
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        _resolve_safe(raw)
+        return None
+    except PathEscapesAllowedRootsError as exc:
+        return exc
 
 
 def _is_within(path: Path, root: Path) -> bool:

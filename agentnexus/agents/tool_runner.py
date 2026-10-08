@@ -129,11 +129,50 @@ def execute_tool(
         # under the submitting thread — route the confirm by caller tid.
         caller_tid = threading.get_ident()
         confirm_as = getattr(hitl_approver, "confirm_as", None)
-        if confirm_as is not None:
-            def _hitl_approver(summary: str) -> bool:
-                return confirm_as(caller_tid, summary)
+        # Set when the out-of-bounds prompt below already covered this call's
+        # risk — the registry HITL gate (file_write) then auto-allows once
+        # instead of asking the user a second time.
+        hitl_preapproved = [False]
+        if hitl_approver is None and confirm_as is None:
+            _hitl_approver = None
         else:
-            _hitl_approver = hitl_approver
+            def _hitl_approver(summary: str) -> bool:
+                if hitl_preapproved[0]:
+                    hitl_preapproved[0] = False
+                    return True
+                if confirm_as is not None:
+                    return confirm_as(caller_tid, summary)
+                return hitl_approver(summary)
+
+        # Out-of-bounds path: ask the user to allow it instead of letting the
+        # tool hard-fail after the fact. Approval lasts for this process
+        # session, scoped to the current workspace; permanent access belongs
+        # in config allowed_paths (YAML-only, same trust class as
+        # shell_blacklist — deliberately not API-settable).
+        if _hitl_approver is not None:
+            from agentnexus.tools.file_ops import path_guard_violation
+            violation = path_guard_violation(name, arguments)
+            if violation is not None:
+                summary = (
+                    "路径越界请求放行\n"
+                    f"工具: {name}\n"
+                    f"请求路径: {violation.path}\n"
+                    f"解析为: {violation.resolved}\n"
+                    f"允许的根目录: {', '.join(violation.roots)}\n\n"
+                    "批准 = 本会话（当前项目）放行该路径；\n"
+                    "永久放行请将该路径加入 config.yaml 的 allowed_paths。"
+                )
+                if _hitl_approver(summary):
+                    from agentnexus.tools.workspace import approve_extra_path
+                    approve_extra_path(violation.resolved)
+                    hitl_preapproved[0] = True  # file_write's HITL gate covered
+                else:
+                    return ToolError(
+                        error_code=ToolErrorCode.HITL_BLOCKED,
+                        message=f"用户拒绝了越界路径访问: {violation.path}",
+                        recoverable=False,
+                        suggested_action="改用允许目录内的路径，或请用户加入 allowed_paths",
+                    )
 
         def _invoke_tracked(**kwargs):
             worker_tid.append(threading.get_ident())

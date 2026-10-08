@@ -49,6 +49,29 @@ def get_registered_attachment_paths() -> tuple[str, ...]:
     return tuple(_ATTACHMENT_PATH_COUNTS)
 
 
+# Paths approved by the user mid-run via the out-of-bounds HITL prompt.
+# Process-global but scoped by workspace: a path approved in one project must
+# not leak into a concurrent session bound to another folder. Cleared never
+# (process lifetime = "本次会话放行"); restart re-locks. Permanent access
+# belongs in config allowed_paths.
+_APPROVED_PATHS: set[tuple[str, str]] = set()  # (workspace, resolved_path)
+
+
+def approve_extra_path(path: str | Path) -> None:
+    """Allow the resolved path for the current workspace until process exit."""
+    _APPROVED_PATHS.add((str(get_effective_workspace()),
+                         str(Path(path).resolve(strict=False))))
+
+
+def get_approved_extra_paths() -> tuple[str, ...]:
+    return tuple(p for ws, p in _APPROVED_PATHS
+                 if ws == str(get_effective_workspace()))
+
+
+def clear_approved_paths() -> None:
+    _APPROVED_PATHS.clear()
+
+
 def get_effective_workspace() -> Path:
     """Return the session's workspace override, falling back to process cwd."""
     override = current_workspace.get()

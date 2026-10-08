@@ -1,7 +1,5 @@
 """Tests for nexus sessions CLI command."""
 
-import os
-
 import pytest
 from typer.testing import CliRunner
 
@@ -43,9 +41,9 @@ def test_sessions_command_no_sessions():
         assert "No previous sessions found" in result.output
 
 
-def test_sessions_command_with_sessions(setup_sessions):
+def test_sessions_command_with_sessions(setup_sessions, monkeypatch):
     """Test sessions command with existing sessions."""
-    os.chdir(setup_sessions)
+    monkeypatch.chdir(setup_sessions)
     result = runner.invoke(app, ["sessions"])
     assert result.exit_code == 0
     assert "session_0" in result.output
@@ -53,9 +51,9 @@ def test_sessions_command_with_sessions(setup_sessions):
     assert "session_2" in result.output
 
 
-def test_sessions_command_with_limit(setup_sessions):
+def test_sessions_command_with_limit(setup_sessions, monkeypatch):
     """Test sessions command with --limit option."""
-    os.chdir(setup_sessions)
+    monkeypatch.chdir(setup_sessions)
     result = runner.invoke(app, ["sessions", "--limit", "2"])
     assert result.exit_code == 0
     # Should only show 2 sessions

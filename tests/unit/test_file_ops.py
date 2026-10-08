@@ -28,7 +28,7 @@ class TestFingerprintFile:
     def test_missing_file(self):
         assert _fingerprint_file(Path("nonexistent_file_xyz")) == "missing"
 
-    def test_existing_file(self, tmp_path: Path):
+    def test_existing_file(self, tmp_path: Path, monkeypatch):
         f = tmp_path / "test.txt"
         f.write_text("hello")
         fp = _fingerprint_file(f)
@@ -41,9 +41,8 @@ class TestFileRead:
         result = file_read("nonexistent_file_xyz123")
         assert "文件不存在" in result
 
-    def test_reads_content(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_reads_content(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         f = tmp_path / "test.txt"
         f.write_text("line1\nline2\nline3")
         result = file_read("test.txt")
@@ -51,9 +50,8 @@ class TestFileRead:
         assert "line1" in result
         assert "3 行" in result
 
-    def test_offset_and_limit(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_offset_and_limit(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         f = tmp_path / "test.txt"
         f.write_text("a\nb\nc\nd\ne")
         result = file_read("test.txt", offset=2, limit=2)
@@ -64,10 +62,9 @@ class TestFileRead:
 
 
 class TestFileReadThreeTier:
-    def test_small_file_full_content(self, tmp_path: Path):
+    def test_small_file_full_content(self, tmp_path: Path, monkeypatch):
         """Files <=200 lines return full content"""
-        import os
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         lines = [f"line-{i}" for i in range(50)]
         (tmp_path / "small.txt").write_text("\n".join(lines))
         result = file_read("small.txt")
@@ -75,10 +72,9 @@ class TestFileReadThreeTier:
         assert "line-49" in result
         assert "省略" not in result
 
-    def test_medium_file_first_200_lines(self, tmp_path: Path):
+    def test_medium_file_first_200_lines(self, tmp_path: Path, monkeypatch):
         """Files 201-1000 lines return first 200 + hint"""
-        import os
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         lines = [f"line-{i}" for i in range(500)]
         (tmp_path / "medium.txt").write_text("\n".join(lines))
         result = file_read("medium.txt")
@@ -87,10 +83,9 @@ class TestFileReadThreeTier:
         assert "省略 300 行" in result
         assert "offset=200" in result
 
-    def test_large_file_metadata_only(self, tmp_path: Path):
+    def test_large_file_metadata_only(self, tmp_path: Path, monkeypatch):
         """Files >1000 lines return metadata + 20-line preview"""
-        import os
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         lines = [f"line-{i}" for i in range(2000)]
         (tmp_path / "large.txt").write_text("\n".join(lines))
         result = file_read("large.txt")
@@ -102,10 +97,9 @@ class TestFileReadThreeTier:
         # Should NOT contain line-100
         assert "line-100" not in result
 
-    def test_explicit_offset_respected(self, tmp_path: Path):
+    def test_explicit_offset_respected(self, tmp_path: Path, monkeypatch):
         """When offset is specified, three-tier is bypassed"""
-        import os
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         lines = [f"line-{i}" for i in range(500)]
         (tmp_path / "med.txt").write_text("\n".join(lines))
         result = file_read("med.txt", offset=100, limit=50)
@@ -113,10 +107,9 @@ class TestFileReadThreeTier:
         assert "line-149" in result
         assert "offset=200" not in result
 
-    def test_explicit_limit_respected(self, tmp_path: Path):
+    def test_explicit_limit_respected(self, tmp_path: Path, monkeypatch):
         """When limit is specified, three-tier is bypassed"""
-        import os
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         lines = [f"line-{i}" for i in range(500)]
         (tmp_path / "med2.txt").write_text("\n".join(lines))
         result = file_read("med2.txt", limit=10)
@@ -125,9 +118,8 @@ class TestFileReadThreeTier:
 
 
 class TestFileWrite:
-    def test_create_new_file(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_create_new_file(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         result = file_write("new.txt", "hello", mode="create")
         assert result["status"] == "ok"
         assert result["change_type"] == "added"
@@ -136,18 +128,16 @@ class TestFileWrite:
         assert "已创建" in result["message"]
         assert (tmp_path / "new.txt").exists()
 
-    def test_create_existing_fails(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_create_existing_fails(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "existing.txt").write_text("data")
         result = file_write("existing.txt", "hello", mode="create")
         assert result["status"] == "error"
         assert result["error_code"] == "file_exists"
         assert "文件已存在" in result["message"]
 
-    def test_overwrite(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_overwrite(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("old")
         result = file_write("f.txt", "new", mode="overwrite")
         assert result["status"] == "ok"
@@ -157,9 +147,8 @@ class TestFileWrite:
         assert "stats" in result
         assert (tmp_path / "f.txt").read_text() == "new"
 
-    def test_append(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_append(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("base")
         result = file_write("f.txt", "+more", mode="append")
         assert result["status"] == "ok"
@@ -167,29 +156,26 @@ class TestFileWrite:
         assert "已追加" in result["message"]
         assert (tmp_path / "f.txt").read_text() == "base+more"
 
-    def test_append_nonexistent_fails(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_append_nonexistent_fails(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         result = file_write("nope.txt", "x", mode="append")
         assert result["status"] == "error"
         assert result["error_code"] == "file_missing"
 
-    def test_invalid_mode(self, tmp_path: Path):
+    def test_invalid_mode(self, tmp_path: Path, monkeypatch):
         result = file_write("f.txt", "x", mode="invalid")
         assert result["status"] == "error"
         assert result["error_code"] == "invalid_mode"
 
-    def test_version_conflict(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_version_conflict(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("data")
         result = file_write("f.txt", "new", mode="overwrite", expected_version="wrong")
         assert result["status"] == "error"
         assert result["error_code"] == "version_conflict"
 
-    def test_large_diff_uses_patch_ref(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_large_diff_uses_patch_ref(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         original = "\n".join(f"line-{i}" for i in range(2000))
         updated = "\n".join(f"updated-{i}" for i in range(2000))
         (tmp_path / "big.txt").write_text(original, encoding="utf-8")
@@ -199,9 +185,8 @@ class TestFileWrite:
         if result["patch"] is None:
             assert result["patch_ref"]
 
-    def test_preview_truncates_large_diff(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_preview_truncates_large_diff(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         original = "\n".join(f"before-{i}" for i in range(400))
         updated = "\n".join(f"after-{i}" for i in range(400))
         (tmp_path / "truncate.txt").write_text(original, encoding="utf-8")
@@ -216,25 +201,22 @@ class TestFileList:
         result = file_list("nonexistent_dir_xyz")
         assert "目录不存在" in result
 
-    def test_file_path_raises(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_file_path_raises(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "f.txt").write_text("x")
         result = file_list("f.txt")
         assert "不是目录" in result
 
-    def test_lists_entries(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_lists_entries(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         (tmp_path / "a.txt").write_text("x")
         (tmp_path / "b.txt").write_text("y")
         result = file_list(".")
         assert "2 项" in result
         assert "a.txt" in result or "A.TXT" in result
 
-    def test_empty_dir(self, tmp_path: Path):
-        import os
-        os.chdir(tmp_path)
+    def test_empty_dir(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         result = file_list(".")
         assert "(空)" in result
 

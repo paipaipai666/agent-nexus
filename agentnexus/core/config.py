@@ -315,6 +315,10 @@ class Settings(BaseSettings):
     shell_execution_docker_image: str = Field(default="python:3.11-slim")
     # File operations
     file_read_max_mb: float = Field(default=10.0, ge=1, le=100)
+    # Extra roots the file tools may access without a per-run prompt.
+    # Deliberately NOT in the config API's SETTABLE_KEYS — it widens the
+    # sandbox, same class as shell_blacklist, so it stays YAML-only.
+    allowed_paths: list[str] = Field(default_factory=list)
     # Shell blacklist (regex patterns, checked case-insensitive)
     shell_blacklist: list[str] = Field(default_factory=list)
     # Declarative extensions and workflow defaults

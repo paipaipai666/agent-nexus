@@ -12,6 +12,17 @@
 - Shell 三层黑名单（通用 + 平台 + 用户自定义）
 - NFKC 归一化防 Unicode 绕过
 
+## 路径沙箱（file 工具）
+
+`file_read` / `file_write` / `file_list` 的路径经 `_resolve_safe` 两层校验（normpath 挡 `..` 穿越、resolve 挡符号链接逃逸），允许根 = 会话 workspace + `~/.agentnexus` + 包目录 + 本轮附件 + **用户批准集** + config `allowed_paths`。
+
+越界时的放行通道（两道，均为显式同意）：
+
+1. **会话级提示放行**：tool_runner 调用前预检越界，经 HITL 确认通道问用户一次——批准则该路径加入按 workspace 作用域的会话级批准集（进程存活期有效，并发会话不串），并顺带覆盖 file_write 的 HITL 门；拒绝则工具不执行（`HITL_BLOCKED`）。无确认通道（非交互）保持硬错误。
+2. **永久列表**：config.yaml `allowed_paths`（目录或文件路径列表）。刻意**不进** config API 白名单——放宽沙箱与 `shell_blacklist` 同级信任类，只能本地编辑。
+
+`shell_exec` 的 `cwd` 同样过 `_resolve_safe`，但越界无提示通道（保持硬错误）。
+
 ## PII 脱敏
 
 `MemoryManager._mask_pii()` 实现部分脱敏，所有写入 LTM 的文本经过此函数：
