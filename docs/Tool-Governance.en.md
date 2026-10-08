@@ -34,7 +34,7 @@ Each call records `AuditEntry{tool, caller, params(masked), duration, hitl, erro
 
 ## Tool Registration
 
-`ToolProvider` protocol, 10 providers registered in order:
+`ToolProvider` protocol, 9 providers registered in order:
 
 ```text
 MemoryToolProvider       → memory_search, memory_save
@@ -44,6 +44,8 @@ ExecutionToolProvider    → shell_exec
 SubagentToolProvider     → subagent_run
 McpBridgeToolProvider    → MCP dynamic import
 TodoToolProvider         → todo_add, todo_update, todo_list
+ReactionToolProvider     → express_reaction
+PlanModeToolProvider     → exit_plan_mode
 ```
 
 ## Built-in Tool Parameters

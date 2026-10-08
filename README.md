@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**A production-grade, fully local AI agent with FSM-driven safety and 269 test files.**
+**A production-grade, fully local AI agent with FSM-driven safety and 329 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-269%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-329%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus is a **ReAct (Thought→Action→Observe) single-agent** CLI tool that runs entirely on your machine. No cloud dependency. No data leakage. Your vectors, memory, and trace logs never leave your device.
@@ -42,7 +42,7 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
 | 🌐 **Browser Automation** | Via external MCP server — bring your own Playwright/CDP browser toolset |
 | 📖 **Wiki System** | Hybrid Wiki + RAG knowledge management, Karpathy's LLM Wiki pattern, mechanical verification, confidence-based routing |
-| 🔒 **Security Sandbox** | native (bubblewrap/Seatbelt/Low-IL) → Docker → local fallback |
+| 🔒 **Security Sandbox** | Workspace path sandbox with one-click out-of-bounds approval; shell chain: bubblewrap/Seatbelt/Low-IL → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
 | 📈 **Observability** | 6-layer system: JSONL Trace + drift detection + tool fault attribution + alerting + health checks + improvement loop |
 | 📊 **Evaluation** | 8 evaluators (Agent/Trajectory/Hallucination/RAG/Code, etc.) |

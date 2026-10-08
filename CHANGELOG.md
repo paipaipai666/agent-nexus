@@ -4,9 +4,13 @@ All notable changes to AgentNexus will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **文档事实性刷新（清理后对齐）** — README（zh/en）徽标/标语测试文件数 269→329（全量递归计数）、安全沙箱行补工作区路径沙箱 + 越界一键放行；README.zh 工具参数表计数 18→14；Tool-Governance（zh/en）/Tools-Detailed/Architecture（zh/en）提供者表统一补齐 Reaction/PlanMode 两行并修正计数（10→9）；archify-runtime JSON 内置工具 ×13→×15（对齐实际注册数）
+
 ### Removed
 
-- **彻底清理废弃功能：子代理 max-step、computer-use、browser-use** — ① 子代理 `max_steps` 参数早已是死代码（子代理 ReActAgent 恒 `max_steps=None`，真实护栏是 `subagent_timeout_sec` 时间预算）：删除 `subagent.py`/`subagent_provider.py` 的参数、schema、`BEFORE/AFTER_SUBAGENT_RUN` hook payload 键与 trace span 字段，5 个测试文件的 `max_steps=` kwargs 及 Tool-Governance 参数表列；② computer-use 整体下线：`tools/computer_use/`（element/snapshot/manager/tools + 三平台 backends）、`ComputerUseToolProvider`、Settings 6 字段（`computer_use_*`）+ `normalize_computer_use_backend` 校验器、config API 5 个 SETTABLE_KEYS、`pyproject` 的 `computer-use` extra（pywinauto/pyobjc/pyperclip，pyperclip 仅 backends 使用）与 `all` 引用、`test_computer_use.py`、`test_plan_mode`/`test_tool_descriptions`（含 `computer_` family-prefix 特例）/`test_tool_providers` 中的对应项、桌面端 SettingsPage「Desktop Automation」组 + toolIcons 10 个 computer 图标 + effects orb 规则、`docs/Computer-Use.{md,en.md}` 及 Architecture/Home/Tools-Detailed/Tool-Governance/App-Runtime/_Sidebar/README（zh/en）全部相关行（提供者 10→9）；③ browser-use 主树源码此前已删，本次清残余：桌面 toolIcons 14 个 browser 图标 + 孤儿 lucide 导入、effects 正则、设计稿 mockup 图标表、README.zh 过期行（内置 Playwright 表述改外部 MCP、死链、ASCII 图 token）、`archify-runtime.architecture.json` 节点。清理后内置工具 15→13 个提供者 10→9；浏览器自动化仍经外部 MCP 提供（README/Home 保留 MCP 表述）。全量单测/安全套件 + 桌面 vitest(182) + tsc 通过
+- **彻底清理废弃功能：子代理 max-step、computer-use、browser-use** — ① 子代理 `max_steps` 参数早已是死代码（子代理 ReActAgent 恒 `max_steps=None`，真实护栏是 `subagent_timeout_sec` 时间预算）：删除 `subagent.py`/`subagent_provider.py` 的参数、schema、`BEFORE/AFTER_SUBAGENT_RUN` hook payload 键与 trace span 字段，5 个测试文件的 `max_steps=` kwargs 及 Tool-Governance 参数表列；② computer-use 整体下线：`tools/computer_use/`（element/snapshot/manager/tools + 三平台 backends）、`ComputerUseToolProvider`、Settings 6 字段（`computer_use_*`）+ `normalize_computer_use_backend` 校验器、config API 5 个 SETTABLE_KEYS、`pyproject` 的 `computer-use` extra（pywinauto/pyobjc/pyperclip，pyperclip 仅 backends 使用）与 `all` 引用、`test_computer_use.py`、`test_plan_mode`/`test_tool_descriptions`（含 `computer_` family-prefix 特例）/`test_tool_providers` 中的对应项、桌面端 SettingsPage「Desktop Automation」组 + toolIcons 10 个 computer 图标 + effects orb 规则、`docs/Computer-Use.{md,en.md}` 及 Architecture/Home/Tools-Detailed/Tool-Governance/App-Runtime/_Sidebar/README（zh/en）全部相关行（提供者 10→9）；③ browser-use 主树源码此前已删，本次清残余：桌面 toolIcons 14 个 browser 图标 + 孤儿 lucide 导入、effects 正则、设计稿 mockup 图标表、README.zh 过期行（内置 Playwright 表述改外部 MCP、死链、ASCII 图 token）、`archify-runtime.architecture.json` 节点。清理后内置工具 25→15、提供者 10→9；浏览器自动化仍经外部 MCP 提供（README/Home 保留 MCP 表述）。全量单测/安全套件 + 桌面 vitest(182) + tsc 通过
 
 ### New Features
 

@@ -34,7 +34,7 @@ JSON Schema 校验参数结构，注册时自动编译缓存校验器。
 
 ## 工具注册
 
-`ToolProvider` 协议，10 个提供者按顺序注册：
+`ToolProvider` 协议，9 个提供者按顺序注册：
 
 ```text
 MemoryToolProvider       → memory_search, memory_save
@@ -44,6 +44,8 @@ ExecutionToolProvider    → shell_exec
 SubagentToolProvider     → subagent_run
 McpBridgeToolProvider    → MCP 动态导入
 TodoToolProvider         → todo_add, todo_update, todo_list
+ReactionToolProvider     → express_reaction
+PlanModeToolProvider     → exit_plan_mode
 ```
 
 ## 内置工具参数

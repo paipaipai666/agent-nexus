@@ -76,17 +76,19 @@ class ProviderSpec:
     exposed_agents: tuple[str, ...] = ("*",)
 ```
 
-### 10 个内置提供者
+### 9 个内置提供者
 
 | 提供者 | 工具 | 说明 |
 | --- | --- | --- |
 | `MemoryToolProvider` | memory_search, memory_save | 长期记忆检索与保存 |
 | `SearchToolProvider` | grep_search, web_search, web_fetch, kb_search | 搜索工具集 |
-| `FilesystemToolProvider` | file_read, file_list, file_write | 文件操作 |
+| `FilesystemToolProvider` | file_read, file_list, file_write | 文件操作（路径沙箱，越界可一键放行） |
 | `ExecutionToolProvider` | shell_exec | 代码执行 (沙箱) |
 | `SubagentToolProvider` | subagent_run | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | todo_add, todo_update, todo_list | 待办事项管理 |
+| `ReactionToolProvider` | express_reaction | 表情反馈（默认关闭） |
+| `PlanModeToolProvider` | exit_plan_mode | 计划模式审批退出 |
 
 ## MCP 集成
 

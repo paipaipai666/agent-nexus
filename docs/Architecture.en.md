@@ -81,6 +81,8 @@ The system uses `ToolProvider` protocol with 9 providers registered in order:
 | `SubagentToolProvider` | `subagent_run` | Sub-agent delegation |
 | `McpBridgeToolProvider` | MCP dynamic import | External tool integration |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | Todo list management |
+| `ReactionToolProvider` | `express_reaction` | Emoji reactions (disabled by default) |
+| `PlanModeToolProvider` | `exit_plan_mode` | Plan mode review exit |
 
 ## Service Startup Sequence
 

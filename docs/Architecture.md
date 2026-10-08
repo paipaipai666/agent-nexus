@@ -78,6 +78,8 @@ agentnexus/
 | `SubagentToolProvider` | `subagent_run` | 子代理委派 |
 | `McpBridgeToolProvider` | MCP 动态导入 | 外部工具集成 |
 | `TodoToolProvider` | `todo_add`, `todo_update`, `todo_list` | 待办事项管理 |
+| `ReactionToolProvider` | `express_reaction` | 表情反馈（默认关闭） |
+| `PlanModeToolProvider` | `exit_plan_mode` | 计划模式审批退出 |
 
 ## 服务启动顺序
 

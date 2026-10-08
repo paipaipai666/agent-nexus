@@ -181,7 +181,7 @@
     {
       "id": "tools",
       "type": "backend",
-      "label": "内置工具 ×13",
+      "label": "内置工具 ×15",
       "sublabel": "shell·file·web·subagent·wiki",
       "pos": [
         540,
@@ -194,7 +194,7 @@
       "sources": [
         {
           "path": "agentnexus/tools/registry.py",
-          "label": "13 个内置工具"
+          "label": "15 个内置工具"
         }
       ]
     },

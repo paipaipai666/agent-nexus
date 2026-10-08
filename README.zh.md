@@ -2,12 +2,12 @@
 
 # AgentNexus
 
-**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 269 个测试文件。**
+**生产级、纯本地 AI Agent — FSM 驱动安全循环 + 329 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00C853)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/AgentNexus/AgentNexus/ci.yml?label=CI&logo=github)](https://github.com/AgentNexus/AgentNexus/actions)
-[![Tests](https://img.shields.io/badge/Tests-269%20files-00C853)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-329%20files-00C853)](tests/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/AgentNexus/AgentNexus)
 
 AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI 工具，完全运行在本地。无云端依赖，无数据泄露。向量、记忆、Trace 日志全部留在你的设备上。
@@ -42,7 +42,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 📚 **知识库 RAG** | 混合检索（稠密+稀疏+RRF+重排序），8 种文件格式导入 |
 | 🌐 **浏览器自动化** | 经外部 MCP 服务器接入浏览器工具（如 Playwright/CDP） |
 | 📖 **Wiki 系统** | 混合 Wiki + RAG 知识管理，Karpathy 的 LLM Wiki 模式，机械验证，置信度路由 |
-| 🔒 **安全沙箱** | E2B 云端 → 原生 (bubblewrap/Seatbelt) → Docker → 本地兜底 |
+| 🔒 **安全沙箱** | 工作区路径沙箱 + 越界一键放行提示；Shell 链：bubblewrap/Seatbelt/Low-IL → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
 | 📈 **可观测性** | 6 层体系：JSONL Trace + 漂移检测 + 工具故障归因 + 告警管道 + 健康检查 + 改进闭环 |
 | 📊 **评估体系** | 8 个评估器（Agent/Trajectory/幻觉/RAG/代码等） |
@@ -89,7 +89,7 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 | 🏠 [Wiki 首页](docs/Home.md) | 架构图、核心能力表格 |
 | 🏗️ [系统架构](docs/Architecture.md) | 系统架构、模块边界、数据流 |
 | 🤖 [ReAct Agent](docs/ReAct-Agent.md) | FSM 状态机、三级 LLM 策略、JSON 容错 |
-| 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、18 个工具参数表 |
+| 🔧 [工具治理](docs/Tool-Governance.md) | 7 道关卡、14 个工具参数表 |
 | ⚡ [代码执行](docs/Code-Execution.md) | 沙箱降级链、Shell 黑名单、子代理 |
 | 🧠 [记忆系统](docs/Memory-System.md) | STM/LTM 架构、压缩金字塔、评分驱逐 |
 | 📚 [RAG 检索](docs/RAG-System.md) | 混合检索管线、ChromaDB 双客户端 |
