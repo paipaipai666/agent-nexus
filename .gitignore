@@ -67,3 +67,4 @@ config/
 experiments/
 **/.codegraph/
 **/paper/
+.research_tmp/

@@ -110,6 +110,46 @@ def test_batch_tool_done_events_have_correct_payload():
         assert e.payload["result"] == f"result_of_{e.payload['name']}"
 
 
+def test_tool_done_emitted_in_completion_order():
+    """Fast tool in a parallel batch must report TOOL_DONE before the slow one.
+
+    Regression: TOOL_DONE used to fire only after the whole batch returned, so
+    finished tools kept showing "running" until the slowest sibling finished.
+    """
+    import time
+    from types import SimpleNamespace
+
+    from agentnexus.agents.react_runtime import execute_pending_tools_batch
+
+    ctx = _make_ctx("slow_tool", "fast_tool")
+    events = _capture_events(ctx)
+    registry = MagicMock()
+    registry.get_meta.return_value = SimpleNamespace(concurrency_safe=True, lane="")
+
+    def execute_fn(name, args):
+        if name == "slow_tool":
+            time.sleep(0.3)
+        return f"result_of_{name}"
+
+    execute_pending_tools_batch(
+        ctx,
+        registry=registry,
+        execute_tool=execute_fn,
+        output=_noop_output,
+    )
+
+    done_names = [e.payload["name"] for e in events if e.type == ReActEventType.TOOL_DONE]
+    assert done_names == ["fast_tool", "slow_tool"]
+
+    # call ids ride along so the GUI settles the right card
+    done_ids = {e.payload["id"] for e in events if e.type == ReActEventType.TOOL_DONE}
+    assert done_ids == {"call_slow_tool", "call_fast_tool"}
+
+    # conversation recording still follows the original call order
+    tool_msgs = [m for m in ctx.messages if m.get("role") == "tool"]
+    assert [m["content"] for m in tool_msgs] == ["result_of_slow_tool", "result_of_fast_tool"]
+
+
 def test_batch_tool_done_events_preserve_order():
     """RED: TOOL_DONE events should be in the same order as the pending calls."""
     from agentnexus.agents.react_runtime import execute_pending_tools_batch

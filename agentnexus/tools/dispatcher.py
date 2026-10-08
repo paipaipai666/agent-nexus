@@ -29,6 +29,7 @@ class ToolCallResult:
     result: Any = None
     error: str | None = None
     duration_ms: float = 0.0
+    call_id: str = ""
 
 
 @dataclass
@@ -57,6 +58,7 @@ class ToolDispatcher:
         self,
         tool_calls: list[dict],
         execute_fn: Callable[[str, dict], Any],
+        on_done: Callable[[ToolCallResult], None] | None = None,
     ) -> list[ToolCallResult]:
         """Execute a batch of tool calls with read/write partitioning.
 
@@ -65,6 +67,8 @@ class ToolDispatcher:
                 optional ``id`` keys.
             execute_fn: ``(name, arguments) -> result`` — the actual tool
                 execution function (typically ``registry.invoke``).
+            on_done: Optional per-call callback fired in COMPLETION order —
+                use for UI feedback; the returned list keeps original order.
 
         Returns:
             Results in the same order as *tool_calls*.
@@ -114,16 +118,16 @@ class ToolDispatcher:
         for lane, calls_in_lane in lane_groups.items():
             self._execute_on_pool(
                 self._registry.get_lane_pool(lane), calls_in_lane, execute_fn,
-                results, parent_trace_id,
+                results, parent_trace_id, on_done,
             )
 
         # Execute concurrent group in parallel
         if concurrent_group:
-            self._execute_concurrent(concurrent_group, execute_fn, results, parent_trace_id)
+            self._execute_concurrent(concurrent_group, execute_fn, results, parent_trace_id, on_done)
 
         # Execute sequential group one by one
         if sequential_group:
-            self._execute_sequential(sequential_group, execute_fn, results)
+            self._execute_sequential(sequential_group, execute_fn, results, on_done)
 
         # All slots should be filled
         return [r for r in results if r is not None]
@@ -134,10 +138,11 @@ class ToolDispatcher:
         execute_fn: Callable[[str, dict], Any],
         results: list[ToolCallResult | None],
         parent_trace_id: str | None = None,
+        on_done: Callable[[ToolCallResult], None] | None = None,
     ) -> None:
         """Run concurrent-safe tools in a short-lived per-batch pool."""
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            self._execute_on_pool(pool, calls, execute_fn, results, parent_trace_id)
+            self._execute_on_pool(pool, calls, execute_fn, results, parent_trace_id, on_done)
 
     def _execute_on_pool(
         self,
@@ -146,6 +151,7 @@ class ToolDispatcher:
         execute_fn: Callable[[str, dict], Any],
         results: list[ToolCallResult | None],
         parent_trace_id: str | None,
+        on_done: Callable[[ToolCallResult], None] | None = None,
     ) -> None:
         """Submit calls to *pool* and collect results in order. Does NOT shut
         the pool down — lane pools are session-scoped and reused."""
@@ -163,17 +169,23 @@ class ToolDispatcher:
                     name=call.name,
                     arguments=call.arguments,
                     error=str(exc),
+                    call_id=call.call_id,
                 )
+            if on_done is not None:
+                on_done(results[call.index])
 
     def _execute_sequential(
         self,
         calls: list[_IndexedCall],
         execute_fn: Callable[[str, dict], Any],
         results: list[ToolCallResult | None],
+        on_done: Callable[[ToolCallResult], None] | None = None,
     ) -> None:
         """Run write tools one by one."""
         for call in calls:
             results[call.index] = self._run_single(call, execute_fn)
+            if on_done is not None:
+                on_done(results[call.index])
 
     @staticmethod
     def _run_single(
@@ -194,6 +206,7 @@ class ToolDispatcher:
                 arguments=call.arguments,
                 result=result,
                 duration_ms=round(duration, 1),
+                call_id=call.call_id,
             )
         except Exception as exc:
             duration = (time.monotonic() - start) * 1000
@@ -202,6 +215,7 @@ class ToolDispatcher:
                 arguments=call.arguments,
                 error=str(exc),
                 duration_ms=round(duration, 1),
+                call_id=call.call_id,
             )
         finally:
             if parent_trace_id:
