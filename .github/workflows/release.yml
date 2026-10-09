@@ -172,7 +172,9 @@ jobs:
           path: dist/
       - name: Make executable (Linux/macOS)
         if: runner.os != 'Windows'
-        run: chmod +x dist/agentnexus-*
+        # Artifacts do not preserve the exec bit; chmod the binary inside
+        # the unpacked onedir (dist/agentnexus-* is a directory).
+        run: chmod -R +x dist/agentnexus-*/
       - name: Binary starts and shows version
         shell: bash
         run: |
