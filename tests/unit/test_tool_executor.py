@@ -1,5 +1,5 @@
 """Tests for ToolRegistry"""
-from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 
 class TestToolRegistry:

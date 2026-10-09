@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.capabilities import ModelCapabilities
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _openai_chunk(content=None, finish_reason=None, tool_calls=None):

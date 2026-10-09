@@ -6,7 +6,7 @@ and prevent infinite recursion.
 from unittest.mock import MagicMock, patch
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_llm(response=""):

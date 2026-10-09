@@ -153,7 +153,7 @@ class TestWriteFailureBlocksNextRound:
             ReActEventType,
         )
         from agentnexus.memory.manager import MemoryManager
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta
+        from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
         llm = MagicMock()
         llm.model = "m"

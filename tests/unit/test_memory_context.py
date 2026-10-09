@@ -157,7 +157,7 @@ class TestReActAgentConversationMode:
 
     def test_conversation_mode_true(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -165,7 +165,7 @@ class TestReActAgentConversationMode:
 
     def test_build_prompt_without_profile_matches_default_template(self):
         from agentnexus.agents.re_act_agent import REACT_PROMPT_TEMPLATE, ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
 
@@ -181,7 +181,7 @@ class TestReActAgentConversationMode:
 
     def test_build_prompt_includes_available_skill_context(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         agent.set_available_skill_context("== Available Skills ==\n- default/docx: DOCX - Word docs\n\n")
@@ -195,7 +195,7 @@ class TestReActAgentConversationMode:
     def test_build_prompt_with_profile_injects_guidance(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         profile = Workflow.model_validate({
@@ -227,7 +227,7 @@ class TestReActAgentConversationMode:
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import ExecutionContext, ReActEvent, ReActEventType
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
         mock_llm.capabilities.supports_tool_calling = True
@@ -273,7 +273,7 @@ class TestReActAgentConversationMode:
     def test_execute_tool_uses_profile_tool_policy_hard_gate(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
         mock_llm = MagicMock()
         executor = ToolRegistry()
@@ -312,7 +312,7 @@ class TestReActAgentConversationMode:
     def test_run_with_profile_sends_guidance_to_llm(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
         mock_llm = MagicMock()
         mock_llm.capabilities.supports_thinking = False
         mock_llm.capabilities.supports_tool_calling = False
@@ -371,7 +371,7 @@ class TestReActAgentConversationMode:
     def test_reset_profile_restores_default_prompt(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.skills.workflow import Workflow
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         agent = ReActAgent(mock_llm, ToolRegistry(), conversation_mode=False)
         profile = Workflow.model_validate({
@@ -398,7 +398,7 @@ class TestReActAgentConversationMode:
     def test_conversation_mode_false_creates_new_local_history(self):
         """In non-conversation mode, history is a local variable re-created each run."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         mock_llm.last_truncated = False
         mock_llm.think.return_value = "done"
@@ -410,7 +410,7 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_empty_stm(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -422,7 +422,7 @@ class TestReActAgentConversationMode:
 
     def test_build_conversation_context_with_messages(self):
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -442,7 +442,7 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_keeps_user_messages_intact(self):
         """User/assistant messages are kept whole — no mid-message truncation."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -459,7 +459,7 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_groups_by_turns(self):
         """Messages are grouped by complete turns, not by raw count."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -532,7 +532,7 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_includes_tool_messages(self):
         """Tool messages should appear in conversation context."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -553,7 +553,7 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_with_summary(self):
         """When STM has a summary, it should be shown prominently."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -573,7 +573,7 @@ class TestReActAgentConversationMode:
     def test_build_conversation_context_no_summary_fallback(self):
         """Without summary, should show recent messages directly."""
         from agentnexus.agents.re_act_agent import ReActAgent
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
         mock_llm = MagicMock()
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
@@ -590,7 +590,7 @@ class TestReActAgentConversationMode:
     def test_run_routes_side_channel_events_through_three_arg_observer(self, monkeypatch):
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         def fake_run_loop(self, initial_event, ctx, handlers):
             ctx.emit(ReActEventType.TOOL_START, name="read", arguments={"file_path": "x.py"})
@@ -648,7 +648,7 @@ class TestReActAgentConversationMode:
 
     def test_classified_tool_emits_thought_event_from_reasoning(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(
             self._make_llm(supports_thinking=True, reasoning="Need fresh information before answering"),
@@ -672,7 +672,7 @@ class TestReActAgentConversationMode:
 
     def test_classified_tool_falls_back_to_json_thought_without_reasoning(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         monkeypatch.setattr(agent, "_execute_tool",
@@ -689,7 +689,7 @@ class TestReActAgentConversationMode:
 
     def test_classified_tool_emits_tool_done_side_channel_for_ui(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         observation = "[1] Tavily result\nURL: https://example.com\nSnippet"
@@ -721,7 +721,7 @@ class TestReActAgentConversationMode:
 
     def test_no_tools_after_tool_emits_answer_thought_from_reasoning(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(
             self._make_llm(reasoning="The tool result is sufficient to answer now."),
@@ -746,7 +746,7 @@ class TestReActAgentConversationMode:
 
     def test_classified_answer_emits_answer_thought_after_tool_use(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(
             self._make_llm(reasoning="The search result is enough to answer now."),
@@ -770,7 +770,7 @@ class TestReActAgentConversationMode:
 
     def test_fallback_text_extracts_answer_from_malformed_json(self):
         from agentnexus.agents.react_types import CallingStrategy, ReActEvent, ReActEventType, RetryReason
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         ctx = ExecutionContext(question="readme", strategy=CallingStrategy.PROMPT_JSON)
@@ -787,7 +787,7 @@ class TestReActAgentConversationMode:
 
     def test_prompt_json_tool_followup_does_not_append_duplicate_thought_prompt(self, monkeypatch):
         from agentnexus.agents.react_types import CallingStrategy, ReActEvent, ReActEventType
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import ToolRegistry
 
         agent = ReActAgent(self._make_llm(), ToolRegistry(), conversation_mode=False)
         monkeypatch.setattr(agent, "_execute_tool", lambda name, arguments: "README content")

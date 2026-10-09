@@ -12,7 +12,7 @@ _on_receive_native 在 pending_tool_calls 为空时把正文直接当最终答�
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_llm():

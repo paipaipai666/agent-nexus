@@ -30,7 +30,7 @@ from agentnexus.agents.react_types import (
     ReActState as S,
 )
 from agentnexus.core.capabilities import SessionCapabilityTracker
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_llm(supports_tool_calling: bool = True):

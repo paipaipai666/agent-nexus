@@ -66,7 +66,7 @@ def test_hybrid_retrieval(temp_agentnexus_home):
 
 
 def test_tool_executor():
-    from agentnexus.tools.registry import ToolRegistry, ToolMeta
+    from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
     te = ToolRegistry()
     te.register(

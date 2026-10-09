@@ -13,7 +13,7 @@ from agentnexus.tools.mcp.adapter import (
     MCPToolManager,
     _sanitize_name,
 )
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:

@@ -8,7 +8,7 @@ import pytest
 
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.mcp.adapter import MCPToolDescriptor
-from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 
 def _make_descriptor(**overrides) -> MCPToolDescriptor:

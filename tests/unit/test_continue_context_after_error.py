@@ -7,7 +7,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_llm():

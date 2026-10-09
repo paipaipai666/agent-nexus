@@ -10,7 +10,7 @@ import pytest
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.memory.todo import SessionTodoList
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def _make_llm():

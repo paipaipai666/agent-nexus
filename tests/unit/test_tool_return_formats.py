@@ -5,7 +5,7 @@ Validates that each tool returns the expected format for success/failure.
 
 import pytest
 
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 class TestToolReturnFormats:

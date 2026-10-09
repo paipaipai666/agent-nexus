@@ -2,7 +2,7 @@
 
 Validates that tool execution produces actual side effects.
 """
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 class TestToolSideEffects:

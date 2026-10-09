@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import yaml
 
 from agentnexus.capabilities.runtime import CapabilityRuntime
-from agentnexus.tools.registry import ToolRegistry, ToolMeta
+from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
 
 def test_refresh_if_stale_skips_matching_generation(temp_agentnexus_home):

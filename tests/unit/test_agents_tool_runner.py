@@ -195,7 +195,7 @@ class TestHitlAcrossThreadHop:
 
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
         hook_ctx = _make_hook_ctx()
         mock_get_hook.return_value.fire.return_value = hook_ctx
@@ -250,7 +250,7 @@ class TestHitlAcrossThreadHop:
 
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge
-        from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+        from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
         hook_ctx = _make_hook_ctx()
         mock_get_hook.return_value.fire.return_value = hook_ctx

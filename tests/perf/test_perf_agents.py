@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 AGENT_STEP_P95_MAX_MS = 200
 AGENT_FULL_RUN_P95_MAX_MS = 1000
@@ -283,7 +283,7 @@ def test_tool_executor_invoke_overhead(benchmark):
 
 
 def test_registry_audit_overhead(benchmark, perf_env):
-    from agentnexus.tools.registry import ToolMeta, ToolRegistry, RiskLevel
+    from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
     r = ToolRegistry()
     meta = ToolMeta(

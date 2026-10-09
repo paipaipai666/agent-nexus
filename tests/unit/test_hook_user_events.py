@@ -17,7 +17,7 @@ import pytest
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.hooks import HookType, get_hook_manager
-from agentnexus.tools.registry import ToolRegistry, ToolMeta, RiskLevel
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
 
 @pytest.fixture(autouse=True)
