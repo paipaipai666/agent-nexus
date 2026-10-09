@@ -240,8 +240,7 @@ class TestCall:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=ValueError("invalid request")):
-            with patch("litellm.completion", side_effect=ValueError("also fails")):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == ""
 
@@ -256,8 +255,7 @@ class TestCall:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=ConnectionError("connection")):
-            with patch("litellm.completion", side_effect=ConnectionError("connection")):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == ""
         assert "connection" in llm.last_error.lower()
@@ -274,9 +272,7 @@ class TestCall:
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("tool calling not supported")):
-            with patch("litellm.completion",
-                       side_effect=ValueError("tool calling not supported")):
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("tool_calling", 0) > 0
 
@@ -292,9 +288,7 @@ class TestCall:
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("response_format unsupported")):
-            with patch("litellm.completion",
-                       side_effect=ValueError("response_format unsupported")):
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("json_mode", 0) > 0
 
@@ -310,9 +304,7 @@ class TestCall:
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("reasoning_effort not supported")):
-            with patch("litellm.completion",
-                       side_effect=ValueError("reasoning_effort not supported")):
-                llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert llm.session_tracker.failed_counts.get("thinking", 0) > 0
 

@@ -52,9 +52,8 @@ class TestStreamingInterruption:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=ValueError("bad request")):
-            with patch("litellm.completion", side_effect=ValueError("bad request")):
-                result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
-                assert result == ""
+            result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
+            assert result == ""
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -67,6 +66,5 @@ class TestStreamingInterruption:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("Connection failed")):
-            with patch("litellm.completion", side_effect=RuntimeError("Connection failed")):
-                result = llm.think([{"role": "user", "content": "hi"}])
-                assert result == ""
+            result = llm.think([{"role": "user", "content": "hi"}])
+            assert result == ""

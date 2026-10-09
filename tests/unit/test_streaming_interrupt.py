@@ -60,10 +60,9 @@ class TestStreamingErrorHandling:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("connection failed")):
-            with patch("litellm.completion", side_effect=RuntimeError("connection failed")):
-                result = llm.think([{"role": "user", "content": "hi"}])
-                assert result == ""
-                assert llm.last_error is not None
+            result = llm.think([{"role": "user", "content": "hi"}])
+            assert result == ""
+            assert llm.last_error is not None
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -77,9 +76,8 @@ class TestStreamingErrorHandling:
 
         llm = AgentLLM()
         with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("timeout")):
-            with patch("litellm.completion", side_effect=RuntimeError("timeout")):
-                llm.think([{"role": "user", "content": "hi"}])
-                assert "timeout" in (llm.last_error or "").lower()
+            llm.think([{"role": "user", "content": "hi"}])
+            assert "timeout" in (llm.last_error or "").lower()
 
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
@@ -99,12 +97,11 @@ class TestStreamingErrorHandling:
             raise ValueError("bad request")
 
         with patch.object(llm, "_call_via_provider", side_effect=_fail):
-            with patch("litellm.completion", side_effect=_fail):
-                result = llm.think([{"role": "user", "content": "hi"}])
-                assert result == ""
-                # Non-transient errors (ValueError) stop immediately, no retries
-                assert call_count[0] >= 1
-                mock_sleep.assert_not_called()
+            result = llm.think([{"role": "user", "content": "hi"}])
+            assert result == ""
+            # Non-transient errors (ValueError) stop immediately, no retries
+            assert call_count[0] >= 1
+            mock_sleep.assert_not_called()
 
 
 class TestStreamingToolCalls:
