@@ -1,4 +1,5 @@
 import os
+from importlib.metadata import version as pkg_version
 
 from typer.testing import CliRunner
 
@@ -16,7 +17,7 @@ class TestCliVersion:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         assert "AgentNexus" in result.stdout
-        assert "v0.1.0" in result.stdout
+        assert f"v{pkg_version('agentnexus')}" in result.stdout
 
 
 class TestCliStats:

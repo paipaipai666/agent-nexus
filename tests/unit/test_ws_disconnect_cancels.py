@@ -201,8 +201,8 @@ async def test_disconnect_during_confirm_wakes_and_cancels_run(runtime_chat_sess
         await ws_agent(ws, session.id)
         watcher.cancel()
 
-    assert confirm_result == [False], f"confirm 等待未被断连唤醒: {confirm_result}"
-    assert run_finished.wait(timeout=5), "run 线程未退出"
+    assert run_finished.wait(timeout=5), 'run 线程未退出'
+    assert confirm_result == [False]
     run_id = chat._session_last_run.get(session.id)
     turn = chat._turns.get(run_id)
     assert turn is not None and turn.cancel_checker(), "confirm 场景的断连未取消 run"

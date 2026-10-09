@@ -7,6 +7,7 @@ Covers:
 """
 
 import os
+from importlib.metadata import version as pkg_version
 
 import pytest
 from typer.testing import CliRunner
@@ -23,7 +24,7 @@ class TestCliBasicCommands:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         assert "AgentNexus" in result.stdout
-        assert "v0.1.0" in result.stdout
+        assert f"v{pkg_version('agentnexus')}" in result.stdout
 
     def test_help_top_level(self):
         result = runner.invoke(app, ["--help"])

@@ -33,7 +33,7 @@ def _make_agent(llm):
     te = ToolRegistry()
     te.register(
         ToolMeta(
-            name="file_list",
+            name="demo_list",
             description="列文件",
             param_schema={"type": "object", "properties": {}},
         ),
@@ -69,7 +69,7 @@ class TestContextSurvivesFailedTurn:
         def think_round1(**kw):
             rounds[0] += 1
             if rounds[0] == 1:
-                llm.last_tool_calls = [{"name": "file_list", "arguments": {"path": "D:\\code\\AgentNexus"}}]
+                llm.last_tool_calls = [{"name": "demo_list", "arguments": {"path": "x"}}]
                 return "先列目录。"
             llm.last_error = "Error code: 400 - missing field tool_call_id"
             llm.last_tool_calls = []
