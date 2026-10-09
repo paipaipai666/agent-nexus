@@ -34,7 +34,10 @@ jobs:
           fi
           echo "✓ Versions match: $TAG_VERSION"
       - name: Install deps
-        run: pip install pyinstaller .[all]
+        # setuptools<81 keeps the classic pkg_resources (with
+        # NullProvider); PyInstaller pyi_rth_pkgres hook crashes at
+        # startup against newer setuptools (seen on macOS).
+        run: pip install pyinstaller .[all] "setuptools<81"
       - name: Build backend binary
         run: pyinstaller agentnexus.spec --noconfirm
       - name: List dist contents
