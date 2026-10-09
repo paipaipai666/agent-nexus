@@ -22,7 +22,7 @@ from agentnexus.skills.router.types import _JSON_OBJECT_RE, SkillRoute
 @dataclass(frozen=True)
 class LLMDecision:
     """Result of LLM routing decision."""
-    action: str  # "use_skill" | "skip_skill" | "clarify"
+    action: str
     skill_id: str | None = None
     reason: str = ""
     clarify_question: str | None = None
@@ -112,7 +112,6 @@ def _parse_decision(raw: str, by_id: dict[str, SkillRoute]) -> LLMDecision:
     if not text:
         return LLMDecision(action="skip_skill", reason="empty LLM response")
 
-    # Extract JSON from markdown code blocks or raw text
     match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if match:
         text = match.group(1).strip()
@@ -150,7 +149,6 @@ def _parse_decision(raw: str, by_id: dict[str, SkillRoute]) -> LLMDecision:
     else:
         clarify_question = None
 
-    # Validate skill_id exists in candidates
     if action == "use_skill" and skill_id:
         if skill_id not in by_id:
             return LLMDecision(

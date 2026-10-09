@@ -17,13 +17,9 @@ from typing import Any
 from agentnexus.evaluation.task import GraderConfig, ScoringMode
 from agentnexus.evaluation.trial import GraderScore
 
-# ── Named constants for subprocess timeouts ─────────────────────────────
 _STATIC_ANALYSIS_TIMEOUT_SEC = 60
 _CODE_EXECUTION_TIMEOUT_SEC = 30
 
-# ---------------------------------------------------------------------------
-# Base Grader
-# ---------------------------------------------------------------------------
 
 class BaseGrader(ABC):
     """评分器基类。"""
@@ -52,10 +48,6 @@ class BaseGrader(ABC):
         """
         ...
 
-
-# ---------------------------------------------------------------------------
-# Deterministic Graders
-# ---------------------------------------------------------------------------
 
 class TranscriptGrader(BaseGrader):
     """转录约束评分器 — 检查轮次、token 等约束。"""
@@ -296,10 +288,6 @@ class StaticAnalysisGrader(BaseGrader):
         )
 
 
-# ---------------------------------------------------------------------------
-# Model-Based Grader (LLM-as-Judge)
-# ---------------------------------------------------------------------------
-
 class LLMRubricGrader(BaseGrader):
     """LLM Rubric 评分器 — 使用独立 Judge LLM 评分。
 
@@ -319,7 +307,6 @@ class LLMRubricGrader(BaseGrader):
     ) -> GraderScore:
         start = time.monotonic()
 
-        # 提取答案
         answer = ""
         for span in reversed(transcript):
             if span.get("name") == "final_answer":
@@ -337,10 +324,8 @@ class LLMRubricGrader(BaseGrader):
                 start_time=start,
             )
 
-        # 构建 judge prompt
         prompt = self._build_prompt(task_input, answer, transcript, config)
 
-        # 调用 judge LLM
         try:
             from agentnexus.core.judge_llm import get_judge_llm
 
@@ -376,7 +361,6 @@ class LLMRubricGrader(BaseGrader):
         config: GraderConfig,
     ) -> str:
         """构建 judge prompt。"""
-        # 如果有自定义 prompt 文件，使用它
         if config.prompt_file:
             try:
                 from agentnexus.prompts import format_prompt
@@ -389,7 +373,6 @@ class LLMRubricGrader(BaseGrader):
             except Exception:
                 pass
 
-        # 默认 rubric prompt
         parts = [
             "你是一个评估专家。请根据以下标准对 AI agent 的回答进行评分。",
             f"\n## 任务\n{task_input.get('prompt', '')}",
@@ -416,9 +399,7 @@ class LLMRubricGrader(BaseGrader):
         """解析 judge 响应。"""
         import json
 
-        # 尝试 JSON 解析
         try:
-            # 提取 JSON 块
             json_match = re.search(r'\{[^{}]*"score"[^{}]*\}', response)
             if json_match:
                 data = json.loads(json_match.group())
@@ -428,7 +409,6 @@ class LLMRubricGrader(BaseGrader):
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # 回退：提取数字
         score_match = re.search(r'(?:score|分数)[：:]\s*([\d.]+)', response)
         if score_match:
             try:
@@ -439,10 +419,6 @@ class LLMRubricGrader(BaseGrader):
 
         return 0.0, f"Failed to parse judge response: {response[:200]}"
 
-
-# ---------------------------------------------------------------------------
-# Composite Grader
-# ---------------------------------------------------------------------------
 
 class CompositeGrader(BaseGrader):
     """组合评分器 — 组合多个 grader 的分数。
@@ -487,12 +463,10 @@ class CompositeGrader(BaseGrader):
             )
 
         if self._mode == ScoringMode.HYBRID.value:
-            # Check required graders — those marked required must pass
             required_passed = all(
                 s.passed for s, (_, gc) in zip(scores, self._graders) if gc.required
             )
 
-            # Weighted average of non-required scores
             weighted_scores = [
                 (s.score, s.weight) for s, (_, gc) in zip(scores, self._graders) if not gc.required
             ]
@@ -514,7 +488,6 @@ class CompositeGrader(BaseGrader):
                 start_time=start,
             )
 
-        # Default: weighted
         total_weight = sum(s.weight for s in scores)
         if total_weight > 0:
             weighted_score = sum(s.score * s.weight for s in scores) / total_weight
@@ -535,10 +508,6 @@ class CompositeGrader(BaseGrader):
             start_time=start,
         )
 
-
-# ---------------------------------------------------------------------------
-# Grader Registry — 将现有评估器包装为标准 Grader
-# ---------------------------------------------------------------------------
 
 class TrajectoryGraderAdapter(BaseGrader):
     """将现有 trajectory.py 包装为标准 grader。
@@ -561,9 +530,8 @@ class TrajectoryGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.trajectory import TrajectoryEvaluator
             evaluator = TrajectoryEvaluator()
-            # 调用 _evaluate_one 直接操作内存 spans
             report = evaluator._evaluate_one("inline", transcript)
-            score = report.score / 10.0  # 归一化到 0-1
+            score = report.score / 10.0
             threshold = (config.threshold or 6.0) / 10.0
             passed = score >= threshold
             issues = [f"[{i.severity}] {i.check}: {i.detail}" for i in report.issues]
@@ -603,7 +571,6 @@ class HallucinationGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.hallucination import HallucinationDetector
             detector = HallucinationDetector()
-            # 提取答案
             answer = ""
             for span in reversed(transcript):
                 if span.get("name") == "final_answer":
@@ -616,11 +583,9 @@ class HallucinationGraderAdapter(BaseGrader):
                     details="No answer to check for hallucination",
                     weight=config.weight, start_time=start,
                 )
-            # 调用 _evaluate_one 直接操作内存数据
             report = detector._evaluate_one("inline", answer, transcript)
-            # 幻觉率越低越好，score = 1 - hallucination_rate
             score = max(0.0, 1.0 - report.hallucination_rate)
-            threshold = config.threshold or 0.98  # 默认 < 2% 幻觉率
+            threshold = config.threshold or 0.98
             passed = score >= threshold
             details = f"Hallucination rate: {report.hallucination_rate:.1%} ({report.unsupported_claims}/{report.total_claims} claims)"
         except Exception as e:
@@ -659,9 +624,8 @@ class CoherenceGraderAdapter(BaseGrader):
         try:
             from agentnexus.evaluation.coherence import CoherenceEvaluator
             evaluator = CoherenceEvaluator()
-            # 调用 _evaluate_one 直接操作内存 spans
             report = evaluator._evaluate_one("inline", transcript)
-            score = report.coherence_score / 10.0  # 归一化到 0-1
+            score = report.coherence_score / 10.0
             threshold = (config.threshold or 8.5) / 10.0
             passed = score >= threshold
             details = f"Coherence: {report.coherence_score:.1f}/10"
@@ -713,7 +677,6 @@ class CodeExecutionGrader(BaseGrader):
                 weight=config.weight, start_time=start,
             )
 
-        # 从 transcript 提取 agent 生成的代码
         code = self._extract_code(transcript)
         if not code:
             return GraderScore.from_result(
@@ -723,13 +686,11 @@ class CodeExecutionGrader(BaseGrader):
                 weight=config.weight, start_time=start,
             )
 
-        # 组装测试脚本
         test_script = code.rstrip() + "\n\n"
         for assertion in config.test_files:
             test_script += f"assert {assertion}\n"
         test_script += "print('ALL_TESTS_PASSED')\n"
 
-        # 在子进程中执行
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".py", delete=False, encoding="utf-8"
@@ -777,19 +738,15 @@ class CodeExecutionGrader(BaseGrader):
 
     def _extract_code(self, transcript: list[dict[str, Any]]) -> str:
         """从 transcript 提取 agent 生成的代码。"""
-        # 优先从 final_answer 中提取代码块
         for span in reversed(transcript):
             if span.get("name") == "final_answer":
                 answer = span.get("output", {}).get("answer", "")
-                # 提取 ```python ... ``` 代码块
                 import re
                 code_blocks = re.findall(r'```(?:python)?\n(.*?)```', answer, re.DOTALL)
                 if code_blocks:
                     return "\n\n".join(code_blocks)
-                # 如果没有代码块，整个答案可能就是代码
                 if "def " in answer or "class " in answer or "import " in answer:
                     return answer
-        # 从 tool 结果中提取
         for span in transcript:
             if span.get("name") == "tool":
                 result = str(span.get("output", {}).get("result_summary", ""))
@@ -798,11 +755,6 @@ class CodeExecutionGrader(BaseGrader):
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Grader Factory
-# ---------------------------------------------------------------------------
-
-# 内置 grader 类型映射
 _BUILTIN_GRADERS: dict[str, type[BaseGrader]] = {
     "transcript": TranscriptGrader,
     "tool_calls": ToolCallsGrader,

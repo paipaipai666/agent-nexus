@@ -1,9 +1,4 @@
-/**
- * Tool-card display helpers — collapsed-row arg summary and typed body kind.
- * Pure functions; no React so they stay unit-testable.
- */
 
-/** Keys preferred for the collapsed-row summary, in priority order. */
 const ARG_SUMMARY_KEYS = [
   'file_path', 'filepath', 'path', 'file', 'filename',
   'query', 'q', 'pattern', 'search', 'regex',
@@ -12,7 +7,6 @@ const ARG_SUMMARY_KEYS = [
   'text', 'content', 'message', 'prompt', 'task', 'question',
 ]
 
-/** One-line argument summary for the collapsed tool row. */
 export function toolArgSummary(msg: { toolArgs?: Record<string, unknown> }): string {
   const args = msg.toolArgs
   if (!args || typeof args !== 'object') return ''
@@ -21,7 +15,6 @@ export function toolArgSummary(msg: { toolArgs?: Record<string, unknown> }): str
     if (typeof v === 'string' && v.trim()) return truncateOneLine(v.trim())
     if (typeof v === 'number' || typeof v === 'boolean') return String(v)
   }
-  // First string-ish value as fallback
   for (const v of Object.values(args)) {
     if (typeof v === 'string' && v.trim()) return truncateOneLine(v.trim())
     if (typeof v === 'number') return String(v)
@@ -34,7 +27,6 @@ function truncateOneLine(s: string, max = 64): string {
   return one.length > max ? one.slice(0, max - 1) + '…' : one
 }
 
-/** 48ms / 1.2s / 2m3s — compact duration for the row. */
 export function formatDuration(ms?: number): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
   if (ms < 1000) return `${Math.round(ms)}ms`
@@ -51,7 +43,6 @@ const SEARCH_TOOLS = new Set(['web_search', 'web_fetch', 'kb_search', 'grep_sear
 const SHELL_TOOLS = new Set(['shell_exec', 'python_execute', 'bash', 'execute_command', 'run_command'])
 const FILE_TOOLS = new Set(['file_read', 'read_file', 'file_list', 'file_read_text'])
 
-/** Result body renderer class for a tool message. */
 export function toolBodyKind(toolName?: string): ToolBodyKind {
   const n = (toolName || '').toLowerCase()
   if (DIFF_TOOLS.has(n)) return 'diff'
@@ -63,8 +54,6 @@ export function toolBodyKind(toolName?: string): ToolBodyKind {
 
 export interface DiffLine { kind: 'hunk' | 'add' | 'del' | 'ctx'; text: string }
 
-/** Split a unified-diff-like body into lines. Avoids the old first-char heuristic
- *  on non-diff text: only treats as diff when hunk/add/del lines actually appear. */
 export function parseDiffLines(text: string): DiffLine[] | null {
   const lines = text.split('\n')
   let score = 0
@@ -84,7 +73,6 @@ export function parseDiffLines(text: string): DiffLine[] | null {
 
 export interface SearchHit { title: string; url: string; snippet: string }
 
-/** Parse condensed web_search / web_fetch style output into hit cards. */
 export function parseSearchHits(text: string): SearchHit[] | null {
   const hits: SearchHit[] = []
   const lines = text.split('\n')
@@ -109,7 +97,6 @@ export function parseSearchHits(text: string): SearchHit[] | null {
   return hits.length ? hits : null
 }
 
-/** Extract shell command from args for the expanded shell body. */
 export function shellCommandFromArgs(args?: Record<string, unknown>): string {
   if (!args) return ''
   for (const k of ['command', 'cmd', 'code', 'script']) {
@@ -119,12 +106,10 @@ export function shellCommandFromArgs(args?: Record<string, unknown>): string {
   return ''
 }
 
-/** Result body text: toolResult first, content as fallback (history path). */
 export function toolBodyText(msg: { toolResult?: string; content?: string }): string {
   return (msg.toolResult ?? msg.content ?? '').trim()
 }
 
-/** First path-ish arg for file tools — used in the expanded meta strip. */
 export function toolPathArg(args?: Record<string, unknown>): string {
   if (!args) return ''
   for (const k of ARG_SUMMARY_KEYS) {

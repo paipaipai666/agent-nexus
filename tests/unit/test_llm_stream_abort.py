@@ -51,7 +51,6 @@ class _StalledStreamProvider(BaseLLMProvider):
             on_token("start")
         self.tokens += 1
         while not self.aborted.wait(timeout=0.1):
-            # 阻塞直到 abort —— 模拟等待下一个网络 chunk。
             pass
         raise RuntimeError("stream closed by abort")
 
@@ -89,7 +88,7 @@ def test_cancel_aborts_stalled_llm_stream_immediately():
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    time.sleep(0.5)  # let think() enter the stalled stream
+    time.sleep(0.5)
     cancel.set()
     t.join(timeout=10)
 
@@ -120,7 +119,6 @@ def test_llm_without_checker_keeps_stream_alive():
     t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(timeout=2)
-    # 没有 checker，watcher 不存在，流照常阻塞（线程还活着）。
     assert not done.is_set(), "未装 checker 时流不应被中断"
-    provider.aborted.set()  # 清理：让线程退出
+    provider.aborted.set()
     t.join(timeout=5)

@@ -143,7 +143,6 @@ def delete_collection(name: str | None = None, namespace: str | None = None):
         try:
             client.delete_collection(collection_name)
         except Exception as exc:
-            # "does not exist" is expected on first run or after cleanup — not a real error
             if "does not exist" not in str(exc).lower():
                 logger.warning("ChromaDB 删除集合异常: %s", exc)
         _collections.pop(collection_name, None)

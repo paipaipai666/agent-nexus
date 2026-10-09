@@ -65,11 +65,6 @@ def _make_prompt_item(name="greet", description="say hello"):
     return SimpleNamespace(name=name, description=description, arguments=[])
 
 
-# ---------------------------------------------------------------------------
-# import_server_capabilities
-# ---------------------------------------------------------------------------
-
-
 class TestImportServerCapabilities:
     """Tests for import_server_capabilities."""
 
@@ -189,18 +184,12 @@ class TestImportServerCapabilities:
             asyncio.run(run())
 
 
-# ---------------------------------------------------------------------------
-# import_resources
-# ---------------------------------------------------------------------------
-
-
 class TestImportResources:
     """Tests for import_resources."""
 
     def test_session_lacks_both_list_methods_early_return(self):
         config = _make_config()
         runtime = _make_runtime(config=config)
-        # Remove both list methods
         if hasattr(runtime.session, "list_resources"):
             delattr(runtime.session, "list_resources")
         if hasattr(runtime.session, "list_resource_templates"):
@@ -231,7 +220,6 @@ class TestImportResources:
         res_result = SimpleNamespace(resources=[_make_resource_item()])
         runtime.session.list_resources = AsyncMock(return_value=res_result)
         runtime.session.list_resource_templates = AsyncMock(side_effect=RuntimeError("templates broken"))
-        # Ensure read_resource exists so tool descriptors would be built
         runtime.session.read_resource = AsyncMock()
 
         resource_descriptors = {}
@@ -289,7 +277,6 @@ class TestImportResources:
         runtime.session.list_resources = AsyncMock(return_value=res_result)
         tpl_result = SimpleNamespace(resourceTemplates=[])
         runtime.session.list_resource_templates = AsyncMock(return_value=tpl_result)
-        # Remove read_resource
         if hasattr(runtime.session, "read_resource"):
             delattr(runtime.session, "read_resource")
 
@@ -340,13 +327,7 @@ class TestImportResources:
         asyncio.run(run())
         assert resource_descriptors["test_server"] == []
         assert resource_template_descriptors["test_server"] == []
-        # Tool descriptors ARE built because read_resource exists and listed_any is True
         assert len(tool_descriptors) == 3
-
-
-# ---------------------------------------------------------------------------
-# import_prompts
-# ---------------------------------------------------------------------------
 
 
 class TestImportPrompts:
@@ -426,11 +407,6 @@ class TestImportPrompts:
         assert len(tool_descriptors) == 0
 
 
-# ---------------------------------------------------------------------------
-# build_resource_tool_descriptors
-# ---------------------------------------------------------------------------
-
-
 class TestBuildResourceToolDescriptors:
     """Tests for build_resource_tool_descriptors."""
 
@@ -456,11 +432,6 @@ class TestBuildResourceToolDescriptors:
         result = build_resource_tool_descriptors(config)
         read_desc = next(d for d in result if d.remote_name == "read_resource")
         assert "uri" in read_desc.param_schema.get("required", [])
-
-
-# ---------------------------------------------------------------------------
-# build_prompt_tool_descriptors
-# ---------------------------------------------------------------------------
 
 
 class TestBuildPromptToolDescriptors:

@@ -4,7 +4,6 @@ from agentnexus.memory.short_term import ShortTermMemory
 
 
 class TestShortTermMemory:
-
     def test_append_and_get_all(self):
         stm = ShortTermMemory()
         stm.append("user", "你好")
@@ -28,7 +27,6 @@ class TestShortTermMemory:
             stm.append("user", f"msg{i}")
         msgs = stm.get_all()
         assert len(msgs) == 3
-        # oldest messages dropped, newest retained
         assert msgs[0]["content"] == "msg2"
         assert msgs[2]["content"] == "msg4"
 
@@ -36,7 +34,6 @@ class TestShortTermMemory:
         stm = ShortTermMemory()
         stm.append("user", "hello world this is a test")
         tokens = stm.estimate_tokens()
-        # 33 ASCII chars * 0.4 ≈ 13 tokens
         assert tokens > 0
         assert tokens < 50
 
@@ -44,7 +41,6 @@ class TestShortTermMemory:
         stm = ShortTermMemory()
         stm.append("user", "你好世界这是一个测试")
         tokens = stm.estimate_tokens()
-        # 10 Chinese chars * 1.4 ≈ 14 tokens
         assert tokens > 0
         assert tokens < 50
 
@@ -60,12 +56,10 @@ class TestShortTermMemory:
             stm.append("user", f"msg{i}")
         stm.compact("这是摘要", keep_recent=3)
         msgs = stm.get_all()
-        # 1 system summary + 3 recent = 4 total
         assert len(msgs) == 4
         assert msgs[0]["role"] == "system"
         assert "[会话摘要]" in msgs[0]["content"]
         assert "这是摘要" in msgs[0]["content"]
-        # last 3 messages retained
         assert msgs[1]["content"] == "msg7"
         assert msgs[2]["content"] == "msg8"
         assert msgs[3]["content"] == "msg9"
@@ -76,7 +70,7 @@ class TestShortTermMemory:
         stm.append("user", "msg1")
         stm.compact("摘要", keep_recent=5)
         msgs = stm.get_all()
-        assert len(msgs) == 3  # 1 summary + 2 original
+        assert len(msgs) == 3
         assert msgs[0]["role"] == "system"
         assert msgs[1]["content"] == "msg0"
         assert msgs[2]["content"] == "msg1"
@@ -87,7 +81,6 @@ class TestShortTermMemory:
         stm.append("assistant", "world")
         stm.compact("summary", keep_recent=1)
         msgs = stm.get_all()
-        # 1 summary + 1 recent = 2
         assert len(msgs) == 2
         assert msgs[0]["role"] == "system"
         stm.clear()
@@ -100,7 +93,7 @@ class TestShortTermMemory:
         removed = stm.snip(keep_recent=5)
         assert removed == 15
         msgs = stm.get_all()
-        assert len(msgs) == 6  # 1 boundary marker + 5 recent
+        assert len(msgs) == 6
         assert msgs[0]["role"] == "system"
         assert "上下文已裁剪" in msgs[0]["content"]
         assert "15" in msgs[0]["content"]
@@ -115,7 +108,6 @@ class TestShortTermMemory:
         assert removed == 0
         msgs = stm.get_all()
         assert len(msgs) == 5
-        # no boundary marker inserted
         assert msgs[0]["content"] == "msg0"
 
     def test_get_last_ts(self):
@@ -140,7 +132,7 @@ class TestShortTermMemory:
         removed = stm.snip(keep_recent=3)
         assert removed == 3
         msgs = stm.get_all()
-        assert len(msgs) == 4  # 1 boundary + 3 recent
+        assert len(msgs) == 4
         assert msgs[1]["content"] == "result1"
         assert msgs[2]["content"] == "result2"
         assert msgs[3]["content"] == "final"

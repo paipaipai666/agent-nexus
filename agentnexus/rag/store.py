@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 );
 """
 
+
 _catalog_instances: dict[str, "KnowledgeBaseCatalog"] = {}
 
 
@@ -147,7 +148,6 @@ def _encode_sections(sections: list[DocumentSection]) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
-
 def _decode_sections(payload: str | None) -> list[DocumentSection]:
     if not payload:
         return []
@@ -166,9 +166,6 @@ def _decode_sections(payload: str | None) -> list[DocumentSection]:
 
 
 def _chunk_record_from_row(row) -> ChunkRecord:
-    # Text columns (raw_text, indexed_text, sparse_text) can be empty strings
-    # when they match the document-level defaults. The `or` fallbacks reconstruct
-    # the effective value on read from the primary `text` column. (STOR-007)
     indexed_text = row["indexed_text"] or row["text"]
     return ChunkRecord(
         chunk_id=row["chunk_id"],
@@ -278,8 +275,6 @@ class KnowledgeBaseCatalog:
             "CREATE INDEX IF NOT EXISTS idx_kb_deletion_log_status ON kb_deletion_log(status)"
         )
         self._conn.commit()
-
-    # ── deletion journal ───────────────────────────────────────────
 
     def log_deletion_failure(self, namespace: str, document_id: str,
                              chunk_ids: list[str], error: str) -> int:

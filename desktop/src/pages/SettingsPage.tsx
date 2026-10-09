@@ -62,12 +62,10 @@ export default function SettingsPage() {
     setAccent(id)
   }
 
-  // Persona state
   const [persona, setPersona] = useState<PersonaData>(EMPTY_PERSONA)
   const [personaDraft, setPersonaDraft] = useState<PersonaData>(EMPTY_PERSONA)
   const [personaSaving, setPersonaSaving] = useState(false)
   const personaEdited = JSON.stringify(persona) !== JSON.stringify(personaDraft)
-  // Model providers state (multi-provider, multi-model switchable profiles)
   const [savedProviders, setSavedProviders] = useState<ProviderInfo[]>([])
   const [providersDraft, setProvidersDraft] = useState<ProviderDraft[]>([])
   const [providersDirty, setProvidersDirty] = useState(false)
@@ -209,7 +207,6 @@ export default function SettingsPage() {
     }
   }
 
-  /** Click a discovered model to toggle it in/out of the provider's model list. */
   const toggleDiscoveredModel = (pIdx: number, id: string) => {
     setProvidersDraft(prev => {
       const next = [...prev]
@@ -235,7 +232,6 @@ export default function SettingsPage() {
         models: r.models,
       })))
       setProvidersDirty(false)
-      // Reload so key masking + normalized values come from the server
       const d = await api.getLlmProviders()
       setSavedProviders(d.providers || [])
       setProvidersDraft((d.providers || []).map(p => ({
@@ -270,7 +266,6 @@ export default function SettingsPage() {
     const effort = mode === 'off' ? 'none' : mode
     setConfig(c => ({ ...c, model_thinking: enabled, model_thinking_effort: effort }))
     try {
-      // One user knob → both fields: on/off is model_thinking, depth is effort.
       await api.updateConfig('model_thinking', enabled ? 'true' : 'false')
       await api.updateConfig('model_thinking_effort', effort)
     } catch (e) {
@@ -322,11 +317,11 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
-        {/* ── Persona Section ─────────────────────────────────── */}
+        {}
         <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>Persona</h2>
           <div className="space-y-2.5">
-            {/* Simple fields */}
+            {}
             {([['agent_name', 'Agent Name'], ['identity', 'Identity'], ['tone', 'Tone']] as const).map(([field, label]) => (
               <div key={field} className="flex items-center gap-3">
                 <label className="text-xs w-52 shrink-0 font-mono truncate" style={{ color: 'var(--fg-muted)' }}>{label}</label>
@@ -340,7 +335,7 @@ export default function SettingsPage() {
               </div>
             ))}
 
-            {/* Projects list */}
+            {}
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-mono" style={{ color: 'var(--fg-muted)' }}>Projects</label>
@@ -384,7 +379,7 @@ export default function SettingsPage() {
               ))}
             </div>
 
-            {/* Save / Reset */}
+            {}
             {personaEdited && (
               <div className="flex items-center gap-2 pt-2">
                 <button
@@ -410,7 +405,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Appearance ────────────────────────────────────── */}
+        {}
         <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>Appearance</h2>
           <div className="flex items-center gap-3">
@@ -447,7 +442,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Model Providers ───────────────────────────────── */}
+        {}
         <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Model Providers</h2>
@@ -463,7 +458,7 @@ export default function SettingsPage() {
             填 base_url 与 api_key，拉取或添加模型即可。思考模式：关闭=只用协议 Thought；低/中/高=请求模型推理。能力自动检测；特殊模型可在 config.yaml 的 override 里覆盖。
           </p>
 
-          {/* Thinking mode default — session HUD chip overrides per conversation. */}
+          {}
           <div className="flex items-center gap-3 mb-3">
             <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>新会话默认思考强度</label>
             <select
@@ -484,7 +479,7 @@ export default function SettingsPage() {
             </select>
           </div>
 
-          {/* Judge model picker */}
+          {}
           <div className="flex items-center gap-3 mb-4">
             <label className="text-xs w-52 shrink-0 font-mono" style={{ color: 'var(--fg-muted)' }}>Judge 模型</label>
             <select
@@ -509,7 +504,7 @@ export default function SettingsPage() {
 
           {providersDraft.map((p, pIdx) => (
             <div key={pIdx} className="mb-3 p-3 rounded-md" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-              {/* provider endpoint row */}
+              {}
               <div className="flex items-center gap-2 mb-2">
                 <input type="text" value={p.name} onChange={e => handleProviderField(pIdx, 'name', e.target.value)} className="input-field w-28 shrink-0 font-mono text-xs" placeholder="名称" />
                 <input type="text" value={p.base_url} onChange={e => handleProviderField(pIdx, 'base_url', e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="base_url" />
@@ -540,7 +535,7 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              {/* discovered models — click to toggle membership */}
+              {}
               {p.discovered && p.discovered.length > 0 && (
                 <div className="mb-2 p-2 rounded max-h-44 overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
                   <div className="mb-1 text-[10px]" style={{ color: 'var(--fg-faint)' }}>
@@ -569,7 +564,7 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* models list */}
+              {}
               {p.models.map((m, mIdx) => (
                 <div key={mIdx} className="flex items-center gap-2 mb-1.5">
                   <input type="text" value={m.model_id} onChange={e => handleModelId(pIdx, mIdx, e.target.value)} className="input-field flex-1 min-w-0 font-mono text-xs" placeholder="model_id" />
@@ -617,7 +612,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Flat Config Groups ──────────────────────────────── */}
+        {}
         {Object.entries(GROUPS).map(([group, keys]) => {
           const visibleKeys = keys.filter(k => k in config)
           if (visibleKeys.length === 0) return null

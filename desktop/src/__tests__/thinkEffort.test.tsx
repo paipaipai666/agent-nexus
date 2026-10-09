@@ -5,8 +5,6 @@ import ThinkEffortControl from '../components/chat/ThinkEffortControl'
 import { api } from '../services/api'
 import { thinkingEffortArm } from '../services/thinkingEffortArm'
 
-// The control reads sessionId from useSession() instead of a prop — tests
-// drive it through this mock, mirroring provider-backed session switches.
 const sessionMock = vi.hoisted(() => ({ sessionId: null as string | null }))
 
 vi.mock('../components/session/SessionManager', () => ({
@@ -86,7 +84,6 @@ describe('ThinkEffortControl', () => {
     sessionMock.sessionId = 's1'
     rerender(<ThinkEffortControl />)
     await waitFor(() => expect(mockedApi.setThinkingEffort).toHaveBeenCalledWith('s1', 'low'))
-    // consumed once
     sessionMock.sessionId = 's2'
     rerender(<ThinkEffortControl />)
     await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s2'))

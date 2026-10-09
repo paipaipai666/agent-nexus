@@ -23,9 +23,6 @@ from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
 
 _STRONG = tuple(MemoryExtractionPipeline._STRONG_SIGNALS)
 
-# session_id prefix → write-path attribution. Rows from tui_/server_/session_
-# may have entered via the conclude() gate OR the memory_save tool; SQLite has
-# no per-row provenance, so that bucket is reported as "runtime (ambiguous)".
 _WRITERS = {
     "perf_test": "test",
     "system": "merge/compaction",
@@ -139,5 +136,4 @@ def main(db_path: str | None = None, sample_csv: str | None = None,
 
 
 if __name__ == "__main__":
-    # Real CLI: `agentnexus eval memory-audit`. Bare module run = store audit only.
     main()

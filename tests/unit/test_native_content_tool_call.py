@@ -26,7 +26,7 @@ def _make_llm():
     llm.last_usage = {"input_tokens": 0, "output_tokens": 0}
     llm.capabilities = MagicMock()
     llm.capabilities.supports_thinking = False
-    llm.capabilities.supports_tool_calling = True  # NATIVE 策略
+    llm.capabilities.supports_tool_calling = True
     llm.capabilities.supports_json_mode = True
     llm.capabilities.supports_json_schema = False
     llm.capabilities.supports_parallel_tool_calls = False
@@ -67,7 +67,6 @@ class TestNativeContentToolCallRecovery:
             round_no[0] += 1
             llm.last_tool_calls = []
             if round_no[0] == 1:
-                # 通道漏接：工具调用写进了正文
                 return '{"thought": "需要查询天气", "tool": "get_weather", "params": {"city": "杭州"}}'
             return "杭州今天暴雪，气温-5°C，不适合穿短袖。"
 

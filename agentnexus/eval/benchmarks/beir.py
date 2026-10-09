@@ -40,7 +40,7 @@ BEIR_LICENSE_NOTE = (
 
 @dataclass(frozen=True)
 class BEIRDatasetSpec:
-    name: str  # zip/directory name, e.g. "nfcorpus"
+    name: str
     display: str
 
 
@@ -77,7 +77,6 @@ def ensure_dataset(spec: BEIRDatasetSpec, offline: bool = False) -> Path:
     extract_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(extract_dir)
-    # BEIR zips nest everything under a top-level "<name>/" directory — flatten it.
     nested = extract_dir / spec.name
     if (nested / "corpus.jsonl").exists():
         for item in nested.iterdir():
@@ -145,7 +144,7 @@ def load_beir_dataset(spec: BEIRDatasetSpec, offline: bool = False) -> Benchmark
                 continue
             parts = line.split("\t")
             if len(parts) < 3:
-                parts = line.split()  # tolerate whitespace-separated variants
+                parts = line.split()
             if len(parts) < 3:
                 continue
             qid, doc_id, rel = parts[0], parts[1], parts[2]
@@ -157,7 +156,6 @@ def load_beir_dataset(spec: BEIRDatasetSpec, offline: bool = False) -> Benchmark
                 continue
             qrels.setdefault(qid, {})[doc_id] = max(qrels.setdefault(qid, {}).get(doc_id, 0), rel_int)
 
-    # Only evaluate queries that have at least one relevant doc (BEIR protocol).
     eval_queries = [
         BenchmarkQuery(query_id=qid, text=text)
         for qid, text in queries.items()

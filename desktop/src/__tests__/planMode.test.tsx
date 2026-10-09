@@ -6,8 +6,6 @@ import PlanReviewCard from '../components/chat/PlanReviewCard'
 import { api } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
 
-// The toggle reads sessionId from useSession() instead of a prop — tests
-// drive it through this mock, mirroring provider-backed session switches.
 const sessionMock = vi.hoisted(() => ({ sessionId: null as string | null }))
 
 vi.mock('../components/session/SessionManager', () => ({
@@ -54,17 +52,15 @@ describe('PlanModeToggle', () => {
     mockedApi.setPlanMode.mockResolvedValue({ session_id: 's1', plan_mode: true })
     const { rerender } = render(<PlanModeToggle />)
     const btn = screen.getByRole('button')
-    expect(btn).not.toBeDisabled() // pre-session arming must be possible
+    expect(btn).not.toBeDisabled()
     await userEvent.click(btn)
     expect(btn).toHaveAttribute('aria-pressed', 'true')
     expect(mockedApi.getSession).not.toHaveBeenCalled()
     expect(mockedApi.setPlanMode).not.toHaveBeenCalled()
-    // session created on first send → armed intent applied before any run
     sessionMock.sessionId = 's1'
     rerender(<PlanModeToggle />)
     await waitFor(() => expect(mockedApi.setPlanMode).toHaveBeenCalledWith('s1', true))
     await waitFor(() => expect(btn).toHaveAttribute('aria-pressed', 'true'))
-    // consumed exactly once
     sessionMock.sessionId = 's2'
     rerender(<PlanModeToggle />)
     await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('s2'))

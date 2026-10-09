@@ -23,8 +23,6 @@ import WikiPage from './pages/WikiPage'
 
 const DEFAULT_BACKEND_PORT = 18765
 
-// file:// 打包环境下路径是磁盘文件路径，BrowserRouter 无法匹配路由；
-// Electron 窗口（有 preload 注入的 electronAPI）用 HashRouter，纯浏览器开发/E2E 用 BrowserRouter。
 const Router = window.electronAPI ? HashRouter : BrowserRouter
 
 export default function App() {
@@ -32,7 +30,6 @@ export default function App() {
   const [backendPort, setBackendPort] = useState(DEFAULT_BACKEND_PORT)
 
   useEffect(() => {
-    // In Electron, get the actual port from the main process
     window.electronAPI?.getBackendStatus().then((status) => {
       if (status.port) setBackendPort(status.port)
     })

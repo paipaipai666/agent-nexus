@@ -1,19 +1,7 @@
-/**
- * 新会话侧边栏即时可见性（对齐 codex/opencode 桌面端行为）。
- *
- * 现象：新会话首条消息发送后，侧边栏不立即出现会话标签，要切换页面才出现。
- * 根因：发送消息时同步触发的 session-updated 刷新与服务端
- * update_session_preview 存在竞态（refetch 常在 preview 落盘前完成，空
- * preview 会话被过滤）；服务端确认 run_started 到达后没有任何刷新触发。
- *
- * 期望：收到服务端 run_started（preview 已落盘的确认点）后，侧边栏
- * 重新拉取会话列表，新会话立即可见。
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-// ── Mock wsPool：捕获每个会话的事件处理器 ──────────────────────────
 const handlers = new Map<string, Record<string, (data: unknown) => void>>()
 
 vi.mock('../services/ws', () => ({
@@ -45,7 +33,6 @@ vi.mock('../services/ws', () => ({
   },
 }))
 
-// ── Mock API ──────────────────────────────────────────────────────
 vi.mock('../services/api', () => ({
   api: {
     getRecentSessions: vi.fn(),
@@ -98,13 +85,11 @@ describe('新会话首条消息后的侧边栏可见性', () => {
   it('收到服务端 run_started 确认后重新拉取会话列表', async () => {
     renderApp()
 
-    // 初始挂载拉取（空列表，新会话尚无 preview 被过滤）
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
     })
     const callsBeforeSend = vi.mocked(api.getRecentSessions).mock.calls.length
 
-    // 用户激活新会话并发送消息
     await act(async () => {
       sessionApi.activateSession('s-new')
     })
@@ -112,13 +97,10 @@ describe('新会话首条消息后的侧边栏可见性', () => {
       await new Promise((r) => setTimeout(r, 50))
     })
 
-    // 服务端此时已处理 send_message（update_session_preview 落盘），
-    // 随后推送 run_started —— 这是 preview 已持久化的确认点。
     await act(async () => {
       handlers.get('s-new')?.run_started({ type: 'run_started', run_id: 'r1', seq: 0 })
     })
 
-    // 期望：run_started 触发会话列表刷新（竞态修复前此处不会重新拉取）
     const callsAfterRunStarted = vi.mocked(api.getRecentSessions).mock.calls.length
     expect(callsAfterRunStarted).toBeGreaterThan(callsBeforeSend)
   })
@@ -136,7 +118,6 @@ describe('新会话首条消息后的侧边栏可见性', () => {
       await new Promise((r) => setTimeout(r, 50))
     })
 
-    // 服务端 preview 已落盘：后续拉取返回该会话
     vi.mocked(api.getRecentSessions).mockResolvedValue({ sessions: [NEW_SESSION], count: 1 })
 
     await act(async () => {
@@ -179,7 +160,6 @@ describe('草稿态会话行（New Chat 立即可见，opencode 风格）', () =
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
     })
-    // 服务端列表仍为空（preview 未落盘）——草稿行顶上
     expect(screen.getByText('Hello world')).toBeTruthy()
   })
 
@@ -209,7 +189,6 @@ describe('草稿态会话行（New Chat 立即可见，opencode 风格）', () =
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
     })
-    // s-old 空 preview 且非激活 → 不渲染；草稿行为当前会话兜底
     expect(screen.queryByText(NEW_SESSION.preview)).toBeNull()
   })
 })

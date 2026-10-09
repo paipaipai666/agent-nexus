@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 SLOW_HOOK_THRESHOLD_MS = 100
 
-_JOURNAL_LOCK = None  # lazy threading.Lock
+_JOURNAL_LOCK = None
 
 
 def _journal_lock():
@@ -103,13 +103,11 @@ def read_hook_journal(limit: int = 100) -> list[dict]:
 class HookType(str, Enum):
     """Supported hook points in the agent lifecycle."""
 
-    # ── Tier 0: user-interaction lifecycle ────────────────────────
-    USER_PROMPT_SUBMIT = "user_prompt_submit"     # payload["prompt"] rewritable; abort = refuse
-    AGENT_STOP = "agent_stop"                     # veto final answer → agent continues
-    PERMISSION_REQUEST = "permission_request"     # Tool Gateway HITL decision input
-    NOTIFICATION = "notification"                 # fire-and-forget (HITL waiting, prompts)
+    USER_PROMPT_SUBMIT = "user_prompt_submit"
+    AGENT_STOP = "agent_stop"
+    PERMISSION_REQUEST = "permission_request"
+    NOTIFICATION = "notification"
 
-    # ── agent-level tool/model lifecycle ──────────────────────────
     BEFORE_TOOL_CALL = "before_tool_call"
     AFTER_TOOL_CALL = "after_tool_call"
     ON_TOOL_ERROR = "on_tool_error"
@@ -120,7 +118,6 @@ class HookType(str, Enum):
     BEFORE_MEMORY_OP = "before_memory_op"
     AFTER_MEMORY_OP = "after_memory_op"
 
-    # ── Tier 1: core governance paths ────────────────────────────
     BEFORE_LLM_CALL = "before_llm_call"
     AFTER_LLM_CALL = "after_llm_call"
     BEFORE_LTM_SAVE = "before_ltm_save"
@@ -132,14 +129,10 @@ class HookType(str, Enum):
     BEFORE_REGISTRY_INVOKE = "before_registry_invoke"
     AFTER_REGISTRY_INVOKE = "after_registry_invoke"
 
-    # ── Tier 2: operational lifecycle ────────────────────────────
     BEFORE_MCP_CONNECT = "before_mcp_connect"
     AFTER_MCP_CONNECT = "after_mcp_connect"
     BEFORE_MCP_CALL_TOOL = "before_mcp_call_tool"
     AFTER_MCP_CALL_TOOL = "after_mcp_call_tool"
-    # Subagent hooks fire on dispatcher lane-pool worker threads when
-    # subagents run in parallel — callbacks must be thread-safe and must
-    # never touch UI directly (TUI: use call_from_thread).
     BEFORE_SUBAGENT_RUN = "before_subagent_run"
     AFTER_SUBAGENT_RUN = "after_subagent_run"
     BEFORE_RAG_SEARCH = "before_rag_search"
@@ -149,7 +142,6 @@ class HookType(str, Enum):
     BEFORE_CHECKPOINT = "before_checkpoint"
     AFTER_CHECKPOINT = "after_checkpoint"
 
-    # ── Tier 3: infrastructure lifecycle ─────────────────────────
     BEFORE_PLUGIN_LOAD = "before_plugin_load"
     AFTER_PLUGIN_LOAD = "after_plugin_load"
     BEFORE_APP_BUILD = "before_app_build"
@@ -176,10 +168,6 @@ _MUTABLE_HOOKS: frozenset[HookType] = frozenset(
     }
 )
 
-# Expected payload keys per event. fire() validates present keys against
-# these types when hook_schema_check is enabled (default) — catches drift
-# between fire sites and hook authors instead of silent misbehavior.
-# Extra keys are allowed (forward compatibility).
 _STR = str
 _DICT = dict
 _LIST = list
@@ -274,8 +262,6 @@ class HookContext:
         self._abort = True
         if code is not None:
             self._abort_code = code
-            # Positional reason doubles as the structured message so
-            # ctx.abort("why", code="X") doesn't silently drop the reason.
             self._abort_reason = message or reason
             self._abort_details = details or {}
         else:
@@ -333,8 +319,8 @@ class _HookEntry:
     callback: Callable
     priority: int = 200
     enabled: bool = True
-    fail_count: int = 0      # consecutive exceptions (warned once, then debug)
-    timeout: float | None = None  # seconds; sync callbacks only, None = no cap
+    fail_count: int = 0
+    timeout: float | None = None
 
 
 class HookManager:
@@ -343,8 +329,6 @@ class HookManager:
     def __init__(self) -> None:
         self._hooks: dict[str, _HookEntry] = {}
         self._slow_threshold_ms: float = SLOW_HOOK_THRESHOLD_MS
-
-    # ── registration ───────────────────────────────────────────────
 
     def register(
         self,
@@ -408,8 +392,6 @@ class HookManager:
     def clear(self) -> None:
         """Remove all hooks (for testing)."""
         self._hooks.clear()
-
-    # ── dispatch (sync) ────────────────────────────────────────────
 
     @trace_span("hook_fire", lambda self, hook_type, payload: {"hook_type": hook_type.name})
     def fire(self, hook_type: HookType, payload: dict[str, Any]) -> HookContext:
@@ -480,8 +462,6 @@ class HookManager:
             return None, err
         return None, None
 
-    # ── internals ──────────────────────────────────────────────────
-
     def _sorted(self, hook_type: HookType) -> list[_HookEntry]:
         return sorted(
             [e for e in self._hooks.values() if e.hook_type == hook_type],
@@ -542,7 +522,6 @@ class HookManager:
 
             results = run_command_hooks_for(ctx)
         except Exception:
-            # Command hooks must never break the agent loop.
             logger.warning("command hook execution failed", exc_info=True)
             return []
         records: list[dict] = []
@@ -585,7 +564,7 @@ class HookManager:
             )
             return "timeout"
         except Exception:
-            raise  # handled by the caller's isolation path
+            raise
 
     @staticmethod
     def _run_async(coro):
@@ -596,7 +575,6 @@ class HookManager:
             loop = None
 
         if loop and loop.is_running():
-            # We're inside a running event loop — schedule on it
             future = asyncio.run_coroutine_threadsafe(coro, loop)
             try:
                 return future.result(timeout=30)
@@ -605,11 +583,8 @@ class HookManager:
                 logger.warning("Async hook timed out after 30s")
                 return None
         else:
-            # No running loop — safe to create one
             return asyncio.run(coro)
 
-
-# ── module-level singleton ─────────────────────────────────────────
 
 _hook_manager: HookManager | None = None
 
@@ -628,9 +603,6 @@ def _reset_hook_manager() -> None:
     _hook_manager = None
 
 
-# ── call-site ritual helper ────────────────────────────────────────
-
-
 def fire_hook(hook_type: HookType, payload: dict[str, Any]) -> HookContext:
     """Fire a lifecycle hook and return its context.
 
@@ -645,9 +617,6 @@ def fire_hook(hook_type: HookType, payload: dict[str, Any]) -> HookContext:
         x = hook_ctx.payload.get("key", x)  # 可变键回写
     """
     return get_hook_manager().fire(hook_type, payload)
-
-
-# ── decorator API ──────────────────────────────────────────────────
 
 
 def on(

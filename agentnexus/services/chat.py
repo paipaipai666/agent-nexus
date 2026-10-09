@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_ATTACHMENTS = 10
-_MAX_IMAGE_BYTES = 5 * 1024 * 1024  # Anthropic base64 image limit
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
@@ -117,7 +117,7 @@ class SessionHandle:
     id: str
     skill: str | None = None
     profile: str | None = None
-    workspace: str | None = None  # normalized; None = inherit the server default cwd
+    workspace: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,10 +132,9 @@ class AgentEvent:
     payload: dict[str, Any] = field(default_factory=dict)
     run_id: str | None = None
     session_id: str | None = None
-    seq: int = 0  # per-run monotonic sequence for reconnect resume
-    tok_seq: int = 0  # per-run monotonic index over stream_token events only;
-                      # absolute (queue-position independent) reconnect skip key
-    step_id: int = 0  # ReAct step this event belongs to (timeline grouping)
+    seq: int = 0
+    tok_seq: int = 0
+    step_id: int = 0
 
 
 @dataclass
@@ -158,11 +157,6 @@ class _RunSetup:
     old_output: Any
 
 
-#: Cap for per-run event queues. A disconnected or slow consumer must not
-#: let events pile up in RAM for the entire run (the queue is only popped
-#: when the next run on the session starts). 10k events is far beyond what
-#: a live client lags by; the seq cursor lets a reconnecting client detect
-#: the gap and fall back to REST history.
 _EVENT_QUEUE_MAX = 10_000
 
 
@@ -181,7 +175,7 @@ def _enqueue_bounded(q: "queue.Queue | asyncio.Queue", event: AgentEvent | None)
         try:
             q.put_nowait(event)
         except (queue.Full, asyncio.QueueFull):
-            pass  # extremely contended; dropping one event is acceptable
+            pass
         return False
 
 
@@ -197,11 +191,9 @@ class ChatService:
         tool_executor: "ToolRegistry | None" = None,
         capability_runtime: "CapabilityRuntime | None" = None,
     ):
-        # Factories for per-session agent/memory creation (Phase 1: multi-session)
         self._agent_factory = agent_factory
         self._memory_factory_builder = memory_factory_builder
-        # Legacy references
-        self._version = version_manager  # Used by _get_version_manager for workspace path
+        self._version = version_manager
         self._tool_executor = tool_executor
         self._capability_runtime = capability_runtime
         self._skill_service = skill_service
@@ -214,43 +206,21 @@ class ChatService:
         self._turns: dict[str, TurnRuntime] = {}
         self._run_snapshots: dict[str, TurnRecord] = {}
         self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-        # Per-session locking (R0 resolved: threading, R1, R2)
         self._session_locks: dict[str, threading.Lock] = {}
         self._locks_lock = threading.Lock()
         self._processing_lock = threading.Lock()
         self._processing_sessions: set[str] = set()
-        # Per-session agent and memory instances (R1: isolation)
         self._agents: dict[str, Any] = {}
         self._memory_managers: dict[str, Any] = {}
-        # Per-session token buffers for WS reconnect snapshot (R8)
         self._token_buffers: dict[str, str] = {}
         self._token_cursors: dict[str, int] = {}
-        # Char offset into _token_buffers where the CURRENT step started
-        # (advanced on TOOL_START). Snapshot content is buffer[base:] so a
-        # mid-run reconnect never replays earlier steps' text into the
-        # current step's draft.
         self._token_step_base: dict[str, int] = {}
-        # Per-run monotonic index over stream_token events (reconnect skip key)
         self._run_token_seq: dict[str, int] = {}
-        # Per-session version managers — each session gets its own journal + checkpoints
         self._version_managers: dict[str, Any] = {}
-        # Per-session short-term memories live inside their MemoryManager
-        # (chat._get_or_create_memory) — restored via restore_session_stm().
-        # Per-session plan-mode switches (in-memory; reset on server restart).
         self._plan_mode = PlanModeManager()
-        # Subagent visibility: entries live for the process (same as _turns).
         self._subagents = SubagentRegistry()
-        # _put_event is now called from dispatcher lane-pool threads too
-        # (subagent child events) — serialize seq assignment + queue puts.
-        # RLock: settlement paths (cancel_run, send_message except ->
-        # teardown) hold it across multiple _put_event calls to keep
-        # terminal events and the stream sentinel ordered atomically.
         self._put_event_lock = threading.RLock()
-        # Per-session thinking-effort override: "none"|"low"|"medium"|"high" or
-        # None = follow Settings default (model_thinking_effort).
         self._thinking_effort: dict[str, str | None] = {}
-
-    # ── Plan mode ─────────────────────────────────────────────────
 
     def set_plan_mode(self, session_id: str, enabled: bool) -> bool:
         if session_id not in self._sessions:
@@ -260,8 +230,6 @@ class ChatService:
 
     def is_plan_mode(self, session_id: str) -> bool:
         return self._plan_mode.is_active(session_id)
-
-    # ── Thinking effort (session override) ─────────────────────────
 
     def set_thinking_effort(self, session_id: str, effort: str | None) -> str | None:
         """Set this session's thinking-effort override.
@@ -303,8 +271,6 @@ class ChatService:
         handle = self._sessions.get(session_id)
         return handle.workspace if handle else None
 
-    # ── Per-Session Lock & Instance Management (Phase 1) ──────────
-
     def _get_session_lock(self, session_id: str) -> threading.Lock:
         """Get or create a per-session lock. Thread-safe creation via meta-lock."""
         with self._locks_lock:
@@ -336,9 +302,8 @@ class ChatService:
         with session_lock:
             self._agents.pop(session_id, None)
             self._memory_managers.pop(session_id, None)
-            self._token_buffers.pop(session_id, None)  # R8
-            self._token_cursors.pop(session_id, None)  # R8
-        # Session lock is idle now, safe to remove
+            self._token_buffers.pop(session_id, None)
+            self._token_cursors.pop(session_id, None)
         with self._locks_lock:
             self._session_locks.pop(session_id, None)
         with self._processing_lock:
@@ -350,8 +315,6 @@ class ChatService:
         """Check if a specific session is currently processing."""
         with self._processing_lock:
             return session_id in self._processing_sessions
-
-    # ── Message Queue ──────────────────────────────────────────────
 
     @property
     def is_processing(self) -> bool:
@@ -384,7 +347,6 @@ class ChatService:
                 else:
                     self._processing_sessions.discard(session_id)
             else:
-                # Legacy fallback: clear all processing state
                 if not processing:
                     self._processing_sessions.clear()
 
@@ -401,9 +363,7 @@ class ChatService:
             with self._put_event_lock:
                 seq = self._run_event_seq.get(run_id, 0) + 1
                 self._run_event_seq[run_id] = seq
-                # frozen dataclass — assign via object.__setattr__
                 object.__setattr__(event, "seq", seq)
-            # Timeline persistence — observability never blocks the loop.
             if persist:
                 try:
                     get_timeline_store().record_event(
@@ -429,8 +389,6 @@ class ChatService:
                 run_id, n,
             )
 
-    # ── Subagent visibility ───────────────────────────────────────
-
     def _subagent_emit(self, entry, kind: str, status: str | None = None,
                        **fields) -> None:
         """Update registry state and forward a child-agent event into the
@@ -445,8 +403,6 @@ class ChatService:
             updates["error"] = fields.get("error", "")
         if updates:
             self._subagents.update(entry, **updates)
-        # Token/reasoning streams are high-volume and meaningless per-row in
-        # the timeline — live-only, exactly like main-agent _SKIP_TYPES.
         self._put_event(entry.run_id, AgentEvent(
             "subagent_event",
             {"subagent_id": entry.subagent_id, "name": entry.name,
@@ -489,13 +445,9 @@ class ChatService:
         setup = self._prepare_run(session_id, text, attachments, on_run_started)
         agent, memory = setup.agent, setup.memory
         run, turn = setup.run, setup.turn
-        # True once THIS invocation emitted terminal events; the teardown
-        # sentinel is enqueued only then. If another path settled the
-        # turn first (e.g. cancel_run), that path owns events + sentinel.
         wrapper_settled = False
         try:
             agent_text, todo_list = self._wire_agent_for_run(setup, text)
-            # 启动 trace，记录任务级元数据
             from agentnexus.observability.tracer import trace_manager as _tm
             _tm.start_trace(agent_text, metadata={
                 "user_goal": text,
@@ -515,12 +467,10 @@ class ChatService:
             finally:
                 _tm.end_trace()
                 self._evaluate_run_alerts()
-                # Run ended — detach the per-run todo observer.
                 if todo_list is not None:
                     todo_list.on_change = None
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
-            # Persist cumulative token usage and step count to DB
             try:
                 usage = getattr(agent, "_total_usage", {}) or {}
                 setup.version_mgr.update_session_stats(
@@ -531,8 +481,6 @@ class ChatService:
             except Exception as e:
                 logger.warning("Failed to persist session stats: %s", e)
             self._run_snapshots[run.id] = record
-            # Surface the LLM error when the run produced no answer — a silent
-            # empty reply reads as "agent ignored me" (e.g. rate-limited model).
             llm_error = ""
             llm_client = getattr(agent, "llm_client", None)
             if not answer and llm_client is not None:
@@ -559,9 +507,6 @@ class ChatService:
             ))
             wrapper_settled = True
         except Exception as exc:
-            # If the turn was already settled externally (cancel_run from the
-            # WS lifecycle / cancel endpoint), its terminal events were
-            # emitted there — re-emitting would duplicate them for the client.
             already_settled = turn.record_snapshot.status != "running"
             if turn.cancel_checker() or isinstance(exc, AgentCancelled):
                 record = turn.cancel("cancelled")
@@ -605,20 +550,10 @@ class ChatService:
         teardown debt yet (same leak profile as the original method)."""
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
-        # Per-session agent and memory — no shared lock needed (R1)
         agent = self._get_or_create_agent(session_id)
         memory = self._get_or_create_memory(session_id)
-        # Plan-mode gate: live binding so mid-run manual toggles take effect.
         _bind_optional(agent, "set_plan_mode", PlanModeBinding(self._plan_mode, session_id))
-        # Session thinking-effort override — mid-run switches apply on the
-        # next LLM call.
         _bind_optional(agent, "set_thinking_effort", self._thinking_effort.get(session_id))
-        # Attachments: validate all-or-nothing BEFORE anything is committed —
-        # a dead file must not half-send. Vision gate degrades images to
-        # path-only references when the model can't see. Read capabilities
-        # via detect_capabilities (config-only) — agent.llm_client.capabilities
-        # triggers a live endpoint probe (3 calls × 90s timeout) that would
-        # stall the first send of every process before run_started.
         from agentnexus.core.capabilities import detect_capabilities
         llm = getattr(agent, "llm_client", None)
         model_id = getattr(llm, "model", "") or ""
@@ -626,25 +561,18 @@ class ChatService:
         caps = detect_capabilities(model_id, base_url) if model_id else None
         vision_ok = bool(caps and getattr(caps, "supports_vision", False))
         images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
-        # Tools resolve relative paths against this session's workspace folder.
         from agentnexus.tools.workspace import (
             current_workspace,
             register_attachment_paths,
         )
         ws_token = current_workspace.set(self._sessions[session_id].workspace)
         register_attachment_paths(attach_paths)
-        # Reset token buffers for new run (R8)
         with self._get_session_lock(session_id):
             self._token_buffers[session_id] = ""
             self._token_cursors[session_id] = 0
             self._token_step_base[session_id] = 0
-        # Mark this session as processing
         self.mark_processing(True, session_id=session_id)
-        # Persist user question BEFORE the run starts so it is durable the
-        # moment on_run_started fires (run_started ⇒ user message already
-        # on disk — a disconnect/cancel from the event-loop thread can no
-        # longer win the first commit slot).
-        version_mgr = None  # stays None if creation itself fails; stats block tolerates it
+        version_mgr = None
         try:
             version_mgr = self._get_version_manager(session_id)
             existing = version_mgr.get_messages(limit=0)
@@ -660,10 +588,6 @@ class ChatService:
             on_run_started(run)
         old_on_event = getattr(agent, "_on_event", None)
         old_output = getattr(agent, "_output", None)
-        # Publish the subagent visibility context for the duration of this run
-        # so subagent_run closures (lane-pool threads) can attribute and
-        # forward child-agent events. Single slot, same tradeoff as
-        # CancelBridge — the last run to start wins.
         subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
         if subagent_bridge is not None:
             subagent_bridge.set_context(SubagentRunContext(self, session_id, run.id))
@@ -688,19 +612,13 @@ class ChatService:
         _bind_optional(agent, "set_cancel_checker", turn.cancel_checker)
         agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
         self._install_agent_event_bridge(turn, events, run.id, session_id, setup.old_on_event, agent=agent)
-        # Per-round durable commit: after each ReAct iteration (tools/answer)
-        # flush new STM rows to SQLite before the next round starts.
-        # Crash after commit keeps the round; crash before loses only it.
         _bind_optional(agent, "set_round_persist", turn.commit_round)
-        # Per-model-call context snapshots for the timeline UI. Wrapped in
-        # try/except inside the agent — observability never breaks the run.
         _bind_optional(
             agent, "set_context_observer",
             lambda step_id, messages: get_timeline_store().record_snapshot(
                 session_id, run.id, step_id, messages,
             ),
         )
-        # Todo changes during the run → timeline events (observability only).
         todo_list = getattr(agent, "_todo_list", None)
         if todo_list is not None:
             def _on_todo_change(action, item, _run_id=run.id):
@@ -712,7 +630,6 @@ class ChatService:
                     step_id=getattr(agent, "_step_count", 0),
                 ))
             todo_list.on_change = _on_todo_change
-        # Suppress agent _output (print) — events are sent via WebSocket
         try:
             agent._output = lambda _msg: None
         except Exception as e:
@@ -745,9 +662,6 @@ class ChatService:
             _bind_optional(agent, "set_round_persist", None)
         except Exception as e:
             logger.debug("Failed to clear round persist: %s", e)
-        # Run ended — the token snapshot is only meaningful mid-run. Left
-        # populated, a post-run reconnect would overwrite the finalized
-        # answer with raw streamed tokens (reconnect_snapshot).
         with self._get_session_lock(session_id):
             self._token_buffers.pop(session_id, None)
             self._token_cursors.pop(session_id, None)
@@ -761,7 +675,6 @@ class ChatService:
             from agentnexus.core.config import get_settings
             from agentnexus.memory.versioned import ConversationVersionManager
             settings = get_settings()
-            # Per-session workspace wins; fall back to the server default.
             handle = self._sessions.get(session_id)
             workspace = (handle.workspace if handle else None) or ""
             if not workspace and self._version is not None:
@@ -824,8 +737,6 @@ class ChatService:
     def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
-        # Drop the previous run's queues/state (reconnect resume only ever
-        # targets the latest run) — otherwise these dicts grow unboundedly.
         prev_run = self._session_last_run.get(session_id)
         if prev_run:
             self._run_events.pop(prev_run, None)
@@ -886,22 +797,16 @@ class ChatService:
         session = self._sessions[session_id]
         if session.skill:
             service.use(session.skill)
-        # Set session profile on per-session agent (replaces SkillService.agent reference)
         if agent is not None and session.skill and hasattr(agent, "set_session_profile"):
             agent.set_session_profile(session.skill)
 
-        # Get router recommendations (fast, deterministic, ~45ms)
         recommendations = service.get_recommendations(text)
 
-        # Inject skill context WITH recommendations into agent prompt
         if agent is not None and hasattr(agent, "set_available_skill_context"):
             agent.set_available_skill_context(
                 service.available_skill_context(recommendations=recommendations),
             )
 
-        # Let the agent decide — it has conversation history + LTM context
-        # If agent decides to use a skill, it will call /<skill-id> or
-        # the maybe_auto_select will activate it (once — do not re-run below).
         if not session.skill:
             service.maybe_auto_select(text)
 
@@ -937,8 +842,6 @@ class ChatService:
                 run_id=run_id,
                 session_id=session_id,
             ))
-        # Pass workflow context to agent as a separate system message
-        # (not embedded in the user question — that buryies the actual question)
         workflow_ctx = getattr(result, "workflow_context", None)
         if workflow_ctx and agent is not None and hasattr(agent, "set_workflow_context"):
             agent.set_workflow_context(workflow_ctx)
@@ -959,8 +862,6 @@ class ChatService:
 
         def _on_event(event, from_state, to_state):
             nonlocal has_reasoning
-            # FSM auto-advance transitions notify with event=None — not a real
-            # event; forward to the previous handler but emit nothing.
             if event is None:
                 if previous is not None:
                     previous(event, from_state, to_state)
@@ -968,16 +869,9 @@ class ChatService:
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
 
-            # STREAM_TOKEN feeds the reconnect snapshot (content only) and gets
-            # an absolute per-run tok_seq (reconnect skip key). STREAM_REASONING
-            # is resumed via seq-based replay — it must NOT pollute the answer
-            # buffer, the token cursor, or the token skip counter: mixing the
-            # two channels desynced client/server cursors and rendered
-            # reasoning text as answer content (see experiments/verify_reconnect_resume.py).
             if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
                 token = payload.get("token", "")
                 if token:
-                    # 逐步流式聚合：逐 token 不落盘，攒到模型响应结束发一条摘要
                     bucket = "content" if event_type == "STREAM_TOKEN" else "reasoning"
                     stream_counts[bucket] += len(token)
                     if event_type == "STREAM_TOKEN":
@@ -991,8 +885,6 @@ class ChatService:
                             tok_seq=tok_seq,
                         )
                         self._put_event(run_id, token_event)
-                        # Update token buffer + cursor atomically (R8)
-                        # Same lock as snapshot read — ensures content/cursor consistency
                         with self._get_session_lock(session_id):
                             self._token_buffers[session_id] = \
                                 self._token_buffers.get(session_id, "") + token
@@ -1008,8 +900,6 @@ class ChatService:
                         ))
                 return
 
-            # 模型响应结束（解释器事件/FAULT 到达）→ 流出该步的流式摘要。
-            # 流事件先于解释器事件到达，且同属一步，此时计数正好完整。
             if event_type in ("TOOLS_REQUESTED", "ANSWER_READY", "ANSWER_THOUGHT", "FAULT") and (
                 stream_counts["content"] or stream_counts["reasoning"]
             ):
@@ -1025,16 +915,11 @@ class ChatService:
 
             self._record_agent_event(turn, event)
 
-            # Skip thought events when reasoning is available
             if event_type in ("TOOLS_REQUESTED", "ANSWER_THOUGHT") and has_reasoning:
                 has_reasoning = False
                 return
 
-            # TOOL_START/TOOL_DONE: carry payload directly to avoid journal-parsing bugs
             if event_type == "TOOL_START":
-                # The current LLM step ends here: everything buffered so far
-                # belongs to PREVIOUS steps. Advance the snapshot baseline so
-                # reconnect_snapshot only ever carries the CURRENT step's text.
                 with self._get_session_lock(session_id):
                     self._token_step_base[session_id] = \
                         len(self._token_buffers.get(session_id, ""))
@@ -1067,10 +952,6 @@ class ChatService:
 
             agent_event = AgentEvent(
                 "turn_journal",
-                # Carry the original thought so GUI mapping does not have to
-                # reverse-scan the journal (and so empty thought stays empty).
-                # Other payload fields (detail/reason/warn_count/...) pass
-                # through verbatim so the timeline can show them.
                 {**payload,
                  "event": event_type,
                  "thought": payload.get("thought") or ""},
@@ -1173,10 +1054,6 @@ class ChatService:
                 logger.exception("Failed to cancel run %s during shutdown", run_id)
 
     def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
-        # Settlement must be atomic w.r.t. queue puts: the run wrapper
-        # teardown can enqueue its stream sentinel concurrently, and a
-        # sentinel landing before these terminal events makes consumers
-        # see an empty tail (run_interrupted never delivered).
         with self._put_event_lock:
             self._cancel_run_locked(run_id, reason)
 
@@ -1199,9 +1076,6 @@ class ChatService:
             ))
         else:
             self._put_event(run_id, AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
-        # 同步和异步队列都需要 None 哨兵来终止 stream。与 _put_event 同策略:
-        # 队列满时淘汰最旧一个腾位(活消费者场景无淘汰,断开场景只丢一条),
-        # 绝不清空——否则可能把刚入队的 run_interrupted 等终止态事件抹掉。
         sync_q = self._run_events.get(run_id)
         if sync_q is not None:
             _enqueue_bounded(sync_q, None)

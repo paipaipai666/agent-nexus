@@ -44,7 +44,6 @@ class TestLongTermMemory:
             category="knowledge",
             embedding=[0.5, 0.6, 0.7],
         )
-        # search with embedding close to first
         results = ltm.search(
             query_embedding=[0.1, 0.2, 0.3],
             limit=3,
@@ -57,7 +56,6 @@ class TestLongTermMemory:
             category="knowledge",
             embedding=[1.0, 0.0, 0.0],
         )
-        # query embedding is orthogonal -> cosine similarity ≈ 0
         results = ltm.search(
             query_embedding=[0.0, 1.0, 0.0],
             min_similarity=0.99,

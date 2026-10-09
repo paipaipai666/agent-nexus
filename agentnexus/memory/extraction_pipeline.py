@@ -28,21 +28,16 @@ GATE_PROMPT = load_prompt("memory_gate")
 class MemoryExtractionPipeline:
     """Decides whether a Q&A pair is worth memorizing, then extracts to LTM."""
 
-    # ── Two-level filtering: class constants ────────────────────────
     _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])
-    # Whitelist admission: only content carrying an explicit durable-intent
-    # signal is extracted. Everything else defaults to deny (0 token).
     _STRONG_SIGNALS = frozenset([
         "记住", "我叫", "我的名字", "我是",
         "我喜欢", "我不喜欢", "我讨厌",
         "以后都", "以后", "别再", "总是", "永远", "习惯用", "偏好",
     ])
-    # Questions are requests for information, not durable facts.
     _QUESTION_SUFFIXES = ("？", "?", "吗", "呢")
 
     def __init__(self, mgr: MemoryManager):
         self._mgr = mgr
-        # LLM gate circuit breaker (fixed recovery)
         self.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
 
     def run(self, question: str, answer: str, allow_memory: bool = True) -> None:
@@ -68,16 +63,12 @@ class MemoryExtractionPipeline:
         (e.g. "我叫张三" → answer "张三" is <5 chars but contains strong signal "我叫").
         """
         combined = question + answer
-        # Strong signals: always pass, regardless of answer length
         if any(sig in combined for sig in self._STRONG_SIGNALS):
             return "yes"
-        # Format-level exclusion: empty / whitespace-only
         if len(answer.strip()) < 5:
             return "no"
-        # Transactional + very short: tool echo
         if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 50:
             return "no"
-        # Pure questions never carry durable user facts
         if question.strip().endswith(self._QUESTION_SUFFIXES):
             return "no"
         return "uncertain"
@@ -94,21 +85,16 @@ class MemoryExtractionPipeline:
         """
         metrics = get_metrics()
 
-        # Level 1: rule filter (0ms, deterministic). "no" is final.
         rule_result = self.should_extract_rules(question, answer)
         if rule_result == "no":
             return False
 
-        # Rules-only fallback: whitelist auto-admits, uncertain default-denies.
         settings = getattr(self._mgr, "_settings", None)
         if not getattr(settings, "memory_llm_gate", False):
             if rule_result == "uncertain":
                 metrics.incr("writes_skipped_gate")
             return rule_result == "yes"
 
-        # Level 2: LLM gate — every rules-non-"no" case (strong signal or
-        # uncertain) gets a verdict. Fail-closed: circuit open or exception
-        # denies the write.
         gate = self.gate_circuit
         try:
             with gate.protect():
@@ -120,7 +106,6 @@ class MemoryExtractionPipeline:
                 if normalized == "no" or normalized.startswith("no"):
                     metrics.incr("writes_skipped_gate")
                     return False
-                # Format anomaly — not a failure, but counted separately
                 logger.warning("Gate returned unexpected format: %s", result[:100])
                 metrics.incr("writes_skipped_gate_format_error")
                 return False
@@ -139,7 +124,6 @@ class MemoryExtractionPipeline:
             return
         if not self._mgr._should_extract(question, answer):
             return
-        # PII masking on input side (defense in depth — extraction prompt also controls this)
         if _contains_pii(question) or _contains_pii(answer):
             question = _mask_pii(question)
             answer = _mask_pii(answer)

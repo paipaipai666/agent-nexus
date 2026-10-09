@@ -47,14 +47,12 @@ class ConsistencyChecker:
         pages = store.list_pages(source_namespace=source_namespace)
         items: list[ReviewItem] = []
 
-        # Collect all canonical definitions across pages
-        term_pages: dict[str, list[tuple[str, str]]] = {}  # term → [(page_id, consensus)]
+        term_pages: dict[str, list[tuple[str, str]]] = {}
         for page in pages:
             for term, canon_def in page.canonical_definitions.items():
                 if canon_def.consensus:
                     term_pages.setdefault(term, []).append((page.page_id, canon_def.consensus))
 
-        # Check for contradictions between pages defining the same term
         for term, definitions in term_pages.items():
             if len(definitions) < 2:
                 continue
@@ -64,9 +62,8 @@ class ConsistencyChecker:
                     page_a, def_a = definitions[i]
                     page_b, def_b = definitions[j]
 
-                    # Use cosine similarity to detect potential contradiction
                     sim = cosine_similarity(def_a, def_b)
-                    if sim < 0.4:  # Low similarity = potential contradiction
+                    if sim < 0.4:
                         items.append(ReviewItem(
                             item_id=f"consist_{uuid.uuid4().hex[:12]}",
                             priority=ReviewPriority.DEFINITION_CONFLICT.value,
@@ -106,7 +103,6 @@ class DriftDetector:
                 if not canon_def or not canon_def.consensus:
                     continue
 
-                # Compare statement text against canonical definition
                 sim = cosine_similarity(stmt.text, canon_def.consensus)
                 if sim < drift_threshold:
                     items.append(ReviewItem(
@@ -138,7 +134,6 @@ class CoverageChecker:
         rag_namespace: str = "",
     ) -> list[ReviewItem]:
         """Check for uncovered chunks in the source RAG namespace."""
-        # Get all chunks from RAG catalog
         from agentnexus.rag.store import get_knowledge_base_catalog
 
         catalog = get_knowledge_base_catalog()
@@ -149,7 +144,6 @@ class CoverageChecker:
         all_chunks = catalog.list_chunks_by_kb(kb_record.kb_id)
         all_chunk_ids = {c.chunk_id for c in all_chunks}
 
-        # Get all chunk IDs referenced by wiki statements
         pages = store.list_pages(source_namespace=source_namespace)
         covered_chunks: set[str] = set()
         for page in pages:
@@ -162,14 +156,13 @@ class CoverageChecker:
         if not uncovered:
             return []
 
-        # Cap the number of coverage items to avoid flooding the queue
         max_items = 20
         items: list[ReviewItem] = []
         for chunk_id in sorted(uncovered)[:max_items]:
             items.append(ReviewItem(
                 item_id=f"cover_{uuid.uuid4().hex[:12]}",
                 priority=ReviewPriority.COVERAGE_GAP.value,
-                page_id="",  # No specific page — it's a missing reference
+                page_id="",
                 description=(
                     f"RAG chunk {chunk_id} is not referenced by any wiki statement. "
                     f"Consider ingesting the source document or linking to existing pages."
@@ -236,7 +229,6 @@ class WikiLinter:
 
         for item in overdue:
             if item.priority == ReviewPriority.DEFINITION_CONFLICT.value:
-                # P1 overdue → mark page as untrusted
                 if item.page_id:
                     self.store.update_page_confidence(
                         item.page_id, "untrusted",
@@ -251,7 +243,6 @@ class WikiLinter:
                     })
 
             elif item.priority == ReviewPriority.SEMANTIC_DRIFT.value:
-                # P2 overdue → revert to canonical definition
                 self.store.resolve_review_item(item.item_id, ReviewStatus.AUTO_DEGRADED.value)
                 actions.append({
                     "action": "revert_to_canonical",
@@ -261,7 +252,6 @@ class WikiLinter:
                 })
 
             elif item.priority == ReviewPriority.COVERAGE_GAP.value:
-                # P3 overdue → archive
                 self.store.resolve_review_item(item.item_id, ReviewStatus.AUTO_DEGRADED.value)
                 actions.append({
                     "action": "archive",

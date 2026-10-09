@@ -162,7 +162,6 @@ class TestHallucinationDetectorFileMethods:
                               encoding="utf-8")
         detector = HallucinationDetector()
         reports = detector.evaluate_all(str(tmp_path))
-        # Whitespace-only passes bool() check but produces 0 claims
         assert len(reports) == 1
         assert reports[0].trace_id == "t2"
         assert reports[0].total_claims == 0

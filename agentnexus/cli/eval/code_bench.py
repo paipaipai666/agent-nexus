@@ -4,8 +4,6 @@ import typer
 
 from agentnexus.cli import console, eval_app
 
-# ── HumanEval ──────────────────────────────────────────────────────
-
 
 @eval_app.command("humaneval")
 def eval_humaneval(
@@ -70,5 +68,3 @@ def eval_swebench(
     for s in samples:
         repo = getattr(s, "repo", "?")
         console.print(f"  [{s.trace_id}] {repo} — {len(s.test_cases)} test cases")
-
-

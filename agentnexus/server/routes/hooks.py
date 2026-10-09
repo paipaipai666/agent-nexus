@@ -43,7 +43,7 @@ def list_hooks() -> dict:
 
 class TrustRequest(BaseModel):
     fingerprint: str
-    action: str  # "approve" | "revoke"
+    action: str
 
 
 @router.post("/trust")

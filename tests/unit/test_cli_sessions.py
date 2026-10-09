@@ -19,7 +19,6 @@ def setup_sessions(temp_agentnexus_home):
     settings = get_settings()
     workspace = str(temp_agentnexus_home)
 
-    # Create sessions with checkpoints
     for i in range(3):
         mgr = ConversationVersionManager(
             f"session_{i}", settings.memory_db_path, workspace_path=workspace
@@ -56,6 +55,5 @@ def test_sessions_command_with_limit(setup_sessions, monkeypatch):
     monkeypatch.chdir(setup_sessions)
     result = runner.invoke(app, ["sessions", "--limit", "2"])
     assert result.exit_code == 0
-    # Should only show 2 sessions
     assert "session_2" in result.output
     assert "session_1" in result.output

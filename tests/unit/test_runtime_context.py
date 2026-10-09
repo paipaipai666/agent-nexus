@@ -34,7 +34,6 @@ class TestEnvironmentBlock:
         assert m, f"minute-precision timestamp missing: {block}"
         rendered = m.group(1)
         assert rendered == FIXED_NOW.strftime("%Y-%m-%d %H:%M")
-        # seconds must not leak into the rendered stamp
         assert rendered[17:19] != str(FIXED_NOW.second).zfill(2) or FIXED_NOW.second < 10
         assert len(rendered) == 16
 
@@ -65,9 +64,7 @@ class TestProjectInstructions:
             cwd=cwd, global_path=tmp_path / "missing.md"
         )
         assert "ROOT RULES" in result and "MID RULES" in result and "CWD RULES" in result
-        # deeper file rendered later = higher precedence
         assert result.index("ROOT RULES") < result.index("MID RULES") < result.index("CWD RULES")
-        # precedence semantics stated for the model
         assert "更接近工作目录" in result
         assert "安全约束永远优先" in result
         assert len(re.findall(r"<project_instructions", result)) == 3
@@ -119,7 +116,6 @@ class TestProjectInstructions:
         (root / "AGENTS.md").write_text("R" * 400, encoding="utf-8")
         (cwd / "AGENTS.md").write_text("C" * 400, encoding="utf-8")
         result = runtime_context.load_project_instructions(cwd=cwd, global_path=tmp_path / "x.md")
-        # the deeper (higher-precedence) file survives the budget cut
         assert "C" * 400 in result
         assert "R" * 400 not in result
         assert "被省略" in result
@@ -157,7 +153,6 @@ class TestMessagesContextOrdering:
             append_system_prompt="USER_APPENDIX",
         )
         contents = [m["content"] for m in messages]
-        # group order: rules → memory → conversation → static → tools → volatile → user
         assert contents[0] == "rules"
         assert contents[1] == "MEMORY"
         assert contents[2] == "CONVERSATION"
@@ -167,5 +162,4 @@ class TestMessagesContextOrdering:
         assert contents[4] == "== 可用工具 ==\nTOOLS"
         volatile = contents[5]
         assert volatile.index("ENVIRONMENT") < volatile.index("TODO")
-        # user question stays the final message
         assert messages[-1]["role"] == "user"

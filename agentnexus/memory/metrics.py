@@ -16,39 +16,31 @@ class MemoryMetrics:
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    # Write path
     writes_total: int = 0
     writes_skipped_dedup: int = 0
     writes_skipped_gate: int = 0
-    writes_skipped_gate_error: int = 0          # LLM gate network/API exception
-    writes_skipped_gate_format_error: int = 0   # LLM gate unexpected output format
+    writes_skipped_gate_error: int = 0
+    writes_skipped_gate_format_error: int = 0
 
-    # PII
-    pii_masked_count: int = 0                   # regex fallback caught PII that prompt missed
+    pii_masked_count: int = 0
 
-    # Conflict / supersede
     conflicts_detected: int = 0
     superseded_count: int = 0
 
-    # Eviction / TTL
     deletions_expired: int = 0
     deletions_evicted: int = 0
 
-    # Search
     searches_total: int = 0
     searches_hit: int = 0
 
-    # Extraction lifecycle
     extraction_attempts: int = 0
     extraction_successes: int = 0
 
-    # ── atomic increment ─────────────────────────────────────────────
     def incr(self, attr: str, n: int = 1) -> None:
         """Atomically increment a counter by *n*."""
         with self._lock:
             setattr(self, attr, getattr(self, attr) + n)
 
-    # ── derived rates ────────────────────────────────────────────────
     @property
     def hit_rate(self) -> float:
         """Fraction of searches that returned at least one result."""
@@ -69,7 +61,6 @@ class MemoryMetrics:
         )
         return self.writes_skipped_gate_format_error / total_gate if total_gate else 0.0
 
-    # ── snapshot ─────────────────────────────────────────────────────
     def report(self) -> dict:
         """Return a plain dict snapshot of all counters and derived rates."""
         with self._lock:
@@ -94,7 +85,6 @@ class MemoryMetrics:
             }
 
 
-# ── module-level singleton ──────────────────────────────────────────
 _metrics: MemoryMetrics | None = None
 _metrics_lock = threading.Lock()
 

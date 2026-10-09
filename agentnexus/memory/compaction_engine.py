@@ -45,8 +45,8 @@ SEGMENT_PROMPT = load_prompt("memory_segment_summarize")
 @dataclass
 class SegmentIndexResult:
     """分段索引结果：条目 + 被移出 STM 的原文（带全局序号，供归档）。"""
-    entries: list[tuple[int, int, str]]   # (seg_start, seg_end, summary)
-    archived: list[tuple[int, dict]]       # (global_idx, message)
+    entries: list[tuple[int, int, str]]
+    archived: list[tuple[int, dict]]
 
 
 def segment_summarize(
@@ -117,12 +117,11 @@ class CompactionEngine:
 
     def __init__(self, mgr: MemoryManager):
         self._mgr = mgr
-        # Compaction circuit breaker (exponential backoff)
         self.circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
         self.microcompacts_since_open: int = 0
         self.compacting: bool = False
         self.snip_freed_tokens: int = 0
-        self.recent_reads: list[tuple[str, str, float]] = []  # (filepath, preview, ts)
+        self.recent_reads: list[tuple[str, str, float]] = []
         self.last_api_call_ts: float = 0.0
         self.on_compact: Callable[[dict], None] | None = None
         self.on_after_compact: Callable[[], None] | None = None
@@ -223,17 +222,14 @@ class CompactionEngine:
         drained = 0
         for i, msg in enumerate(messages):
             role = msg.get("role", "")
-            # Skip tool results — not useful for LTM
             if role == "tool":
                 continue
-            # Only drain high-importance messages
             imp = compute_importance(msg, i, len(messages))
             if imp < 0.7:
                 continue
             content = msg.get("content", "")
             if len(content) < 20:
                 continue
-            # Truncate very long content
             save_content = content[:2000]
             try:
                 embedding = None
@@ -350,8 +346,6 @@ class CompactionEngine:
                 logger.debug("Circuit breaker in cooldown (%.0fs remaining)", remaining)
                 self.microcompact()
                 return 0
-            # Cooldown expired — probe mode; the protect() gate at the LLM
-            # layer performs the OPEN→HALF_OPEN state transition
             half_open_probe = True
             self._fire_compact("circuit_half_open", elapsed=remaining)
 
@@ -361,10 +355,8 @@ class CompactionEngine:
                 threshold = max(threshold - self.snip_freed_tokens, threshold // 2)
 
         stm = mgr.short_term
-        # Prefer incremental counter (O(1)) over full re-encoding
         tokens_before = stm.token_count or stm.estimate_tokens()
 
-        # Half-open probe bypasses threshold — we need to test LLM health
         if not half_open_probe:
             if tokens_before < threshold:
                 if mgr._settings.time_microcompact_interval > 0:
@@ -377,35 +369,26 @@ class CompactionEngine:
         else:
             all_msgs = stm.get_all()
 
-        # Layer 2: Snip
         self.snip()
 
-        # Layer 3: Time-based microcompact
         if mgr._settings.time_microcompact_interval > 0:
             self.microcompact_time_based()
 
-        # Layer 3b: MicroCompact before LLM summarization
         self.microcompact()
 
-        # Full rewrite: send ALL messages to summarizer
         all_msgs_after = stm.get_all()
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs_after)
         if not history_text.strip():
             return 0
 
-        # Layer 5: Kairos transcript backup before destructive compact
         self._write_transcript()
 
-        # Layer 5b: Drain high-importance messages to LTM before summarization
         self._drain_to_ltm(all_msgs_after)
 
         self._fire_compact("start", tokens_before=tokens_before)
 
         self.compacting = True
         try:
-            # Circuit gate + success/failure recording around the LLM layer.
-            # Admission was already checked above, so CircuitOpenError cannot
-            # fire here; protect() owns the record_* protocol.
             with circuit.protect(on_open=lambda: self._fire_compact("circuit_open")):
                 tokens_saved = self._llm_compact(
                     all_msgs_after, custom_instructions, tokens_before, hook_mgr,
@@ -444,7 +427,6 @@ class CompactionEngine:
         mgr = self._mgr
         stm = mgr.short_term
 
-        # 分段索引压缩：每段独立小结、跨轮 append-only，无复利丢失
         seg_size = getattr(mgr._settings, "memory_index_segment_size", 20)
         if not isinstance(seg_size, int):
             seg_size = 20
@@ -457,10 +439,8 @@ class CompactionEngine:
         if result is None:
             return None
 
-        # 原文先入归档，再移出 STM——任何时刻内容都在某处完整存在
         self._archive_history(result.archived)
         stm.compact_indexed(result.entries, keep_recent=6)
-        # 索引超预算时折叠最老条目为归档目录（召回靠 history_search 兜底）
         index_budget = getattr(mgr._settings, "memory_index_max_tokens", 4000)
         if not isinstance(index_budget, int):
             index_budget = 4000
@@ -471,10 +451,8 @@ class CompactionEngine:
         self.snip_freed_tokens = 0
         self.recent_reads.clear()
 
-        # A3: File recovery after compact
         self._restore_files()
 
-        # A6: System prompt rebuild hook
         if self.on_after_compact:
             try:
                 self.on_after_compact()

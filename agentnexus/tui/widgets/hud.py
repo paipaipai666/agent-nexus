@@ -23,7 +23,6 @@ def _format_k(tokens: int | float) -> str:
 
 class HUD(Widget):
     """Bottom status bar — model, context window, token usage."""
-
     DEFAULT_CSS = """
     HUD {
         height: auto;
@@ -37,17 +36,12 @@ class HUD(Widget):
         self.model = full_id
         self._display_model = full_id.split("/")[-1] if "/" in full_id else full_id
         self.ctx_max = resolve_ctx_max(full_id, base_url)
-        # Current context (STM) size — shown in the context bar
         self.current_tokens = 0
-        # Cumulative usage
         self.total_input = 0
         self.total_output = 0
-        # Compression indicator
         self._compacting = False
-        # Capability indicators
         self._supports_thinking = False
         self._strategy = ""
-        # Version indicators
         self._head = "---"
         self._can_undo = False
         self._can_redo = False
@@ -104,13 +98,11 @@ class HUD(Widget):
         else:
             ctx_seg = f"ctx {_format_k(ctx_used)}/[dim]?[/]"
 
-        # Capability indicators
         caps = ["[#a78bfa]\U0001f9e0[/]"] if self._supports_thinking else []
         if self._strategy:
             caps.append(self._strategy)
         caps_seg = f" [dim]({' '.join(caps)})[/]" if caps else ""
 
-        # Compression indicator
         compact_indicator = " [#fab283]\u2699 compact[/]" if self._compacting else ""
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head

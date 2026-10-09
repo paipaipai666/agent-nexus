@@ -135,21 +135,19 @@ class TestMultiStepIntent:
         service.reset()
         route = service.maybe_auto_select("搜索并总结")
         assert route is not None
-        # Primary intent is search
         assert route.entry.workflow_id == "search"
 
     def test_read_and_modify(self, service: SkillService):
         """'读取配置并修改' matches code (config+modify) or pdf (read)."""
         service.reset()
         route = service.maybe_auto_select("读取配置并修改")
-        assert route is None or route.entry.workflow_id in ["code", "pdf"]  # genuinely ambiguous
+        assert route is None or route.entry.workflow_id in ["code", "pdf"]
 
     def test_download_and_convert(self, service: SkillService):
         """'下载并转换格式' should match code or translate."""
         service.reset()
         route = service.maybe_auto_select("下载并转换格式")
         assert route is not None
-        # Should match one of the relevant skills
         assert route.entry.workflow_id in ["code", "translate"]
 
     def test_search_and_create(self, service: SkillService):
@@ -157,7 +155,6 @@ class TestMultiStepIntent:
         service.reset()
         route = service.maybe_auto_select("搜索资料并创建文档")
         assert route is not None
-        # Should match one of the relevant skills
         assert route.entry.workflow_id in ["search", "docx"]
 
     def test_analyze_and_summarize(self, service: SkillService):
@@ -204,7 +201,6 @@ class TestConditionalIntent:
         service.reset()
         route = service.maybe_auto_select("准备好了就部署")
         assert route is not None
-        # Deployment is code-related
         assert route.entry.workflow_id == "code"
 
     def test_if_search_fails_create(self, service: SkillService):
@@ -212,7 +208,6 @@ class TestConditionalIntent:
         service.reset()
         route = service.maybe_auto_select("搜索不到就创建")
         assert route is not None
-        # Primary intent is search
         assert route.entry.workflow_id == "search"
 
 
@@ -238,7 +233,6 @@ class TestPriorityIntent:
         service.reset()
         route = service.maybe_auto_select("创建搜索文档")
         assert route is not None
-        # Creation intent is primary
         assert route.entry.workflow_id == "docx"
 
     def test_primary_code_secondary_search(self, service: SkillService):
@@ -246,7 +240,6 @@ class TestPriorityIntent:
         service.reset()
         route = service.maybe_auto_select("搜索代码")
         assert route is not None
-        # Could be either code-search or search
         assert route.entry.workflow_id in ["code", "search"]
 
     def test_primary_analysis_secondary_export(self, service: SkillService):
@@ -272,7 +265,6 @@ class TestParallelIntent:
         service.reset()
         route = service.maybe_auto_select("同时创建文档和表格")
         assert route is not None
-        # Router should pick one as primary
         assert route.entry.workflow_id in ["docx", "xlsx"]
 
     def test_both_search_and_translate(self, service: SkillService):
@@ -343,14 +335,12 @@ class TestCompositeEdgeCases:
         """'做点什么' should return None or uncertain."""
         service.reset()
         service.maybe_auto_select("做点什么")
-        # Very vague - might return None
 
     def test_single_keyword_dominates(self, service: SkillService):
         """'PDF文档表格代码搜索' should match based on strongest signal."""
         service.reset()
         route = service.maybe_auto_select("PDF文档表格代码搜索")
         assert route is not None
-        # Should pick one based on scoring
         assert route.entry.workflow_id in ["pdf", "docx", "xlsx", "code", "search"]
 
     def test_complex_natural_language(self, service: SkillService):
@@ -360,5 +350,4 @@ class TestCompositeEdgeCases:
             "我需要先搜索一些资料，然后写一个总结报告，最后翻译成英文"
         )
         assert route is not None
-        # Should pick primary intent
         assert route.entry.workflow_id in ["search", "summarize", "translate"]

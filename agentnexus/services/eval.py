@@ -31,10 +31,6 @@ class EvalService:
         self._harness: EvalHarness | None = None
         self._baseline_mgr: BaselineManager | None = None
 
-    # ------------------------------------------------------------------
-    # Lazy initialization
-    # ------------------------------------------------------------------
-
     @property
     def traces_dir(self) -> str:
         if self.settings:
@@ -65,10 +61,6 @@ class EvalService:
         if self._baseline_mgr is None:
             self._baseline_mgr = BaselineManager(self.traces_dir)
         return self._baseline_mgr
-
-    # ------------------------------------------------------------------
-    # Task Management
-    # ------------------------------------------------------------------
 
     def list_tasks(
         self,
@@ -108,10 +100,6 @@ class EvalService:
             "errors": errors,
             "stats": stats,
         }
-
-    # ------------------------------------------------------------------
-    # Suite Management
-    # ------------------------------------------------------------------
 
     def list_suites(self) -> list[dict[str, Any]]:
         """列出所有套件。"""
@@ -169,10 +157,6 @@ class EvalService:
         report = self.harness.run_task(task, agent_runner, n_trials)
         return report.to_dict()
 
-    # ------------------------------------------------------------------
-    # Baseline Management
-    # ------------------------------------------------------------------
-
     def save_baseline(self, suite_name: str, report: dict[str, Any]) -> str:
         """保存 baseline。"""
         path = self.baseline_mgr.save_baseline(suite_name, report)
@@ -198,10 +182,6 @@ class EvalService:
         regression = self.baseline_mgr.compare(current_report, baseline)
         return regression.to_dict()
 
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
-
     def get_eval_stats(self) -> dict[str, Any]:
         """获取评估系统统计信息。"""
         dataset_stats = self.dataset.stats()
@@ -212,10 +192,6 @@ class EvalService:
             "suites": len(suites),
             "baselines": len(baselines),
         }
-
-    # ------------------------------------------------------------------
-    # Default Agent Runner
-    # ------------------------------------------------------------------
 
     def _default_agent_runner(self, task: EvalTask, trial_index: int) -> Any:
         """默认 agent runner — 使用 ReActAgentRunner 执行真实 agent。"""

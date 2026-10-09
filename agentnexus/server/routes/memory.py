@@ -68,7 +68,6 @@ def list_short_term_memories(runtime=Depends(get_runtime)):
     for m in messages:
         role = m.get("role", "")
         content = m.get("content", "")
-        # Strip workflow context prefix from user messages (legacy data)
         if role == "user":
             content = _strip_workflow_context(content)
         result.append({"role": role, "content": content, "ts": m.get("ts")})
@@ -106,7 +105,6 @@ def list_session_history(limit: int = 0, session_id: str | None = None, runtime=
     settings = get_settings()
     workspace = str(__import__("pathlib").Path.cwd())
 
-    # Use provided session_id, or fall back to first active session, or find latest
     if not session_id:
         chat = runtime.chat
         if chat._sessions:
@@ -114,7 +112,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None, runtime=
 
     if not session_id:
         session_id = ConversationVersionManager.find_latest_session(
-            settings.memory_db_path, None  # sessions live across workspaces
+            settings.memory_db_path, None
         )
     if not session_id:
         return {"messages": [], "count": 0}
@@ -122,8 +120,6 @@ def list_session_history(limit: int = 0, session_id: str | None = None, runtime=
     version = ConversationVersionManager(
         session_id, settings.memory_db_path,
         workspace_path=(
-            # Adopt the session's stored workspace — re-registering under the
-            # process cwd would corrupt its conversation_sessions row.
             ConversationVersionManager.get_session_workspace(
                 settings.memory_db_path, session_id
             ) or workspace

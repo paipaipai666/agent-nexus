@@ -37,11 +37,6 @@ const LABELS: Record<ThinkingEffort, { en: string; cn: string; code: string }> =
 }
 const LEVEL_ORDER: ThinkingEffort[] = ['off', 'low', 'medium', 'high']
 
-/** Thinking-effort chip + popover slider in the chat HUD.
- *
- *  Session override (none/low/medium/high) or follow Settings default.
- *  Mid-run switches apply on the next LLM call. Pre-session window stores
- *  an armed intent, mirroring PlanModeToggle. */
 export default function ThinkEffortControl() {
   const { sessionId } = useSession()
   const { value: effort, busy, preview, commit } = useSessionOverride(sessionId, EFFORT_OVERRIDE)
@@ -64,7 +59,6 @@ export default function ThinkEffortControl() {
     }
   }, [open])
 
-  /** Live preview during drag; commit on release / click. */
   const apply = (next: ThinkingEffort) => {
     preview(next)
     void commit(next)
@@ -119,7 +113,7 @@ export default function ThinkEffortControl() {
           </div>
           <p className="text-[12px] mb-4" style={{ color: 'var(--fg-faint)' }}>会话覆盖，下一跳生效</p>
 
-          {/* Continuous 12px rail + rounded-square thumb */}
+          {}
           <div
             role="slider"
             tabIndex={0}
@@ -174,7 +168,7 @@ export default function ThinkEffortControl() {
               className="absolute left-0 right-0 overflow-hidden"
               style={{ height: 12, top: '50%', marginTop: -6, borderRadius: 999, background: 'var(--surface-4)' }}
             >
-              {/* trail */}
+              {}
               <div
                 className="absolute left-0 top-0 bottom-0"
                 style={{
@@ -185,7 +179,7 @@ export default function ThinkEffortControl() {
                   filter: 'blur(1px)',
                 }}
               />
-              {/* fill + intensity bars */}
+              {}
               <div
                 className="absolute left-0 top-0 bottom-0"
                 style={{
@@ -210,7 +204,7 @@ export default function ThinkEffortControl() {
                 />
               </div>
             </div>
-            {/* rounded-square thumb */}
+            {}
             <div
               className="absolute grid place-items-center"
               style={{
@@ -232,7 +226,7 @@ export default function ThinkEffortControl() {
             </div>
           </div>
 
-          {/* Faster ←→ Smarter */}
+          {}
           <div className="flex justify-between mt-2.5 px-0.5">
             <span className="font-mono text-[10px] tracking-wider" style={{ color: idx <= 1 ? 'var(--accent)' : 'var(--fg-faint)' }}>FASTER</span>
             <span className="font-mono text-[10px] tracking-wider" style={{ color: idx >= 2 ? 'var(--accent)' : 'var(--fg-faint)' }}>SMARTER</span>

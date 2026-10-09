@@ -23,8 +23,6 @@ def _rag_evaluator_cls():
 
     return eval_cmd.get_rag_evaluator_cls()
 
-# ── RAG evaluation ────────────────────────────────────────────────
-
 
 @eval_app.command("list")
 def eval_list():
@@ -174,11 +172,9 @@ def eval_run(
 
     output_console.print(table)
 
-    # Highlight best
     best = max(results, key=lambda r: r.task_success_rate)
     output_console.print(f"\n[bold green]Best configuration:[/bold green] {best.label} (task_success_rate={best.task_success_rate:.1%}, faithfulness={best.faithfulness:.3f})")
 
-    # Save report
     report_dir = Path(get_settings().traces_dir) / "evals"
     report_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -219,7 +215,6 @@ def eval_run(
         if export_path:
             output_console.print(f"[dim]Exported {export_format.lower()} report: {export_path}[/dim]")
 
-    # CI gate
     if ci:
         output_console.print("\n[bold]CI Gate Check:[/bold]")
         all_passed = True
@@ -239,7 +234,6 @@ def eval_run(
             for k, v in sorted(DEFAULT_RAG_THRESHOLDS.items()):
                 output_console.print(f"  {k}: {v}")
             raise typer.Exit(code=1)
-
 
 
 def _export_eval_report(report_data: dict, output: str, export_format: str) -> str:
@@ -406,5 +400,3 @@ def eval_compare(
         table.add_row(*row)
 
     console.print(table)
-
-

@@ -10,7 +10,6 @@ class TestConfigSettings:
     def test_get_settings_returns_valid_settings(self, temp_agentnexus_home):
         s = get_settings()
         assert isinstance(s, Settings)
-        # No vendor defaults — must be filled by the user
         assert s.llm_model_id == ""
         assert s.llm_base_url == ""
         assert s.llm_timeout == 60
@@ -65,7 +64,6 @@ class TestConfigSettings:
         s = Settings(llm_api_key="sk-test-1234")
         raw = s.llm_api_key.get_secret_value()
         assert raw == "sk-test-1234"
-        # repr should not expose the key
         assert "sk-test-1234" not in repr(s.llm_api_key)
 
     def test_timeout_ge_1(self):

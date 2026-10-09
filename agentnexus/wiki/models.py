@@ -88,7 +88,7 @@ class DefinitionEntry:
 
     text: str
     source_chunk_id: str
-    confidence: float  # 0.0-1.0, based on source quality
+    confidence: float
 
 
 @dataclass(slots=True)
@@ -136,7 +136,7 @@ class WikiPage:
 
     page_id: str = ""
     title: str = ""
-    page_type: str = "concept"  # entity | concept | overview | source_summary
+    page_type: str = "concept"
     content: str = ""
     statements: list[WikiStatement] = field(default_factory=list)
     canonical_definitions: dict[str, CanonicalDefinition] = field(default_factory=dict)

@@ -44,9 +44,6 @@ def _populate(registry: ToolRegistry, count: int) -> None:
         registry.register(meta, _make_handler(i))
 
 
-# ── Registry dispatch ───────────────────────────────────────────
-
-
 def test_registry_dispatch_small(benchmark):
     r = ToolRegistry()
     _populate(r, 10)
@@ -99,9 +96,6 @@ def test_registry_to_openai_tools(benchmark):
     benchmark(r.to_openai_tools)
 
 
-# ── Shell execution ─────────────────────────────────────────────
-
-
 def test_shell_exec_simple(benchmark):
     from agentnexus.tools.shell import shell_exec
 
@@ -109,9 +103,6 @@ def test_shell_exec_simple(benchmark):
     p95 = _p95_ms(benchmark.stats.stats.data)
     assert p95 < SHELL_STARTUP_P95_MAX_MS, \
         f"p95={p95:.1f}ms >= {SHELL_STARTUP_P95_MAX_MS}ms"
-
-
-# ── Grep search ──────────────────────────────────────────────────
 
 
 def test_grep_search(benchmark, perf_env, monkeypatch):

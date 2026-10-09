@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// The projects store falls back to localStorage when no Electron bridge exists
-// (jsdom has no window.electronAPI).
 
-// Dynamic import is intentional: these tests exercise module-load behavior
-// (load-on-import), so each test re-imports with fresh module state.
 async function loadStore() {
   return await import('../services/projects')
 }
@@ -57,7 +53,7 @@ describe('projects store (browser fallback)', () => {
     const store = await loadStore()
     await store.addProject('/tmp/alpha')
     await store.addProject('/tmp/beta')
-    await store.addProject('/tmp/alpha/') // trailing separator = same folder
+    await store.addProject('/tmp/alpha/')
 
     expect(store.getProjectsState().projects).toEqual(['/tmp/alpha/', '/tmp/beta'])
     expect(store.getSelectedProject()).toBe('/tmp/alpha/')
@@ -66,7 +62,7 @@ describe('projects store (browser fallback)', () => {
   it('removing the selected project reselects the first remaining one', async () => {
     const store = await loadStore()
     await store.addProject('/tmp/alpha')
-    await store.addProject('/tmp/beta') // selected
+    await store.addProject('/tmp/beta')
 
     await store.removeProject('/tmp/beta')
 
@@ -76,7 +72,6 @@ describe('projects store (browser fallback)', () => {
 
   it('workspaceKey casefolds Windows paths like the backend', async () => {
     const store = await loadStore()
-    // Backend ConversationVersionManager casefolds the whole path on Windows.
     expect(store.workspaceKey('D:\\Code\\AgentNexus\\')).toBe('d:\\code\\agentnexus')
     expect(store.workspaceKey('/Work/Alpha/')).toBe('/Work/Alpha')
   })
@@ -105,7 +100,6 @@ describe('projects store (browser fallback)', () => {
     expect(addProject).toHaveBeenCalledWith('D:\\work')
     expect(store.getProjectsState().projects).toEqual(['D:\\work'])
     expect(store.getSelectedProject()).toBe('D:\\work')
-    // Electron owns persistence — no localStorage write.
     expect(localStorage.getItem('agentnexus.projects')).toBeNull()
   })
 })

@@ -1,16 +1,3 @@
-/**
- * Chat composer attachment flow (desktop ChatPage).
- *
- * Covers the user-facing contract:
- * - paperclip + chips render only with the Electron bridge
- * - attach → file deleted on disk → send is BLOCKED (draft kept, chip struck
- *   through, system message explains) — the user's named edge case
- * - recovery → send goes out over WS with attachments payload
- * - while the agent runs, attachment sends queue and drain with attachments
- *
- * Backend validation tests live in tests/unit/test_chat_attachments.py;
- * payload shape is locked by ws.test.ts.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act, waitFor, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -41,14 +28,8 @@ class MockWebSocket {
   }
 }
 
-// Dynamic imports + inline `typeof import(...)` types are REQUIRED here, same
-// as the sibling session tests: vi.resetModules() runs per test, so
-// SessionManager/ChatPage must be re-imported fresh or module state leaks
-// across tests (static imports would defeat the reset).
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms)) // ES2020 lib: no Promise.withResolvers types
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-// Per-test overrides on top of an always-resolving api proxy (ChatPage and
-// friends call dozens of api functions on mount, all fire-and-forget).
 const apiOverrides: Record<string, (...args: any[]) => Promise<any>> = {}
 
 vi.mock('../services/api', () => {
@@ -146,15 +127,12 @@ describe('ChatPage attachments', () => {
     const probe: ProbeState = { messages: [], isRunning: false }
     await renderChat('/chat/s1', probe)
 
-    // Attach via paperclip → chip appears
     await userEvent.click(await screen.findByTitle('添加附件（本地文件，按路径引用）'))
     await waitFor(() => expect(screen.getByText('a.txt')).toBeInTheDocument())
 
-    // Type a message
     const ta = screen.getByPlaceholderText('Message Nexus...') as HTMLTextAreaElement
     await userEvent.type(ta, 'hello agent')
 
-    // File dies on disk → send is blocked
     statFiles.mockResolvedValue([{ path: 'C:\\docs\\a.txt', ok: false, size: 0 }])
     await userEvent.type(ta, '{Enter}')
     await waitFor(() =>
@@ -165,7 +143,6 @@ describe('ChatPage attachments', () => {
     expect(chip.style.textDecoration).toBe('line-through')
     expect(sentPayloads().filter(p => p.type === 'send_message')).toHaveLength(0)
 
-    // Remove dead chip, re-attach live file, send succeeds with attachments
     statFiles.mockResolvedValue([{ path: 'C:\\docs\\a.txt', ok: true, size: 12 }])
     await userEvent.click(screen.getByTitle('移除附件'))
     await userEvent.click(screen.getByTitle('添加附件（本地文件，按路径引用）'))
@@ -179,10 +156,9 @@ describe('ChatPage attachments', () => {
         { path: 'C:\\docs\\a.txt', name: 'a.txt', size: 12, mime: 'application/octet-stream' },
       ])
     })
-    // Composer chips clear AND the sent bubble carries the attachment chip.
     await waitFor(() => {
       const chips = screen.getAllByTitle('C:\\docs\\a.txt')
-      expect(chips.length).toBe(1) // composer chip gone; only the bubble chip remains
+      expect(chips.length).toBe(1)
     })
   })
 
@@ -212,7 +188,6 @@ describe('ChatPage attachments', () => {
   })
 
   it('hides the paperclip without the Electron bridge', async () => {
-    // no window.electronAPI
     const probe: ProbeState = { messages: [], isRunning: false }
     await renderChat('/', probe)
     await screen.findByPlaceholderText('Message Nexus...')
@@ -230,7 +205,6 @@ describe('ChatPage attachments', () => {
     await renderChat('/chat/s1', probe)
     await screen.findByPlaceholderText('Message Nexus...')
 
-    // Make the session running, then attach + send → must queue, not send
     await userEvent.click(screen.getByTestId('send-warmup'))
     await waitFor(() => expect(probe.isRunning).toBe(true))
 
@@ -242,7 +216,6 @@ describe('ChatPage attachments', () => {
     await sleep(150)
     expect(sentPayloads().filter(p => p.type === 'send_message' && p.content === 'queued q')).toHaveLength(0)
 
-    // Run finishes → queued message drains with its attachments
     await act(async () => { lastWs()._receive({ type: 'done' }) })
     await waitFor(() => {
       const sends = sentPayloads().filter(p => p.type === 'send_message' && p.content === 'queued q')

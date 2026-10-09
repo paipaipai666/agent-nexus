@@ -19,7 +19,6 @@ BUILTIN_REVIEW_DIR = (
 
 
 class TestBuiltinCodeReviewSkill:
-
     def test_builtin_workflow_yaml_exists(self):
         yaml_path = BUILTIN_REVIEW_DIR / "workflow.yaml"
         assert yaml_path.exists(), f"Expected workflow.yaml at {yaml_path}"
@@ -56,7 +55,6 @@ class TestBuiltinCodeReviewSkill:
 
 
 class TestSkillRegistryDiscovery:
-
     def test_discover_from_skill_dir(self, tmp_path):
         from agentnexus.skills.registry import SkillRegistry
         skill_dir = tmp_path / "skills" / "my-skill"
@@ -99,7 +97,6 @@ class TestSkillRegistryDiscovery:
 
 
 class TestRouterEndToEnd:
-
     @pytest.fixture
     def skill_entry(self, tmp_path) -> list:
         from agentnexus.skills.registry import SkillEntry
@@ -156,7 +153,6 @@ class TestRouterEndToEnd:
 
 
 class TestSkillRuntime:
-
     def test_workflow_step_state_ok_count(self):
         from agentnexus.skills.runtime import WorkflowRunState, WorkflowStepState
         steps = [
@@ -177,7 +173,6 @@ class TestSkillRuntime:
     def test_workflow_run_enhanced_question(self):
         from agentnexus.skills.runtime import WorkflowRunResult
         result = WorkflowRunResult(question="hello", workflow_context="context")
-        # Context is injected as a separate system message, not merged into question
         assert result.enhanced_question == "hello"
 
     def test_supported_kb_filters_filters_correctly(self):
@@ -189,7 +184,6 @@ class TestSkillRuntime:
 
 
 class TestSkillServiceCore:
-
     def test_skill_service_state(self):
         from agentnexus.services.skill import SkillService
         from agentnexus.skills.registry import SkillRegistry

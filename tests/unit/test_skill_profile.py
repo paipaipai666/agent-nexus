@@ -120,9 +120,6 @@ def test_build_workflow_guidance_and_policy_summary():
     assert "no-subagents" in summary
 
 
-# ── Core fragments ──────────────────────────────────────────────
-
-
 def test_load_core_fragments_loads_all_three():
     result = load_core_fragments()
     assert "行为原则" in result
@@ -136,9 +133,6 @@ def test_load_core_fragments_order_is_stance_autonomy_accountability():
     autonomy_pos = result.index("自主权边界")
     accountability_pos = result.index("Accountability")
     assert stance_pos < autonomy_pos < accountability_pos
-
-
-# ── Persona compilation ─────────────────────────────────────────
 
 
 def test_compile_persona_fragment_empty_config():

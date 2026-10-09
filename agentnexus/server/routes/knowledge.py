@@ -11,10 +11,8 @@ from agentnexus.server.error_handlers import APIError
 
 router = APIRouter(tags=["knowledge"])
 
-# Keep references to background tasks to prevent garbage collection
 _background_tasks: set = set()
 
-# Dedicated thread pool for ingestion to avoid blocking the default pool
 _ingestion_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingestion")
 
 
@@ -100,10 +98,9 @@ async def ingest_document(file: UploadFile = File(...)):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         tmp_path = tmp.name
         try:
-            # Read from underlying file object directly in this thread
             file.file.seek(0)
             while True:
-                chunk = file.file.read(1024 * 1024)  # 1MB chunks
+                chunk = file.file.read(1024 * 1024)
                 if not chunk:
                     break
                 tmp.write(chunk)
@@ -111,7 +108,6 @@ async def ingest_document(file: UploadFile = File(...)):
             tmp.close()
         return tmp_path
 
-    # Save file in dedicated thread — never blocks event loop or default pool
     tmp_path = await loop.run_in_executor(_ingestion_executor, _save_file)
 
     def _run_ingestion():
@@ -125,14 +121,13 @@ async def ingest_document(file: UploadFile = File(...)):
                 source_uri=filename,
             )
         except Exception:
-            pass  # Error recorded in IngestionRunRecord
+            pass
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
 
-    # Run ingestion in dedicated thread pool — never blocks default pool
     task = loop.run_in_executor(_ingestion_executor, _run_ingestion)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)

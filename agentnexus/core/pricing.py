@@ -11,8 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_INPUT_PRICE = 10.0   # CNY per million tokens
-_DEFAULT_OUTPUT_PRICE = 30.0  # CNY per million tokens
+_DEFAULT_INPUT_PRICE = 10.0
+_DEFAULT_OUTPUT_PRICE = 30.0
 
 
 def resolve_model(model: str) -> str:

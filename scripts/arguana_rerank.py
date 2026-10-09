@@ -26,10 +26,9 @@ from agentnexus.eval.benchmarks.beir import BEIRDatasetSpec, load_beir_dataset
 from agentnexus.storage.chroma import get_collection, reset_storage_client
 
 TOP_N = 30
-LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 0  # 0 = all queries
+LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("arguana_rerank_result.json")
 
-# reuse latest arguana-fix temp chroma (vectors already embedded)
 candidates = sorted(glob.glob(str(Path.home() / "AppData/Local/Temp/arguana-fix-*")), key=Path)
 if not candidates:
     raise SystemExit("no arguana-fix temp dir found")

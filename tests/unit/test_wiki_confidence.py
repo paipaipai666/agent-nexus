@@ -59,7 +59,6 @@ class TestComputePageConfidence:
             _make_statement(SynthesisLevel.CROSS_REFERENCE.value),
         ]
         page = _make_page(statements=stmts)
-        # 60% high-trust -> below 80% threshold, above 50% -> medium
         assert self.router.compute_page_confidence(page) == ConfidenceLevel.MEDIUM.value
 
     def test_synthesis_only_returns_low(self):
@@ -92,7 +91,6 @@ class TestComputePageConfidence:
             ),
         ]
         page = _make_page(statements=stmts)
-        # Both verified as high-trust -> 100% -> high
         assert self.router.compute_page_confidence(page) == ConfidenceLevel.HIGH.value
 
 

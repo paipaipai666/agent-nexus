@@ -9,17 +9,11 @@ import {
   shellCommandFromArgs, toolBodyText, toolPathArg,
 } from '../../utils/toolDisplay'
 
-/* ─── Tool Row — one quiet line inside a shared group card ───
- * Collapsed: icon · name · arg summary chip · duration · 7px status dot.
- * Expanded: typed body (diff / search / shell / file meta / plain).
- * Consecutive tool messages share one bordered card (see thread renderer). */
 const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; isMcp?: boolean }) {
   const [expanded, setExpanded] = useState(msg.toolStatus === 'running')
   const userToggled = useRef(false)
   const reducedMotion = usePrefersReducedMotion()
   useEffect(() => {
-    // auto-expand while running; collapse again when done unless the user
-    // explicitly opened the row
     if (msg.toolStatus === 'running') setExpanded(true)
     else if (!userToggled.current) setExpanded(false)
   }, [msg.toolStatus])
@@ -104,7 +98,6 @@ const ToolCard = React.memo(function ToolCard({ msg, isMcp }: { msg: Message; is
   )
 })
 
-/* Typed expanded body for a tool row. */
 function ToolBody({ msg, kind, body }: { msg: Message; kind: ReturnType<typeof toolBodyKind>; body: string }) {
   const mono = 'font-mono text-[12px] leading-[1.7]'
   const codeBg = { background: 'var(--surface-2)', border: '1px solid var(--border)' }
@@ -236,7 +229,6 @@ function ToolBody({ msg, kind, body }: { msg: Message; kind: ReturnType<typeof t
     )
   }
 
-  // plain
   return body ? (
     <pre
       className={`${mono} px-3 py-2 rounded-md whitespace-pre-wrap break-words max-h-[220px] overflow-auto`}

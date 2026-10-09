@@ -128,7 +128,7 @@ def memory_bench_rejudge(
     judged = [r for r in data["results"] if r.get("judge_correct") is not None]
     acc = sum(1 for r in judged if r["judge_correct"]) / len(judged) if judged else None
     data["judge_accuracy"] = round(acc, 4) if acc is not None else None
-    data["judge_model"] = getattr(judge, "model", None)  # audit trail for cross-judge runs
+    data["judge_model"] = getattr(judge, "model", None)
 
     out_path = Path(output) if output else path
     out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

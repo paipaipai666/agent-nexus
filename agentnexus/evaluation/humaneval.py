@@ -94,7 +94,6 @@ class HumanEvalReport:
 class HumanEvalEvaluator:
     """Evaluate code generation against HumanEval-style test cases."""
 
-    # Type of test runner to use
     runner: Literal["subprocess", "exec"] = "subprocess"
 
     def load_dataset(self, path: str | Path) -> list[ProblemSample]:
@@ -157,8 +156,6 @@ class HumanEvalEvaluator:
                         if not error:
                             error = result.stderr.strip() or result.stdout.strip()
                 else:
-                    # fallback: exec in-process (for testing/docstring-only)
-                    # Use restricted builtins to prevent abuse
                     safe_builtins = {
                         k: __builtins__[k] if isinstance(__builtins__, dict) else getattr(__builtins__, k)
                         for k in (

@@ -16,7 +16,6 @@ def perf_docs_dir(perf_env) -> Path:
     d = perf_env / "docs"
     d.mkdir(parents=True, exist_ok=True)
 
-    # 50KB markdown file with 30 headings
     md_lines = []
     for i in range(30):
         md_lines.append(f"## Section {i}\n\n")
@@ -27,7 +26,6 @@ def perf_docs_dir(perf_env) -> Path:
     md_content = "".join(md_lines)
     (d / "perf_50kb.md").write_text(md_content[:50000], encoding="utf-8")
 
-    # 100KB markdown file with 60 headings
     md_lines2 = []
     for i in range(60):
         md_lines2.append(f"### Subsection {i}\n\n")
@@ -38,7 +36,6 @@ def perf_docs_dir(perf_env) -> Path:
     md_content2 = "".join(md_lines2)
     (d / "perf_100kb.md").write_text(md_content2[:100000], encoding="utf-8")
 
-    # Plain text file (no headings)
     txt_lines = [f"Plain text line {i} with some content for testing.\n" for i in range(1000)]
     (d / "perf_plain.txt").write_text("".join(txt_lines), encoding="utf-8")
 
@@ -55,8 +52,8 @@ def test_clean_text_small(benchmark):
 
 def test_clean_text_500kb(benchmark):
     from agentnexus.rag.ingestion import clean_text
-    text = "这是一个测试文档。\n\n" * 10000  # ~200KB
-    text += "Full-width test：ｈｅｌｌｏ\n" * 10000  # ~350KB
+    text = "这是一个测试文档。\n\n" * 10000
+    text += "Full-width test：ｈｅｌｌｏ\n" * 10000
     result = benchmark(clean_text, text)
     assert isinstance(result, str)
     assert len(result) > 0

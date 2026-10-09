@@ -11,8 +11,6 @@ the GUI layer (``server/routes/chat.py`` _GUI_EVENT_OVERRIDES) rewrites into a
 
 from __future__ import annotations
 
-# Reaction name -> emoji. Backend owns the mapping so every frontend (desktop,
-# TUI) renders the same glyph without duplicating the table.
 REACTION_EMOJI: dict[str, str] = {
     "like": "👍",
     "dislike": "👎",
@@ -24,7 +22,6 @@ REACTION_EMOJI: dict[str, str] = {
     "sleepy": "🥱",
 }
 
-# One short quip, not an essay.
 MAX_COMMENT_LEN = 50
 
 

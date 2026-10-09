@@ -7,7 +7,6 @@ Or run this file directly (it re-imports all test classes):
     pytest tests/unit/test_mcp_adapter.py -x -q
 """
 
-# Re-export all test classes from the split modules so this file remains runnable.
 from tests.unit.test_mcp.test_adapter_basic import (  # noqa: F401
     TestContentBlockToText,
     TestContentBlockToTextEdgeCases,

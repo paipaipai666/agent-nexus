@@ -5,16 +5,13 @@ import {
 } from 'lucide-react'
 
 export interface NavItem {
-  /** stable id */
   id: string
   label: string
   path: string
   icon: LucideIcon
-  /** match extra path prefixes (e.g. chat matches /chat/:id) */
   match?: (pathname: string) => boolean
 }
 
-/** v2.3 — two primary sections only; everything else lives under Settings. */
 export const PRIMARY_NAV: NavItem[] = [
   {
     id: 'chat', label: 'Chat', path: '/', icon: MessageSquare,
@@ -26,7 +23,6 @@ export const PRIMARY_NAV: NavItem[] = [
   },
 ]
 
-/** Settings sub-navigation — rendered in the context sidebar under /settings/*. */
 export const SETTINGS_NAV: NavItem[] = [
   { id: 'general', label: 'General', path: '/settings', icon: Settings },
   { id: 'knowledge', label: 'Knowledge', path: '/settings/knowledge', icon: BookOpen },
@@ -46,7 +42,6 @@ export function navItemForPath(pathname: string): NavItem | undefined {
   return PRIMARY_NAV.find((i) => (i.match ? i.match(pathname) : pathname.startsWith(i.path)))
 }
 
-/** Sub-page label for the titlebar breadcrumb (e.g. "Settings / Stats"). */
 export function settingsItemForPath(pathname: string): NavItem | undefined {
   return SETTINGS_NAV.find((i) =>
     i.path === '/settings' ? pathname === '/settings' : pathname.startsWith(i.path),

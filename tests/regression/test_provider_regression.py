@@ -73,7 +73,6 @@ class TestProviderEndToEnd:
         assert result == "DeepSeek answer"
         client.chat.completions.create.assert_called_once()
         call_kwargs = client.chat.completions.create.call_args[1]
-        # Model id is sent exactly as configured (no vendor-prefix stripping)
         assert call_kwargs["model"] == "deepseek/deepseek-v4-flash"
 
     @patch("agentnexus.core.llm.get_settings")
@@ -149,7 +148,6 @@ class TestProviderEndToEnd:
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
         assert result == "Proxy answer"
-        # base_url is passed to OpenAI() constructor — verify it was used
         assert client.chat.completions.create.call_count == 1
 
 
@@ -243,7 +241,7 @@ class TestProviderToolCalling:
         ])
 
         llm = AgentLLM()
-        llm._capabilities = None  # Force re-detection
+        llm._capabilities = None
 
         tools = [{"type": "function", "function": {"name": "search"}}]
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
@@ -312,7 +310,6 @@ class TestProviderTokenEstimation:
         mock_settings.return_value.llm_timeout = 30
         mock_trace.active = None
 
-        # No usage chunk — provider should fall back to tiktoken estimation
         client = _mock_openai_client([
             _openai_chunk(content="Hello world", finish_reason="stop"),
         ])

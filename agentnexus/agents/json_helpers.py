@@ -115,7 +115,7 @@ def _validate_strings_closed(text: str) -> bool:
                     break
                 i += 1
             else:
-                return False  # unclosed string
+                return False
         i += 1
     return True
 

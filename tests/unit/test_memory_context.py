@@ -29,7 +29,6 @@ def _mock_agent_trace_manager():
 
 
 class TestInitSessionWithContext:
-
     def test_init_session_uses_question_with_summary(self, temp_agentnexus_home):
         stm = ShortTermMemory()
         stm.append("user", "用python实现一个快速排序算法")
@@ -58,7 +57,6 @@ class TestInitSessionWithContext:
 
             call_args = mock_embed.encode.call_args
             query_text = call_args[0][0]
-            # Question is always in the query; summary is prepended when available
             assert "讲解一下" in query_text
             assert "快速排序" in query_text
 
@@ -123,7 +121,7 @@ class TestInitSessionWithContext:
             assert "喜欢Python" in result
             assert "使用VSCode" in result
             assert "★" in result
-            assert "相关历史记忆" in result  # 注：诱导性 [提示] 行已在准入收紧中移除
+            assert "相关历史记忆" in result
 
     def test_init_session_returns_empty_when_no_relevant_results(self, temp_agentnexus_home):
         mock_embed = MagicMock()
@@ -149,7 +147,6 @@ class TestInitSessionWithContext:
 
 
 class TestReActAgentConversationMode:
-
     def test_conversation_mode_default_false(self):
         from agentnexus.agents.re_act_agent import ReActAgent
         agent = ReActAgent.__new__(ReActAgent)
@@ -355,14 +352,9 @@ class TestReActAgentConversationMode:
 
         assert result.answer == "done"
         messages = mock_llm.think.call_args.kwargs["messages"]
-        # Profile fragments + workflow guidance reach the LLM in a system
-        # context message — located by content, not by fixed index.
         system_texts = [m["content"] for m in messages if m["role"] == "system"]
         context_content = next(c for c in system_texts if "Skill Workflow" in c)
         assert "安全原则" in context_content
-        # Tool policy filters the schema list sent to the model. With the
-        # mock's session tracker the strategy is NATIVE_TOOLS, so the
-        # allowed tool surfaces in the native tools payload, not a text block.
         tools_payload = mock_llm.think.call_args.kwargs["tools"]
         names = [t["function"]["name"] for t in tools_payload]
         assert names == ["file_read"]
@@ -404,7 +396,6 @@ class TestReActAgentConversationMode:
         mock_llm.think.return_value = "done"
         executor = ToolRegistry()
         agent = ReActAgent(mock_llm, executor, conversation_mode=False)
-        # Should not raise — history is now local, not self.history
         result = agent.run("test question")
         assert result.answer == "done"
 
@@ -465,15 +456,12 @@ class TestReActAgentConversationMode:
         agent = ReActAgent(mock_llm, executor, conversation_mode=True)
 
         stm = ShortTermMemory()
-        # Turn 1
         stm.append("user", "问题1")
         stm.append("assistant", "回答1")
         stm.append("system", "[最终答案] 回答1")
-        # Turn 2
         stm.append("user", "问题2")
         stm.append("assistant", "回答2")
         stm.append("system", "[最终答案] 回答2")
-        # Turn 3 (in progress)
         stm.append("user", "问题3")
         stm.append("assistant", "回答3")
 
@@ -481,10 +469,8 @@ class TestReActAgentConversationMode:
         mock_mm.short_term = stm
         result = agent._build_conversation_context(mock_mm)
         lines = result.split("\n")
-        # All 3 turns should be present (N_TURNS_NO_SUMMARY=3)
         user_lines = [line for line in lines if line.startswith("用户:")]
         assert len(user_lines) == 3
-        # [最终答案] should NOT appear in output
         assert "[最终答案]" not in result
 
     def test_collect_recent_turns_skips_compaction_markers(self):
@@ -500,7 +486,6 @@ class TestReActAgentConversationMode:
         ]
         turns = _collect_recent_turns(messages, 5)
         assert len(turns) == 2
-        # First turn starts with 问题1, not 会话摘要
         assert turns[0][0]["content"] == "问题1"
 
     def test_collect_recent_turns_includes_incomplete_turn(self):
@@ -615,9 +600,6 @@ class TestReActAgentConversationMode:
         assert result.answer == "done"
         assert calls == [(ReActEventType.TOOL_START, None, None, "read")]
 
-    # ── 以下用例在 FSM 重设计（Step 3）后改走新入口 _on_round / _on_tools_requested
-    #    / _on_recover；验证目标不变：UI 侧事件流与对话内容不回归。──
-
     def _run_round(self, agent, ctx, monkeypatch, emitted=None):
         """驱动 _on_round：call_llm 直接返回预设的 ctx.last_response_text。"""
         monkeypatch.setattr(
@@ -703,7 +685,6 @@ class TestReActAgentConversationMode:
 
         followup = agent._on_tools_requested(ctx, returned[0])
 
-        # 观测事件（LLM_CALL 等）与 UI 旁路断言无关 —— 过滤后再比对
         _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
                           ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
         side_channel = [(t, p) for t, p in emitted if t not in _OBSERVABILITY]
@@ -734,7 +715,6 @@ class TestReActAgentConversationMode:
 
         returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
-        # 观测事件（LLM_CALL 等）与旁路断言无关 —— 过滤后再比对
         _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
                           ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
         assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
@@ -759,7 +739,6 @@ class TestReActAgentConversationMode:
 
         returned = self._run_round(agent, ctx, monkeypatch, emitted)
 
-        # 观测事件（LLM_CALL 等）与旁路断言无关 —— 过滤后再比对
         _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
                           ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
         assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
@@ -776,7 +755,7 @@ class TestReActAgentConversationMode:
         ctx = ExecutionContext(question="readme", strategy=CallingStrategy.PROMPT_JSON)
         ctx.steps.append(AgentStep(step_id=0, tool_outputs=[{"tool": "file_read", "output": "result"}]))
         ctx.memory_state.session_caps = agent.llm_client.session_tracker
-        ctx.run_state.json_retries = 2  # 预算耗尽 → salvage
+        ctx.run_state.json_retries = 2
         ctx.last_response_text = '{"answer"："最终答案"}'
 
         returned = agent._on_recover(ctx, ReActEvent(ReActEventType.FAULT, {
@@ -820,7 +799,6 @@ class TestReActAgentConversationMode:
 
 
 class TestChatScreenAnswerRender:
-
     def test_answer_render_waits_until_msg_content_exists(self):
         from agentnexus.agents.react_types import ReActEvent, ReActEventType
         from agentnexus.tui.app import AgentNexusTUI
@@ -949,7 +927,6 @@ class TestChatScreenAnswerRender:
 
 
 class TestBuildProjection:
-
     def _make_mgr(self, stm, ctx_max=128000, buffer_tokens=8000):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -972,7 +949,7 @@ class TestBuildProjection:
     def test_projection_mild_truncates_long(self, monkeypatch):
         monkeypatch.setattr(
             "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
-            lambda self: 120000,  # 93.75% of 128k
+            lambda self: 120000,
         )
         stm = ShortTermMemory()
         stm.append("system", "system prompt")
@@ -987,16 +964,14 @@ class TestBuildProjection:
         mgr = self._make_mgr(stm)
         messages = [{"role": m["role"], "content": m["content"]} for m in stm.get_all()]
         result = mgr.build_projection(messages)
-        # Last 4 should be intact
         assert result[-4]["content"] == "recent1"
-        # Long assistant should be truncated (not last 4)
         assert "投影截断" in result[1]["content"]
         assert len(result[1]["content"]) < len(long_content)
 
     def test_projection_aggressive_clears_tools(self, monkeypatch):
         monkeypatch.setattr(
             "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
-            lambda self: 125000,  # 97.6% of 128k
+            lambda self: 125000,
         )
         stm = ShortTermMemory()
         stm.append("system", "system msg")
@@ -1009,14 +984,11 @@ class TestBuildProjection:
         mgr = self._make_mgr(stm)
         messages = [{"role": m["role"], "content": m["content"]} for m in stm.get_all()]
         result = mgr.build_projection(messages)
-        # Tool result should be cleared
         tool_msgs = [m for m in result if m["role"] == "tool"]
         assert len(tool_msgs) == 1
         assert "投影清除" in tool_msgs[0]["content"]
-        # Boundary marker should be present
         system_msgs = [m for m in result if m["role"] == "system"]
         assert any("上下文投影" in m["content"] for m in system_msgs)
-        # Last 3 should be intact
         assert result[-1]["content"] == "recent3"
 
     def test_projection_non_destructive(self, monkeypatch):
@@ -1046,7 +1018,6 @@ class TestCompactFull:
             stm.append("user", f"msg{i}")
         stm.compact_full("摘要内容", message_count=20, is_auto=True)
         msgs = stm.get_all()
-        # compact_full keeps last 6 recent messages + 1 summary
         assert len(msgs) == 7
         assert "本会话是从之前一次因上下文耗尽而中断的对话延续过来的" in msgs[0]["content"]
         assert "摘要内容" in msgs[0]["content"]
@@ -1057,7 +1028,6 @@ class TestCompactFull:
             stm.append("user", f"msg{i}")
         stm.compact_full("摘要内容", message_count=20, is_auto=False)
         msgs = stm.get_all()
-        # compact_full keeps last 6 recent messages + 1 summary
         assert len(msgs) == 7
         assert "对话已被手动压缩" in msgs[0]["content"]
 
@@ -1067,9 +1037,7 @@ class TestCompactFull:
         stm.append("assistant", "critical decision")
         stm.compact_full("summary", is_auto=True)
         msgs = stm.get_all()
-        # compact_full keeps last 6 recent messages + 1 summary (2 msgs < 6, so all kept)
         assert len(msgs) == 3
-        # Summary should be in the first message
         assert "important message" not in msgs[0]["content"]
 
 
@@ -1182,7 +1150,6 @@ class TestTranscriptBackup:
 
 
 class TestHasNewMemories:
-
     def test_returns_true_after_new_ltm_write(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -1210,7 +1177,6 @@ class TestHasNewMemories:
 
 
 class TestRefreshLtmContext:
-
     def test_refresh_returns_same_format_as_init_session(self):
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
@@ -1237,7 +1203,6 @@ class TestRefreshLtmContext:
 
 
 class TestConclude:
-
     def _make_mgr(self):
         from agentnexus.memory.circuit_breaker import CircuitBreaker
         mgr = MemoryManager.__new__(MemoryManager)
@@ -1255,8 +1220,6 @@ class TestConclude:
         return mgr
 
     def test_calls_llm_with_extract_prompt(self):
-        # Note: statement-form input — pure questions are rejected by the
-        # whitelist rule before reaching the gate.
         mgr = self._make_mgr()
         mgr._llm.think.return_value = '{"user_preference": ["likes Python"]}'
         mgr.conclude("编程语言讨论", "Python")
@@ -1272,7 +1235,6 @@ class TestConclude:
             "preference": ["likes Python", "prefers dark mode"],
             "fact": ["uses VSCode"],
         })
-        # Gate call returns "yes", extraction call returns JSON
         mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("Test", "Answer")
         assert mgr.long_term.save.call_count == 3
@@ -1281,7 +1243,6 @@ class TestConclude:
         mgr = self._make_mgr()
         mgr.long_term.search.return_value = []
         json_response = '```json\n{"preference": ["likes Python"]}\n```'
-        # Gate call returns "yes", extraction call returns JSON
         mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("test", "Python")
         assert mgr.long_term.save.call_count == 1
@@ -1292,10 +1253,8 @@ class TestConclude:
     def test_masks_pii_in_question_instead_of_skipping(self):
         mgr = self._make_mgr()
         mgr.long_term.search.return_value = []
-        # Answer must be >= 5 chars to pass rule filter
         mgr._llm.think.side_effect = ["yes", "{}"]
         mgr.conclude("email me at user@example.com", "sure thing")
-        # Gate call + extraction call
         assert mgr._llm.think.call_count == 2
         gate_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
         assert "***" in gate_text
@@ -1306,7 +1265,6 @@ class TestConclude:
         mgr.long_term.search.return_value = []
         mgr._llm.think.side_effect = ["yes", "{}"]
         mgr.conclude("hello", "call 13800138000")
-        # Gate call + extraction call
         assert mgr._llm.think.call_count == 2
         extraction_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
         assert "****" in extraction_text

@@ -25,37 +25,31 @@ from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
 _INDEX_TEMPLATE = """\
 # 项目记忆索引
 
 <!-- 一行一条：[kind] YYYY-MM-DD 内容。会话开始只加载本文件；详情见 memo.md / decisions.md / lessons.md。 -->
 """
-
 _MEMO_TEMPLATE = """\
 # 项目备忘录
 
 <!-- 不可猜的命令、约定、landmines。只写从代码里看不出来的东西。 -->
 """
-
 _DECISIONS_TEMPLATE = """\
 # 决策记录
 
 <!-- 决策 + 理由 + 被否方案。append-only，几乎不删。 -->
 """
-
 _LESSONS_TEMPLATE = """\
 # 踩坑记录
 
 <!-- 一行一坑，带 #tag 便于 grep。 -->
 """
-
 _STATE_TEMPLATE = """\
 # 当前状态
 
 （暂无）
 """
-
 _GITIGNORE = """\
 # Per-operator state — not committed to git
 worklog/
@@ -82,8 +76,6 @@ class ProjectMemory:
         self._lock = threading.Lock()
         self.ensure_layout()
 
-    # ── layout ───────────────────────────────────────────────────────
-
     def ensure_layout(self) -> None:
         """Create the .agentnexus/ tree if missing. Never overwrites content."""
         self.root.mkdir(parents=True, exist_ok=True)
@@ -100,8 +92,6 @@ class ProjectMemory:
             fpath = self.root / name
             if not fpath.exists():
                 fpath.write_text(template, encoding="utf-8")
-
-    # ── reads ────────────────────────────────────────────────────────
 
     def read_index(self) -> str:
         """Return the MEMORY.md index (capped), or '' if unreadable."""
@@ -132,7 +122,6 @@ class ProjectMemory:
         """
         parts: list[str] = []
         index = self.read_index()
-        # An index with no entry lines carries no information.
         has_entries = any(line.startswith("- [") for line in index.splitlines())
         if has_entries:
             parts.append(f"[项目记忆索引] 本项目相关约定以此为准（优先级高于全局记忆），详情见 .agentnexus/ 目录\n{index}")
@@ -140,8 +129,6 @@ class ProjectMemory:
         if state:
             parts.append(f"[项目当前状态]\n{state}")
         return "\n\n".join(parts)
-
-    # ── writes ───────────────────────────────────────────────────────
 
     def add_entry(self, kind: str, content: str, tags: str = "") -> bool:
         """Append a one-line entry to a topic file + index. Returns False on duplicate.
@@ -201,8 +188,6 @@ class ProjectMemory:
             tmp_path.write_text(text, encoding="utf-8")
             os.replace(tmp_path, state_path)
 
-    # ── internals ────────────────────────────────────────────────────
-
     def _append_index(self, kind: str, date: str, content: str) -> None:
         index_path = self.root / self.INDEX_NAME
         entry = f"- [{kind}] {date} {content[:100]}"
@@ -212,7 +197,6 @@ class ProjectMemory:
             lines = _INDEX_TEMPLATE.splitlines()
         lines.append(entry)
         if len(lines) > self.MAX_INDEX_LINES:
-            # Keep the header block (non-entry lines at the top), trim oldest entries.
             header_end = 0
             for i, line in enumerate(lines):
                 if line.startswith("- ["):

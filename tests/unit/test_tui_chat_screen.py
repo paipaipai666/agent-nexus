@@ -446,7 +446,6 @@ class TestMcpCommandExceptionHandler:
         screen = ChatScreen(agent=MagicMock(), memory=None, version=None, mcp_manager=manager)
         screen._chat_area = MagicMock()
         screen._handle_mcp_command("status")
-        # Verify add_system was still called (error path, not crash)
         assert screen._chat_area.add_system.called
 
 
@@ -777,7 +776,6 @@ class TestSkillCommandHelpers:
 
         question = screen._prepare_agent_question("user question")
 
-        # Context is now injected as a separate system message, not merged into question
         assert question == "user question"
         assert screen._side_panel.add_timeline_event.called
 
@@ -796,7 +794,6 @@ class TestSkillCommandHelpers:
 
         question = screen._prepare_agent_question("user question")
 
-        # Context is now injected as a separate system message
         assert question == "user question"
         assert service.snapshot().last_run_status == "completed"
         screen._side_panel.update_skill.assert_called_with(
@@ -842,7 +839,6 @@ class TestSkillCommandHelpers:
         question = screen._prepare_agent_question("Please write concise release notes.")
 
         assert service.current == entry
-        # Context is injected as a separate system message, not merged into question
         assert question == "Please write concise release notes."
         assert screen._side_panel.add_timeline_event.called
 

@@ -11,7 +11,6 @@ import uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversation_checkpoints (
     id TEXT PRIMARY KEY,
@@ -46,23 +45,17 @@ CREATE INDEX IF NOT EXISTS idx_cp_session ON conversation_checkpoints(session_id
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON conversation_sessions(workspace_path, updated_at);
 CREATE INDEX IF NOT EXISTS idx_msg_session ON conversation_messages(session_id, id);
 """
-
-# Migration: add head_checkpoint_id column if missing
 _MIGRATION_SQL = """
 ALTER TABLE conversation_sessions ADD COLUMN head_checkpoint_id TEXT;
 """
-
-# Migration: add message_count column to checkpoints
 _MIGRATION_MSG_COUNT_SQL = """
 ALTER TABLE conversation_checkpoints ADD COLUMN message_count INTEGER;
 """
-
-# Migration: add preview column to sessions
 _MIGRATION_PREVIEW_SQL = """
 ALTER TABLE conversation_sessions ADD COLUMN preview TEXT NOT NULL DEFAULT '';
 """
 
-# Migration: add runtime stats columns to sessions
+
 _MIGRATION_STATS_INPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_input_tokens INTEGER DEFAULT 0"
 _MIGRATION_STATS_OUTPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_output_tokens INTEGER DEFAULT 0"
 _MIGRATION_STATS_STEPS_SQL = "ALTER TABLE conversation_sessions ADD COLUMN step_count INTEGER DEFAULT 0"
@@ -100,8 +93,6 @@ class ConversationVersionManager:
         if self._workspace_path:
             self.register_session(self._workspace_path, self._profile)
 
-    # ── public API ─────────────────────────────────────────────────
-
     def commit_with_messages(
         self,
         messages: list[dict],
@@ -123,10 +114,6 @@ class ConversationVersionManager:
         })
 
         with self._lock:
-            # Committing from a HEAD that sits behind the journal tail (after
-            # undo/jump) forks the timeline: rows past HEAD belong to the
-            # abandoned future and are physically cut, so the new checkpoint
-            # counts only HEAD's window plus the new turn.
             head = self._current_checkpoint()
             head_count = head.get("message_count") if head else None
             if head_count is not None:
@@ -137,7 +124,6 @@ class ConversationVersionManager:
                     (self.session_id, self.session_id, head_count),
                 )
 
-            # Write messages
             rows = [
                 (self.session_id, m.get("role", ""), m.get("content", ""), m.get("ts", _time.time()))
                 for m in messages
@@ -154,7 +140,6 @@ class ConversationVersionManager:
             ).fetchone()
             total_count = total_count_row["cnt"] if total_count_row else 0
 
-            # Create checkpoint
             cp_id = uuid.uuid4().hex[:8]
             parent_id = self._current_head_id()
             self._conn.execute(
@@ -204,7 +189,6 @@ class ConversationVersionManager:
             self._touch_session()
             self._conn.commit()
 
-            # New commit after undo → clear redo stack
             self._redo_stack.clear()
 
         hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
@@ -228,8 +212,6 @@ class ConversationVersionManager:
                 (self.session_id, normalized, self._profile),
             )
             self._conn.commit()
-
-    # ── message journal ─────────────────────────────────────────────
 
     def append_message(self, role: str, content: str, ts: float | None = None) -> int:
         """Append a single message to the journal. Returns the message row id."""
@@ -317,8 +299,6 @@ class ConversationVersionManager:
                 out.append(m)
                 if m.get("role") != "user":
                     continue
-                # Does this turn already have a final-answer marker before the
-                # next user message?
                 has_answer = False
                 for r in messages[i + 1:]:
                     if r.get("role") == "user":
@@ -406,16 +386,10 @@ class ConversationVersionManager:
         conn = sqlite3.connect(db_path, timeout=5)
         conn.row_factory = sqlite3.Row
         try:
-            # Sidebar hot path: skip the schema bootstrap DDL unless the db is
-            # brand new — executescript on every request serializes against
-            # the agent loop's write commits on the same file.
             if conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions'"
             ).fetchone() is None:
                 conn.executescript(SCHEMA)
-            # Skip content-less rows (e.g. the server build session registered
-            # on every `nexus serve` launch); sessions with a checkpoint,
-            # message, or persisted preview all count as having content.
             content_filter = (
                 "(EXISTS ("
                 "  SELECT 1 FROM conversation_checkpoints c WHERE c.session_id = s.session_id"
@@ -444,7 +418,6 @@ class ConversationVersionManager:
                 preview = row["preview"] or ""
                 last_message_at = row["updated_at"]
 
-                # If preview is empty, try to generate from checkpoint or messages
                 if not preview:
                     last_cp = conn.execute(
                         "SELECT question, answer, created_at "
@@ -460,7 +433,6 @@ class ConversationVersionManager:
                             preview = preview[:100] + "..."
                         last_message_at = last_cp["created_at"] or row["updated_at"]
 
-                    # Fallback: get preview from journal if question/answer empty
                     if not preview:
                         last_msg = conn.execute(
                             "SELECT content FROM conversation_messages "
@@ -471,7 +443,6 @@ class ConversationVersionManager:
                         if last_msg:
                             preview = last_msg["content"][:100] or ""
 
-                    # Persist generated preview for future queries (batched below)
                     if preview:
                         pending_previews.append((preview, session_id))
 
@@ -485,8 +456,6 @@ class ConversationVersionManager:
                     "workspace_path": row["workspace_path"],
                 })
 
-            # One commit for all generated previews — cosmetic cache, so a lock
-            # failure must not fail the read either.
             if pending_previews:
                 try:
                     conn.executemany(
@@ -630,11 +599,9 @@ class ConversationVersionManager:
             if parent is None:
                 return None
 
-            # Move head to parent
             self._set_head(parent["id"])
             self._conn.commit()
 
-            # Push current onto redo stack
             self._redo_stack.append(current["id"])
 
             return dict(parent)
@@ -675,9 +642,6 @@ class ConversationVersionManager:
 
             chain_ids = [r["id"] for r in self._ancestor_chain(head_id)]
             if cp_id in chain_ids:
-                # Backward: everything strictly between HEAD and target becomes
-                # redoable; append order puts the nearest checkpoint at the
-                # top of the stack (redo pops from the end).
                 idx = chain_ids.index(cp_id)
                 self._redo_stack.extend(chain_ids[:idx])
                 self._set_head(cp_id)
@@ -685,8 +649,6 @@ class ConversationVersionManager:
                 return dict(target)
 
             if cp_id in self._redo_stack:
-                # Forward jump along the redo timeline — commits here would
-                # fork, so the redo stack is discarded (same as commit).
                 self._redo_stack.clear()
                 self._set_head(cp_id)
                 self._conn.commit()
@@ -733,7 +695,6 @@ class ConversationVersionManager:
         with self._lock:
             head = self._current_checkpoint()
             if head is None:
-                # Fallback: latest checkpoint
                 row = self._conn.execute(
                     "SELECT stm_snapshot, message_count FROM conversation_checkpoints "
                     "WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -743,20 +704,14 @@ class ConversationVersionManager:
                     return ""
                 head = dict(row)
 
-            # Path 1: legacy snapshot exists
             snapshot = head.get("stm_snapshot", "")
             if snapshot:
                 return snapshot
 
-            # Path 2: replay from journal
             msg_count = head.get("message_count")
             if msg_count is None or msg_count <= 0:
-                # No journal data either — return empty
                 return ""
 
-            # Read the first msg_count messages of the journal (the HEAD
-            # window — rows past HEAD are the undone future and must not
-            # leak into the replay), capped by max_messages.
             limit = min(msg_count, max_messages)
             rows = self._conn.execute(
                 "SELECT role, content, ts FROM conversation_messages "
@@ -782,27 +737,25 @@ class ConversationVersionManager:
             self._conn.commit()
             self._redo_stack.clear()
 
-    # ── internal helpers ──────────────────────────────────────────
-
     def _migrate(self):
         """Apply schema migrations for existing databases."""
         try:
             self._conn.execute(_MIGRATION_SQL)
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
         try:
             self._conn.execute(_MIGRATION_MSG_COUNT_SQL)
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
         try:
             self._conn.execute(_MIGRATION_PREVIEW_SQL)
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
         for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
             try:
                 self._conn.execute(_sql)
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                pass
 
     def _current_head_id(self) -> str | None:
         """Get the current HEAD checkpoint ID from conversation_sessions."""
@@ -816,7 +769,6 @@ class ConversationVersionManager:
 
     def _set_head(self, cp_id: str):
         """Update the HEAD checkpoint ID in conversation_sessions."""
-        # Ensure session exists first
         self._conn.execute(
             "INSERT OR IGNORE INTO conversation_sessions (session_id, workspace_path, profile) "
             "VALUES (?, ?, ?)",
@@ -874,7 +826,6 @@ class ConversationVersionManager:
                 conn.executescript(SCHEMA)
             except sqlite3.OperationalError:
                 pass
-            # Ensure stats columns exist (migration)
             for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
                 try:
                     conn.execute(_sql)

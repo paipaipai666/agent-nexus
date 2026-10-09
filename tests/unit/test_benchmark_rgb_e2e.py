@@ -55,7 +55,6 @@ def test_load_rgb_queries(rgb_cache):
 def test_build_corpus_sampling(rgb_cache):
     (query,) = [q for q in load_rgb_queries("zh", "noise", offline=True) if q.query_id == "0"]
     docs = query.build_corpus(passage_num=5, seed=7)
-    # noise_rate=0.5 -> neg_num = ceil(5*0.5) = 3, pos_num = min(5-3, 3) = 2
     assert len(docs) == 5
     assert sum(d in query.negative for d in docs) == 3
     assert sum(d in query.positive for d in docs) == 2
@@ -80,11 +79,10 @@ def test_generation_prompt_and_rejection_rules(rgb_cache):
 def test_rate_limiter_pacing(monkeypatch):
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
-    limiter = ratelimit.RateLimiter(rate_per_minute=120)  # 0.5s interval
+    limiter = ratelimit.RateLimiter(rate_per_minute=120)
     for _ in range(3):
         limiter.acquire()
-    assert len(sleeps) == 2  # first call free, then paced
-    # sleep is stubbed so the clock never advances: waits accumulate 0.5, 1.0
+    assert len(sleeps) == 2
     assert sleeps[0] == pytest.approx(0.5, abs=0.05)
     assert sleeps[1] == pytest.approx(1.0, abs=0.05)
 
@@ -130,7 +128,6 @@ def _patch_e2e_env(monkeypatch, tmp_path, script=None):
     settings = get_settings()
     monkeypatch.setattr(settings, "chroma_persist_dir", str(tmp_path / "chroma"))
     reset_storage_client()
-    # retry backoff must not slow tests down
     monkeypatch.setattr(ratelimit.time, "sleep", lambda s: None)
 
     import hashlib
@@ -155,7 +152,7 @@ def _patch_e2e_env(monkeypatch, tmp_path, script=None):
     )
 
     generator = _FakeLLM("fake-gen", script)
-    judge = _FakeLLM("fake-judge", script=lambda u, m: "0.95")  # always correct
+    judge = _FakeLLM("fake-judge", script=lambda u, m: "0.95")
     monkeypatch.setattr(e2e, "_make_llm", lambda selector: generator)
     monkeypatch.setattr("agentnexus.core.judge_llm.get_judge_llm", lambda: judge)
     return generator, judge
@@ -188,7 +185,7 @@ def test_e2e_rejection_task_rule_judged(monkeypatch, tmp_path):
 
     _patch_e2e_env(monkeypatch, tmp_path, script=reject_script)
     summary = e2e.run_rgb_e2e([_mk_query(task="rejection")], rpm=60000)
-    assert summary.records[0].judge_score is None  # rule-based, no LLM judge
+    assert summary.records[0].judge_score is None
     assert summary.records[0].correct is True
 
 
@@ -196,10 +193,10 @@ def test_e2e_generate_only_defers_judging(monkeypatch, tmp_path):
     _, judge = _patch_e2e_env(monkeypatch, tmp_path)
     summary = e2e.run_rgb_e2e([_mk_query()], rpm=60000, judge_enabled=False)
     record = summary.records[0]
-    assert record.generation  # generation still ran and was stored
-    assert record.correct is None  # not judged — deferred to a later rejudge pass
+    assert record.generation
+    assert record.correct is None
     assert record.judge_score is None
-    assert judge.calls == 0  # zero judge LLM calls
+    assert judge.calls == 0
     assert summary.n_correct == 0 and summary.accuracy == 0.0
 
 
@@ -237,7 +234,7 @@ def test_rejudge_report_scores_and_agrees(monkeypatch, tmp_path, rgb_cache):
 
     from agentnexus.eval.benchmarks.e2e import rejudge_report
 
-    _patch_e2e_env(monkeypatch, tmp_path)  # provides fake judge returning 0.95
+    _patch_e2e_env(monkeypatch, tmp_path)
 
     report_path = tmp_path / "report.json"
     report_path.write_text(_json.dumps({
@@ -246,7 +243,7 @@ def test_rejudge_report_scores_and_agrees(monkeypatch, tmp_path, rgb_cache):
         "records": [
             {"query_id": "0", "generation": "答案是 12 人", "correct": True, "judge_score": 1.0},
             {"query_id": "1", "generation": "答案是 12 人", "correct": False, "judge_score": 0.0},
-            {"query_id": "999", "generation": "orphan", "correct": True},  # not in dataset
+            {"query_id": "999", "generation": "orphan", "correct": True},
         ],
     }, ensure_ascii=False), encoding="utf-8")
 
@@ -254,13 +251,12 @@ def test_rejudge_report_scores_and_agrees(monkeypatch, tmp_path, rgb_cache):
 
     assert result["original_judge"] == "old-judge"
     assert result["new_judge"] == "fake-judge"
-    # fake judge always scores 0.95 -> all found records correct
     assert result["records"][0]["judge_score_new"] == pytest.approx(0.95)
     assert result["records"][0]["correct_new"] is True
-    assert result["records"][1]["correct_new"] is True  # flipped from original
+    assert result["records"][1]["correct_new"] is True
     assert result["records"][2]["rejudge_error"] == "query not found in dataset"
     assert result["n_errors"] == 1
-    assert result["agreement"] == pytest.approx(0.5)  # 1 of 2 comparable agreed
+    assert result["agreement"] == pytest.approx(0.5)
 
 
 def test_rejudge_rejects_non_rgb_and_rejection_reports(tmp_path):

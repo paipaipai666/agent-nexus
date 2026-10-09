@@ -15,10 +15,7 @@ from agentnexus.evaluation.fine_grained.cases import DATASET_PRIMARY_METRIC
 
 logger = logging.getLogger(__name__)
 
-_BOOKKEEPING_TOOLS = {"todo_add", "todo_update"}  # 记账工具不计入工具决策判定
-
-
-# ── EvalTrace：单次运行的采集结构（文章 §6.3）────────────────────────
+_BOOKKEEPING_TOOLS = {"todo_add", "todo_update"}
 
 
 @dataclass
@@ -30,7 +27,7 @@ class RunMetrics:
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    tool_calls: list[dict] = field(default_factory=list)   # [{name, params, ok}]
+    tool_calls: list[dict] = field(default_factory=list)
     json_retries: int = 0
     error: str = ""
 
@@ -42,9 +39,6 @@ class RunMetrics:
     def real_tool_names(self) -> list[str]:
         """剔除记账类工具后的真实工具调用。"""
         return [n for n in self.tool_names if n not in _BOOKKEEPING_TOOLS]
-
-
-# ── Judge 封装 ────────────────────────────────────────────────────────
 
 
 def _parse_judge_json(text: str) -> dict:
@@ -96,17 +90,14 @@ class Judges:
         return self._ask("judge_abnormal", user_input=user_input, answer=answer)
 
 
-# ── 用例结果与报告 ────────────────────────────────────────────────────
-
-
 @dataclass
 class CaseOutcome:
     case_id: str
     dataset: str
-    verdict: str = "error"          # pass | fail | skip | error（skip 不计入分母）
-    metric_values: dict[str, Any] = field(default_factory=dict)  # 具体数值
-    reasoning: str = ""             # judge 的推理（可解释性）
-    answer_preview: str = ""        # Agent 回答摘要（用例诊断入口）
+    verdict: str = "error"
+    metric_values: dict[str, Any] = field(default_factory=dict)
+    reasoning: str = ""
+    answer_preview: str = ""
     run: RunMetrics = field(default_factory=RunMetrics)
 
 
@@ -123,8 +114,6 @@ class FineGrainedReport:
         self.memory_probe_rows = memory_probe_rows or []
         self.duration_s = duration_s
 
-    # ── 指标聚合 ──
-
     def _rate(self, outcomes: list[CaseOutcome], key: str) -> tuple[float, int, int]:
         """metric_values[key] 为 1.0/0.0 的比率，返回 (rate, hit, total)。"""
         vals = [o for o in outcomes if isinstance(o.metric_values.get(key), (int, float))
@@ -140,7 +129,6 @@ class FineGrainedReport:
         for ds in {o.dataset for o in self.outcomes}:
             outs = [o for o in self.outcomes if o.dataset == ds]
             row: dict[str, str] = {}
-            # 收集该数据集出现过的所有比率先 metrics
             keys = {k for o in outs for k, v in o.metric_values.items()
                     if isinstance(v, (int, float)) and k.endswith("_rate") or k.endswith("accuracy")
                     or k in ("task_completion", "instruction_following", "faithfulness",
@@ -149,7 +137,6 @@ class FineGrainedReport:
                 rate, hit, total = self._rate(outs, k)
                 if total:
                     row[k] = f"{rate:.2f} ({hit}/{total})"
-            # 均值类
             for k in ("avg_steps", "avg_tool_calls"):
                 vals = [o.metric_values[k] for o in outs if isinstance(o.metric_values.get(k), (int, float))]
                 if vals:

@@ -103,7 +103,6 @@ class TestJsonStringInternalFix:
 
     def test_unescaped_quote_in_answer(self):
         """Unescaped double quote inside answer should be fixed"""
-        # The string has a literal " inside the value (not escaped)
         raw = '{"answer": "他说\\"你好\\""}'
         result = ReActAgent._parse_json_response(raw)
         assert result["type"] == "answer"

@@ -30,10 +30,6 @@ from agentnexus.evaluation.trial import AggregateMetrics, TaskReport, TrialResul
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Harness Config
-# ---------------------------------------------------------------------------
-
 @dataclass
 class HarnessConfig:
     """Harness 配置。
@@ -57,18 +53,8 @@ class HarnessConfig:
     verbose: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Agent Runner Protocol
-# ---------------------------------------------------------------------------
-
-# AgentRunner 是一个 callable: (task: EvalTask) -> TrialResult
-# 由外部注入，harness 不关心具体 agent 实现
 AgentRunner = Callable[[EvalTask, int], TrialResult]
 
-
-# ---------------------------------------------------------------------------
-# Eval Harness
-# ---------------------------------------------------------------------------
 
 class EvalHarness:
     """端到端评估 harness。
@@ -84,10 +70,6 @@ class EvalHarness:
     @property
     def config(self) -> HarnessConfig:
         return self._config
-
-    # ------------------------------------------------------------------
-    # Suite-level execution
-    # ------------------------------------------------------------------
 
     def run_suite(
         self,
@@ -120,14 +102,11 @@ class EvalHarness:
 
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
-        # 聚合指标
         aggregate = self._compute_aggregate(task_reports, elapsed_ms)
 
-        # 饱和度
         pass_rates = [tr.success_rate for tr in task_reports]
         saturation = compute_saturation_score(pass_rates)
 
-        # 检查是否通过
         passed = self._check_suite_passed(task_reports, suite)
 
         return SuiteReport(
@@ -139,10 +118,6 @@ class EvalHarness:
             passed=passed,
             duration_ms=elapsed_ms,
         )
-
-    # ------------------------------------------------------------------
-    # Task-level execution
-    # ------------------------------------------------------------------
 
     def run_task(
         self,
@@ -157,14 +132,11 @@ class EvalHarness:
         for i in range(trials):
             if self._config.verbose:
                 logger.info("Running task %s trial %d/%d", task.id, i + 1, trials)
-            # 环境隔离: setup
             env_state = self._setup_environment(task)
             try:
                 result = agent_runner(task, i)
-                # 补充 outcome 中的环境状态
                 if env_state:
                     result.outcome.setdefault("environment", env_state)
-                # 评分
                 result = self._grade_trial(task, result)
                 trial_results.append(result)
             except Exception as e:
@@ -175,10 +147,8 @@ class EvalHarness:
                     error=str(e),
                 ))
             finally:
-                # 环境隔离: teardown
                 self._teardown_environment(task)
 
-        # 计算 pass 指标
         n_success = sum(1 for t in trial_results if t.passed)
         pass_metrics = compute_pass_metrics(len(trial_results), n_success)
         consistency = compute_trial_consistency([t.final_score for t in trial_results])
@@ -195,10 +165,6 @@ class EvalHarness:
         )
 
         return report
-
-    # ------------------------------------------------------------------
-    # Grading
-    # ------------------------------------------------------------------
 
     def _grade_trial(self, task: EvalTask, result: TrialResult) -> TrialResult:
         """对 trial 结果运行所有 graders。"""
@@ -220,10 +186,6 @@ class EvalHarness:
 
         return result
 
-    # ------------------------------------------------------------------
-    # Environment isolation
-    # ------------------------------------------------------------------
-
     def _setup_environment(self, task: EvalTask) -> dict[str, Any]:
         """为 trial 创建隔离环境。
 
@@ -237,7 +199,6 @@ class EvalHarness:
 
         env_state: dict[str, Any] = {"type": env.get("type", "default")}
 
-        # 执行 setup 命令
         setup_cmd = env.get("setup_cmd")
         if setup_cmd:
             import shlex
@@ -275,10 +236,6 @@ class EvalHarness:
                 )
             except Exception as e:
                 logger.debug("Task %s teardown error: %s", task.id, e)
-
-    # ------------------------------------------------------------------
-    # Internal execution
-    # ------------------------------------------------------------------
 
     def _run_sequential(
         self,
@@ -321,10 +278,6 @@ class EvalHarness:
 
         return reports  # type: ignore
 
-    # ------------------------------------------------------------------
-    # Aggregation
-    # ------------------------------------------------------------------
-
     def _compute_aggregate(
         self,
         task_reports: list[TaskReport],
@@ -350,12 +303,9 @@ class EvalHarness:
             for t in r.trials
         )
 
-        # 按类别统计
         by_category: dict[str, dict[str, Any]] = {}
-        # 按难度统计
         by_difficulty: dict[str, dict[str, Any]] = {}
 
-        # 分数分布
         score_distribution: dict[str, int] = {
             "0.0-0.2": 0, "0.2-0.4": 0, "0.4-0.6": 0, "0.6-0.8": 0, "0.8-1.0": 0,
         }
@@ -394,21 +344,15 @@ class EvalHarness:
         passed = sum(1 for r in task_reports if r.passed)
         pass_rate = passed / total
 
-        # 检查最低通过率
         if pass_rate < suite.thresholds.min_pass_rate:
             return False
 
-        # 检查 saturation
         saturation = compute_saturation_score([r.success_rate for r in task_reports])
         if saturation["saturation"] > suite.thresholds.max_saturation:
-            return False  # 已饱和，需要升级
+            return False
 
         return True
 
-
-# ---------------------------------------------------------------------------
-# Suite Report
-# ---------------------------------------------------------------------------
 
 class SuiteReport:
     """套件级别的评估报告。"""

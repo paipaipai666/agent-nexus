@@ -22,11 +22,11 @@ class RouteEvent:
     selected_score: float = 0.0
     selected_source: str = ""
     candidates: tuple[dict[str, Any], ...] = ()
-    mode: str = "single"  # single / multi_intent / ambiguous / abstain
+    mode: str = "single"
     confidence: float = 0.0
     margin: float = 0.0
-    accepted: bool | None = None  # None = not yet confirmed
-    actual_skill: str | None = None  # what the user actually ended up using
+    accepted: bool | None = None
+    actual_skill: str | None = None
 
 
 class RouteTelemetry:

@@ -6,22 +6,10 @@ from typing import Any
 
 from agentnexus.memory.compaction import parse_tool_message
 
-TOOL_CONTEXT_LIMIT = 2000      # max chars for tool results in conversation context
-N_TURNS_NO_SUMMARY = 3         # turns to show when no compressed summary exists
-N_TURNS_WITH_SUMMARY = 2       # turns to show alongside compressed summary
+TOOL_CONTEXT_LIMIT = 2000
+N_TURNS_NO_SUMMARY = 3
+N_TURNS_WITH_SUMMARY = 2
 
-
-# ── Section model ────────────────────────────────────────────────
-# Context blocks are named sections in a dict, not anonymous text
-# concatenated into one message. Naming keeps rendering deterministic:
-# a group whose sections all stayed the same re-renders byte-identical
-# and the provider's prefix cache keeps hitting up to the first
-# changed group.
-#
-# Groups are ordered stable → volatile: memory and conversation
-# change only on compaction; the static group is fixed for the run;
-# tools text appears only on JSON strategies (degrade can add it
-# mid-run); the volatile group (env timestamp, todo) churns most.
 
 SECTION_MEMORY = "memory"
 SECTION_CONVERSATION = "conversation"
@@ -34,8 +22,6 @@ SECTION_APPENDIX = "append_system_prompt"
 SECTION_ENVIRONMENT = "environment"
 SECTION_TODO = "todo"
 
-# Section order within the static group — user-authored content last
-# (salience), mirroring the previous combined-message layout.
 _STATIC_SECTIONS = (
     SECTION_SKILLS,
     SECTION_MCP,
@@ -44,7 +30,6 @@ _STATIC_SECTIONS = (
     SECTION_PROJECT,
     SECTION_APPENDIX,
 )
-# Volatile group: minute-precision env timestamp + todo churn.
 _VOLATILE_SECTIONS = (SECTION_ENVIRONMENT, SECTION_TODO)
 
 
@@ -126,8 +111,6 @@ def assemble_react_messages(
     if static_text:
         messages.append({"role": "system", "content": static_text})
 
-    # JSON strategies have no native schemas — the text list is their
-    # only tool surface. NATIVE_TOOLS skips it to avoid double-describing.
     if include_tools_desc and tools_desc:
         messages.append({"role": "system", "content": f"== 可用工具 ==\n{tools_desc}"})
 
@@ -254,10 +237,8 @@ def _format_turns_for_context(turns: list[list[dict]]) -> str:
     lines = []
     for turn in turns:
         for message in turn:
-            # Skip display-only messages (e.g. final-answer thought)
             if message.get("metadata", {}).get("display_only"):
                 continue
-            # Convert [最终答案] system marker into assistant message for context
             if message["role"] == "system" and message["content"].startswith(FINAL_ANSWER_PREFIX):
                 actual_answer = message["content"][len(FINAL_ANSWER_PREFIX):].strip()
                 if actual_answer:

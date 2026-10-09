@@ -21,12 +21,8 @@ _RISK_ORDER = {
 }
 _CORE_TEMPLATE_KEYS = {"tools", "question", "history", "memory_context", "conversation_context"}
 
-# Platform-level behavioral fragments — always loaded, cannot be disabled.
 _CORE_FRAGMENTS = ["stance", "autonomy", "accountability"]
 
-# Priority preamble — injected before all fragments to resolve conflicts.
-# NOTE: must NOT contain the exact fragment headers "行为原则", "自主权边界",
-# "Accountability" — tests use substring matching to verify fragment ordering.
 _PRIORITY_PREAMBLE = (
     "== 准则优先级 ==\n"
     "当以下原则之间存在冲突时，按此顺序裁决：\n"

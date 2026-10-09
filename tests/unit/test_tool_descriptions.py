@@ -20,10 +20,9 @@ def registry_with_all_providers() -> ToolRegistry:
     return reg
 
 
-# Tools that are self-explanatory (namespace-scoped action tools) — skip boundary check
 _SKIP_TOOLS = {
-    "subagent_run",          # checked separately (complex delegation tool)
-    "shell_exec",            # description carries a "[!]" confirmation warning instead
+    "subagent_run",
+    "shell_exec",
 }
 
 
@@ -57,12 +56,10 @@ class TestBoundaryDescriptions:
 
         errors = []
         for meta in reg.list_tools_with_meta():
-            # Only check the [不适用] boundary portion
             boundary_match = re.search(r"\[不适用\](.+)", meta.description)
             if not boundary_match:
                 continue
             boundary = boundary_match.group(1)
-            # Extract tool references like "(用grep_search)" — ASCII tool names only
             refs = re.findall(r"用([a-zA-Z_][a-zA-Z0-9_]*)", boundary)
             for ref in refs:
                 if ref not in all_names:

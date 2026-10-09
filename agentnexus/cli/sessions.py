@@ -19,7 +19,6 @@ def sessions(
     settings = get_settings()
     workspace = str(Path.cwd())
 
-    # If restore is specified, launch TUI with that session
     if restore:
         if not ConversationVersionManager.session_belongs_to_workspace(
             settings.memory_db_path, restore, workspace
@@ -30,7 +29,6 @@ def sessions(
         launch_tui(session_id=restore, restore_session=True)
         return
 
-    # List sessions
     sessions = ConversationVersionManager.find_recent_sessions(
         settings.memory_db_path, workspace, limit=limit
     )

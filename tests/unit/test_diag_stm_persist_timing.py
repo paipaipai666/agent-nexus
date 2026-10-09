@@ -45,7 +45,6 @@ class TestStmDurabilityFacts:
             run_id="r1", session_id="s1", question="介绍 AgentNexus",
             memory_manager=memory, version_manager=version,
         )
-        # 回答尚未结束：不应 commit
         assert version.commit_with_messages.call_count == 0
         turn.finish("完整答案")
         assert version.commit_with_messages.call_count == 1
@@ -55,15 +54,13 @@ class TestStmDurabilityFacts:
         memory = MagicMock()
         memory.short_term.get_all.return_value = [
             {"role": "user", "content": "介绍 AgentNexus"},
-            {"role": "system", "content": "[最终答案] 半截…"},  # 只在内存 STM
+            {"role": "system", "content": "[最终答案] 半截…"},
         ]
         version = MagicMock()
         TurnRuntime(
             run_id="r1", session_id="s1", question="介绍 AgentNexus",
             memory_manager=memory, version_manager=version,
         )
-        # 不调用 finish/fail/cancel —— 等价于崩溃
         assert version.commit_with_messages.call_count == 0
-        # 进程死则 MemoryManager.short_term 一起消失；WAL 未开 → 无法恢复
         mm = MemoryManager(session_id="crash", enable_long_term=False)
         assert mm.short_term._wal_path is None

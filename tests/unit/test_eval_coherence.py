@@ -66,7 +66,6 @@ class TestCoherenceEvaluatorParseScore:
 
     def test_negative_number_becomes_positive(self):
         score = CoherenceEvaluator._parse_score("Score: -3.0")
-        # Regex captures "3.0" without the minus sign
         assert score == 3.0
 
     def test_no_match_returns_default(self):
@@ -83,7 +82,7 @@ class TestCoherenceEvaluatorEvaluateOne:
         evaluator = CoherenceEvaluator()
         spans = [{"name": "task"}, {"name": "llm", "start_time": 1}]
         report = evaluator._evaluate_one("t1", spans)
-        assert report.total_steps == 1  # only "llm" counted (task filtered)
+        assert report.total_steps == 1
         assert report.coherence_score == 10.0
 
     def test_with_judge_llm(self):
@@ -99,7 +98,7 @@ class TestCoherenceEvaluatorEvaluateOne:
             mock_judge = mock_get.return_value
             mock_judge.think.return_value = "连贯性分数: 9.0\n主要问题: 无"
             report = evaluator._evaluate_one("t1", spans)
-        assert report.total_steps == 2  # task filtered out
+        assert report.total_steps == 2
         assert report.coherence_score == 9.0
         assert "主要问题" in report.issues
 
@@ -115,7 +114,7 @@ class TestCoherenceEvaluatorEvaluateOne:
                    side_effect=ImportError("no judge")):
             report = evaluator._evaluate_one("t1", spans)
         assert report.total_steps == 2
-        assert report.coherence_score == 0.0  # default on exception
+        assert report.coherence_score == 0.0
 
     def test_parse_score_on_judge_output(self):
         evaluator = CoherenceEvaluator()
@@ -153,7 +152,7 @@ class TestCoherenceEvaluatorFileMethods:
             mock_judge = mock_get.return_value
             mock_judge.think.return_value = "连贯性分数: 9.0"
             reports = CoherenceEvaluator().evaluate_all(str(tmp_path))
-        assert len(reports) == 0  # fewer than 3 spans
+        assert len(reports) == 0
 
     def test_evaluate_all_with_traces(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"

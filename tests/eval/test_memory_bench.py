@@ -30,12 +30,10 @@ class FakeLLM:
         return self.facts.get(question, "无法确定")
 
 
-# ── scoring ──────────────────────────────────────────────────────────
-
 def test_char_f1_exact_and_partial():
     assert char_f1("PostgreSQL", "PostgreSQL") == 1.0
     assert char_f1("使用 PostgreSQL 数据库", "PostgreSQL") > 0.5
-    assert char_f1("苹果", "香蕉") == 0.0          # disjoint char multisets
+    assert char_f1("苹果", "香蕉") == 0.0
     assert char_f1("", "PostgreSQL") == 0.0
 
 
@@ -43,17 +41,13 @@ def test_char_f1_punctuation_and_case_insensitive():
     assert char_f1("ruff 和 mypy！", "ruff和mypy") == 1.0
 
 
-# ── retrieval-level (model-free) coverage ────────────────────────────
-
 def test_gold_coverage_substring_with_normalization():
     assert gold_coverage("PostgreSQL", "数据库选型是 PostgreSQL，排除 SQLite。")
-    assert gold_coverage("3.11", "之前的版本是 3.11")          # temporal old value
+    assert gold_coverage("3.11", "之前的版本是 3.11")
     assert not gold_coverage("3.12", "之前的版本是 3.11")
-    assert not gold_coverage("", "anything")                    # empty gold
-    assert not gold_coverage("FastAPI", "")                     # empty context
+    assert not gold_coverage("", "anything")
+    assert not gold_coverage("FastAPI", "")
 
-
-# ── dataset ──────────────────────────────────────────────────────────
 
 def test_builtin_suite_wellformed():
     suite = load_builtin_suite()
@@ -71,7 +65,6 @@ def test_builtin_suite_wellformed():
 
 
 def test_load_suite_roundtrip(tmp_path):
-    # Build via dict → JSONL to exercise the real parse path.
     line = json.dumps({
         "id": "c1",
         "turns": [{"role": "user", "content": "记住部署端口是 8080"}],
@@ -81,7 +74,7 @@ def test_load_suite_roundtrip(tmp_path):
     path.write_text(line + "\n", encoding="utf-8")
     suite = load_suite(path)
     assert len(suite) == 1
-    assert suite[0].questions[0].qa_type == "single_hop"  # default type
+    assert suite[0].questions[0].qa_type == "single_hop"
 
 
 def test_load_suite_rejects_bad_qa_type(tmp_path):
@@ -95,8 +88,6 @@ def test_load_suite_rejects_bad_qa_type(tmp_path):
     with pytest.raises(ValueError, match="qa_type"):
         load_suite(path)
 
-
-# ── runner end-to-end (fake backend, no LLM) ─────────────────────────
 
 def _fake_backend(facts: dict[str, str]) -> NaiveBackend:
     return NaiveBackend(FakeLLM(facts))
@@ -117,27 +108,24 @@ def test_runner_scores_and_aggregates():
     assert report.error_count == 0
 
     by_id = {r.question_id: r for r in report.results}
-    assert by_id["sw-q1"].f1 == 1.0            # exact fact
-    assert by_id["sw-q3"].f1 == 1.0            # knowledge_update answered current
-    assert by_id["sw-q5"].f1 == 1.0            # abstention gold "无法确定"
-    assert by_id["sw-q4"].f1 == 0.0            # wrong "无法确定" vs gold "3.11": no char overlap
-    # FakeLLM only knows 3 facts → 1 of 6 single_hop questions answered.
+    assert by_id["sw-q1"].f1 == 1.0
+    assert by_id["sw-q3"].f1 == 1.0
+    assert by_id["sw-q5"].f1 == 1.0
+    assert by_id["sw-q4"].f1 == 0.0
     assert report.type_f1("single_hop") == pytest.approx(1 / 6)
 
-    # Retrieval-level: NaiveBackend's context IS the transcript, so golds
-    # stated in the dialogue are covered regardless of the fake LLM's knowledge.
-    assert by_id["sw-q1"].retrieval_hit is True     # FastAPI in transcript
-    assert by_id["sw-q2"].retrieval_hit is True     # PostgreSQL in transcript
-    assert by_id["sw-q3"].retrieval_hit is True     # 3.12 in transcript
-    assert by_id["sw-q4"].retrieval_hit is True     # 3.11 still in transcript
-    assert by_id["sw-q5"].retrieval_hit is None     # abstention: check not applicable
+    assert by_id["sw-q1"].retrieval_hit is True
+    assert by_id["sw-q2"].retrieval_hit is True
+    assert by_id["sw-q3"].retrieval_hit is True
+    assert by_id["sw-q4"].retrieval_hit is True
+    assert by_id["sw-q5"].retrieval_hit is None
     checked = [r for r in report.results if r.retrieval_hit is not None]
     assert report.retrieval_hit_rate == pytest.approx(
         sum(r.retrieval_hit for r in checked) / len(checked))
     assert report.type_retrieval_rate("abstention") is None
 
     payload = report.to_dict()
-    json.dumps(payload, ensure_ascii=False)    # must serialize
+    json.dumps(payload, ensure_ascii=False)
     assert payload["by_type"]["single_hop"]["n"] == 6
     assert payload["retrieval_hit_rate"] is not None
     assert "retrieval_hit" in payload["results"][0]
@@ -151,7 +139,7 @@ def test_runner_ingest_error_captured():
 
     report = MemoryBenchRunner(ExplodingBackend(FakeLLM({}))).run(
         load_builtin_suite()[:1])
-    assert report.error_count == 5             # all questions of conv 1 flagged
+    assert report.error_count == 5
     assert all("boom" in r.error for r in report.results)
 
 

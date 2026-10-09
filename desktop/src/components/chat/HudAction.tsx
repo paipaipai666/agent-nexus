@@ -1,7 +1,5 @@
 import { History } from 'lucide-react'
 
-/** HUD action — quiet 28px icon button (v3). The label moves to the tooltip;
- *  at HUD density, text competed with the model/plan chips for attention. */
 function HudAction({ icon: Icon, label, onClick, disabled, title }: {
   icon: typeof History
   label: string

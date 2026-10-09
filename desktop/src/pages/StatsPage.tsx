@@ -5,7 +5,6 @@ import { api } from '../services/api'
 import { useApiQuery } from '../hooks/useApiQuery'
 import { useTilt } from '../utils/useTilt'
 
-/** KPI tile with pointer-follow 3D tilt (parent grid supplies perspective). */
 function KpiCard({ children }: { children: ReactNode }) {
   const tiltRef = useTilt<HTMLDivElement>()
   return (
@@ -101,7 +100,7 @@ export default function StatsPage() {
           <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Usage Overview</h1>
           <p className="text-[13px] mt-1" style={{ color: 'var(--fg-muted)' }}>Agent activity, token consumption and cost across all projects.</p>
         </div>
-        {/* Segmented range control (v2) */}
+        {}
         <div
           className="flex items-center gap-0.5 p-0.5 rounded-lg"
           style={{ background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', height: 26 }}
@@ -127,7 +126,7 @@ export default function StatsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {/* Stats Cards */}
+        {}
         <div className="grid grid-cols-5 gap-3 perspective-3d">
           {[
             { label: 'Total Tasks', value: stats.total_tasks ?? '-', icon: BarChart3, color: 'var(--accent)' },
@@ -146,7 +145,7 @@ export default function StatsPage() {
           ))}
         </div>
 
-        {/* Stats Cards row 2 */}
+        {}
         <div className="grid grid-cols-4 gap-3 perspective-3d">
           {[
             {
@@ -189,7 +188,7 @@ export default function StatsPage() {
           ))}
         </div>
 
-        {/* Chart */}
+        {}
         {chartData.length > 0 && (
           <div className="p-4 rounded-xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
             <h2 className="text-[13px] font-semibold mb-3" style={{ color: 'var(--fg)', letterSpacing: '-0.01em' }}>Token Usage</h2>
@@ -206,7 +205,7 @@ export default function StatsPage() {
           </div>
         )}
 
-        {/* Logs */}
+        {}
         <div>
           <h2 className="text-sm font-medium mb-2" style={{ color: 'var(--fg-secondary)' }}>Recent Traces</h2>
           {logs.length === 0 ? (

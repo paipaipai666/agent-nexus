@@ -17,9 +17,8 @@ class TestCostThresholdRegression:
     _MAX_TOKENS_PER_QUERY = 10000
 
     def test_cost_does_not_exceed_threshold(self):
-        # Default estimate without vendor table: 10/30 CNY per Mtok
         cost = _cost(5000, 2000, "deepseek-v4-flash")
-        assert cost < 1.0  # loose bound; no baked-in vendor rates
+        assert cost < 1.0
 
     def test_cost_for_expensive_model(self):
         cost = _cost(5000, 2000, "deepseek-v3")
@@ -41,7 +40,6 @@ class TestCostThresholdRegression:
 
     def test_cost_for_unknown_model_uses_default_pricing(self):
         cost = _cost(5000, 2000, "unknown-model-123")
-        # Unknown models use default pricing (10.0 CNY/M input, 30.0 CNY/M output)
         expected = (5000 * 10.0 + 2000 * 30.0) / 1_000_000
         assert cost == expected
 

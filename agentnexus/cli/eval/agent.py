@@ -7,8 +7,6 @@ from rich.table import Table
 from agentnexus.cli import console, eval_app
 from agentnexus.core.config import get_settings
 
-# ── Agent evaluation (current architecture) ──────────────────────
-
 
 @eval_app.command("agent")
 def eval_agent(
@@ -41,7 +39,6 @@ def eval_agent(
             tool_table.add_row(name, str(info["calls"]), str(info["errors"]), rate_str)
         console.print(tool_table)
 
-    # Per-trace details
     if report.failed_traces:
         console.print("\n[bold yellow]Failed Traces:[/bold yellow]")
         for r in report.failed_traces[:5]:
@@ -54,8 +51,5 @@ def eval_agent(
                 issues.append("no answer produced")
             console.print(f"  [{r.trace_id}] {r.task_preview[:60]} — {', '.join(issues)}")
 
-    # CI gate
     if not report.passed:
         console.print("\n[bold yellow]⚠ Some metrics below threshold[/bold yellow]")
-
-

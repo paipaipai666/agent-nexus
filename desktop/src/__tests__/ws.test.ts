@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// Mock WebSocket
 class MockWebSocket {
   static OPEN = 1
   static CONNECTING = 0
@@ -15,7 +14,6 @@ class MockWebSocket {
   close = vi.fn()
 
   constructor(public url: string) {
-    // Simulate async connect
     setTimeout(() => this.onopen?.(new Event('open')), 0)
   }
 
@@ -40,7 +38,6 @@ describe('AgentWebSocket', () => {
     vi.useFakeTimers()
     global.WebSocket = MockWebSocket as any
 
-    // Re-import to get fresh singleton
     vi.resetModules()
     const mod = await import('../services/ws')
     agentWs = mod.agentWs
@@ -53,7 +50,6 @@ describe('AgentWebSocket', () => {
     vi.restoreAllMocks()
   })
 
-  /** Helper: get the MockWebSocket instance for a given session via the pool */
   function getWs(sessionId: string): MockWebSocket {
     const conn = (wsPool as any).connections.get(sessionId)
     return conn?.ws
@@ -97,7 +93,6 @@ describe('AgentWebSocket', () => {
       const conn = (wsPool as any).connections.get('session-123')
       expect(conn.reconnectTimer).not.toBeNull()
 
-      // disconnect should call clearTimeout and null out sessionId
       agentWs.disconnect()
 
       expect(agentWs.sessionId).toBeNull()
@@ -244,7 +239,6 @@ describe('AgentWebSocket', () => {
       agentWs.connect('session-123')
 
       const ws = getWs('session-123')
-      // Simulate invalid JSON message
       ws.onmessage?.(new MessageEvent('message', { data: 'not json' }))
 
       expect(consoleSpy).toHaveBeenCalledWith('WS parse error:', expect.any(Error))
@@ -269,7 +263,6 @@ describe('AgentWebSocket', () => {
       agentWs.connect('session-123')
       agentWs.disconnect()
 
-      // After disconnect, sessionId is null, so no reconnect should happen
       expect(agentWs.sessionId).toBeNull()
     })
 
@@ -278,8 +271,6 @@ describe('AgentWebSocket', () => {
       agentWs.connect('session-123')
       agentWs.on('thinking', handler)
 
-      // Simulate a dropped connection: close schedules a reconnect; the new
-      // SessionConnection must not wipe subscribers.
       const ws1 = getWs('session-123')
       ws1.readyState = MockWebSocket.CLOSED
       ws1._close()

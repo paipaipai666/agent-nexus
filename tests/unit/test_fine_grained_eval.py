@@ -24,8 +24,8 @@ from agentnexus.evaluation.fine_grained.runner import FineGrainedRunner
 class TestScopeAssembly:
     def test_all_scopes_resolve(self):
         for scope in SCOPE_DATASETS:
-            assert datasets_for_scope(scope)  # non-empty
-            cases_for_scope(scope)  # no KeyError
+            assert datasets_for_scope(scope)
+            cases_for_scope(scope)
 
     def test_unknown_scope_raises(self):
         with pytest.raises(ValueError, match="unknown scope"):
@@ -52,7 +52,6 @@ class TestPerceptionOffline:
         table = report.metrics_table()
         assert "perception_route" in table
         assert "intent_accuracy" in table["perception_route"]
-        # 每个用例都有具体数值而非只有成败
         for o in report.outcomes:
             assert o.metric_values["intent_accuracy"] in (0.0, 1.0)
             assert "期望=" in o.reasoning and "实际=" in o.reasoning
@@ -99,13 +98,13 @@ class TestJudgeCalibration:
         from agentnexus.evaluation.fine_grained.report import Judges
 
         canned = [
-            '{"verdict": "fail", "reasoning": "r"}',      # task_completion fail
-            '{"verdict": "pass", "reasoning": "r"}',      # task_completion pass
-            '{"verdict": "fail", "reasoning": "r"}',      # instruction_following fail
-            '{"verdict": "fail", "reasoning": "r"}',      # faithfulness fail
-            '{"verdict": "pass", "reasoning": "r"}',      # faithfulness pass
-            '{"behavior": "violated", "reasoning": "r"}',  # abnormal violated
-            '{"behavior": "refused", "reasoning": "r"}',   # abnormal refused
+            '{"verdict": "fail", "reasoning": "r"}',
+            '{"verdict": "pass", "reasoning": "r"}',
+            '{"verdict": "fail", "reasoning": "r"}',
+            '{"verdict": "fail", "reasoning": "r"}',
+            '{"verdict": "pass", "reasoning": "r"}',
+            '{"behavior": "violated", "reasoning": "r"}',
+            '{"behavior": "refused", "reasoning": "r"}',
         ]
         runner = FineGrainedRunner(generator=MagicMock(), judge_llm=None)
         runner.judges = Judges(_SeqJudgeLLM(canned))
@@ -116,9 +115,8 @@ class TestJudgeCalibration:
     def test_disagreement_detected(self):
         from agentnexus.evaluation.fine_grained.report import Judges
 
-        # 第一个 judge 答错（期望 fail 给了 pass）
         canned = [
-            '{"verdict": "pass", "reasoning": "r"}',      # 期望 fail → 不一致
+            '{"verdict": "pass", "reasoning": "r"}',
             '{"verdict": "pass", "reasoning": "r"}',
             '{"verdict": "fail", "reasoning": "r"}',
             '{"verdict": "fail", "reasoning": "r"}',
@@ -149,7 +147,6 @@ class TestReportDataFirst:
             self._outcome("E-3", "e2e_task", "skip", {}),
         ])
         row = report.metrics_table()["e2e_task"]
-        # skip 不计入分母：1/2 而非 1/3
         assert row["task_completion"] == "0.50 (1/2)"
 
     def test_cost_perf_aggregates(self):
@@ -168,9 +165,9 @@ class TestReportDataFirst:
                           ),
         ])
         text = report.summary()
-        assert "0.00 (0/1)" in text          # 具体数值
+        assert "0.00 (0/1)" in text
         assert "用例结果分布" in text
-        assert "PASS" not in text.split("质量")[0]  # 头部不是 PASS/FAIL 大字报
+        assert "PASS" not in text.split("质量")[0]
 
     def test_to_dict_roundtrip(self):
         report = FineGrainedReport(scope="e2e", outcomes=[

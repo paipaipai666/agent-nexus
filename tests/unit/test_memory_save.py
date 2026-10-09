@@ -94,11 +94,9 @@ class TestMemorySave:
             context="推荐歌曲时用户否定了莫文蔚、选择周杰伦",
         )
 
-        # D: embedding input is content + context concatenated
         assert mock_model.encode.call_args[0][0] == (
             "用户喜欢周杰伦\n推荐歌曲时用户否定了莫文蔚、选择周杰伦"
         )
-        # A: context lands in metadata
         _, kwargs = mock_get_ltm.return_value.save.call_args
         assert kwargs["metadata"] == {"context": "推荐歌曲时用户否定了莫文蔚、选择周杰伦"}
 
@@ -112,7 +110,5 @@ class TestMemorySave:
         memory_save("A fact without context", category="fact", importance=0.7)
 
         _, kwargs = mock_get_ltm.return_value.save.call_args
-        # metadata kwarg must be absent to keep existing precise assertions stable
         assert "metadata" not in kwargs
-        # D: embedding input is content only
         assert mock_model.encode.call_args[0][0] == "A fact without context"

@@ -175,7 +175,6 @@ class TestContentBlockToTextEdgeCases:
         block = SimpleNamespace(text=None, resource=None, mimeType=None, mime_type=None, data=b"raw")
         result = _content_block_to_text(block)
         assert isinstance(result, str)
-        # Falls through to str() fallback; binary markers not present
         assert "[binary content:" not in result
         assert "[embedded resource:" not in result
 

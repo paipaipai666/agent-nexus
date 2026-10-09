@@ -16,8 +16,6 @@ from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.router import SkillRouter
 from agentnexus.skills.workflow import Workflow
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
 ROUTING_500_P95_MAX_MS = 5.0
 REBUILD_500_DELTA_MAX_MS = 50.0
 LLM_FALLBACK_TOKEN_CEILING = 8000
@@ -90,9 +88,6 @@ class _TokenTrackingLLM:
         m.supports_thinking = False
         m.supports_tool_calling = False
         return m
-
-
-# ── Skill-S1: Large-scale skill routing (500+) ────────────────────
 
 
 class TestSkillRoutingScale:
@@ -171,9 +166,6 @@ class TestSkillRoutingScale:
         )
 
 
-# ── Skill-S2: Skill update cache invalidation ──────────────────────
-
-
 class TestSkillCacheInvalidation:
     """Measure index rebuild cost when skill set changes."""
 
@@ -246,9 +238,6 @@ class TestSkillCacheInvalidation:
         assert elapsed_ms < REBUILD_500_DELTA_MAX_MS * 2, (
             f"Service refresh with 501 skills took {elapsed_ms:.2f}ms"
         )
-
-
-# ── Skill-S3: LLM fallback cost test ──────────────────────────────
 
 
 class TestSkillLLMFallbackCost:

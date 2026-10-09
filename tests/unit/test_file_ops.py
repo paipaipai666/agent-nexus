@@ -57,7 +57,6 @@ class TestFileRead:
         result = file_read("test.txt", offset=2, limit=2)
         assert "c" in result
         assert "d" in result
-        # The first displayed line should be line 3 (offset=2), not line 1
         assert "3 | c" in result or "3│c" in result
 
 
@@ -94,7 +93,6 @@ class TestFileReadThreeTier:
         assert "前 20 行预览" in result
         assert "line-0" in result
         assert "line-19" in result
-        # Should NOT contain line-100
         assert "line-100" not in result
 
     def test_explicit_offset_respected(self, tmp_path: Path, monkeypatch):

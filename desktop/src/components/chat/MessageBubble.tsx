@@ -8,7 +8,6 @@ import { animateMessage } from '../../utils/animations'
 import { unwrapStreamingAnswer } from '../../utils/unwrapAnswer'
 import ToolCard from './ToolCard'
 
-/* ─── Collapsible Section ─── */
 function Collapsible({ header, children, defaultExpanded = false, className = '' }: {
   header: React.ReactNode
   children: React.ReactNode
@@ -35,7 +34,6 @@ function Collapsible({ header, children, defaultExpanded = false, className = ''
   )
 }
 
-/* ─── Message Bubble ─── */
 const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { msg: Message; animatedIds: Set<string> }) {
   return (
     <div
@@ -48,7 +46,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
       className="py-3"
     >
       <div className="max-w-3xl mx-auto px-6">
-        {/* Role label — only for user messages */}
+        {}
         {msg.role === 'user' && (
           <div className="flex items-center justify-end gap-2 mb-1.5">
             <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)', letterSpacing: '0.02em' }}>
@@ -57,16 +55,13 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
           </div>
         )}
 
-        {/* Content */}
+        {}
         {msg.role === 'tool' ? (
           <ToolCard msg={msg} />
         ) : msg.role === 'user' ? (
           <div className="flex justify-end">
-            {/* w-full: give the column a definite width so the bubble's
-                max-w-[85%] resolves against the chat column, not against
-                this shrink-to-fit container — the circular reference used
-                to squeeze every bubble to 85% of its own text width,
-                wrapping lines that should fit on one. */}
+            {
+}
             <div className="flex flex-col items-end w-full">
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-1 mb-1.5">

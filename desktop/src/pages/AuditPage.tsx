@@ -84,7 +84,7 @@ export default function AuditPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {/* Summary */}
+        {}
         <div className="grid grid-cols-4 gap-3">
           {[
             { label: 'Total Calls', value: entries.length, icon: FileText, color: 'var(--accent)' },
@@ -102,7 +102,7 @@ export default function AuditPage() {
           ))}
         </div>
 
-        {/* Entry List */}
+        {}
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />

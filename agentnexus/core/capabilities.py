@@ -14,29 +14,20 @@ logger = logging.getLogger(__name__)
 class ModelCapabilities:
     """What a model can and cannot do. Runtime overrides live in SessionCapabilityTracker."""
 
-    # Core feature flags — conservative until probed or overridden
     supports_tool_calling: bool = False
-    supports_json_mode: bool = False          # response_format={"type": "json_object"}
-    supports_json_schema: bool = False        # structured output with schema
-    supports_thinking: bool = False           # reasoning/thinking tokens
+    supports_json_mode: bool = False
+    supports_json_schema: bool = False
+    supports_thinking: bool = False
     supports_parallel_tool_calls: bool = False
     supports_system_role: bool = True
-    supports_vision: bool = False            # image input (multimodal)
+    supports_vision: bool = False
 
-    # Token limits — 0 means unknown (do not invent vendor windows)
     max_context_tokens: int = 0
-    # Long-form answers (reports) need headroom; YAML/override can raise further.
-    # Thinking tokens also count against this on Anthropic-style APIs.
     max_output_tokens: int = 32_768
 
-    # Thinking tuning — effort is the single user knob; token budgets are derived per vendor
-    thinking_effort: str = "medium"            # "none"|"low"|"medium"|"high"
+    thinking_effort: str = "medium"
 
-    # True when flags are still defaults (not probe/config/override) —
-    # callers may probe the live endpoint instead of trusting these.
     from_default_fallback: bool = True
-    # True when supports_parallel_tool_calls came from an explicit override —
-    # the probe must not flip it (user may have forced it off).
     parallel_explicit: bool = False
 
 
@@ -50,11 +41,7 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
     """
     caps = ModelCapabilities(from_default_fallback=True)
 
-    # ── User config overrides ──
     settings = get_settings()
-    # from_default_fallback gates live probe for tool_calling / json_mode only.
-    # model_thinking is never probed — setting it must NOT skip the probe
-    # (that left tool_calling stuck at False → PROMPT_JSON + JSON prompt leak).
     if settings.model_tool_calling is not None:
         caps.supports_tool_calling = settings.model_tool_calling
         caps.from_default_fallback = False
@@ -71,7 +58,6 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         logger.warning("Unknown model_thinking_effort %r — falling back to medium", effort)
         caps.thinking_effort = "medium"
 
-    # Per-model override (highest priority) — from the provider's model entry.
     entry = settings.find_model_override_entry(model_id, base_url)
     if entry is not None and entry.override is not None:
         ov = entry.override
@@ -92,9 +78,6 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         if ov.supports_parallel_tool_calls is not None:
             caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
             caps.parallel_explicit = True
-        # Probe gate: only tool_calling/json_mode (the probed pair) force "known".
-        # Thinking / vision / token limits are never probed. A parallel-only
-        # override stays probed-able: tool/json may still be unknown.
         if ov.supports_tool_calling is not None or ov.supports_json_mode is not None:
             caps.from_default_fallback = False
 

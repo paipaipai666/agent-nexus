@@ -76,10 +76,8 @@ class TestLtmEvictBenchmark:
         ltm = _get_ltm()
         ltm._max_memories = 150
         _save_entries(ltm, 200)
-        # Reset write counter to avoid side effects in benchmark
         ltm._write_counter = 0
 
-        # Add one more to trigger eviction directly
         def _run():
             ltm.save(
                 session_id="evict_bench",

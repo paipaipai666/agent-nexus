@@ -60,20 +60,19 @@ class TestExceptionSurfacing:
             mgr.fire(HookType.AFTER_TOOL_CALL, {"name": "x", "params": {}, "result": ""})
             entry = mgr._hooks["flaky"]
             assert entry.fail_count == 1
-            # second fire: no new warning, count grows
             caplog.clear()
             mgr.fire(HookType.AFTER_TOOL_CALL, {"name": "x", "params": {}, "result": ""})
         assert entry.fail_count == 2
         assert not any("flaky" in r.message and r.levelno >= logging.WARNING
                        for r in caplog.records)
-        assert any("flaky" in r.message for r in caplog.records)  # debug line exists
+        assert any("flaky" in r.message for r in caplog.records)
 
 
 class TestPayloadSchemaValidation:
     def test_missing_key_logs_error(self, caplog):
         mgr = HookManager()
         with caplog.at_level(logging.ERROR):
-            mgr.fire(HookType.AFTER_TOOL_CALL, {"params": {}, "result": "ok"})  # no "name"
+            mgr.fire(HookType.AFTER_TOOL_CALL, {"params": {}, "result": "ok"})
         assert any("missing key" in r.message for r in caplog.records)
 
     def test_wrong_type_logs_error(self, caplog):
@@ -86,7 +85,7 @@ class TestPayloadSchemaValidation:
         monkeypatch.setattr(get_settings(), "hook_schema_check", False, raising=False)
         mgr = HookManager()
         with caplog.at_level(logging.ERROR):
-            mgr.fire(HookType.AGENT_START, {})  # missing both keys
+            mgr.fire(HookType.AGENT_START, {})
         assert not any("missing key" in r.message for r in caplog.records)
 
     def test_all_hook_types_have_schema(self):

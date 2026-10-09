@@ -169,7 +169,7 @@ class TestToolSelectionEvaluatorEvaluateFromTraces:
         evaluator = ToolSelectionEvaluator()
         report = evaluator.evaluate_from_traces(str(tmp_path))
         assert report.total_queries == 1
-        assert report.correct == 1  # first tool "web_search" matches "搜索"
+        assert report.correct == 1
 
     def test_bad_json_lines_skipped(self, tmp_path):
         trace_file = tmp_path / "trace.jsonl"

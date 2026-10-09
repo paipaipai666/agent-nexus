@@ -12,8 +12,6 @@ from typing import Any
 
 import pytest
 
-# ── Latency profiles ───────────────────────────────────────────
-
 LATENCY_PROFILES: dict[str, dict[str, Any]] = {
     "fast": {
         "base_delay": 0.05,
@@ -97,9 +95,6 @@ def mock_llm_latency(request: pytest.FixtureRequest) -> _CountingLLM:
     profile_name = getattr(request, "param", "typical")
     profile = LATENCY_PROFILES[profile_name]
     return _CountingLLM(profile)
-
-
-# ── Large data fixtures ────────────────────────────────────────
 
 
 @pytest.fixture

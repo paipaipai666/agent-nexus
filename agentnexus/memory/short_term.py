@@ -22,7 +22,6 @@ def _get_tiktoken_encoding():
     return _tiktoken_encoding
 
 
-# ── Importance scoring ────────────────────────────────────────────
 _ROLE_WEIGHTS = {"system": 0.9, "user": 0.8, "assistant": 0.5, "tool": 0.3}
 _IMPORTANCE_KEYWORDS = frozenset([
     "记住", "重要", "约束", "决策", "规则", "必须", "不要", "禁止",
@@ -36,15 +35,12 @@ def compute_importance(msg: dict, position: int, total: int) -> float:
     Considers role weight, recency, and content signals.
     """
     score = 0.0
-    # 1. Role weight (40%)
     role = msg.get("role", "")
     score += _ROLE_WEIGHTS.get(role, 0.4) * 0.4
 
-    # 2. Recency — newer is higher, but not the only factor (30%)
     recency = position / max(total - 1, 1) if total > 1 else 1.0
     score += recency * 0.3
 
-    # 3. Content signals (30%)
     content = msg.get("content", "")
     if any(kw in content for kw in _IMPORTANCE_KEYWORDS):
         score += 0.2
@@ -61,8 +57,8 @@ class ShortTermMemory:
         self._messages: deque[dict] = deque(maxlen=max_messages)
         self._summary: str = ""
         self._append_count: int = 0
-        self._max_tokens: int = max_tokens  # 0 = no token budget limit
-        self._token_count: int = 0  # incremental token counter
+        self._max_tokens: int = max_tokens
+        self._token_count: int = 0
         self._wal_path = wal_path
         if self._wal_path:
             self._recover_wal()
@@ -72,9 +68,7 @@ class ShortTermMemory:
         if metadata:
             msg["metadata"] = metadata
         with self._lock:
-            # Incremental token tracking
             self._token_count += self._estimate_msg_tokens(msg)
-            # If deque is full, the evicted message's tokens should be subtracted
             if self._messages.maxlen and len(self._messages) == self._messages.maxlen:
                 evicted = self._messages[0]
                 self._token_count -= self._estimate_msg_tokens(evicted)
@@ -181,7 +175,6 @@ class ShortTermMemory:
             folded = entries[:len(entries) - len(kept)]
             if not folded:
                 return 0
-            # 与既有目录合并：折叠区间从 0 连续增长，始终保持一条目录
             end = max(int(m["metadata"].get("seg_end", 0)) for m in folded)
             prev_count = 0
             for d in dirs:
@@ -212,10 +205,8 @@ class ShortTermMemory:
                 return 0
             all_msgs = list(self._messages)
             total = len(all_msgs)
-            # Partition: recent tail is always kept
             tail = all_msgs[-keep_recent:]
             head = all_msgs[:-keep_recent]
-            # Score head messages and keep those above threshold
             _IMPORTANCE_KEEP_THRESHOLD = 0.65
             preserved_head = []
             removed_count = 0
@@ -227,7 +218,6 @@ class ShortTermMemory:
                     removed_count += 1
             if removed_count == 0:
                 return 0
-            # Rebuild deque
             self._messages.clear()
             marker = {
                 "role": "system",
@@ -346,7 +336,6 @@ class ShortTermMemory:
                 self._messages.append(msg)
             self._summary = wal_data.get("summary", "")
             self._append_count = wal_data.get("append_count", 0)
-            # Restore token count if available, otherwise recalculate
             if "token_count" in wal_data:
                 self._token_count = wal_data["token_count"]
             else:
@@ -376,5 +365,4 @@ class ShortTermMemory:
         return inst
 
 
-# Alias for compatibility
 get_short_term_memory = ShortTermMemory

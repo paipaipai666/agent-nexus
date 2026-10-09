@@ -47,8 +47,6 @@ export default function InfoPanel() {
   const [todos, setTodos] = useState<Todo[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
-  // Subagents: REST hydrates on mount/session switch (covers reload mid-run);
-  // live updates arrive via subagent_event into SessionManager's store.
   const [restSubagents, setRestSubagents] = useState<SubagentInfo[]>([])
   const navigate = useNavigate()
   const { sessionId, getLiveSessionState } = useSession()
@@ -83,7 +81,6 @@ export default function InfoPanel() {
   const mcpToolCount = mcpServers.reduce((sum, s) => sum + s.tool_names.length, 0)
   const totalTools = mcpToolCount + enabledSkills.length
 
-  // Merge REST hydration with live store entries (store is fresher — wins on id).
   const storeSubagents = (sessionId ? getLiveSessionState(sessionId)?.subagents : undefined)
   const mergedSubagents = new Map<string, SubagentMeta>()
   for (const s of restSubagents) {
@@ -102,7 +99,7 @@ export default function InfoPanel() {
       collapsed={infoPanelCollapsed}
       onToggleCollapse={toggleInfoPanel}
     >
-      {/* Subagents */}
+      {}
       {mergedSubagents.size > 0 && (
         <Section
           title={`Subagents (${mergedSubagents.size})`}
@@ -154,7 +151,7 @@ export default function InfoPanel() {
         </Section>
       )}
 
-      {/* Todo List */}
+      {}
       <Section
         title="Todo List"
         icon={<ListTodo size={14} />}
@@ -185,7 +182,7 @@ export default function InfoPanel() {
         </div>
       </Section>
 
-      {/* Available Tools */}
+      {}
       <Section
         title={`Available Tools (${totalTools})`}
         icon={<Wrench size={14} />}
@@ -193,7 +190,7 @@ export default function InfoPanel() {
         onToggle={() => toggleSection('tools')}
       >
         <div className="space-y-3">
-          {/* MCP Tools */}
+          {}
           {connectedServers.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
@@ -212,7 +209,7 @@ export default function InfoPanel() {
             </div>
           )}
 
-          {/* Skills */}
+          {}
           {enabledSkills.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
@@ -239,11 +236,6 @@ export default function InfoPanel() {
   )
 }
 
-/**
- * Floating, collapsible session card (v2.1). Anchored to the top-right of the
- * chat canvas with a float shadow + glass blur; collapses to a small pill so
- * the card never permanently consumes horizontal space.
- */
 function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
   children: React.ReactNode
   totalTools: number
@@ -290,7 +282,7 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
         animation: 'rise-in 0.25s var(--ease)',
       }}
     >
-      {/* Card header */}
+      {}
       <div
         className="flex items-center gap-2 px-3 h-9 shrink-0"
         style={{ borderBottom: '1px solid var(--border-subtle)' }}

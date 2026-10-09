@@ -45,10 +45,6 @@ class RunTaskRequest(BaseModel):
     n_trials: int = 1
 
 
-# ------------------------------------------------------------------
-# Legacy JSONL endpoints (保留兼容)
-# ------------------------------------------------------------------
-
 @router.get("/datasets")
 def list_datasets():
     from pathlib import Path
@@ -117,7 +113,6 @@ def compare_reports(req: CompareRequest):
     settings = get_settings()
     evals_dir = Path(settings.traces_dir) / "evals"
 
-    # Reject path traversal attempts
     for name in (req.baseline, req.candidate):
         if ".." in name or "/" in name or "\\" in name:
             raise APIError(400, "bad_request", f"Invalid filename: {name}")
@@ -150,10 +145,6 @@ def compare_reports(req: CompareRequest):
 
     return {"baseline": req.baseline, "candidate": req.candidate, "delta": delta}
 
-
-# ------------------------------------------------------------------
-# New Task/Suite endpoints
-# ------------------------------------------------------------------
 
 def _get_eval_service():
     from agentnexus.services.eval import EvalService
@@ -265,10 +256,6 @@ def eval_stats():
     return service.get_eval_stats()
 
 
-# ------------------------------------------------------------------
-# Public benchmark endpoints (BEIR / MultiHop-RAG track)
-# ------------------------------------------------------------------
-
 class BenchmarkRunRequest(BaseModel):
     suite: str = "multihop"
     mode: str = "dense"
@@ -312,7 +299,6 @@ def run_benchmark(req: BenchmarkRunRequest | None = None):
     except ValueError as e:
         raise APIError(400, "bad_request", str(e))
 
-    # optional embedding switch for this run
     settings = original = None
     if req.embedding_model:
         from agentnexus.core.config import get_settings

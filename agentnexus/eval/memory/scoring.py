@@ -12,8 +12,6 @@ from collections import Counter
 
 _PUNCT = re.compile(r"[\s，。！？；：、（）()【】\[\]《》<>\"'\"'.,!?;:·—\-_/\\|]+")
 
-# Judge prompt shared with the memory probe suite (memory_eval.py) — one
-# convention for "does the answer contain the gold fact" across the repo.
 JUDGE_PROMPT = (
     "判断回答是否正确。\n问题: {question}\n正确答案应包含: {gold}\n"
     "模型回答: {answer}\n只回答 \"正确\" 或 \"错误\"。"

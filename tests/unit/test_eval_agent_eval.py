@@ -13,11 +13,9 @@ from agentnexus.evaluation.agent_eval import (
 
 class TestCost:
     def test_known_model(self):
-        # Default estimate without a vendor table: 10 CNY/M input
         assert _cost(1_000_000, 0, "deepseek-v4-flash") == 10.0
 
     def test_unknown_model(self):
-        # Unknown models use default pricing: 10.0 CNY/M input + 30.0 CNY/M output
         expected = (1000 * 10.0 + 500 * 30.0) / 1_000_000
         assert _cost(1000, 500, "unknown") == pytest.approx(expected)
 
@@ -82,7 +80,7 @@ class TestTraceRecord:
 
     def test_tool_calls_unique(self):
         rec = TraceRecord(trace_id="t", tool_calls_unique=["search", "read", "search"])
-        assert len(rec.tool_calls_unique) == 3  # stored as-is, dedup in _evaluate_trace
+        assert len(rec.tool_calls_unique) == 3
 
 
 class TestAgentReport:
@@ -401,7 +399,7 @@ class TestAgentEvaluatorEvaluateAll:
         (traces_dir / "day1.jsonl").write_text(data)
         report = AgentEvaluator().evaluate_all(str(traces_dir))
         assert report.total_traces == 2
-        assert report.answer_rate == 1.0  # last llm span for each trace has no tool_calls
+        assert report.answer_rate == 1.0
         assert report.error_rate == 0.5
         assert report.total_input_tokens == 15
         assert report.total_output_tokens == 15

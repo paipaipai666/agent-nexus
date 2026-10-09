@@ -112,8 +112,6 @@ class TestAddOnlyExtraction:
         embed_model = MagicMock()
         embed_model.encode.return_value.tolist.return_value = [0.1] * 8
         long_term = MagicMock()
-        # A near-duplicate exists in the former conflict band (0.70-0.90);
-        # ADD-only must neither judge nor supersede it.
         long_term.search.return_value = []
         long_term.save.return_value = 42
 
@@ -121,7 +119,7 @@ class TestAddOnlyExtraction:
             llm=llm, embed_model=embed_model, long_term=long_term,
             session_id="t", question="回答风格讨论一下", answer="好的，明白了",
         )
-        assert llm.think.call_count == 1  # extraction only, no conflict check
+        assert llm.think.call_count == 1
         long_term.mark_superseded.assert_not_called()
         long_term.save.assert_called_once()
 
@@ -179,7 +177,6 @@ class TestPendingQuarantine:
         ).fetchone()
         assert row["superseded_by"] == new_id
         assert ltm.get_pending(pid)["status"] == "approved"
-        # The approved memory is now in LTM
         saved = ltm._conn.execute(
             "SELECT content, category FROM long_term_memories WHERE id = ?", (new_id,)
         ).fetchone()
@@ -252,9 +249,7 @@ class TestCurator:
 
         pending = ltm.list_pending()
         assert len(pending) == 2
-        # No conversation_sessions rows here → project scope falls back to user
         assert all(p["scope"] == "user" for p in pending)
-        # Source notes untouched until approval
         s = ltm.stats()
         assert s["total"] == 6
         assert s["superseded"] == 0

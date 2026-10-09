@@ -42,12 +42,10 @@ class TestCollapseAndTruncate:
         assert result == ""
 
     def test_limit_zero_returns_ellipsis(self):
-        # max(0, 0 - 1) = max(0, -1) = 0, so [:0] + "…"
         result = collapse_and_truncate("hello", 0)
         assert result == "…"
 
     def test_limit_one_returns_ellipsis(self):
-        # max(0, 1 - 1) = max(0, 0) = 0, so [:0] + "…"
         result = collapse_and_truncate("hello", 1)
         assert result == "…"
 
@@ -65,7 +63,6 @@ class TestCollapseAndTruncate:
 
     def test_unicode_characters(self):
         result = collapse_and_truncate("こんにちは世界", 5)
-        # Each char is one character in Python's len()
         assert result == "こんにち…"
 
     def test_unicode_within_limit(self):

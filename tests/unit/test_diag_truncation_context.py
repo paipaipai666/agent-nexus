@@ -67,9 +67,7 @@ class TestScreenshotSymptom:
         agent.run("介绍 AgentNexus 项目", memory_manager=mm)
         dump = _stm_dump(mm)
         joined = " | ".join(c for _, c in dump)
-        # 记录事实：salvage 是否写入
         assert "介绍 AgentNexus 项目" in joined
-        # 这条若失败 → H1 对 salvage 成立；通过则 salvage 不是丢上下文的那条路
         assert "AgentNexus" in joined, f"H3-salvage 未写入正文: {dump}"
 
     def test_H2_empty_answer_after_long_stream_leaves_no_reply_in_stm(self):
@@ -81,11 +79,10 @@ class TestScreenshotSymptom:
         agent = _agent(llm)
         mm = MemoryManager(session_id="diag-h2", enable_long_term=False)
 
-        # 模拟：内部流了很多内容，但最终 answer 为空（fatal / 未 emit）
         def think(**kw):
             llm.last_truncated = False
             llm.last_error = "Error code: 400 - something"
-            return ""  # agent 视角：没有正文
+            return ""
 
         llm.think.side_effect = think
         result = agent.run("介绍 AgentNexus 项目", memory_manager=mm)
@@ -94,12 +91,9 @@ class TestScreenshotSymptom:
         joined = " | ".join(c for _, c in dump)
         assert "介绍 AgentNexus 项目" in joined, dump
         has_reply = "AgentNexus 是一个" in joined or "配备完整" in joined
-        # 事实记录：空答案轮次里，STM 是否含回复正文
-        # 若 False → 下一轮 conv_ctx 必然没有「上一轮说了什么」
         print("H2 STM dump:", dump)
         print("H2 result.answer:", repr(result.answer))
         assert result.answer in (None, "",) or "AgentNexus" not in str(result.answer) or True
-        # 钉住可复现事实：空答案不会写入回复正文
         if not (result.answer or "").strip():
             assert not has_reply, (
                 "空答案却写入了正文——与 H2 预期不符，请改断言"
@@ -115,9 +109,7 @@ class TestScreenshotSymptom:
 
         conv = agent._build_conversation_context(mm)
         print("H4 conv_ctx:", repr(conv[:400]))
-        # 截图里模型说「没有近期对话」——若 conv 非空但很短/无助手正文，要写清楚
         assert "介绍 AgentNexus" in conv, f"user 应出现在 conv_ctx: {conv!r}"
-        # 没有 [最终答案] 时，不应出现助手最终回复
         assert "配备完整" not in conv
 
     def test_H4b_next_llm_call_messages_when_prior_turn_had_no_final_answer(self):
@@ -126,7 +118,6 @@ class TestScreenshotSymptom:
         agent = _agent(llm)
         mm = MemoryManager(session_id="diag-h4b", enable_long_term=False)
 
-        # 第一轮：空答案
         llm.think.side_effect = lambda **kw: (
             setattr(llm, "last_error", "400") or ""
         )
@@ -147,9 +138,7 @@ class TestScreenshotSymptom:
         flat = "\n".join(str(m.get("content") or "") for m in captured[0])
         print("H4b r1.answer:", repr(r1.answer))
         print("H4b second msgs snippet:", flat[:600])
-        # 可复现事实：用户问题是否在
         assert "怎么话没说完" in flat
-        # 上一问是否在
         print("H4b has prior question:", "介绍 AgentNexus" in flat)
 
     def test_turn_finish_empty_does_not_write_final_answer_marker(self):
@@ -162,7 +151,5 @@ class TestScreenshotSymptom:
         turn.finish("")
         dump = _stm_dump(mm)
         print("TURN STM after finish(''):", dump)
-        # 事实：persist_snapshot 明确不把 answer 写回 STM
         assert not any(c.startswith("[最终答案]") for _, c in dump)
-        # finish('') 本身也不负责 user 行
         assert dump == [] or not any("介绍 AgentNexus" in c for _, c in dump)

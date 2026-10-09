@@ -7,11 +7,6 @@ export interface ApiQueryResult<T> {
   reload: () => void
 }
 
-/** Fetch-on-mount (and on deps change) query with unified loading/error state.
- * The fetcher receives an AbortSignal that is aborted when deps change or the
- * component unmounts; aborted runs never touch state. `reload` re-runs the
- * latest fetcher. Errors are stored as Error and never console.error'd here —
- * pages that want logging do it themselves from `error`. */
 export function useApiQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: unknown[] = []): ApiQueryResult<T> {
   const [data, setData] = useState<T | undefined>(undefined)
   const [loading, setLoading] = useState(true)

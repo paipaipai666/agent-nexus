@@ -51,11 +51,11 @@ def rgb_cache_root() -> Path:
 class RGBQuery:
     query_id: str
     query: str
-    answer_groups: list[list[str]]  # acceptable-answer groups (any group match = correct)
+    answer_groups: list[list[str]]
     positive: list[str]
     negative: list[str]
-    task: str = "noise"  # noise | rejection
-    language: str = "zh"  # zh | en
+    task: str = "noise"
+    language: str = "zh"
     sampled_docs: list[str] = field(default_factory=list)
 
     @property

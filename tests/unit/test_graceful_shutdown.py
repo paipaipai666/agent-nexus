@@ -70,7 +70,7 @@ def test_lifespan_teardown_cancels_runs_before_close():
 
     app = create_app(runtime)
     with TestClient(app):
-        pass  # lifespan startup/shutdown bracket the request phase
+        pass
 
     chat.cancel_all_runs.assert_called_once_with(reason="server_shutdown")
     runtime.close.assert_called_once()

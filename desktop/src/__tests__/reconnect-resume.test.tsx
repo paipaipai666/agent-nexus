@@ -1,16 +1,3 @@
-/**
- * Tests for WS reconnect/resume cursor semantics (R8) on the desktop client.
- *
- * Locks the fixes validated by experiments/verify_reconnect_resume.py:
- * 1. reconnect_snapshot overwrites the in-flight answer draft but must NOT
- *    touch the message-id counter (msgCounter) — the server's cursor counts
- *    run tokens, the counter issues message ids; overwriting created
- *    duplicate ids (React key collisions).
- * 2. Token events at or below the snapshot cursor (tok_seq <= lastCursor)
- *    are already covered by the snapshot and must be ignored; tokens above
- *    the cursor append normally. Events without tok_seq (older servers)
- *    keep legacy behavior.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { useEffect } from 'react'
@@ -85,8 +72,6 @@ describe('Reconnect resume cursor semantics (desktop)', () => {
   })
 
   it('snapshot must not rewind the message-id counter (no duplicate ids)', async () => {
-    // Counter is at 3 (t-1, a-2, tc-3) when the snapshot arrives with cursor=1.
-    // Old behavior overwrote the counter with cursor → next draft re-uses a-2.
     await act(async () => {
       ws._receive({ type: 'run_started', run_id: 'run-1' })
       ws._receive({ type: 'thinking', content: 'Thinking.' })
@@ -94,7 +79,6 @@ describe('Reconnect resume cursor semantics (desktop)', () => {
       await sleep(30)
       ws._receive({ type: 'tool_call', tool_name: 'todo_add' })
       ws._receive({ type: 'reconnect_snapshot', content: '', cursor: 1 })
-      // Step 2 begins: a new draft is created.
       ws._receive({ type: 'token', content: 'B', tok_seq: 2 })
       await sleep(30)
     })
@@ -111,9 +95,7 @@ describe('Reconnect resume cursor semantics (desktop)', () => {
       ws._receive({ type: 'token', content: 'AB', tok_seq: 1 })
       await sleep(30)
       ws._receive({ type: 'reconnect_snapshot', content: 'AB', cursor: 1 })
-      // Replayed tokens covered by the snapshot — must not double-append.
       ws._receive({ type: 'token', content: 'AB', tok_seq: 1 })
-      // Above the cursor: a genuinely new token — must append.
       ws._receive({ type: 'token', content: 'B', tok_seq: 2 })
       await sleep(30)
     })

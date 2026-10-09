@@ -49,70 +49,60 @@ def _make_skill(
 def _create_ambiguous_skills() -> list[SkillEntry]:
     """Create skills with overlapping keywords for disambiguation testing."""
     return [
-        # Network proxy skill
         _make_skill(
             "proxy",
             "Proxy",
             "Configure network proxy settings and HTTP proxy servers. "
             "配置 网络代理 HTTP代理 服务器 转发 转发规则 端口",
         ),
-        # AI Agent skill
         _make_skill(
             "agent",
             "Agent",
             "Create and manage AI agents for autonomous task execution. "
             "AI代理 智能代理 自动化 任务执行 人工智能 机器人",
         ),
-        # Application deployment skill
         _make_skill(
             "deploy",
             "Deploy",
             "Deploy applications to servers and cloud platforms. "
             "部署 应用 服务器 云平台 发布 上线 容器 Docker K8s",
         ),
-        # Data backup skill
         _make_skill(
             "backup",
             "Backup",
             "Create manage and restore data backups and snapshots. "
             "备份 数据 快照 恢复 存储 归档 灾难恢复",
         ),
-        # System monitoring skill
         _make_skill(
             "monitor",
             "Monitor",
             "Monitor system health performance metrics and alerts. "
             "监控 系统 性能 指标 告警 CPU 内存 磁盘 网络",
         ),
-        # Data analysis skill
         _make_skill(
             "analyze",
             "Analyze",
             "Analyze data patterns trends and generate insights. "
             "分析 数据 趋势 洞察 报告 可视化 统计 机器学习",
         ),
-        # Code search skill
         _make_skill(
             "code-search",
             "Code Search",
             "Search and navigate source code repositories. "
             "搜索 代码 源码 仓库 函数 类 方法 重构",
         ),
-        # Knowledge search skill
         _make_skill(
             "knowledge-search",
             "Knowledge Search",
             "Search knowledge base and documentation. "
             "搜索 知识库 文档 资料 信息 查询 检索",
         ),
-        # Database query skill
         _make_skill(
             "db-query",
             "DB Query",
             "Execute database queries and manage data. "
             "数据库 查询 SQL 表 记录 数据 管理",
         ),
-        # Data export skill
         _make_skill(
             "data-export",
             "Data Export",
@@ -256,7 +246,6 @@ class TestMonitorVsAnalyzeDisambiguation:
         """Alert context should match monitor or related skill."""
         service.reset()
         route = service.maybe_auto_select("设置监控告警")
-        # Router may not confidently disambiguate this query
         if route is not None:
             assert route.entry.workflow_id in ("monitor", "analyze")
 
@@ -381,20 +370,13 @@ class TestAmbiguityResolution:
         """Highly ambiguous query may return None or uncertain result."""
         service.reset()
         service.maybe_auto_select("代理")
-        # This is ambiguous - could be proxy or agent
-        # Router should either return None or mark as uncertain
-        # The behavior depends on router implementation
 
     def test_ambiguous_deploy_backup(self, service: SkillService):
         """Highly ambiguous query may return None or uncertain result."""
         service.reset()
         service.maybe_auto_select("部署备份")
-        # This is ambiguous - deploy or backup?
-        # Router should handle gracefully
 
     def test_context_clarifies_intent(self, service: SkillService):
         """Additional context should clarify intent."""
         service.reset()
         service.maybe_auto_select("部署应用并备份数据库")
-        # Has both deploy and backup keywords
-        # Should pick one based on primary intent or return None

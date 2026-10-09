@@ -10,8 +10,6 @@ from agentnexus.agents import decisions
 from agentnexus.agents.react_types import CallingStrategy, RetryReason
 from agentnexus.core.capabilities import SessionCapabilityTracker
 
-# ── interpret_native ────────────────────────────────────────────────
-
 
 def _tools(**over):
     base = {
@@ -40,7 +38,6 @@ class TestInterpretNative:
         assert d.fail_pending_calls is False
 
     def test_tool_calls_without_thought_are_allowed(self):
-        # 决策1（2026-09-24 拍板）：允许模型不做可见思考直接调工具
         d = _tools(response_text="", reasoning_text="",
                    tool_calls=[{"name": "x", "arguments": {}}])
         assert d.kind == "tools"
@@ -48,7 +45,6 @@ class TestInterpretNative:
         assert d.text == ""
 
     def test_tool_calls_carry_commentary_text(self):
-        # 决策2：边说话边调工具 —— text 随行展示
         d = _tools(response_text="我先查一下这两个文件，然后给你结论。",
                    tool_calls=[{"name": "x", "arguments": {}}])
         assert d.kind == "tools"
@@ -63,8 +59,6 @@ class TestInterpretNative:
         assert not hasattr(d, "terminal_answer")
 
     def test_bookkeeping_batch_text_is_plain_commentary(self):
-        # 2026-10-07 决策3：记账批次 + 长文本不再触发任何终止语义——
-        # 同响应文本一律是旁白，终止只认 todo 全 done 的显式信号（re_act_agent）。
         text = "好，我已经把待办更新完了。这是一个满足长度要求的最终总结文本。"
         d = _tools(response_text=text, tool_calls=[{"name": "todo_add", "arguments": {}}])
         assert d.kind == "tools"
@@ -119,9 +113,6 @@ class TestInterpretNative:
         assert d.text == "42"
 
 
-# ── select_visible_thought / split ──────────────────────────────────
-
-
 class TestThoughtHelpers:
     def test_reasoning_wins_over_text(self):
         assert decisions.select_visible_thought("正文", "推理") == "推理"
@@ -145,9 +136,6 @@ class TestThoughtHelpers:
         thought, answer = decisions.split_native_thought_answer("普通答案")
         assert thought == ""
         assert answer == "普通答案"
-
-
-# ── JSON protocol path ──────────────────────────────────────────────
 
 
 class TestJsonProtocol:
@@ -180,19 +168,14 @@ class TestJsonProtocol:
         assert d.text == "42"
 
     def test_single_key_json_is_answer_value(self):
-        # json_helpers.classify_parsed：单键字典取值为答案（如 {"温度": "26°C"}）
         d = decisions.interpret_json(response_text='{"weird": 1}', truncated=False)
         assert d.kind == "answer"
         assert d.text == "1"
 
     def test_multi_key_unknown_payload_is_parse_fault(self):
-        # json_helpers.classify_parsed 对无 tool/answer 键的多键字典返回 type=error
         d = decisions.interpret_json(response_text='{"a": 1, "b": 2}', truncated=False)
         assert d.kind == "fault"
         assert d.reason is RetryReason.PARSE_ERROR
-
-
-# ── recover ──────────────────────────────────────────────────────────
 
 
 class TestRecover:

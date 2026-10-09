@@ -12,7 +12,6 @@ from agentnexus.memory.short_term import ShortTermMemory
 
 
 class TestParseToolMessage:
-
     def test_parses_tool_name_and_params(self):
         tool, params = _parse_tool_message("Action: read[file=a.py]")
         assert tool == "read"
@@ -35,7 +34,6 @@ class TestParseToolMessage:
 
 
 class TestExtractXmlTag:
-
     def test_extracts_content_from_tag(self):
         result = _extract_xml_tag("<summary>摘要内容</summary>", "summary")
         assert result == "摘要内容"
@@ -66,7 +64,6 @@ class TestExtractXmlTag:
 
 
 class TestContainsPII:
-
     def test_matches_email_address(self):
         assert _contains_pii("contact me at user@example.com")
 
@@ -91,7 +88,6 @@ class TestContainsPII:
 
 
 class TestSnipInManager:
-
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -138,7 +134,6 @@ class TestSnipInManager:
 
 
 class TestMicroCompact:
-
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -198,14 +193,11 @@ class TestMicroCompact:
 
 
 class TestMicroCompactTimeBased:
-
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
         mgr._pipeline = MemoryExtractionPipeline(mgr)
         mgr.short_term = ShortTermMemory()
-        # Reset incremental counter so microcompact_time_based falls back
-        # to estimate_tokens() for before/after comparison
         mgr.short_term._token_count = 0
         mgr._settings = MagicMock()
         mgr._settings.time_microcompact_interval = 60
@@ -218,7 +210,6 @@ class TestMicroCompactTimeBased:
         mgr = self._make_mgr()
         mgr._engine.last_api_call_ts = time.time() - 120
         mgr.short_term.append("assistant", "x" * 3000)
-        # Reset incremental counter so before/after comparison uses estimate_tokens()
         mgr.short_term._token_count = 0
         result = mgr.microcompact_time_based(interval=60)
         assert result is True
@@ -246,14 +237,12 @@ class TestMicroCompactTimeBased:
         mgr._settings.time_microcompact_interval = 30
         mgr._engine.last_api_call_ts = time.time() - 60
         mgr.short_term.append("assistant", "x" * 3000)
-        # Reset incremental counter so before/after comparison uses estimate_tokens()
         mgr.short_term._token_count = 0
         result = mgr.microcompact_time_based()
         assert result is True
 
 
 class TestOffloadLargeResult:
-
     def test_writes_content_to_disk(self, tmp_path):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -281,7 +270,6 @@ class TestOffloadLargeResult:
 
 
 class TestMaybeCompactCircuitBreaker:
-
     def _make_mgr(self):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -324,7 +312,6 @@ class TestMaybeCompactCircuitBreaker:
         mgr = self._make_mgr()
         for i in range(10):
             mgr.short_term.append("user", f"msg{i}")
-        # Reset incremental counter so maybe_compact() uses the monkeypatched estimate_tokens
         mgr.short_term._token_count = 0
         mgr._llm.think.return_value = ""
         for _ in range(3):
@@ -354,17 +341,15 @@ class TestMaybeCompactCircuitBreaker:
             lambda self: 125000,
         )
         mgr = self._make_mgr()
-        # Simulate circuit in OPEN state with expired backoff (will transition to HALF_OPEN)
         mgr._engine.circuit.record_failure()
         mgr._engine.circuit.record_failure()
         mgr._engine.circuit.record_failure()
         assert mgr._engine.circuit.is_open
-        # Force backoff to expire by setting opened_at to past
         mgr._engine.circuit._opened_at = time.time() - 9999
         mgr._engine.microcompacts_since_open = 4
         for i in range(10):
             mgr.short_term.append("user", f"msg{i}")
-        mgr.short_term._token_count = 0  # force fallback to monkeypatched estimate_tokens
+        mgr.short_term._token_count = 0
         mgr._llm.think.return_value = "<summary>Compacted summary of conversation.</summary>"
         mgr.maybe_compact()
         assert mgr._engine.circuit.is_closed is True
@@ -373,7 +358,6 @@ class TestMaybeCompactCircuitBreaker:
 
 
 class TestBuildProjection:
-
     def _make_mgr(self, stm, ctx_max=128000):
         mgr = MemoryManager.__new__(MemoryManager)
         mgr._engine = CompactionEngine(mgr)
@@ -429,7 +413,6 @@ class TestBuildProjection:
 
 
 class TestProjectMild:
-
     def test_truncates_long_assistant_messages(self):
         messages = [
             {"role": "assistant", "content": "x" * 2000},
@@ -479,7 +462,6 @@ class TestProjectMild:
 
 
 class TestProjectAggressive:
-
     def test_clears_recoverable_tool_results(self):
         from agentnexus.memory.compaction import is_recoverable_tool, parse_tool_message
         messages = [

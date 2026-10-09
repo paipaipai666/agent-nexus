@@ -4,7 +4,6 @@ import type { Message } from '../session/SessionManager'
 import { formatDuration } from '../../utils/toolDisplay'
 import ToolCard from './ToolCard'
 
-/* ─── Tool Group Header — N calls · total duration · error badge ─── */
 const ToolGroupHeader = React.memo(function ToolGroupHeader({
   msgs, collapsed, onToggle,
 }: {
@@ -71,7 +70,6 @@ const ToolGroupHeader = React.memo(function ToolGroupHeader({
   )
 })
 
-/* Shared tool-group card: header + hairline-divided rows. */
 function ToolGroup({ msgs, mcpNames }: { msgs: Message[]; mcpNames: Record<string, true> }) {
   const [collapsed, setCollapsed] = useState(false)
   return (

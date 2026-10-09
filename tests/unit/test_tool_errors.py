@@ -6,8 +6,6 @@ from unittest.mock import MagicMock, patch
 
 from agentnexus.tools.errors import ToolError, ToolErrorCode
 
-# ── ToolError dataclass ──────────────────────────────────────────
-
 
 class TestToolErrorCode:
     """Verify all expected error codes exist."""
@@ -64,7 +62,6 @@ class TestToolErrorConstruction:
         content = str(err)
         assert isinstance(content, str)
         assert len(content) > 0
-        # Should not contain Python object repr
         assert "ToolError(" not in content
 
 
@@ -80,9 +77,6 @@ class TestToolErrorEquality:
         a = ToolError("TIMEOUT", "msg", True, "retry")
         b = ToolError("CANCELLED", "msg", True, "retry")
         assert a != b
-
-
-# ── execute_tool returns ToolError on failure ────────────────────
 
 
 class TestExecuteToolReturnsToolError:
@@ -185,7 +179,6 @@ class TestExecuteToolReturnsToolError:
         )
         assert isinstance(result, ToolError)
         assert result.error_code == ToolErrorCode.EXECUTION_FAILED
-        # Generic errors have message stripped (LOW-02)
         assert "boom" not in result.message
 
     @patch("agentnexus.core.hooks.get_hook_manager")
@@ -203,9 +196,6 @@ class TestExecuteToolReturnsToolError:
         )
         assert result == "ok"
         assert not isinstance(result, ToolError)
-
-
-# ── summarize_tool_result handles ToolError ──────────────────────
 
 
 class TestSummarizeToolResultWithToolError:

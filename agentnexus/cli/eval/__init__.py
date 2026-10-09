@@ -1,6 +1,5 @@
 """Eval CLI command modules."""
 
-# Import modules for Typer command registration.
 from agentnexus.cli.eval import (  # noqa: F401
     agent,
     benchmark,
@@ -14,4 +13,3 @@ from agentnexus.cli.eval import (  # noqa: F401
     trace,
     transcript,
 )
-

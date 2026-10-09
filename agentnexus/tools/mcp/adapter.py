@@ -242,10 +242,6 @@ class MCPToolManager:
 
     def register_tools(self, executor: ToolRegistry, include_tools: set[str] | None = None) -> list[str]:
         registered = []
-        # Signatures hang off the executor, not the manager: child registries
-        # (one per subagent attempt) are short-lived, so manager-level state
-        # keyed by id(executor) leaked entries, and a recycled id could make a
-        # fresh registry wrongly skip registration.
         sigs = getattr(executor, "_mcp_registered_signatures", None)
         if sigs is None:
             sigs = {}

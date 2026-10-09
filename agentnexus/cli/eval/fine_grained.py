@@ -30,7 +30,6 @@ def eval_fine_grained(
     report = runner.run(scope)
     console.print(report.summary())
 
-    # 用例明细表：verdict + 关键数值
     table = Table(title="用例明细", box=box.ROUNDED)
     table.add_column("用例", style="cyan")
     table.add_column("数据集")

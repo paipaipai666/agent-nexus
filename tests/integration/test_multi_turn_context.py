@@ -38,8 +38,6 @@ class TestMultiTurnContext:
             mgr._enable_long_term = True
             mgr._engine.ctx_max = 8000
             mgr._pipeline.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
-            # Opt into the LLM gate: these tests exercise the gate+extraction path.
-            # MagicMock attribute access yields a truthy memory_llm_gate.
             mgr._settings = MagicMock()
             return mgr
 
@@ -47,7 +45,6 @@ class TestMultiTurnContext:
         """Information from turn 1 appears in turn 2's LTM query."""
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        # Turn 2 search returns memory extracted from turn 1
         mock_ltm.search.return_value = [
             {"category": "user_preference", "_score": 0.8, "content": "用户要求使用Python"},
         ]
@@ -57,15 +54,12 @@ class TestMultiTurnContext:
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_embed, mock_ltm)
 
-        # Turn 1
         mgr.short_term.append("user", "用Python实现一个计算器")
         mgr.short_term.append("assistant", "好的，以下是Python计算器实现...")
 
-        # Simulate conclude from turn 1
         mgr._llm.think.return_value = '```json\n{"user_preference": [{"content": "用户要求使用Python"}]}\n```'
         mgr.conclude("用Python实现一个计算器", "好的，以下是Python计算器实现...")
 
-        # Turn 2: init_session should include turn 1's memory
         context = mgr.init_session("添加GUI界面")
 
         assert "Python" in context
@@ -75,11 +69,9 @@ class TestMultiTurnContext:
         """Short-term memory accumulates user/assistant messages."""
         mgr = self._make_mgr(temp_agentnexus_home)
 
-        # Turn 1
         mgr.short_term.append("user", "写一个排序算法")
         mgr.short_term.append("assistant", "这是快速排序实现")
 
-        # Turn 2
         mgr.short_term.append("user", "改成降序排列")
         mgr.short_term.append("assistant", "已修改为降序")
 
@@ -101,7 +93,6 @@ class TestMultiTurnContext:
 
         mgr.short_term.append("user", "定义User模型")
         mgr.short_term.append("assistant", "class User(Base): ...")
-        # Gate check expects "yes"/"no"; extraction expects JSON.
         mgr._llm.think.side_effect = [
             "yes",
             '```json\n{"fact": [{"content": "定义了User模型"}]}\n```',
@@ -109,7 +100,6 @@ class TestMultiTurnContext:
         mgr.conclude("定义User模型", "class User(Base): ...")
         turn1_save_count = mock_ltm.save.call_count
 
-        # Turn 2
         mgr.short_term.append("user", "添加email字段")
         mgr.short_term.append("assistant", "email = Column(String)")
         mgr._llm.think.side_effect = [
@@ -130,11 +120,8 @@ class TestMultiTurnContext:
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
         mock_ltm.search.side_effect = [
-            # Turn 1: no prior memory
             [],
-            # Turn 2: memory from turn 1
             [{"category": "entity_fact", "_score": 0.7, "content": "用户有一个Flask项目"}],
-            # Turn 3: memory from turns 1+2
             [
                 {"category": "entity_fact", "_score": 0.7, "content": "用户有一个Flask项目"},
                 {"category": "user_preference", "_score": 0.8, "content": "使用SQLite数据库"},
@@ -155,15 +142,12 @@ class TestMultiTurnContext:
             mgr._enable_long_term = True
             mgr._llm.think.return_value = '{}'
 
-            # Turn 1: no prior context
             ctx1 = mgr.init_session("项目结构")
             assert ctx1 == "" or "Flask" not in ctx1
 
-            # Turn 2: should see turn 1's memory
             ctx2 = mgr.init_session("添加用户认证")
             assert "Flask" in ctx2
 
-            # Turn 3: should see both memories
             ctx3 = mgr.init_session("部署方案")
             assert "Flask" in ctx3
             assert "SQLite" in ctx3 or "数据库" in ctx3
@@ -184,7 +168,7 @@ class TestMultiTurnContext:
             mgr.short_term.append("assistant", f"Turn {i} answer")
 
         messages = mgr.short_term.get_all()
-        assert len(messages) == 20  # 10 turns × 2 messages
+        assert len(messages) == 20
         assert messages[0]["content"] == "Turn 0 question"
 
     def test_build_projection_after_multi_turn(self, temp_agentnexus_home):

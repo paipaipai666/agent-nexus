@@ -27,8 +27,7 @@ console = Console()
 LLM_MAX_RETRIES = 3
 LLM_RETRY_BASE_DELAY = 2.0
 
-# Provider health tracking for circuit breaker
-_provider_health: dict[str, tuple[int, float]] = {}  # key -> (failure_count, last_failure_time)
+_provider_health: dict[str, tuple[int, float]] = {}
 _provider_health_lock = threading.Lock()
 _PROVIDER_FAILURE_THRESHOLD = 3
 _PROVIDER_COOLDOWN_SECONDS = 60
@@ -53,8 +52,6 @@ def _is_transient_error(exc: Exception) -> bool:
                     break
     return status_code in (429, 503)
 
-# Live capability probe — one tiny call per (model, base_url), cached
-# process-wide so concurrent agents don't each pay the round trip.
 _probe_lock = threading.Lock()
 _probe_cache: dict[tuple[str, str], dict[str, bool]] = {}
 
@@ -85,7 +82,6 @@ class AgentLLM:
         base_url: str | None = None,
         timeout: int | None = None,
         *,
-        # Backward-compatible camelCase aliases (deprecated)
         apiKey: str | None = None,
         baseUrl: str | None = None,
     ):
@@ -95,16 +91,10 @@ class AgentLLM:
         self.model = (model or profile[0]).strip()
         self.api_key = api_key or apiKey or profile[2].get_secret_value()
         self.timeout = timeout or profile[3]
-        # Per-call results live in thread-local storage: concurrent runs
-        # (multi-session) share this client, and plain instance attributes
-        # would clobber each other between interleaved streams.
         self._call_state = threading.local()
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
         self._capabilities: ModelCapabilities | None = None
         self._session_tracker: SessionCapabilityTracker | None = None
-        # Cooperative cancellation: a watcher thread closes the in-flight
-        # provider stream the moment the checker fires (产品决策: 取消=
-        # 立刻停止). Set per run by the agent; None on legacy paths.
         self._cancel_checker: Callable[[], bool] | None = None
         self._active_provider: Any = None
 
@@ -194,7 +184,6 @@ class AgentLLM:
         self.api_key = api_key
         if timeout:
             self.timeout = timeout
-        # Cached capability state is model-specific — force re-detection.
         self._capabilities = None
         self._session_tracker = None
         self.last_error = ""
@@ -326,7 +315,6 @@ class AgentLLM:
         self._cs().tool_call_mode = tools is not None and len(tools) > 0
         self._cs().non_transient = False
 
-        # ── before llm hook ────────────────────────────────────
         hook_ctx = fire_hook(HookType.BEFORE_LLM_CALL, {
             "messages": messages,
             "model": self.model,
@@ -338,9 +326,6 @@ class AgentLLM:
 
         effective_messages = projection_fn(messages) if projection_fn else messages
 
-        # Cancel watcher: while a run is active, poll the checker and close
-        # the in-flight provider stream on fire. Without it a stalled read
-        # hides cancel until the next token (old token-boundary behavior).
         stop_watcher = threading.Event()
         watcher = None
         if self._cancel_checker is not None:
@@ -370,7 +355,6 @@ class AgentLLM:
         finally:
             stop_watcher.set()
 
-        # ── after llm hook ─────────────────────────────────────
         fire_hook(HookType.AFTER_LLM_CALL, {
             "messages": messages,
             "model": self.model,
@@ -386,7 +370,6 @@ class AgentLLM:
         ctx = trace_manager.active
         span = None
         if ctx:
-            # 提取上下文来源引用（context_refs）
             context_refs = []
             for msg in messages:
                 role = msg.get("role", "")
@@ -408,7 +391,6 @@ class AgentLLM:
         self.last_reasoning_content = ""
 
         try:
-            # ── Direct provider (OpenAI-compatible or Anthropic Messages) ──
             provider = select_provider(model, self.base_url)
             provider_key = f"{type(provider).__name__}/{self.model}"
             with _provider_health_lock:
@@ -455,18 +437,14 @@ class AgentLLM:
                 raise
 
         except Exception as e:
-            # 取消信号必须直接传播，不能被重试逻辑吞掉
             if isinstance(e, AgentCancelled):
                 raise
-            # 流被 cancel-watcher 关闭后底层会抛 httpx/连接错误——统一
-            # 还原为 AgentCancelled，避免被重试循环当作瞬态错误重放。
             if self._cancel_checker is not None and self._cancel_checker():
                 raise AgentCancelled("cancelled") from e
 
             error_msg = str(e)
             self.last_error = error_msg
 
-            # ── Capability degradation on "unsupported" errors ──
             error_lower = error_msg.lower()
             if any(kw in error_lower for kw in ("tool", "function_call", "function calling")) and \
                any(kw in error_lower for kw in ("not support", "unsupported", "invalid", "unknown parameter")):
@@ -492,9 +470,6 @@ class AgentLLM:
                 self._cs().non_transient = True
                 return ""
 
-            # transient error — outer retry loop continues
-
-        # All retries exhausted with transient errors
         return ""
 
     def _call_via_provider(
@@ -519,10 +494,6 @@ class AgentLLM:
             if caps.supports_parallel_tool_calls:
                 parallel = True
 
-        # Explicit thinking control — never rely on vendor defaults (DeepSeek
-        # thinks even when we "don't ask"). "none" disables, low/medium/high
-        # enables at that depth. `effort` is a per-call override (session
-        # thinking-effort); None falls back to capabilities/settings.
         if effort == "none":
             reasoning_effort = "none"
         else:
@@ -543,8 +514,6 @@ class AgentLLM:
                 if tracker.is_available("json_schema", caps.supports_json_schema):
                     provider_response_format = response_format
 
-        # Usage on stream: request it uniformly (OpenAI-compatible `stream_options`);
-        # no per-vendor URL sniffing.
         stream_opts = {"include_usage": True}
 
         self._active_provider = provider

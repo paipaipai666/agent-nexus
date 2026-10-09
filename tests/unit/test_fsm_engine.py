@@ -80,7 +80,6 @@ class TestStateMachineDispatch:
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test")
 
-        # Fire with an arbitrary event type
         fsm.run_loop(ReActEvent(ReActEventType.TOOLS_REQUESTED), ctx, {"catch_all": handler})
 
         handler.assert_called_once()
@@ -149,7 +148,6 @@ class TestStateMachineRunLoop:
     def test_returns_last_answer_and_steps_from_ctx(self):
         """run_loop returns (ctx.last_answer, ctx.steps) so it matches ReActAgent contract."""
         handler = MagicMock(return_value=[])
-        # Non-DONE so handler is actually called
         table = [Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "h")]
         fsm = StateMachine(table=table)
         ctx = ExecutionContext(question="test", last_answer="final result", steps=["s1", "s2"])
@@ -165,7 +163,6 @@ class TestStateMachineRunLoop:
 
         def first_handler(ctx, event):
             events.append("first")
-            # Enqueue two events consumed in FIFO order
             return [ReActEvent(ReActEventType.ROUND_READY), ReActEvent(ReActEventType.ROUND_READY)]
 
         def second_handler(ctx, event):
@@ -179,7 +176,6 @@ class TestStateMachineRunLoop:
 
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "first"),
-            # Loop back so both ROUND_READY events are consumed by second_handler
             Transition(ReActState.AWAIT_MODEL, ReActEventType.ROUND_READY, ReActState.AWAIT_MODEL, "second"),
             Transition(ReActState.AWAIT_MODEL, ReActEventType.ANSWER_READY, ReActState.ANSWER, "final"),
             Transition(ReActState.ANSWER, ReActEventType.ANSWER_READY, ReActState.DONE, "nop"),
@@ -193,14 +189,13 @@ class TestStateMachineRunLoop:
              "nop": lambda c, e: []},
         )
 
-        # first -> second (1st RR) -> second (2nd RR) -> final (1st AR) -> DONE (2nd AR, handler skipped)
         assert events == ["first", "second", "second", "final"]
         assert answer == "done"
 
     def test_handler_returning_none_is_ok(self):
         """A handler that returns None should not crash the loop."""
         def nop_handler(ctx, event):
-            return None  # explicit None
+            return None
 
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.AWAIT_MODEL, "nop"),
@@ -210,7 +205,6 @@ class TestStateMachineRunLoop:
 
         answer, steps = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, {"nop": nop_handler})
         assert fsm.current_state == ReActState.AWAIT_MODEL
-        # FSM now returns an error message when exiting in non-terminal state
         assert answer is not None
         assert "exited in state" in answer
 
@@ -258,7 +252,6 @@ class TestStateMachineObserver:
             {"h1": lambda c, e: [ReActEvent(ReActEventType.ROUND_READY)], "h2": lambda c, e: []},
         )
 
-        # Called twice: INIT->AWAIT_MODEL and AWAIT_MODEL->DONE
         assert observer.call_count == 2
 
     def test_observer_receives_correct_args(self):
@@ -347,7 +340,6 @@ class TestStateMachineDone:
 
         table = [
             Transition(ReActState.INIT, ReActEventType.START, ReActState.DONE, "done"),
-            # This transition would only match if DONE didn't terminate:
             Transition(ReActState.DONE, ReActEventType.START, ReActState.AWAIT_MODEL, "extra"),
         ]
         fsm = StateMachine(table=table)
@@ -358,8 +350,6 @@ class TestStateMachineDone:
             {"done": lambda c, e: [ReActEvent(ReActEventType.START)], "extra": extra_handler},
         )
 
-        # The handler enqueues another START, but since we land on DONE,
-        # the loop returns before processing it -- so "extra" should never fire.
         extra_handler.assert_not_called()
 
     def test_done_returns_correct_answer(self):
@@ -416,19 +406,15 @@ class TestRealTransferTable:
 
         from agentnexus.agents.react_transitions import TRANSFER_TABLE
 
-        # (a) no duplicate (state, event) rows
         keys = [(t.state, t.event) for t in TRANSFER_TABLE]
         assert len(keys) == len(set(keys)), "duplicate (state, event) transitions"
 
         states = {t.state for t in TRANSFER_TABLE} | {ReActState.INIT}
-        # (b) every non-DONE state has at least one outgoing transition
         for s in states:
             if s is ReActState.DONE:
                 continue
             assert any(t.state == s for t in TRANSFER_TABLE), f"no outgoing transition from {s.name}"
-        # (d) DONE has no outgoing transitions
         assert all(t.state != ReActState.DONE for t in TRANSFER_TABLE)
-        # (c) every state reachable from INIT via the edge graph
         adj: dict = {}
         for t in TRANSFER_TABLE:
             adj.setdefault(t.state, set()).add(t.next_state)
@@ -453,7 +439,7 @@ class TestRealTransferTable:
 
         on_error_abort = MagicMock(return_value=[])
         handlers = self._stub_handlers(
-            _on_init=MagicMock(return_value=[]),  # auto-advance 进 _on_round
+            _on_init=MagicMock(return_value=[]),
             _on_round=MagicMock(return_value=[ReActEvent(ReActEventType.FAULT,
                                                          {"fatal": True, "detail": "boom"})]),
             _on_recover=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
@@ -477,13 +463,13 @@ class TestRealTransferTable:
 
         ctx = ExecutionContext(question="test")
         handlers = self._stub_handlers(
-            _on_init=MagicMock(return_value=[]),  # auto-advance 进 _on_round
+            _on_init=MagicMock(return_value=[]),
             _on_round=MagicMock(return_value=[ReActEvent(ReActEventType.FAULT,
                                                          {"fatal": True, "detail": "boom"})]),
             _on_recover=MagicMock(return_value=[ReActEvent(ReActEventType.ABORT)]),
         )
         fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
 
-        assert len(observed) == 3  # START, FAULT, ABORT（auto-advance 的 None 事件不进 seq）
+        assert len(observed) == 3
         assert observed == sorted(observed)
         assert len(set(observed)) == len(observed)

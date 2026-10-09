@@ -24,9 +24,6 @@ from agentnexus.eval.memory.schema import BenchQuestion, Conversation, Turn
 
 logger = logging.getLogger(__name__)
 
-# abstention gold for LoCoMo adversarial questions: the question presupposes
-# something the conversation does not support — the scored behavior is saying
-# "not determinable", so we canonicalize the gold phrase.
 ABSTAIN_GOLD = "无法确定"
 
 SOURCES: dict[str, dict[str, str]] = {
@@ -40,9 +37,6 @@ SOURCES: dict[str, dict[str, str]] = {
     },
 }
 
-# LoCoMo qa.category ints → our qa_type (counts per the ACL 2024 paper:
-# 4=single-hop 841, 1=multi-hop 282, 2=temporal 321, 3=open-domain 96,
-# 5=adversarial 446).
 _LOCOMO_CATEGORY_MAP = {
     4: "single_hop",
     1: "multi_session",
@@ -51,7 +45,6 @@ _LOCOMO_CATEGORY_MAP = {
     5: "abstention",
 }
 
-# LongMemEval question_type values → our qa_type.
 _LONGMEMEVAL_TYPE_MAP = {
     "single-session-user": "single_hop",
     "single-session-assistant": "single_hop",
@@ -118,7 +111,7 @@ def convert_locomo(raw: list[dict]) -> list[Conversation]:
             if qa_type is None:
                 continue
             if qa_type == "abstention":
-                gold = ABSTAIN_GOLD          # adversarial_answer is the trap, not gold
+                gold = ABSTAIN_GOLD
             else:
                 gold = str(q.get("answer", "")).strip()
                 if not gold:

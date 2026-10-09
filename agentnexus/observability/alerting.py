@@ -24,13 +24,13 @@ class AlertSeverity(str, Enum):
 
 
 class AlertType(str, Enum):
-    DRIFT = "drift"                      # 漂移检测
-    COST_EXCEED = "cost_exceed"          # 成本超限
-    TOOL_FAILURE_SPIKE = "tool_failure_spike"  # 工具失败率飙升
-    SLOW_HOOK = "slow_hook"              # Hook 执行过慢
-    MCP_DEGRADED = "mcp_degraded"        # MCP 服务器降级
-    CONSECUTIVE_FAILURE = "consecutive_failure"  # 连续任务失败
-    HUMAN_TAKEOVER = "human_takeover"    # 人工接管
+    DRIFT = "drift"
+    COST_EXCEED = "cost_exceed"
+    TOOL_FAILURE_SPIKE = "tool_failure_spike"
+    SLOW_HOOK = "slow_hook"
+    MCP_DEGRADED = "mcp_degraded"
+    CONSECUTIVE_FAILURE = "consecutive_failure"
+    HUMAN_TAKEOVER = "human_takeover"
 
 
 @dataclass
@@ -44,8 +44,6 @@ class Alert:
     trace_id: str = ""
 
 
-# ── 告警规则接口 ──────────────────────────────────────────────────
-
 class AlertRule(ABC):
     """告警规则基类"""
 
@@ -55,8 +53,6 @@ class AlertRule(ABC):
         ...
 
 
-# ── 告警通道接口 ──────────────────────────────────────────────────
-
 class AlertChannel(ABC):
     """告警通知通道基类"""
 
@@ -65,8 +61,6 @@ class AlertChannel(ABC):
         """发送告警通知"""
         ...
 
-
-# ── 内置规则 ──────────────────────────────────────────────────────
 
 class CostExceedRule(AlertRule):
     """Token 成本超过阈值"""
@@ -139,8 +133,6 @@ class DriftCriticalRule(AlertRule):
         return None
 
 
-# ── 内置通道 ──────────────────────────────────────────────────────
-
 class LogAlertChannel(AlertChannel):
     """写入日志文件"""
 
@@ -193,8 +185,6 @@ class ConsoleAlertChannel(AlertChannel):
         except Exception:
             print(f"[ALERT] {alert.severity.value.upper()}: {alert.message}")
 
-
-# ── 告警管理器 ────────────────────────────────────────────────────
 
 class AlertManager:
     """统一告警管理器"""
@@ -249,8 +239,6 @@ class AlertManager:
         return result
 
 
-# ── 全局实例 ──────────────────────────────────────────────────────
-
 _global_alert_manager: AlertManager | None = None
 
 
@@ -266,13 +254,11 @@ def setup_default_alerts(traces_dir: str | None = None) -> AlertManager:
     """设置默认的告警规则和通道"""
     manager = get_alert_manager()
 
-    # 添加默认规则
     manager.add_rule(CostExceedRule(threshold_cny=10.0))
     manager.add_rule(ToolFailureSpikeRule(threshold=0.3))
     manager.add_rule(TaskSuccessRateRule(threshold=0.7))
     manager.add_rule(DriftCriticalRule())
 
-    # 添加默认通道
     manager.add_channel(ConsoleAlertChannel())
     if traces_dir:
         manager.add_channel(LogAlertChannel(log_dir=str(Path(traces_dir).parent / "alerts")))

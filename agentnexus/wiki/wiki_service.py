@@ -63,8 +63,6 @@ class WikiService:
         self.propagation = PropagationEngine(self.store, self.verifier, self.router)
         self.linter = WikiLinter(self.store)
 
-    # ── Ingestion ───────────────────────────────────────────────────
-
     def ingest_source(
         self,
         source_text: str,
@@ -88,7 +86,6 @@ class WikiService:
         Returns:
             The generated WikiPage.
         """
-        # Deduplicate: if a page with the same title already exists, update it
         from pathlib import Path
         expected_title = Path(source_uri).name if source_uri else ""
         existing_pages = self.store.list_pages(source_namespace=source_namespace)
@@ -98,29 +95,23 @@ class WikiService:
                 existing_page = p
                 break
 
-        # Generate wiki page from source using LLM
         page = self._generate_wiki_page(
             source_text, source_uri, source_namespace, page_type, llm_client
         )
 
-        # Reuse existing page_id to avoid duplicates
         if existing_page:
             page.page_id = existing_page.page_id
 
-        # Verify all statements mechanically
         self._verify_page_statements(page)
 
-        # Compute confidence
         page.confidence = self.router.compute_page_confidence(page)
 
-        # Store page
         self.store.upsert_page(page)
         for stmt in page.statements:
             self.store.upsert_statement(stmt)
         for term, canon_def in page.canonical_definitions.items():
             self.store.upsert_canonical_definition(page.page_id, term, canon_def)
 
-        # Index in ChromaDB for wiki search
         self._index_page_in_chroma(page)
 
         logger.info(
@@ -146,7 +137,6 @@ class WikiService:
             source_text, source_uri, source_namespace, existing_pages, llm_client
         )
 
-        # Verify and store
         self._verify_page_statements(page)
         page.confidence = self.router.compute_page_confidence(page)
         self.store.upsert_page(page)
@@ -155,14 +145,11 @@ class WikiService:
         for term, canon_def in page.canonical_definitions.items():
             self.store.upsert_canonical_definition(page.page_id, term, canon_def)
 
-        # Build dependency links
         for ref_page_id in self._extract_cross_references(page, existing_pages):
             self.store.add_dependency(ref_page_id, page.page_id)
 
         self._index_page_in_chroma(page)
         return page
-
-    # ── Query ───────────────────────────────────────────────────────
 
     def query(
         self,
@@ -180,7 +167,6 @@ class WikiService:
         if force_rag:
             return self._rag_fallback(question, rag_namespace or source_namespace)
 
-        # Search wiki
         wiki_pages = self.search_wiki_pages(question, source_namespace)
         if not wiki_pages:
             return self._rag_fallback(question, rag_namespace or source_namespace)
@@ -217,7 +203,6 @@ class WikiService:
         if not results:
             return []
 
-        # Fetch full pages from store
         pages: list[WikiPage] = []
         for r in results:
             page_id = r.get("metadata", {}).get("page_id", "")
@@ -226,8 +211,6 @@ class WikiService:
                 if page and page.source_namespace == source_namespace:
                     pages.append(page)
         return pages
-
-    # ── Lint ────────────────────────────────────────────────────────
 
     def run_lint(self, source_namespace: str = "", rag_namespace: str = "") -> list[dict]:
         """Run full lint and enqueue review items."""
@@ -247,13 +230,10 @@ class WikiService:
         """Process overdue review items (auto-degradation)."""
         return self.linter.process_overdue_items()
 
-    # ── Calibration ─────────────────────────────────────────────────
-
     def calibrate(self, samples: list[CalibrationSample]) -> dict:
         """Run threshold calibration with human-labeled samples."""
         result = run_calibration(self.store, samples)
 
-        # Reload verifier with new thresholds
         self.verifier = MechanicalVerifier(thresholds=result["thresholds"])
         self.propagation.verifier = self.verifier
 
@@ -266,7 +246,7 @@ class WikiService:
         calibration = self.store.get_latest_calibration()
 
         if not calibration:
-            return stats["page_count"] > 0  # Need calibration if wiki has pages
+            return stats["page_count"] > 0
 
         calibrated_size = calibration.get("sample_size", 0)
         current_size = stats["page_count"]
@@ -276,8 +256,6 @@ class WikiService:
         growth_pct = (current_size - calibrated_size) / calibrated_size
         return growth_pct >= settings.wiki_calibration_retrigger_pct
 
-    # ── RAG Integration ─────────────────────────────────────────────
-
     def on_rag_ingest(self, chunk_ids: list[str]):
         """Hook: called after RAG ingestion to trigger wiki re-verification."""
         settings = get_settings()
@@ -285,14 +263,10 @@ class WikiService:
             return
         self.propagation.on_chunk_update(chunk_ids)
 
-    # ── Stats ───────────────────────────────────────────────────────
-
     def get_stats(self, source_namespace: str = "") -> dict:
         stats = self.store.get_stats(source_namespace)
         stats["calibration_needed"] = self.check_calibration_needed(source_namespace)
         return stats
-
-    # ── Internal ────────────────────────────────────────────────────
 
     def _verify_page_statements(self, page: WikiPage):
         """Verify all statements in a page using mechanical verifier."""
@@ -302,7 +276,6 @@ class WikiService:
                 new_level, _ = self.verifier.verify_and_update_statement(stmt, chunk_texts)
                 stmt.verified_synthesis_level = new_level
             else:
-                # No chunk texts available — mark as unverified
                 stmt.verified_synthesis_level = stmt.synthesis_level
 
     def _generate_wiki_page(
@@ -326,10 +299,9 @@ class WikiService:
         page_id = _make_id("page")
         title = Path(source_uri).name if source_uri else "Untitled"
 
-        # Get RAG chunks for this source to link statements
         catalog = get_knowledge_base_catalog()
         kb = catalog.get_knowledge_base(source_namespace)
-        chunk_map: dict[str, str] = {}  # chunk_id -> chunk_text
+        chunk_map: dict[str, str] = {}
         if kb:
             all_docs = catalog.list_documents(kb.kb_id)
             for doc in all_docs:
@@ -338,7 +310,6 @@ class WikiService:
                     for c in chunks:
                         chunk_map[c.chunk_id] = c.text
 
-        # Try LLM-based extraction
         statements = []
         if llm_client:
             try:
@@ -348,7 +319,6 @@ class WikiService:
             except Exception as e:
                 logger.warning("LLM statement extraction failed: %s", e)
 
-        # Fallback: create one statement per chunk
         if not statements and chunk_map:
             for chunk_id, chunk_text in chunk_map.items():
                 statements.append(WikiStatement(
@@ -361,7 +331,6 @@ class WikiService:
                     updated_at=_utc_now(),
                 ))
 
-        # Fallback: no chunks available, create a single statement from source
         if not statements:
             statements.append(WikiStatement(
                 statement_id=_make_id("stmt"),
@@ -420,7 +389,6 @@ class WikiService:
                 silent=True,
             )
             import json
-            # Extract JSON from response
             response = response.strip()
             if response.startswith("```"):
                 response = response.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -432,7 +400,6 @@ class WikiService:
                 if not stmt_text:
                     continue
                 source_ids = item.get("source_chunk_ids", [])
-                # Validate chunk IDs exist
                 valid_ids = [cid for cid in source_ids if cid in chunk_map]
                 level = item.get("synthesis_level", "synthesis")
                 valid_levels = {v.value for v in SynthesisLevel}
@@ -463,16 +430,13 @@ class WikiService:
         llm_client,
     ) -> WikiPage:
         """Generate wiki page with awareness of existing pages."""
-        # Context-aware generation: include existing page titles/summaries
         context = "\n".join(
             f"- {p.title}: {p.content[:200]}..." for p in existing_pages[:20]
         )
-        # LLM prompt would include this context
         return self._generate_wiki_page(source_text, source_uri, source_namespace, "concept", llm_client)
 
     def _extract_cross_references(self, page: WikiPage, existing_pages: list[WikiPage]) -> list[str]:
         """Extract cross-references between new page and existing pages."""
-        # Simple keyword matching for now
         ref_ids: list[str] = []
         page_terms = set(page.canonical_definitions.keys())
         for existing in existing_pages:
@@ -488,7 +452,6 @@ class WikiService:
 
         from agentnexus.storage.chroma import upsert_documents
 
-        # Index page content + title
         text = f"{page.title}\n\n{page.content}"
         metadata = {
             "page_id": page.page_id,

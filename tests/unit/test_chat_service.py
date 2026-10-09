@@ -103,7 +103,6 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run.id)
         assert snapshot.status == "empty_answer"
         assert "Agent 未能得出最终答案" in snapshot.answer
-        # Called twice: once to persist user question immediately, once for final result
         assert version.commit_with_messages.call_count == 2
 
     def test_stream_events_unknown_run_id_raises_key_error(self):
@@ -117,10 +116,8 @@ class TestChatService:
         service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
-        # Consume events that are already queued
         events_before = list(service.stream_events(run.id))
         assert len(events_before) == 4
-        # Cancel and read new events
         service.cancel_run(run.id)
         events_after = list(service.stream_events(run.id))
         assert len(events_after) == 2
@@ -130,7 +127,6 @@ class TestChatService:
 
     def test_cancel_run_unknown_run_id_is_noop(self):
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
-        # Should not raise
         service.cancel_run("nonexistent")
 
     def test_confirm_tool_call_emits_confirmation_requested_with_true(self):
@@ -139,7 +135,6 @@ class TestChatService:
         service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
         session = service.start_session()
         run = service.send_message(session.id, "hello")
-        # Drain initial events
         self._drain_queue(service, run.id)
         service.confirm_tool_call(run.id, approved=True)
         events = self._drain_queue(service, run.id)
@@ -170,7 +165,6 @@ class TestChatService:
         agent = MagicMock()
         service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: memory, version_manager=version)
         session = service.start_session(skill="python", profile="expert")
-        # Trigger lazy creation of per-session instances
         service._get_or_create_memory(session.id)
         service._version_managers[session.id] = version
         snapshot = service.get_session_snapshot(session.id)
@@ -212,7 +206,6 @@ class TestChatService:
         snapshot = service.get_run_snapshot(run_id)
         assert snapshot.status == "failed"
         assert "something broke" in snapshot.answer
-        # Called twice: once to persist user question immediately, once for final result
         assert version.commit_with_messages.call_count == 2
 
     def test_cancel_run_sets_cancel_checker(self):
@@ -308,7 +301,6 @@ class TestChatService:
         assert workflow_event.payload["status"] == "ok"
         assert workflow_event.payload["summary"]
         assert skill.snapshot().last_run_status == "completed"
-        # Workflow context is now passed via set_workflow_context(), not embedded in user text
         agent.set_workflow_context.assert_called()
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Inspect." in ctx
@@ -372,7 +364,6 @@ class TestChatService:
         service.send_message(session.id, "hello")
 
         assert skill.current == entry
-        # Workflow context is now passed via set_workflow_context(), not embedded in user text
         agent.set_workflow_context.assert_called()
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Inspect session skill." in ctx
@@ -409,7 +400,6 @@ class TestChatService:
         assert "skill_auto_selected" in event_types
         auto_event = next(event for event in events if event.type == "skill_auto_selected")
         assert auto_event.payload["source"] == "deterministic"
-        # Workflow context is now passed via set_workflow_context(), not embedded in user text
         agent.set_workflow_context.assert_called()
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Draft concise release notes." in ctx
@@ -455,7 +445,6 @@ class TestChatService:
             t.join()
 
         assert seen == {"a": "skill_a/skill_a", "b": "skill_b/skill_b"}, f"技能选择跨线程泄漏: {seen}"
-        # 新线程（无线程级设置）回退到默认技能
         assert skill.current.qualified_id == "skill_a/skill_a"
 
     @staticmethod

@@ -157,7 +157,6 @@ class TestWikiServiceCalibration:
         }
         result = self.service.calibrate([])
         assert result["sample_size"] == 10
-        # Verifier should be replaced
         assert self.service.verifier is not self.mock_verifier
 
     def test_check_calibration_needed_true_when_no_calibration(self):

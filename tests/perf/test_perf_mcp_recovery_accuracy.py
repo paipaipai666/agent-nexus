@@ -15,11 +15,9 @@ import time
 
 from agentnexus.tools.mcp.schema import MCPServerState
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-RECOVERY_ACCURACY_MIN = 0.90  # 90% accuracy during recovery
-RECOVERY_LATENCY_P95_MAX_MS = 100  # P95 latency during recovery
-FLAPPING_ACCURACY_MIN = 0.85  # 85% accuracy during server flapping
+RECOVERY_ACCURACY_MIN = 0.90
+RECOVERY_LATENCY_P95_MAX_MS = 100
+FLAPPING_ACCURACY_MIN = 0.85
 
 
 def _percentile(data: list[float], p: int) -> float:
@@ -61,21 +59,18 @@ class MockMCPServer:
         """Simulate tool call with potential failures."""
         self.call_count += 1
 
-        # Handle flapping behavior
         if self._is_flapping:
             self._flap_counter += 1
-            if self._flap_counter % 3 == 0:  # Fail every 3rd call
+            if self._flap_counter % 3 == 0:
                 self.failure_count += 1
                 self.state = MCPServerState.DEGRADED
                 return False, f"Server {self.name} is flapping"
 
-        # Handle random failures
         if random.random() < self.failure_rate:
             self.failure_count += 1
             self.state = MCPServerState.DEGRADED
             return False, f"Server {self.name} failed"
 
-        # Success case
         if self.state == MCPServerState.DEGRADED:
             self.recovery_count += 1
             self.state = MCPServerState.HEALTHY
@@ -117,7 +112,6 @@ class MockMCPCallRouterWithRecovery:
             self._call_latencies.append(latency)
             return False, f"Server {expected_server} not found"
 
-        # Try the expected server first
         success, result = server.call_tool(tool_name)
         if success:
             latency = time.perf_counter() - start
@@ -125,7 +119,6 @@ class MockMCPCallRouterWithRecovery:
             self.success_count += 1
             return True, result
 
-        # Try fallback servers
         for fallback_name, fallback_server in self.servers.items():
             if fallback_name != expected_server and fallback_server.state == MCPServerState.HEALTHY:
                 success, result = fallback_server.call_tool(tool_name)
@@ -150,9 +143,6 @@ class MockMCPCallRouterWithRecovery:
         return _p95_ms(self._call_latencies) if self._call_latencies else 0.0
 
 
-# ── MCP-Rec-1: Accuracy during disconnection/reconnection ─────────
-
-
 class TestMCPRecoveryDisconnectReconnect:
     """Test tool call accuracy during server disconnection and reconnection."""
 
@@ -160,35 +150,28 @@ class TestMCPRecoveryDisconnectReconnect:
         """Verify accuracy when servers disconnect and reconnect."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers
         for i in range(5):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(5)])
             router.add_server(server)
 
-        # Test normal operation
         test_cases = []
         for server_name, server in router.servers.items():
             for tool in server.tools[:2]:
                 test_cases.append((tool, server_name))
 
-        # Phase 1: Normal operation
         for tool_name, expected_server in test_cases:
             router.route_call(tool_name, expected_server)
 
-        # Phase 2: Disconnect some servers
         disconnected_servers = ["server_01", "server_03"]
         for server_name in disconnected_servers:
             router.servers[server_name].disconnect()
 
-        # Phase 3: Continue calls during disconnection
         for tool_name, expected_server in test_cases:
             router.route_call(tool_name, expected_server)
 
-        # Phase 4: Reconnect servers
         for server_name in disconnected_servers:
             router.servers[server_name].reconnect()
 
-        # Phase 5: Continue calls after reconnection
         for tool_name, expected_server in test_cases:
             router.route_call(tool_name, expected_server)
 
@@ -199,7 +182,6 @@ class TestMCPRecoveryDisconnectReconnect:
         """Verify accuracy with multiple reconnection cycles."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers
         for i in range(4):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(4)])
             router.add_server(server)
@@ -209,30 +191,22 @@ class TestMCPRecoveryDisconnectReconnect:
             for tool in server.tools[:2]:
                 test_cases.append((tool, server_name))
 
-        # Multiple reconnection cycles
         for cycle in range(3):
-            # Disconnect random servers
             disconnected = random.sample(list(router.servers.keys()), 2)
             for server_name in disconnected:
                 router.servers[server_name].disconnect()
 
-            # Make calls during disconnection
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
 
-            # Reconnect servers
             for server_name in disconnected:
                 router.servers[server_name].reconnect()
 
-            # Make calls after reconnection
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
 
         assert router.accuracy >= RECOVERY_ACCURACY_MIN, \
             f"Accuracy {router.accuracy:.2%} < {RECOVERY_ACCURACY_MIN:.2%} with multiple reconnections"
-
-
-# ── MCP-Rec-2: Accuracy during intermittent failures ──────────────
 
 
 class TestMCPRecoveryIntermittentFailures:
@@ -242,7 +216,6 @@ class TestMCPRecoveryIntermittentFailures:
         """Verify accuracy with intermittent server failures."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers with different failure rates
         failure_rates = [0.0, 0.1, 0.2, 0.3, 0.0]
         for i, failure_rate in enumerate(failure_rates):
             server = MockMCPServer(
@@ -257,7 +230,6 @@ class TestMCPRecoveryIntermittentFailures:
             for tool in server.tools[:3]:
                 test_cases.append((tool, server_name))
 
-        # Make many calls to exercise failure paths
         for _ in range(10):
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
@@ -269,7 +241,6 @@ class TestMCPRecoveryIntermittentFailures:
         """Verify accuracy with high failure rate but fallback servers."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers: one with high failure rate, others as fallbacks
         primary_server = MockMCPServer("primary", [f"tool_{j:02d}" for j in range(10)], failure_rate=0.5)
         router.add_server(primary_server)
 
@@ -279,16 +250,12 @@ class TestMCPRecoveryIntermittentFailures:
 
         test_cases = [(f"tool_{j:02d}", "primary") for j in range(10)]
 
-        # Make calls with fallback
         for _ in range(5):
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
 
         assert router.accuracy >= RECOVERY_ACCURACY_MIN, \
             f"Accuracy {router.accuracy:.2%} < {RECOVERY_ACCURACY_MIN:.2%} with high failure rate"
-
-
-# ── MCP-Rec-3: Accuracy during server flapping ────────────────────
 
 
 class TestMCPRecoveryServerFlapping:
@@ -298,10 +265,9 @@ class TestMCPRecoveryServerFlapping:
         """Verify accuracy when servers are flapping."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers with one flapping
         for i in range(4):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(5)])
-            if i == 1:  # Make one server flap
+            if i == 1:
                 server.set_flapping(True)
             router.add_server(server)
 
@@ -310,7 +276,6 @@ class TestMCPRecoveryServerFlapping:
             for tool in server.tools[:3]:
                 test_cases.append((tool, server_name))
 
-        # Make calls during flapping
         for _ in range(8):
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
@@ -322,10 +287,9 @@ class TestMCPRecoveryServerFlapping:
         """Verify accuracy with multiple flapping servers."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers with multiple flapping
         for i in range(5):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(4)])
-            if i in [1, 3]:  # Make two servers flap
+            if i in [1, 3]:
                 server.set_flapping(True)
             router.add_server(server)
 
@@ -334,7 +298,6 @@ class TestMCPRecoveryServerFlapping:
             for tool in server.tools[:2]:
                 test_cases.append((tool, server_name))
 
-        # Make calls during flapping
         for _ in range(6):
             for tool_name, expected_server in test_cases:
                 router.route_call(tool_name, expected_server)
@@ -346,7 +309,6 @@ class TestMCPRecoveryServerFlapping:
         """Verify latency remains acceptable during flapping."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers with flapping
         for i in range(4):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(5)])
             if i == 2:
@@ -358,7 +320,6 @@ class TestMCPRecoveryServerFlapping:
             for tool in server.tools[:2]:
                 test_cases.append((tool, server_name))
 
-        # Make calls and measure latency
         start = time.perf_counter()
         for _ in range(5):
             for tool_name, expected_server in test_cases:
@@ -370,9 +331,6 @@ class TestMCPRecoveryServerFlapping:
             f"Average latency {avg_latency_ms:.1f}ms >= {RECOVERY_LATENCY_P95_MAX_MS}ms during flapping"
 
 
-# ── Integration tests ────────────────────────────────────────────
-
-
 class TestMCPRecoveryIntegration:
     """Integration tests for MCP recovery scenarios."""
 
@@ -380,7 +338,6 @@ class TestMCPRecoveryIntegration:
         """Verify accuracy with mixed recovery scenarios."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers with different behaviors
         servers = [
             MockMCPServer("stable", [f"stable_tool_{j:02d}" for j in range(5)], failure_rate=0.0),
             MockMCPServer("flaky", [f"flaky_tool_{j:02d}" for j in range(5)], failure_rate=0.2),
@@ -396,9 +353,7 @@ class TestMCPRecoveryIntegration:
             for tool in server.tools[:3]:
                 test_cases.append((tool, server_name))
 
-        # Make calls with mixed scenarios
         for _ in range(10):
-            # Randomly disconnect/reconnect some servers
             if random.random() < 0.3:
                 server = random.choice(servers)
                 if server.state == MCPServerState.HEALTHY:
@@ -416,7 +371,6 @@ class TestMCPRecoveryIntegration:
         """Verify recovery performance characteristics."""
         router = MockMCPCallRouterWithRecovery()
 
-        # Create servers
         for i in range(4):
             server = MockMCPServer(f"server_{i:02d}", [f"tool_{i:02d}_{j:02d}" for j in range(5)])
             router.add_server(server)
@@ -426,20 +380,17 @@ class TestMCPRecoveryIntegration:
             for tool in server.tools[:2]:
                 test_cases.append((tool, server_name))
 
-        # Measure performance during different phases
         phases = {
             "normal": [],
             "disconnected": [],
             "recovery": [],
         }
 
-        # Phase 1: Normal operation
         start = time.perf_counter()
         for tool_name, expected_server in test_cases:
             router.route_call(tool_name, expected_server)
         phases["normal"].append(time.perf_counter() - start)
 
-        # Phase 2: Disconnect some servers
         for server_name in ["server_01", "server_02"]:
             router.servers[server_name].disconnect()
 
@@ -448,7 +399,6 @@ class TestMCPRecoveryIntegration:
             router.route_call(tool_name, expected_server)
         phases["disconnected"].append(time.perf_counter() - start)
 
-        # Phase 3: Recovery
         for server_name in ["server_01", "server_02"]:
             router.servers[server_name].reconnect()
 
@@ -457,7 +407,6 @@ class TestMCPRecoveryIntegration:
             router.route_call(tool_name, expected_server)
         phases["recovery"].append(time.perf_counter() - start)
 
-        # Verify latency doesn't spike dramatically during recovery
         normal_latency = sum(phases["normal"]) / len(phases["normal"])
         recovery_latency = sum(phases["recovery"]) / len(phases["recovery"])
 

@@ -184,7 +184,6 @@ def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查
         console.print(Panel(f"Trace [bold cyan]{trace_id}[/bold cyan]", title="Trace Details"))
         console.print(root_tree)
 
-        # Summary section
         total_latency = sum(s.get("latency_ms", 0) for s in spans)
         total_in = sum(s.get("metadata", {}).get("input_tokens", 0) for s in spans)
         total_out = sum(s.get("metadata", {}).get("output_tokens", 0) for s in spans)

@@ -28,8 +28,6 @@ _SAFE_SUBAGENT_TOOLS = {
     "file_read",
     "file_list",
     "memory_search",
-    # shell_exec replaces the removed python_execute for delegated execution;
-    # it stays HITL-gated via the subagent confirm bridge at call time.
     "shell_exec",
 }
 
@@ -64,11 +62,9 @@ def _clone_llm(parent_llm: AgentLLM | None) -> AgentLLM:
     )
 
 
-
 def _normalize_role(role: str | None) -> str:
     normalized = (role or "explorer").strip().lower()
     return _LEGACY_ROLE_ALIASES.get(normalized, "explorer")
-
 
 
 def _resolve_allowed_tools(
@@ -94,7 +90,6 @@ def _resolve_allowed_tools(
     return preset, "requested_tools_filtered"
 
 
-
 def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None) -> str:
     role_desc = _ROLE_DESCRIPTIONS.get(role, _ROLE_DESCRIPTIONS["explorer"])
     retry_block = ""
@@ -110,7 +105,6 @@ def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None
         f"{retry_block}\n"
         f"子任务：{task}"
     )
-
 
 
 def _register_child_tools(executor: ToolRegistry, parent_llm: AgentLLM | None,
@@ -130,7 +124,6 @@ def _register_child_tools(executor: ToolRegistry, parent_llm: AgentLLM | None,
     )
 
 
-
 def _extract_step_summary(result) -> str:
     steps = getattr(result, "steps", []) or []
     for step in reversed(steps):
@@ -142,7 +135,6 @@ def _extract_step_summary(result) -> str:
             if extracted:
                 return extracted[:1000]
     return ""
-
 
 
 def _make_child_forwarder(sctx, entry):
@@ -188,7 +180,6 @@ def _make_child_forwarder(sctx, entry):
     return forward
 
 
-
 def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                           task: str, role: str, tool_names: list[str],
                           retry_reason: str | None = None,
@@ -218,30 +209,19 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
         child_agent = ReActAgent(
             child_llm,
             child_executor,
-            # No step cap: the child runs until the task completes. The
-            # wall-clock budget (subagent_timeout_sec) is the real guard —
-            # a hard step cap truncated long investigations mid-work
-            # ("已达到最大步数") while buying nothing the timeout doesn't.
             max_steps=None,
             output=lambda *_args, **_kwargs: None,
             confirm_fn=subagent_confirm,
             conversation_mode=False,
             agent_id=f"subagent_{role}",
         )
-        # Timeout cancel signal — set when the wall-clock budget expires so the
-        # child stops at the next FSM boundary instead of orphaning its thread.
         local_cancel = threading.Event()
-        # Cooperative cancellation: parent run cancelled, UI interrupt on this
-        # subagent, or the wall-clock budget expired → stop at next boundary.
-        # Always installed — a child without any checker cannot be cancelled.
         child_agent.set_cancel_checker(
             lambda: local_cancel.is_set()
                     or (cancel_bridge is not None and cancel_bridge.check())
                     or (subagent_entry is not None and subagent_entry.cancel_event.is_set())
         )
         if subagent_ctx is not None and subagent_entry is not None:
-            # Visibility: forward child FSM events into the parent run's
-            # queue so the UI can show this subagent's trajectory/status.
             child_agent._on_event = _make_child_forwarder(subagent_ctx, subagent_entry)
 
         try:
@@ -261,9 +241,6 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                 parent_trace_id = trace_manager.get_inherited_trace()
 
                 def _run_child(prompt: str):
-                    # Runner thread has no active TraceContext; stamp the
-                    # parent's trace id so child spans stay joinable
-                    # (same pattern as tools/dispatcher.py).
                     trace_manager.set_inherited_trace(parent_trace_id)
                     try:
                         return child_agent.run(prompt, memory_manager=None)
@@ -278,9 +255,6 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                     try:
                         result = future.result(timeout=deadline)
                     except FutureTimeout:
-                        # Budget expired: signal cooperative cancel. The child FSM
-                        # checks the cancel flag at every step boundary, raises
-                        # AgentCancelled, and the runner thread exits — no orphan.
                         local_cancel.set()
                         if subagent_entry is not None:
                             subagent_entry.cancel_event.set()
@@ -288,7 +262,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                             "Subagent attempt exceeded %ss — cancelling cooperatively", deadline,
                         )
                         try:
-                            result = future.result(timeout=120)  # grace for in-flight LLM call
+                            result = future.result(timeout=120)
                         except FutureTimeout:
                             raise TimeoutError(
                                 f"subagent ignored cancel and ran past {deadline}s + 120s grace"
@@ -320,10 +294,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
             })
             return None, exc
     finally:
-        # The child registry is per-attempt; without shutdown its pool
-        # threads would linger (one+ per attempt on Python < 3.13).
         child_executor.close()
-
 
 
 def _build_payload(status: str, role: str, answer: str, summary: str,
@@ -342,7 +313,6 @@ def _build_payload(status: str, role: str, answer: str, summary: str,
     if recovery:
         payload["recovery"] = recovery
     return json.dumps(payload, ensure_ascii=False)
-
 
 
 def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False,
@@ -374,15 +344,12 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 span.metadata = {"status": "error", "agent_id": f"subagent_{effective_role}"}
                 return payload
 
-            # Subagent visibility: register the named entry (agent-provided
-            # `name` or auto-generated) for the sidebar/detail view.
             sctx = subagent_bridge.get_context() if subagent_bridge is not None else None
             entry = sctx.started(name, effective_role, task) if sctx is not None else None
             _sid = entry.subagent_id if entry is not None else ""
             _name = entry.name if entry is not None else ""
 
             if entry is not None and entry.cancel_event.is_set():
-                # Interrupted while queued on the lane pool — never start.
                 sctx.finished(entry, "interrupted", error="cancelled before start")
                 payload = _build_payload(
                     status="error", role=effective_role, answer="",
@@ -407,9 +374,6 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
             )
             if error is not None and (isinstance(error, AgentCancelled)
                                       or (entry is not None and entry.cancel_event.is_set())):
-                # Cancelled (per-subagent interrupt or parent run cancel):
-                # do NOT run the fallback attempt — a second child run would
-                # only burn tokens before hitting the same checker.
                 if sctx is not None and entry is not None:
                     sctx.finished(entry, "interrupted", error=str(error) or "cancelled")
                 payload = _build_payload(

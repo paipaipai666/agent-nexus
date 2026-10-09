@@ -20,10 +20,6 @@ def _make_config(**overrides):
     return config
 
 
-# ---------------------------------------------------------------------------
-# build_http_client_kwargs
-# ---------------------------------------------------------------------------
-
 class TestBuildHttpClientKwargs:
     """Tests for the build_http_client_kwargs helper."""
 
@@ -83,7 +79,6 @@ class TestBuildHttpClientKwargs:
         config = _make_config(url="http://example.com")
         http_client = MagicMock()
         kwargs = build_http_client_kwargs(factory, config, http_client)
-        # **kwargs does not expose 'url' in parameters, so server_url fallback
         assert kwargs.get("server_url") == "http://example.com"
 
     def test_factory_with_all_params(self):
@@ -97,17 +92,12 @@ class TestBuildHttpClientKwargs:
         assert kwargs["http_client"] is http_client
 
 
-# ---------------------------------------------------------------------------
-# ensure_sdk_available
-# ---------------------------------------------------------------------------
-
 class TestEnsureSdkAvailable:
     """Tests for the ensure_sdk_available helper."""
 
     def test_sdk_installed_no_error(self):
         """When mcp is importable, no exception should be raised."""
         with patch.dict("sys.modules", {"mcp": MagicMock()}):
-            # Should not raise
             ensure_sdk_available()
 
     def test_sdk_not_installed_raises_runtime_error(self):

@@ -173,8 +173,6 @@ class TestSubagentRun:
         assert payload["role"] == "executor"
         assert payload["answer"] == "executor answer"
         assert captured["agent_id"] == "subagent_executor"
-        # executor preset [shell_exec, file_read, file_list, grep_search] —
-        # shell_exec is in _SAFE_SUBAGENT_TOOLS (HITL-gated at call time).
         assert captured["tools"] == {"shell_exec", "file_read", "file_list", "grep_search"}
         assert "web_search" not in captured["tools"]
         assert captured["confirm"] is bridge

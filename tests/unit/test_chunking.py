@@ -95,7 +95,7 @@ class TestFixedWindowSplit:
     def test_with_overlap(self):
         text = "a" * 300
         chunks = _fixed_window_split(text, 100, 20)
-        assert len(chunks) == 4  # step=80, 300/80 = 3.75 -> 4
+        assert len(chunks) == 4
 
 
 class TestSemanticBlocks:

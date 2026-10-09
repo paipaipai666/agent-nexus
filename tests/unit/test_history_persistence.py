@@ -91,7 +91,7 @@ def test_second_turn_after_restart_persists(tmp_path, monkeypatch):
     s1.send_message(sid, "hello")
 
     s2 = _service_with(tmp_path, monkeypatch, db)
-    s2._sessions[sid] = s1._sessions[sid]  # restored session handle
+    s2._sessions[sid] = s1._sessions[sid]
     s2._agents[sid] = _agent_that([
         ("system", "[思考过程] T2 thought"),
         ("system", "[最终答案] A2"),
@@ -110,8 +110,8 @@ def test_turn_with_tool_and_empty_assistant_appends(tmp_path, monkeypatch):
     service = _service_with(tmp_path, monkeypatch)
     sid = service.start_session().id
     service._agents[sid] = _agent_that([
-        ("assistant", ""),   # empty display_only thought (should not be persisted)
-        ("assistant", ""),   # ditto
+        ("assistant", ""),
+        ("assistant", ""),
         ("tool", "Action: express_reaction[{\"reaction\": \"like\"}]"),
         ("assistant", "summary thought"),
         ("system", "[最终答案] 当然喜欢！"),
@@ -136,13 +136,11 @@ def test_checkpoint_backfill_synthesizes_missing_answers(tmp_path, monkeypatch):
     vm.commit_with_messages([{"role": "user", "content": "q2"}], question="q2", answer="")
     vm.commit_with_messages(
         [{"role": "system", "content": "[最终答案] a2"}], question="q2", answer="a2")
-    # checkpoint metadata holding q1's lost answer (as conclude() recorded it)
     vm.commit_with_messages([], question="q1", answer="a1-final")
 
     msgs = vm.get_messages_with_answers()
     contents = [(m["role"], m["content"]) for m in msgs]
     print("BACKFILLED:", contents)
-    # q1 gains a synthesized [最终答案] right after its user row; q2 untouched
     assert ("system", "[最终答案] a1-final") in contents
     q1_idx = next(i for i, m in enumerate(msgs) if m["content"] == "q1")
     assert msgs[q1_idx + 1]["content"] == "[最终答案] a1-final"

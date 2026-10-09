@@ -11,7 +11,6 @@ from agentnexus.core.text_utils import collapse_and_truncate
 
 class SidePanel(Widget):
     """Dense IDE-style runtime summary panel."""
-
     DEFAULT_CSS = """
     SidePanel {
         height: 100%;
@@ -90,7 +89,6 @@ class SidePanel(Widget):
         self._todo_items = list(items)
         self._refresh_section("todo-card", self._render_todo())
 
-    # Backward-compatible shim for old tests/callers.
     def update_memory(self, items: list[str]):
         if items:
             self.update_skill(status=f"{len(items)} memories")

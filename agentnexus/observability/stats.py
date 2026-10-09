@@ -24,12 +24,10 @@ class TokenStats:
     cost_per_query: float = 0.0
     by_model: dict[str, dict] = field(default_factory=dict)
     by_date: dict[str, dict] = field(default_factory=dict)
-    # Prompt cache metrics
     total_cache_hit_tokens: int = 0
     total_cache_miss_tokens: int = 0
     cache_hit_rate: float = 0.0
     cache_saved_cost_cny: float = 0.0
-    # Phase 4: 任务级指标
     task_success_count: int = 0
     task_success_rate: float = 0.0
     tool_error_count: int = 0
@@ -98,22 +96,18 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                     model = _short_model(meta.get("model", "") or "")
                     latency = span.get("latency_ms", 0)
 
-                    # 任务成功/失败追踪
                     if span.get("name") == "final_answer":
                         trace_has_answer[tid] = True
 
-                    # 工具错误追踪
                     if span.get("name", "").startswith("tool"):
                         stats.tool_total_count += 1
                         if meta.get("status") == "error":
                             stats.tool_error_count += 1
                             trace_has_error[tid] = True
 
-                    # 上下文长度追踪
                     if tokens_in > 0:
                         context_lengths.append(tokens_in)
 
-                    # Prompt cache metrics
                     cache_hit = meta.get("cache_hit_tokens", 0)
                     cache_miss = meta.get("cache_miss_tokens", 0)
                     if cache_hit or cache_miss:
@@ -136,17 +130,14 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
 
     stats.total_tasks = len(seen_traces)
 
-    # 任务成功率
     if seen_traces:
         success_count = sum(1 for tid in seen_traces if trace_has_answer.get(tid, False))
         stats.task_success_count = success_count
         stats.task_success_rate = round(success_count / len(seen_traces), 4)
 
-    # 工具失败率
     if stats.tool_total_count > 0:
         stats.tool_failure_rate = round(stats.tool_error_count / stats.tool_total_count, 4)
 
-    # 上下文长度
     if context_lengths:
         stats.avg_context_length = round(sum(context_lengths) / len(context_lengths))
         stats.max_context_length = max(context_lengths)
@@ -196,12 +187,9 @@ def compute_stats(traces_dir: str, days: int = 7) -> TokenStats:
                 "output": date_model_tokens[d][model]["output"],
             }
 
-    # Calculate cache hit rate and saved cost
     total_cache_tokens = stats.total_cache_hit_tokens + stats.total_cache_miss_tokens
     if total_cache_tokens > 0:
         stats.cache_hit_rate = stats.total_cache_hit_tokens / total_cache_tokens
-        # Estimate cost saved by cache (cache hit price is ~1/50 of cache miss price for DeepSeek)
-        # This is a rough estimate; actual savings depend on the provider's pricing
         cache_miss_cost = _cost(stats.total_cache_miss_tokens, 0, "")
         cache_hit_cost = _cost(stats.total_cache_hit_tokens, 0, "")
         stats.cache_saved_cost_cny = round(cache_miss_cost - cache_hit_cost, 4)

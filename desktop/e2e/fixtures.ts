@@ -11,17 +11,11 @@ function backendContains(path: string) {
   return (url: string | URL) => isBackend(url) && (typeof url === 'string' ? url : url.href).includes(path)
 }
 
-/**
- * Set up API route mocks for the AgentNexus backend.
- * Call this BEFORE navigating to the page.
- */
 export async function mockApi(page: Page) {
-  // Health check — always OK
   await page.route(backendContains('/health'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' })
   )
 
-  // Create session
   let sessionCounter = 0
   await page.route(backendContains('/api/session'), (route) => {
     const url = route.request().url()
@@ -33,17 +27,14 @@ export async function mockApi(page: Page) {
     }
   })
 
-  // Restore session
   await page.route(backendContains('/api/session/restore'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ session_id: 'restored', restored: true }) })
   )
 
-  // Clear STM
   await page.route(backendContains('/api/memory/short/clear'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   )
 
-  // Recent sessions — starts empty, can be updated per test
   let recentSessions: any[] = []
   await page.route(backendContains('/api/sessions/recent'), (route) =>
     route.fulfill({
@@ -53,17 +44,14 @@ export async function mockApi(page: Page) {
     })
   )
 
-  // Session history
   await page.route(backendContains('/api/memory/short/history'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messages: [], count: 0 }) })
   )
 
-  // STM list (must come AFTER /short/clear and /short/history to avoid conflicts)
   await page.route(backendContains('/api/memory/short'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messages: [] }) })
   )
 
-  // Runtime status
   await page.route(backendContains('/api/runtime/status'), (route) =>
     route.fulfill({
       status: 200,
@@ -72,42 +60,34 @@ export async function mockApi(page: Page) {
     })
   )
 
-  // Config
   await page.route(backendContains('/api/config'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ cwd: '/tmp' }) })
   )
 
-  // MCP tools
   await page.route(backendContains('/api/mcp/tools'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tools: [] }) })
   )
 
-  // Skills
   await page.route(backendContains('/api/skills'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skills: [] }) })
   )
 
-  // Extensions
   await page.route(backendContains('/api/extensions'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
   )
 
-  // Todos
   await page.route(backendContains('/api/todos'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], count: 0 }) })
   )
 
-  // Version status
   await page.route(backendContains('/api/version/status'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ session_id: 'test', head: null, can_undo: false, can_redo: false }) })
   )
 
-  // Version log
   await page.route(backendContains('/api/version/log'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ checkpoints: [] }) })
   )
 
-  // Generic API catch-all — must be LAST
   await page.route(backendContains('/api/'), (route) => {
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
@@ -119,10 +99,6 @@ export async function mockApi(page: Page) {
   }
 }
 
-/**
- * Inject a mock WebSocket that captures sent messages and allows
- * the test to simulate server events.
- */
 export function installMockWebSocket(page: Page) {
   page.addInitScript(() => {
     // @ts-expect-error — override for testing
@@ -199,19 +175,16 @@ export const test = base.extend<AgentNexusFixtures>({
   mocks: async ({ page }, use) => {
     const ws = installMockWebSocket(page)
     const api = await mockApi(page)
-    // Capture page errors
     const errors: string[] = []
     page.on('pageerror', (err) => errors.push(err.message))
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text())
     })
     await page.goto('/', { waitUntil: 'networkidle' })
-    // Wait for app to get past the loading screen
     try {
       await page.waitForSelector('textarea', { timeout: 15_000 })
     } catch (err) {
       await page.screenshot({ path: 'test-results/debug.png' })
-      // Log page errors
       const html = await page.content()
       const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/)
       console.log('\n=== BODY HTML ===')

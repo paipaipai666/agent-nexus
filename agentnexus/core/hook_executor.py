@@ -34,7 +34,6 @@ from agentnexus.tools.workspace import get_effective_workspace
 
 logger = logging.getLogger(__name__)
 
-# Environment variables always passed through so shells/interpreters work.
 _ENV_ALLOWLIST = {
     "PATH", "SystemRoot", "COMSPEC", "WINDIR", "HOME", "USERPROFILE",
     "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP", "PATHEXT", "OS", "NUMBER_OF_PROCESSORS",
@@ -181,9 +180,6 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
         except (OSError, subprocess.SubprocessError):
             pass
     else:
-        # POSIX: grandchildren (shell wrappers that didn't exec) inherit the
-        # pipe handles and would block communicate() until they exit — kill
-        # the whole process group (spawned with start_new_session).
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except (OSError, ProcessLookupError):
@@ -284,7 +280,7 @@ class ConcurrentObserver:
         for future in futures:
             try:
                 result = future.result(timeout=max(60.0, max_timeout + 5))
-            except Exception as exc:  # defensive: observer hooks never break the loop
+            except Exception as exc:
                 logger.debug("observer command hook failed to complete: %s", exc)
                 continue
             results.append(result)

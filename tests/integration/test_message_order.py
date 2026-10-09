@@ -12,7 +12,6 @@ stores the answer with [最终答案] prefix.
 """
 
 
-# Simulate the frontend transformation logic from ChatPage.tsx loadAndDisplayMessages
 def transform_messages(stm: list[dict]) -> list[dict]:
     """Python port of the TypeScript transformation logic for testing."""
     transformed = []
@@ -155,33 +154,26 @@ class TestDuplicateAnswerBug:
             {"role": "user", "content": "问题"},
             {"role": "assistant", "content": "思考"},
             {"role": "system", "content": "[最终答案] 答案"},
-            {"role": "assistant", "content": "答案"},  # duplicate from turn service
+            {"role": "assistant", "content": "答案"},
         ]
         result = transform_messages(messages)
 
-        # The duplicate "assistant" becomes "system" (thinking)
         assert len(result) == 4
         assert result[0]["role"] == "user"
-        assert result[1]["role"] == "system"      # thinking
-        assert result[2]["role"] == "assistant"    # answer
-        assert result[3]["role"] == "system"       # duplicate displayed as thinking!
+        assert result[1]["role"] == "system"
+        assert result[2]["role"] == "assistant"
+        assert result[3]["role"] == "system"
         assert result[3]["content"] == "答案"
-
-        # This is the bug: the duplicate makes it look like thinking comes after answer
-        # After fix (removing duplicate), this scenario won't occur
 
     def test_no_duplicate_after_fix(self):
         """After fix: no duplicate answer in stored messages."""
-        # This is what the stored messages should look like after fix
         messages = [
             {"role": "user", "content": "问题"},
             {"role": "assistant", "content": "思考"},
             {"role": "system", "content": "[最终答案] 答案"},
-            # No duplicate assistant entry
         ]
         result = transform_messages(messages)
 
         assert len(result) == 3
         assert result[-1]["role"] == "assistant"
         assert result[-1]["content"] == "答案"
-        # No extra thinking after answer

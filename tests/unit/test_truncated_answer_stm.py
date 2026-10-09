@@ -35,7 +35,6 @@ class TestTruncatedAnswerPersistsToStm:
         agent._output = lambda _m: None
         mm = MemoryManager(session_id="trunc-stm", enable_long_term=False)
 
-        # 每次都「截断」且只吐半截正文 → 走续写/兜底
         llm.think.side_effect = lambda **kw: (
             setattr(llm, "last_truncated", True) or "AgentNexus 是一个框架，配备完整"
         )
@@ -44,7 +43,6 @@ class TestTruncatedAnswerPersistsToStm:
         contents = " | ".join(m.get("content") or "" for m in mm.short_term.get_all())
         assert "介绍 AgentNexus 项目" in contents
         assert "AgentNexus" in contents, f"截断正文未入 STM: {contents!r}"
-        # 最终答案应可被下一轮对话上下文捞到
         conv = agent._build_conversation_context(mm)
         assert "AgentNexus" in conv
         assert "介绍" in conv or "AgentNexus" in conv

@@ -14,9 +14,7 @@ class TestResolveCtxMax:
         assert resolve_ctx_max("totally-unknown-model-xyz") is None
 
     def test_registry_fallback_handles_deepseek_v4_flash(self):
-        # No hardcoded DeepSeek window — unknown unless the user overrides.
         assert resolve_ctx_max("deepseek-v4-flash", "https://api.deepseek.com") is None
-
 
 
 def _settings_with_profile(m, model="n/a"):
@@ -196,7 +194,6 @@ class TestHudBuildText:
         _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
-        hud.current_tokens = 99999  # well beyond ctx_max
+        hud.current_tokens = 99999
         text = hud._build_text()
-        # Bar should be fully filled (10 blocks)
         assert "██████████" in text

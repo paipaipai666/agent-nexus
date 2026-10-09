@@ -56,7 +56,7 @@ export default function StatusBar() {
       {stepCount != null && (
         <StatusItem>{stepCount} steps</StatusItem>
       )}
-      {/* Right: context usage + token totals */}
+      {}
       <div className="ml-auto flex items-center gap-3">
         {(totalInput != null || totalOutput != null) && (
           <span>in:{(totalInput ?? 0).toLocaleString()} out:{(totalOutput ?? 0).toLocaleString()}</span>

@@ -33,7 +33,6 @@ app.add_typer(skill_app, name="skill")
 hooks_app = typer.Typer(help="命令钩子管理")
 app.add_typer(hooks_app, name="hooks")
 
-# Import eval subpackage to register eval subcommands (rag, agent, calibrate, etc.)
 import agentnexus.cli.eval  # noqa: E402,F401
 from agentnexus.cli import (
     alerts_cmd,  # noqa: E402
@@ -73,15 +72,11 @@ def _continue_session(session_id: str | None) -> None:
             workspace,
         ):
             console.print(f"[red]Session not found in this directory:[/red] {session_id}")
-            # Note: SystemExit is used here because this runs before Typer's app() is called.
-            # Other commands use typer.Exit which is handled by Typer's error handling.
             raise SystemExit(1)
     else:
         session_id = ConversationVersionManager.find_latest_session(settings.memory_db_path, workspace)
         if not session_id:
             console.print("[yellow]No previous session found in this directory.[/yellow]")
-            # Note: SystemExit is used here because this runs before Typer's app() is called.
-            # Other commands use typer.Exit which is handled by Typer's error handling.
             raise SystemExit(1)
 
     from agentnexus.cli.tui_cmd import launch_tui
@@ -101,8 +96,6 @@ def main(argv: list[str] | None = None) -> None:
             extra = args[2:]
         if extra:
             console.print("[red]--continue accepts at most one session_id.[/red]")
-            # Note: SystemExit is used here because this runs before Typer's app() is called.
-            # Other commands use typer.Exit which is handled by Typer's error handling.
             raise SystemExit(2)
         _continue_session(session_id)
         return

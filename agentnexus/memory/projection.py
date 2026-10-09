@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-# Shared truncation constants for consistency across projection layers
 _TRUNCATION_THRESHOLD = 1000
 _TRUNCATION_KEPT = 500
 _MICROCOMPACT_THRESHOLD = 2000
-# Messages with importance above this threshold are protected from truncation
 _IMPORTANCE_PROTECT = 0.7
 
 
@@ -25,7 +23,6 @@ def project_mild(
         if is_recent:
             projected.append(dict(message))
             continue
-        # Protect high-importance messages from truncation
         if importance_fn and importance_fn(message, index, total) >= _IMPORTANCE_PROTECT:
             projected.append(dict(message))
             continue
@@ -136,7 +133,6 @@ def microcompact_messages(
     for index in recoverable_indices:
         if index in skip_indices:
             continue
-        # Protect high-importance tool messages
         if importance_fn and importance_fn(compacted[index], index, total) >= _IMPORTANCE_PROTECT:
             continue
         message = compacted[index]
@@ -149,7 +145,6 @@ def microcompact_messages(
 
     for index, message in enumerate(compacted):
         if message["role"] == "assistant":
-            # Protect high-importance assistant messages
             if importance_fn and importance_fn(message, index, total) >= _IMPORTANCE_PROTECT:
                 continue
             content = message.get("content", "")

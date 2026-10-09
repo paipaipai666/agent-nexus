@@ -9,9 +9,8 @@ import threading
 import time
 from unittest.mock import MagicMock
 
-CONCURRENT_RUNS = 16          # 4 会话 × 4 消息
+CONCURRENT_RUNS = 16
 FAKE_RUN_LATENCY_S = 0.05
-# 串行基线 ≈ 16 × 50ms = 800ms；并发阈值给足 CI 余量
 CONCURRENT_WALL_MAX_S = 0.9
 EVENT_CROSS_TALK_ALLOWED = 0
 
@@ -56,13 +55,11 @@ class TestConcurrentSessionPerf:
                     errors.append(e)
                 return None
 
-        # 串行基线
         t0 = time.perf_counter()
         r = do_run(sessions[0], 0)
         sequential_one = time.perf_counter() - t0
         assert r is not None
 
-        # 并发 15 个（已跑 1 个）
         start = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_RUNS) as pool:
             futures = [
@@ -77,7 +74,6 @@ class TestConcurrentSessionPerf:
         assert all(r is not None for r in results)
         assert len(results) == CONCURRENT_RUNS - 1
 
-        # 正确性：答案内容与会话归属一致（无串话）
         cross_talk = 0
         for sid, j, run, events in results:
             assert run.session_id == sid
@@ -86,7 +82,6 @@ class TestConcurrentSessionPerf:
                 cross_talk += 1
         assert cross_talk <= EVENT_CROSS_TALK_ALLOWED
 
-        # 并发收益：15 个 50ms 任务在 4 路并行下应远快于串行
         print(f"\n单次 {sequential_one * 1000:.0f}ms, 并发 15 runs 墙钟 {wall:.2f}s")
         assert wall < CONCURRENT_WALL_MAX_S, (
             f"并发墙钟 {wall:.2f}s 超阈值 {CONCURRENT_WALL_MAX_S}s——调度未并行或被锁串行化"

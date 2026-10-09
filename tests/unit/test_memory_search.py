@@ -128,7 +128,6 @@ class TestMemorySearch:
         ]
         result = memory_search("推荐一首歌")
         assert "用户喜欢周杰伦" in result
-        # B: context source line injected
         assert "推荐歌曲时用户否定了莫文蔚、选择周杰伦" in result
 
     @patch("agentnexus.tools.memory_search.get_embedding_model")
@@ -142,7 +141,6 @@ class TestMemorySearch:
         ]
         result = memory_search("What does user like?")
         assert "User likes Python" in result
-        # no metadata_json → no source line, output stays as before
         assert "来源" not in result
 
     @patch("agentnexus.tools.memory_search.get_embedding_model")

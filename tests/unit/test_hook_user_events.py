@@ -42,8 +42,6 @@ def native_llm(*answers: str) -> MagicMock:
     llm.capabilities.supports_thinking = False
     llm.capabilities.supports_tool_calling = True
     llm.capabilities.supports_json_mode = False
-    # Explicit attribute values: MagicMock auto-attrs are truthy and would
-    # misroute the FSM (e.g. last_truncated truthy → truncation retry loop).
     llm.last_error = None
     llm.last_reasoning_content = None
     llm.last_tool_calls = []
@@ -99,7 +97,7 @@ class TestAgentStop:
         vetoes: list[str] = []
 
         def veto_once(ctx):
-            if not vetoes:  # veto only the first attempt
+            if not vetoes:
                 vetoes.append(ctx.payload["answer"])
                 ctx.abort("缺少测试通过的证据")
 
@@ -120,7 +118,6 @@ class TestAgentStop:
 
         get_hook_manager().register(HookType.AGENT_STOP, always_veto, name="v2")
         result = agent.run("q")
-        # two vetoes consumed, third emit proceeds
         assert result.answer == "a3"
         assert llm.think.call_count == 3
 
@@ -166,7 +163,7 @@ class TestPermissionRequest:
         get_hook_manager().register(HookType.PERMISSION_REQUEST, allow, name="allow")
         result = registry.invoke("dangerous_op", {}, caller="test", hitl_approver=approver)
         assert result == "ok"
-        approver.assert_called_once()  # human prompt still required
+        approver.assert_called_once()
         assert registry.get_audit_log()[-1].hitl_decision == "user_allowed"
 
     def test_hook_allow_honored_with_opt_in(self, monkeypatch):

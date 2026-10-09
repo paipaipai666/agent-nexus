@@ -21,7 +21,6 @@ from agentnexus.memory.versioned import ConversationVersionManager
 from agentnexus.rag.embeddings import embedding_to_list
 
 logger = logging.getLogger(__name__)
-
 _REFLECTION_PROMPT = """\
 你是记忆整理助手。请分析以下近期记忆条目，归纳出值得长期保留的模式、反复出现的偏好、或重要结论。
 
@@ -54,14 +53,13 @@ def _format_memories_for_prompt(memories: list[dict]) -> str:
     lines = []
     for i, m in enumerate(memories, 1):
         cat = m.get("category", "?")
-        content = m.get("content", "")[:200]  # truncate for prompt
+        content = m.get("content", "")[:200]
         lines.append(f"{i}. [{cat}] {content}")
     return "\n".join(lines)
 
 
 def _should_reflect(memories: list[dict]) -> bool:
     """Pre-filter: only reflect if there are enough memories to find patterns."""
-    # Need at least 5 note-type memories to find meaningful patterns
     note_count = sum(1 for m in memories if m.get("category") in ("note", "task_progress", "error_pattern", "conversation"))
     return note_count >= 5
 
@@ -88,7 +86,6 @@ def run_reflection(
     if not long_term:
         return {"patterns_found": 0, "patterns_saved": 0, "memories_reviewed": 0, "error": "No LTM available"}
 
-    # Fetch recent note-category memories (not already reflected)
     rows = long_term._conn.execute(
         "SELECT id, category, content, importance, access_count, created_at "
         "FROM long_term_memories "
@@ -104,7 +101,6 @@ def run_reflection(
         return {"patterns_found": 0, "patterns_saved": 0, "memories_reviewed": len(memories),
                 "reason": f"Not enough note memories ({len(memories)}) to find patterns"}
 
-    # Send to LLM for pattern extraction
     prompt = _REFLECTION_PROMPT.format(memories=_format_memories_for_prompt(memories))
     try:
         response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
@@ -118,7 +114,6 @@ def run_reflection(
     if not patterns:
         return {"patterns_found": 0, "patterns_saved": 0, "memories_reviewed": len(memories)}
 
-    # Quarantine: proposals go to pending_memories, never directly to LTM.
     proposed_count = 0
     memory_ids = [m["id"] for m in memories]
 
@@ -137,7 +132,6 @@ def run_reflection(
             kind = "memo"
         importance = max(0.7, min(0.95, float(p.get("importance", 0.8))))
 
-        # Semantic dedup against LTM: skip if the pattern is already stored
         try:
             vec = embedding_to_list(embed_model.encode(content, normalize_embeddings=True))
         except Exception:
@@ -148,12 +142,11 @@ def run_reflection(
                 logger.debug("Skipping duplicate pattern (sim=%.2f): %s", existing[0]["_score"], content[:60])
                 continue
 
-        # Project-scope proposals need a workspace: take it from the source notes' sessions
         workspace_path = ""
         if scope == "project":
             workspace_path = _workspace_for_memories(memories) or ""
             if not workspace_path:
-                scope = "user"  # can't place it — fall back to user review
+                scope = "user"
 
         pending_id = long_term.add_pending(
             content,

@@ -39,11 +39,6 @@ def _make_runtime(config=None, **overrides):
     return SimpleNamespace(**attrs)
 
 
-# ---------------------------------------------------------------------------
-# connect_all
-# ---------------------------------------------------------------------------
-
-
 class TestConnectAll:
     """Tests for connect_all."""
 
@@ -92,7 +87,6 @@ class TestConnectAll:
         assert server_states["bad"] == MCPServerState.DISCONNECTED
         assert "bad" in failures
         assert "connection refused" in failures["bad"]
-        # good server should have been processed (CONNECTING state set, connect_server called)
         assert server_states["good"] == MCPServerState.CONNECTING
 
     def test_empty_list_noop(self):
@@ -111,11 +105,6 @@ class TestConnectAll:
         asyncio.run(run())
         assert server_states == {}
         connect_server.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# disconnect_server
-# ---------------------------------------------------------------------------
 
 
 class TestDisconnectServer:
@@ -161,11 +150,6 @@ class TestDisconnectServer:
         clear_descriptors.assert_called_once_with("nonexistent")
 
 
-# ---------------------------------------------------------------------------
-# close_all
-# ---------------------------------------------------------------------------
-
-
 class TestCloseAll:
     """Tests for close_all."""
 
@@ -184,7 +168,6 @@ class TestCloseAll:
         callable_cache = {"cached": True}
 
         with patch("asyncio.gather", new_callable=AsyncMock, return_value=[None]) as mock_gather:
-
             async def run():
                 return await close_all(
                     servers=[server],
@@ -282,6 +265,5 @@ class TestCloseAll:
                 callable_cache={},
             )
 
-        # Should complete without error
         result = asyncio.run(run())
         assert result is None

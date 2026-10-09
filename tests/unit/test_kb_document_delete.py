@@ -17,12 +17,10 @@ def catalog(tmp_path, monkeypatch):
     cfg._settings_cache = None
     from agentnexus.rag.store import KnowledgeBaseCatalog
     from agentnexus.storage.chroma import resolve_collection_name
-    # 生产不变式：kb_id == resolve_collection_name(namespace)
     kb_id = resolve_collection_name(namespace="default")
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
     cat.upsert_knowledge_base(KnowledgeBaseRecord(
         kb_id=kb_id, namespace="default", display_name="d", collection_name=kb_id))
-    # kb_service 走全局单例 catalog——指到本夹具实例，隔离真实库
     monkeypatch.setattr(
         "agentnexus.rag.kb_service.get_knowledge_base_catalog", lambda: cat)
     yield cat
@@ -134,11 +132,9 @@ class TestDeleteFailureModes:
                 with pytest.raises(DeleteIncompleteError):
                     delete_document_and_vectors("default", "doc1")
 
-        # 中间态确认：向量已删，catalog 还在（文档仍列出，但 dense 路已搜不到）
         assert chroma_calls == [["doc1_ch0", "doc1_ch1"]]
         assert catalog.get_document("doc1") is not None
 
-        # 重试同一操作：Chroma 幂等重删无副作用，catalog 这次成功 → 终态一致
         with patch("agentnexus.rag.kb_service.delete_documents",
                    side_effect=fake_chroma_delete):
             deleted = delete_document_and_vectors("default", "doc1")
@@ -217,7 +213,6 @@ class TestDeleteRetryAndRecovery:
             with pytest.raises(DeleteIncompleteError) as exc_info:
                 delete_document_and_vectors("default", "doc1")
         log_id = exc_info.value.log_id
-        # 故障恢复后手动 retry（catalog 删除恢复正常）
         from agentnexus.rag.store import KnowledgeBaseCatalog
         monkeypatch.setattr(catalog, "delete_document",
                             lambda doc_id: KnowledgeBaseCatalog.delete_document(catalog, doc_id))
@@ -271,8 +266,7 @@ class TestReconcileKb:
         return col
 
     def test_orphans_deleted_missing_reembedded(self, catalog):
-        _seed(catalog, "doc1", n_chunks=2)  # catalog: doc1_ch0, doc1_ch1
-        # Chroma 侧：doc1_ch0（正常）+ ghost_ch（孤儿）；doc1_ch1 缺失
+        _seed(catalog, "doc1", n_chunks=2)
         fake_col = self._fake_collection(["doc1_ch0", "ghost_ch"])
         with patch("agentnexus.rag.kb_service.get_collection", return_value=fake_col), \
              patch("agentnexus.rag.kb_service.delete_documents") as mock_del, \
@@ -318,11 +312,9 @@ class TestMidStateSearchLeak:
     """
 
     def test_midstate_document_still_searchable_via_sparse(self, catalog, monkeypatch):
-        # 语料要有多个文档，BM25 的 idf 才不退化（单文档语料所有词 idf≤0）
         for i in range(4):
             _seed(catalog, f"doc_noise{i}", n_chunks=1)
         _seed(catalog, "doc_secret", n_chunks=1)
-        # 给 secret chunk 换上独特内容
         from agentnexus.rag.models import ChunkRecord
         from agentnexus.storage.chroma import resolve_collection_name
         kb_id = resolve_collection_name(namespace="default")
@@ -330,13 +322,11 @@ class TestMidStateSearchLeak:
             chunk_id="doc_secret_ch0", kb_id=kb_id, document_id="doc_secret",
             document_version=1, chunk_index=0,
             text="内部机密配方 X-42 的完整工艺流程")])
-        # 模拟中间态：catalog 完整，Chroma 向量已删（dense 候选为空）
         monkeypatch.setattr(
             "agentnexus.rag.retriever.get_knowledge_base_catalog", lambda: catalog)
         from agentnexus.rag.retriever import HybridRetriever
         retriever = HybridRetriever(namespace="default")
         retriever.rebuild_from_catalog()
-        # dense 为空 = Chroma 侧已删；仅 sparse 路工作
         results = retriever.search("机密配方", dense_results=[], min_score=0.0)
         leaked = [r for r in results if r.id.startswith("doc_secret")]
         assert leaked, "中间态下 sparse 路仍能搜到『已删』文档——这就是泄露"

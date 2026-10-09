@@ -16,7 +16,7 @@ from agentnexus.evaluation.utils import load_all_traces
 @dataclass
 class ComponentIssue:
     component: str
-    severity: str  # "error" | "warning"
+    severity: str
     detail: str
     trace_id: str = ""
 
@@ -26,7 +26,7 @@ class ComponentReport:
     total_traces: int = 0
     issues: list[ComponentIssue] = field(default_factory=list)
     by_component: dict[str, dict] = field(default_factory=dict)
-    by_tool: dict[str, dict] = field(default_factory=dict)  # tool_name -> {total, success}
+    by_tool: dict[str, dict] = field(default_factory=dict)
 
     @property
     def issue_count(self) -> int:
@@ -137,7 +137,7 @@ class ComponentEvaluator:
         llm_spans = [s for s in spans if s.get("name") == "llm"]
 
         if not llm_spans and not answer_spans:
-            return  # nothing to evaluate
+            return
 
         score = 10.0
 

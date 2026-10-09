@@ -17,8 +17,6 @@ from agentnexus.tools.mcp.adapter import (
 
 from .conftest import FakeExitStack, _make_descriptor
 
-# ── create_mcp_manager_from_settings ────────────────────────────
-
 
 class TestCreateMcpManagerFromSettings:
     def test_returns_none_when_mcp_disabled(self):
@@ -106,9 +104,6 @@ class TestCreateMcpManagerFromSettingsExtended:
             create_mcp_manager_from_settings(settings)
 
         monkeypatch.setattr(MCPToolManager, "start", original_start)
-
-
-# ── retry_failed complete flow ──────────────────────────────────
 
 
 class TestRetryFailedFullFlow:
@@ -232,9 +227,6 @@ class TestRetryFailedFullFlow:
         assert "b" not in result["reconnected"]
 
 
-# ── status_snapshot validation ──────────────────────────────────
-
-
 class TestStatusSnapshotValidation:
     def test_status_snapshot_mixed_servers(self):
         """status_snapshot must report connected, failed, and empty states correctly."""
@@ -283,9 +275,6 @@ class TestStatusSnapshotValidation:
         assert snapshot["connected_count"] == 0
         assert snapshot["failure_count"] == 0
         assert snapshot["tool_count"] == 0
-
-
-# ── descriptor_signature tests ──────────────────────────────────
 
 
 class TestMCPDescriptorSignature:
@@ -340,9 +329,6 @@ class TestMCPDescriptorSignature:
         assert payload["timeout"] == 60
         assert payload["rate"] == 5
         assert payload["capability"] == "tool"
-
-
-# ── Full MCP capabilities integration ──────────────────────────
 
 
 class TestFullMcpCapabilities:

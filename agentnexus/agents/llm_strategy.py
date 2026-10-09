@@ -6,10 +6,6 @@ from typing import Any, Callable
 
 from agentnexus.agents.react_types import CallingStrategy
 
-# Markers checked to detect whether the JSON format section is already appended
-# to the last message. The garbled twin is the mojibake form that can appear in
-# content corrupted by historical encoding damage; matching must cover BOTH
-# forms. Do NOT normalize the encoding here — that would change behavior.
 _JSON_SECTION_MARKER = "== 输出格式"
 _JSON_SECTION_MARKER_MOJIBAKE = "== 杈撳嚭鏍煎紡"
 
@@ -76,7 +72,6 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
     memory_state = ctx.memory_state
     tool_state = ctx.tool_state
 
-    # ── before model hook (can modify messages) ──────────────
     hook_ctx = fire_hook(HookType.BEFORE_MODEL_CALL, {
         "messages": ctx.messages,
         "tools": tool_state.tools,
@@ -104,7 +99,6 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
         effort=effort,
     )
 
-    # ── after model hook (can modify response text) ──────────
     hook_ctx = fire_hook(HookType.AFTER_MODEL_CALL, {
         "messages": ctx.messages,
         "response_text": result,

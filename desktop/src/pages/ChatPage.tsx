@@ -19,28 +19,21 @@ import ToolGroup from '../components/chat/ToolGroup'
 import MessageBubble from '../components/chat/MessageBubble'
 import HudAction from '../components/chat/HudAction'
 
-/** Backend plan_mode.py PLAN_REVIEW_MARKER — keep in sync. */
 const PLAN_REVIEW_MARKER = '[PLAN_REVIEW]'
 
 interface Checkpoint { id: string; question: string; answer: string; is_head: boolean }
-// Once per app launch: reopen the most recent session instead of landing on a
-// session-less "disconnected" state. Consumed by whichever branch of the init
-// effect runs first, so "New Chat" navigations never trigger a re-restore.
 let didAutoRestoreLastSession = false
 
 type SkillInfo = { id: string; display_name: string; description: string; enabled: boolean }
 type CommandCategory = 'system' | 'skill' | 'mcp' | 'plugin'
 
-/** State/actions the command runners close over — supplied by ChatPage at dispatch time. */
 interface SlashCtx {
   sid: string | null
-  /** The live registry, so /help renders from the same source. */
   defs: CommandDef[]
   addSys: (c: string) => void
   skills: SkillInfo[]
   setSkills: React.Dispatch<React.SetStateAction<SkillInfo[]>>
   handleSendMessage: (text: string, atts?: AttachmentRef[]) => void
-  /** version status + checkpoints + message reload — shared by /undo and /redo. */
   refresh: () => Promise<void>
   clearView: () => void
 }
@@ -50,19 +43,15 @@ interface CommandDef {
   desc: string
   category: CommandCategory
   needsSession?: boolean
-  /** Error prefix for the dispatcher's unified catch, e.g. 'Undo failed'. */
   err?: string
-  /** Returns a string to surface via addSys, or void when it emitted/handled output itself. */
   run: (args: string, ctx: SlashCtx) => Promise<string | void> | string | void
 }
 
-/** Error message for the unified catches — mirrors the old `e.message` on unknown throws. */
 function errMsg(e: unknown): string | undefined {
   if (e && typeof e === 'object' && 'message' in e && typeof e.message === 'string') return e.message
   return undefined
 }
 
-/** Full slash-command registry — single source for dispatch, /help, and the palette. */
 function buildCommandDefs(): CommandDef[] {
   return [
     {
@@ -180,7 +169,6 @@ function buildCommandDefs(): CommandDef[] {
   ]
 }
 
-/** Empty-state prompt starters — concrete openers that fill the composer. */
 const STARTERS = [
   {
     icon: BookOpen,
@@ -214,12 +202,10 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  // Chat attachments — local files referenced by absolute path, never copied.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [deadPaths, setDeadPaths] = useState<Set<string>>(new Set())
 
-  // HUD state
   const [versionStatus, setVersionStatus] = useState<any>(null)
   const [runtimeStatus, setRuntimeStatus] = useState<any>(null)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
@@ -234,8 +220,6 @@ export default function ChatPage() {
   const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
   const [plugins, setPlugins] = useState<Record<string, any>>({})
-  // Per-session workspace: pending value for a not-yet-created chat, plus the
-  // server default shown on the new-chat screen.
   const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null)
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null)
   const { selected: selectedProject } = useProjects()
@@ -261,17 +245,9 @@ export default function ChatPage() {
   const loadAndDisplayMessages = useCallback(async (forceSessionId?: string) => {
     const currentSid = forceSessionId || currentSessionIdRef.current
     console.log('[loadAndDisplayMessages] sid:', currentSid)
-    // Check SessionManager's in-memory Map first — preserves streaming content
-    // that hasn't been persisted to the backend yet.
-    // Use getLiveSessionState (reads from sessionsRef) to avoid stale closure:
-    // this function has empty deps and must always read the latest Map.
     if (currentSid) {
       const cachedMessages = getLiveDisplayMessages(currentSid)
       if (cachedMessages && cachedMessages.length > 0) {
-        // The provider already exposes the flattened display view (committed +
-        // in-flight step), so the UI reflects live state — no setMessages here.
-        // Writing the snapshot back would clobber events that landed after the read
-        // (replace-with-stale-array race while a run is streaming).
         console.log('[loadAndDisplayMessages] Using Map cache:', cachedMessages.length, 'messages')
         for (const m of cachedMessages) animatedIds.add(m.id)
         return
@@ -287,7 +263,6 @@ export default function ChatPage() {
       }
       console.log('[loadAndDisplayMessages] Backend returned:', stm?.length, 'messages for sid:', currentSid)
       if (!stm || stm.length === 0) {
-        // Backend returned no messages. Only clear if the Map also has nothing.
         if (currentSid) {
           const existingMessages = getLiveDisplayMessages(currentSid)
           if (existingMessages && existingMessages.length > 0) return
@@ -298,7 +273,6 @@ export default function ChatPage() {
 
       const transformed = transformHistoryMessages(stm)
       console.log('[loadAndDisplayMessages] Transformed:', transformed.length, 'messages. Setting on active session.')
-      // Mark all restored messages as already animated
       for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
     } catch (err) { console.error('Failed to load messages:', err) }
@@ -322,7 +296,6 @@ export default function ChatPage() {
     }
   }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
 
-  // Re-fetch runtime status when agent run completes (isRunning: true → false)
   useEffect(() => {
     if (prevIsRunningRef.current && !isRunning) {
       api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
@@ -339,11 +312,7 @@ export default function ChatPage() {
   const initNew = useCallback((sid: string) => {
     currentSessionIdRef.current = sid
     setGlobalSessionId(sid)
-    // Don't call setMessages([]) here — React batching means activeSessionId
-    // is still the OLD session, so this would clear the old session's messages.
-    // The new session already starts with empty messages in SessionManager's Map.
     api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
-    // Session's own workspace wins; server default cwd is the chip fallback.
     api.getSession(sid).then((s) => {
       setCwd(s.workspace ?? null)
     }).catch(() => {})
@@ -360,8 +329,6 @@ export default function ChatPage() {
     fetchDynamicCommands()
   }, [fetchDynamicCommands])
 
-  // Server default workspace — shown on the new-chat screen before the user
-  // picks a per-session folder.
   useEffect(() => {
     api.getConfig().then((c) => {
       const cfgCwd = c?.cwd
@@ -376,14 +343,10 @@ export default function ChatPage() {
       console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      // Pass session ID explicitly — currentSessionIdRef may not be updated yet
-      // due to React batching. loadAndDisplayMessages checks SessionManager's
-      // Map first, so it handles both cached and backend-fetched messages correctly.
       loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
       api.getVersionStatus(sid).then(setVersionStatus).catch(() => {})
       api.getVersionLog(sid, 5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
-      // Session's own workspace wins; server default cwd is the chip fallback.
       api.getSession(sid).then((s) => {
         setCwd(s.workspace ?? null)
       }).catch(() => {})
@@ -401,17 +364,14 @@ export default function ChatPage() {
     }
 
     if (routeSessionId) {
-      // Guard: if navigating to the session we're already in, skip re-init.
       if (routeSessionId === currentSessionIdRef.current) {
         return
       }
-      // Reset running state and queue before switching sessions
       resetForSessionSwitch()
       api.restoreSession(routeSessionId)
         .then(({ session_id, restored }) => {
           currentSessionIdRef.current = session_id
           if (restored === false || session_id !== routeSessionId) {
-            // Session was recreated (old one lost) — update URL to new session
             navigate(`/chat/${session_id}`, { replace: true })
             initNew(session_id)
           } else {
@@ -420,17 +380,15 @@ export default function ChatPage() {
         })
         .catch(() => api.createSession().then(async ({ session_id }) => {
           if (planModeArm.consume()) {
-            try { await api.setPlanMode(session_id, true) } catch { /* best-effort */ }
+            try { await api.setPlanMode(session_id, true) } catch {  }
           }
           const armedEffort = thinkingEffortArm.consume()
           if (armedEffort !== null) {
-            try { await api.setThinkingEffort(session_id, armedEffort) } catch { /* best-effort */ }
+            try { await api.setThinkingEffort(session_id, armedEffort) } catch {  }
           }
           currentSessionIdRef.current = session_id; initNew(session_id)
         }))
     } else {
-      // Don't create session eagerly — defer to first message send.
-      // This prevents empty "New session" cards from accumulating in the sidebar.
       resetForSessionSwitch()
       currentSessionIdRef.current = null
       setGlobalSessionId(null)
@@ -439,74 +397,57 @@ export default function ChatPage() {
       fetchDynamicCommands()
       if (isFirstMount) {
         api.getRecentSessions(5).then((d) => {
-          // Skip empty sessions (e.g. the internal server-build session):
-          // the backend generates a preview from the last checkpoint/message,
-          // so a session with any content always has one.
           const last = d.sessions?.find((s) => s.preview)
-          // Bail if the user already started a new chat while we were fetching.
           if (last && !currentSessionIdRef.current) {
             navigate(`/chat/${last.session_id}`, { replace: true })
           }
         }).catch(() => {})
       }
     }
-    // WebSocket lifecycle is managed by SessionProvider — no disconnect here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeSessionId])
 
-  // Auto-scroll on new messages
   useEffect(scrollToBottom, [messages, scrollToBottom])
 
-  // Reset session state when "New Chat" is clicked (even when already on '/')
   useEffect(() => {
     const handleNewChat = () => {
       currentSessionIdRef.current = null
       pendingFirstMessageRef.current = null
       setGlobalSessionId(null)
-      setPendingWorkspace(null) // fall back to the selected project
+      setPendingWorkspace(null)
     }
     window.addEventListener('new-chat', handleNewChat)
     return () => window.removeEventListener('new-chat', handleNewChat)
   }, [])
 
-  // Pending first message for lazy session creation (route '/' without session)
   const pendingFirstMessageRef = useRef<{ text: string; attachments?: AttachmentRef[] } | null>(null)
 
-  // Send pending first message once session is activated (WS connects on activeSessionId change)
   useEffect(() => {
     const pending = pendingFirstMessageRef.current
     if (!pending) return
     pendingFirstMessageRef.current = null
-    // sendMessageInternal retries WS send if not yet connected, so this is safe
     sendMessage(pending.text, pending.attachments)
   }, [sendMessage])
 
-  // Handle first message — create session lazily if needed, then send.
   const handleSendMessage = useCallback((text: string, atts?: AttachmentRef[]) => {
     if (!currentSessionIdRef.current) {
-      // No session yet (first message from route '/') — create lazily, bound to
-      // the pending per-session workspace if the user picked one.
-      // Defer the actual send to a useEffect that fires after activeSessionId
-      // is set and the WS connection is established by SessionManager.
       pendingFirstMessageRef.current = { text, attachments: atts }
       api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(async ({ session_id }) => {
-        // Plan mode armed via the HUD toggle pre-session: apply it BEFORE the
-        // first message can be sent, so the very first run is already gated.
         if (planModeArm.consume()) {
-          try { await api.setPlanMode(session_id, true) } catch { /* best-effort; toggle shows off */ }
+          try { await api.setPlanMode(session_id, true) } catch {  }
         }
         const armedEffort = thinkingEffortArm.consume()
         if (armedEffort !== null) {
-          try { await api.setThinkingEffort(session_id, armedEffort) } catch { /* best-effort */ }
+          try { await api.setThinkingEffort(session_id, armedEffort) } catch {  }
         }
         currentSessionIdRef.current = session_id
-        initNew(session_id) // sets activeSessionId → triggers WS connect + pending send effect
-        setPendingWorkspace(null) // the session carries its folder now
+        initNew(session_id)
+        setPendingWorkspace(null)
         navigate(`/chat/${session_id}`, { replace: true })
       }).catch((err) => {
         pendingFirstMessageRef.current = null
-        setInput(text) // restore the unsent message
-        setAttachments(atts ?? []) // and its attachments
+        setInput(text)
+        setAttachments(atts ?? [])
         window.alert(`创建会话失败：${err instanceof Error ? err.message : err}`)
       })
     } else {
@@ -517,11 +458,9 @@ export default function ChatPage() {
     }
   }, [sendMessage, location.pathname, navigate, initNew, pendingWorkspace, selectedProject])
 
-  // Workspace chip — the folder this chat runs in. Fixed once the session
-  // exists; before the first message it defaults to the selected project.
   const chipWorkspace = cwd ?? pendingWorkspace ?? (sessionId ? null : selectedProject) ?? defaultWorkspace
   const handleWorkspacePick = async () => {
-    if (sessionId) return // locked after creation
+    if (sessionId) return
     const picked = await pickAndAddProject(chipWorkspace)
     if (picked) setPendingWorkspace(picked)
   }
@@ -530,8 +469,6 @@ export default function ChatPage() {
     setMessages(prev => [...prev, { id: `sys-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
   }, [setMessages, incrementMsgCounter])
 
-  // Attach local files (picker + drag-drop share this path): dedupe by path,
-  // stat for liveness + fresh size — directories and dead files are rejected.
   const addAttachments = useCallback(async (candidates: { path: string; name: string; size: number }[]) => {
     const bridge = window.electronAPI
     if (!bridge || candidates.length === 0) return
@@ -549,7 +486,6 @@ export default function ChatPage() {
       if (rejected.length > 0) addSys(`附件不可用（不存在或是文件夹）: ${rejected.join(', ')}`)
       if (ok.length > 0) setAttachments(prev => [...prev, ...ok])
     } catch {
-      // statFiles unavailable — attach anyway; the backend validates on send.
       setAttachments(prev => [...prev, ...fresh.map(c => ({ path: c.path, name: c.name, size: c.size, mime: mimeForPath(c.path) }))])
     }
   }, [attachments, addSys])
@@ -574,9 +510,6 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     const text = input.trim(); if (!text && attachments.length === 0) return
-    // Pre-send liveness check: a file deleted after attaching must block the
-    // send (keep the draft) rather than half-send. The backend re-validates
-    // on receipt anyway — this is UX, not the security boundary.
     if (attachments.length > 0 && window.electronAPI) {
       try {
         const stats = await window.electronAPI.statFiles(attachments.map(a => a.path))
@@ -588,12 +521,11 @@ export default function ChatPage() {
           return
         }
         setDeadPaths(new Set())
-      } catch { /* statFiles unavailable — the backend is the backstop */ }
+      } catch {  }
     }
     const atts = attachments.length > 0 ? attachments : undefined
     setInput(''); setShowPalette(false); setPaletteDismissed(false)
     setAttachments([]); setDeadPaths(new Set())
-    // Attachment-only sends still need text — the WS layer rejects empty content.
     const out = text || '（见附件）'
     if (out.startsWith('/')) { handleSlashCommand(out); return }
     if (isRunning) { queueMessage(out, atts) }
@@ -626,7 +558,6 @@ export default function ChatPage() {
       } catch (e) { addSys(`${def.err ?? `${cmd} failed`}: ${errMsg(e)}`) }
       return
     }
-    // skill dynamic command fallback: an enabled skill's short id invoked as /cmd
     const skillMatch = skills.find(s => {
       if (!s.enabled) return false
       const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
@@ -643,7 +574,6 @@ export default function ChatPage() {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handlePaletteSelect(filteredCommands[paletteIndex].cmd); return }
       if (e.key === 'Escape') { e.preventDefault(); setShowPalette(false); setPaletteDismissed(true); paletteAnimDoneRef.current = false; return }
     }
-    // Palette open with no matches (e.g. mid-typing an argument) — Esc still dismisses
     if (showPalette && e.key === 'Escape') { e.preventDefault(); setShowPalette(false); setPaletteDismissed(true); return }
     if (e.key === 'Escape' && isRunning) {
       e.preventDefault()
@@ -661,9 +591,6 @@ export default function ChatPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value
     setInput(v)
-    // Dismissal (Esc) persists until the user leaves the slash-command context,
-    // e.g. clears the leading '/'. Otherwise the palette would pop back open on
-    // every keystroke while typing.
     const isSlashContext = v.startsWith('/') && v.length > 0
     if (!isSlashContext) setPaletteDismissed(false)
     const show = isSlashContext && !paletteDismissed
@@ -721,9 +648,9 @@ export default function ChatPage() {
 
   return (
     <div className="flex-1 flex overflow-hidden relative" style={{ background: 'var(--surface-0)' }}>
-      {/* Main Chat Area */}
+      {}
       <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Messages */}
+      {}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-6 animate-empty-in px-6">
@@ -739,7 +666,7 @@ export default function ChatPage() {
               </p>
             </div>
 
-            {/* Prompt starters — concrete one-tap openers that fill the composer */}
+            {}
             <div className="w-full max-w-2xl mt-10">
               <div className="grid grid-cols-2 gap-2.5">
                 {STARTERS.map(action => {
@@ -780,8 +707,6 @@ export default function ChatPage() {
           </div>
         )}
         {(() => {
-          // Consecutive tool calls share ONE card (hairline-divided rows)
-          // so N parallel calls cost N quiet lines, not N boxes.
           const mcpNames = Object.fromEntries(mcpTools.map(t => [t.tool, true])) as Record<string, true>
           type Group = { kind: 'msg', msg: Message } | { kind: 'tools', msgs: Message[] }
           const groups: Group[] = []
@@ -807,7 +732,7 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Confirm / Plan review */}
+      {}
       {confirmRequest && (
         confirmRequest.summary.startsWith(PLAN_REVIEW_MARKER) ? (
           <div className="max-w-3xl mx-auto w-full px-6 mb-3">
@@ -843,9 +768,9 @@ export default function ChatPage() {
         )
       )}
 
-      {/* Input Area */}
+      {}
       <div className="px-6 pb-6 relative">
-        {/* Command Palette */}
+        {}
         {showPalette && filteredCommands.length > 0 && (
           <div
             className="absolute bottom-full left-6 right-6 mb-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto z-50 animate-slide-up"
@@ -910,7 +835,7 @@ export default function ChatPage() {
           onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.boxShadow = 'var(--shadow-float)' }}
         >
 
-          {/* Workspace chip — this chat's folder; locked once created */}
+          {}
           <div className="flex items-center px-3 pt-2">
             {sessionId ? (
               <div
@@ -938,7 +863,7 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* Attachment chips — local files referenced by absolute path */}
+          {}
           {attachments.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
               {attachments.map(a => {
@@ -1013,7 +938,7 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* HUD row — model switcher + session actions */}
+          {}
           <div className="flex items-center gap-1 px-3 py-2 text-[12px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-muted)' }}>
             <ModelPicker
               currentModel={runtimeStatus?.model_id ?? null}
@@ -1048,7 +973,7 @@ export default function ChatPage() {
         </BorderBeam>
       </div>
 
-      {/* Checkpoint Overlay */}
+      {}
       {showCheckpoints && (
         <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-elevated)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1067,7 +992,7 @@ export default function ChatPage() {
         </div>
       )}
       </div>
-      {/* Info Panel */}
+      {}
       <InfoPanel />
     </div>
   )

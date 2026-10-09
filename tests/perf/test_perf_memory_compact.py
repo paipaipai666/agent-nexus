@@ -61,9 +61,6 @@ def _populate_tool_results(mgr: MemoryManager, count: int):
         mgr.short_term.append("tool", f"Action: {tool}[key=value]\nObservation: result {i} " * 20)
 
 
-# ── maybe_compact with mock LLM ──────────────────────────────
-
-
 class TestMaybeCompact:
     @pytest.mark.parametrize("msg_count", [50, 200, 500])
     def test_maybe_compact_large_stm(self, benchmark, perf_env, msg_count):
@@ -101,9 +98,6 @@ class TestMaybeCompact:
         assert result == 0
 
 
-# ── snip ──────────────────────────────────────────────────────
-
-
 class TestSnip:
     @pytest.mark.parametrize("count", [100, 500])
     def test_snip_scaling(self, benchmark, count):
@@ -119,9 +113,6 @@ class TestSnip:
 
         result = benchmark(mgr.snip)
         assert result == 0
-
-
-# ── microcompact_time_based ───────────────────────────────────
 
 
 class TestMicrocompactTimeBased:

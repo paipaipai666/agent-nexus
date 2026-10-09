@@ -1,11 +1,6 @@
-/**
- * Fix verification: initRestore correctly prefers backend data over stale cache
- * when the agent finished while the user was away.
- */
 import { describe, it, expect } from 'vitest'
 
 describe('initRestore cache/backend priority fix', () => {
-  // Simulate the initRestore logic
   function simulateInitRestore(opts: {
     agentWasRunning: boolean
     backendMessages: any[]
@@ -13,14 +8,11 @@ describe('initRestore cache/backend priority fix', () => {
   }): { source: 'backend' | 'cache' | 'empty'; messages: any[] } {
     const { agentWasRunning, backendMessages, cachedMessages } = opts
 
-    // Simulate loadAndDisplayMessages
     const hasData = backendMessages.length > 0
 
     if (hasData) {
-      // Backend has messages — clear stale cache, use backend
       return { source: 'backend', messages: backendMessages }
     } else if (agentWasRunning && cachedMessages) {
-      // Backend empty, agent was running — use cached streaming content
       return { source: 'cache', messages: cachedMessages }
     }
 
@@ -36,27 +28,25 @@ describe('initRestore cache/backend priority fix', () => {
       ],
       cachedMessages: [
         { id: 'u-1', role: 'user', content: 'What is 2+2?' },
-        { id: 'a-1', role: 'assistant', content: 'The answer ' }, // partial!
+        { id: 'a-1', role: 'assistant', content: 'The answer ' },
       ],
     })
 
-    // Backend has the complete answer — should use it
     expect(result.source).toBe('backend')
     const answer = result.messages.find(m => m.role === 'assistant')
-    expect(answer.content).toBe('The answer is 4.') // complete!
+    expect(answer.content).toBe('The answer is 4.')
   })
 
   it('agent still running → cache used (backend is empty)', () => {
     const result = simulateInitRestore({
       agentWasRunning: true,
-      backendMessages: [], // agent hasn't finished, backend empty
+      backendMessages: [],
       cachedMessages: [
         { id: 'u-1', role: 'user', content: 'What is 2+2?' },
-        { id: 'a-1', role: 'assistant', content: 'The answer ' }, // partial streaming
+        { id: 'a-1', role: 'assistant', content: 'The answer ' },
       ],
     })
 
-    // Backend empty, agent was running — use cache
     expect(result.source).toBe('cache')
     expect(result.messages.length).toBe(2)
   })
@@ -73,7 +63,6 @@ describe('initRestore cache/backend priority fix', () => {
       ],
     })
 
-    // Agent wasn't running, backend has data — use backend
     expect(result.source).toBe('backend')
     expect(result.messages.length).toBe(2)
   })
@@ -90,24 +79,15 @@ describe('initRestore cache/backend priority fix', () => {
   })
 
   it('BUG SCENARIO before fix: cache had priority, showing incomplete content', () => {
-    // Before the fix, initRestore checked cache FIRST:
-    //
-    //   const cached = getCachedMessages(sid)
-    //   if (cached) { setMessages(cached) }  ← ALWAYS used cache if it existed
-    //   else { loadAndDisplayMessages() }     ← backend never queried
-    //
-    // This meant incomplete streaming content was always shown.
 
     const cachedMessages = [
       { id: 'u-1', role: 'user', content: 'What is 2+2?' },
-      { id: 'a-1', role: 'assistant', content: 'The answer ' }, // partial!
+      { id: 'a-1', role: 'assistant', content: 'The answer ' },
     ]
 
-    // Before fix: cache exists → use it (BUG!)
     const beforeFix = cachedMessages ? 'cache' : 'backend'
-    expect(beforeFix).toBe('cache') // This was the bug — always used cache
+    expect(beforeFix).toBe('cache')
 
-    // After fix: check backend first
     const afterFix = simulateInitRestore({
       agentWasRunning: true,
       backendMessages: [
@@ -116,6 +96,6 @@ describe('initRestore cache/backend priority fix', () => {
       ],
       cachedMessages,
     })
-    expect(afterFix.source).toBe('backend') // Fixed! Uses backend data
+    expect(afterFix.source).toBe('backend')
   })
 })

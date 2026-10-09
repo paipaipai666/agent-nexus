@@ -32,9 +32,6 @@ def mock_runtime():
     agent = MagicMock()
     agent.run.return_value = "test answer"
 
-    # Production semantics: one cached MemoryManager (own STM) per session,
-    # created lazily by the factory. No shared global memory, no STM swap —
-    # checkpoint restore goes through chat.restore_session_stm().
     memories: dict = {}
 
     def memory_factory_builder(session_id):
@@ -52,9 +49,6 @@ def mock_runtime():
     runtime.chat = chat
     runtime.subagent_confirm = ConfirmBridge()
     return runtime, chat, agent, memories
-
-
-# ── Bug 1: New session should NOT interrupt the running agent ──────────
 
 
 class TestSessionSwitchDoesNotInterruptAgent:
@@ -76,7 +70,7 @@ class TestSessionSwitchDoesNotInterruptAgent:
 
         def slow_agent_run(_text, memory_manager=None):
             """Simulate a slow agent that takes time to respond."""
-            time.sleep(0.5)  # Simulate work
+            time.sleep(0.5)
             agent_result.append("agent completed")
             agent_finished.set()
             return "slow answer"
@@ -92,7 +86,6 @@ class TestSessionSwitchDoesNotInterruptAgent:
             if not message_sent:
                 message_sent = True
                 return {"type": "send_message", "content": "hello"}
-            # Disconnect immediately after message sent
             raise WebSocketDisconnect()
 
         ws.receive_json = AsyncMock(side_effect=receive_json)
@@ -101,8 +94,6 @@ class TestSessionSwitchDoesNotInterruptAgent:
         with patch("agentnexus.server.app._get_runtime", return_value=runtime):
             await ws_agent(ws, session.id)
 
-        # ws_agent returned (WebSocket disconnected), but agent should still be running
-        # Wait for the agent to finish
         finished = agent_finished.wait(timeout=3)
         assert finished, "Agent should have finished in the background after WS disconnect"
         assert agent_result == ["agent completed"]
@@ -117,7 +108,6 @@ class TestSessionSwitchDoesNotInterruptAgent:
         runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
-        # Replace the version manager with a mock to track persistence
         version_mgr = MagicMock()
         version_mgr.get_messages.return_value = []
         version_mgr.get_message_count.return_value = 0
@@ -149,12 +139,8 @@ class TestSessionSwitchDoesNotInterruptAgent:
         with patch("agentnexus.server.app._get_runtime", return_value=runtime):
             await ws_agent(ws, session.id)
 
-        # Wait for agent thread to finish
         time.sleep(1)
 
-        # commit_with_messages should have been called:
-        # 1. Immediately for user question
-        # 2. After agent finishes (via turn.persist_snapshot)
         assert version_mgr.commit_with_messages.call_count >= 2, (
             f"Expected at least 2 commit calls (user question + agent result), "
             f"got {version_mgr.commit_with_messages.call_count}"
@@ -172,17 +158,12 @@ class TestSessionSwitchDoesNotInterruptAgent:
         session_a = chat.start_session()
         session_b = chat.start_session()
 
-        # Pre-populate session A's STM
         stm_a = chat._get_or_create_memory(session_a.id).short_term
         stm_a.append("user", "session A message")
 
-        # Get session B's STM — should be independent
         stm_b = chat._get_or_create_memory(session_b.id).short_term
         assert len(stm_b.get_all()) == 0, "Session B STM should be empty"
         assert len(stm_a.get_all()) == 1, "Session A STM should still have its message"
-
-
-# ── Bug 2: User question should survive session switch ──────────
 
 
 class TestUserQuestionPersistsImmediately:
@@ -205,28 +186,24 @@ class TestUserQuestionPersistsImmediately:
         version_mgr.get_message_count.return_value = 0
         chat._get_version_manager = lambda _sid: version_mgr
 
-        # Agent blocks indefinitely — simulates user navigating away mid-run
         agent_started = threading.Event()
         agent_block = threading.Event()
 
         def blocking_agent_run(_text, memory_manager=None):
             agent_started.set()
-            agent_block.wait(timeout=10)  # Block until test signals
+            agent_block.wait(timeout=10)
             return "answer"
 
         agent.run.side_effect = blocking_agent_run
 
-        # Send message in a thread (since it blocks)
         run_thread = threading.Thread(
             target=chat.send_message,
             args=(session.id, "where is the bug?"),
         )
         run_thread.start()
 
-        # Wait for agent to start
         agent_started.wait(timeout=3)
 
-        # User question should be persisted ALREADY (before agent finishes)
         assert version_mgr.commit_with_messages.call_count >= 1, (
             "User question should be persisted immediately, before agent finishes"
         )
@@ -237,7 +214,6 @@ class TestUserQuestionPersistsImmediately:
             f"got: {persisted_messages}"
         )
 
-        # Unblock agent and clean up
         agent_block.set()
         run_thread.join(timeout=3)
 
@@ -258,7 +234,6 @@ class TestUserQuestionPersistsImmediately:
         with pytest.raises(RuntimeError, match="LLM exploded"):
             chat.send_message(session.id, "what happened?")
 
-        # User question was persisted before the agent ran
         assert version_mgr.commit_with_messages.call_count >= 1
         first_call = version_mgr.commit_with_messages.call_args_list[0]
         persisted_messages = first_call.kwargs.get("messages", first_call[1].get("messages", []))
@@ -279,7 +254,6 @@ class TestUserQuestionPersistsImmediately:
         version_mgr.get_message_count.return_value = 0
         chat._get_version_manager = lambda _sid: version_mgr
 
-        # Agent blocks so we can verify persistence before it finishes
         agent_started = threading.Event()
         agent_block = threading.Event()
 
@@ -305,14 +279,11 @@ class TestUserQuestionPersistsImmediately:
         ws.send_json = AsyncMock()
 
         with patch("agentnexus.server.app._get_runtime", return_value=runtime):
-            # Run ws_agent in a task so we can check state while it's running
             ws_task = asyncio.create_task(ws_agent(ws, session.id))
-            await asyncio.sleep(0.5)  # Let the message be processed
+            await asyncio.sleep(0.5)
 
-        # Wait for agent to start
         agent_started.wait(timeout=3)
 
-        # User question should be persisted
         assert version_mgr.commit_with_messages.call_count >= 1
         first_call = version_mgr.commit_with_messages.call_args_list[0]
         persisted_messages = first_call.kwargs.get("messages", first_call[1].get("messages", []))
@@ -320,15 +291,11 @@ class TestUserQuestionPersistsImmediately:
             f"User question should be persisted after WS disconnect, got: {persisted_messages}"
         )
 
-        # Clean up
         agent_block.set()
         try:
             await asyncio.wait_for(ws_task, timeout=3)
         except (asyncio.TimeoutError, Exception):
             ws_task.cancel()
-
-
-# ── STM swap correctness ──────────
 
 
 class TestPerSessionSTM:
@@ -349,7 +316,6 @@ class TestPerSessionSTM:
 
         agent.run.side_effect = capture_stm_run
 
-        # Pre-create a session STM with some data
         from agentnexus.memory.short_term import ShortTermMemory
         session_stm = ShortTermMemory()
         session_stm.append("user", "old context")
@@ -357,15 +323,10 @@ class TestPerSessionSTM:
 
         chat.send_message(session.id, "new message")
 
-        # During the run, the agent should have seen the per-session STM
         assert len(captured_stms) == 1
         assert captured_stms[0] is session_stm, "Agent should use per-session STM"
-        # Per-session STM should have the old context + the agent's processing
         all_msgs = captured_stms[0].get_all()
         assert any(m.get("content") == "old context" for m in all_msgs)
-
-
-# ── Concurrent sessions: the real bug scenario ──────────
 
 
 class TestConcurrentSessions:
@@ -388,7 +349,6 @@ class TestConcurrentSessions:
         session_a = chat.start_session()
         session_b = chat.start_session()
 
-        # Pre-populate each session's STM
         from agentnexus.memory.short_term import ShortTermMemory
         stm_a = ShortTermMemory()
         stm_a.append("user", "session A context")
@@ -419,7 +379,6 @@ class TestConcurrentSessions:
             except Exception as e:
                 errors.append((label, e))
 
-        # Run session A first, then B — serialized by the STM lock
         t_a = threading.Thread(target=run_session, args=(session_a.id, "A", agent_run_a))
         t_a.start()
         t_a.join(timeout=5)
@@ -432,7 +391,6 @@ class TestConcurrentSessions:
         assert results.get("A") == "ok"
         assert results.get("B") == "ok"
 
-        # Each session should have seen its own STM
         assert stms_seen.get("A") is stm_a, "Session A should use its own STM"
         assert stms_seen.get("B") is stm_b, "Session B should use its own STM"
 
@@ -460,15 +418,11 @@ class TestConcurrentSessions:
         chat.send_message(session_a.id, "msg A")
         chat.send_message(session_b.id, "msg B")
 
-        # Session A's STM should not contain B's messages and vice versa
         msgs_a = [m.get("content") for m in stm_a.get_all()]
         msgs_b = [m.get("content") for m in stm_b.get_all()]
 
         assert "B's secret" not in msgs_a, f"Session A STM corrupted: {msgs_a}"
         assert "A's secret" not in msgs_b, f"Session B STM corrupted: {msgs_b}"
-
-
-# ── End-to-end: full lifecycle ──────────
 
 
 class TestSessionSwitchLifecycle:
@@ -482,7 +436,6 @@ class TestSessionSwitchLifecycle:
         """
         runtime, chat, agent, _memories = mock_runtime
 
-        # Version managers per session to track persistence
         version_managers = {}
 
         def make_version_mgr(session_id):
@@ -495,7 +448,6 @@ class TestSessionSwitchLifecycle:
 
         chat._get_version_manager = make_version_mgr
 
-        # ── Step 1: Session A, send message ──
         session_a = chat.start_session()
         agent_started_a = threading.Event()
         agent_block_a = threading.Event()
@@ -527,11 +479,9 @@ class TestSessionSwitchLifecycle:
         try:
             ws_task_a = asyncio.create_task(ws_agent(ws_a, session_a.id))
 
-            # Wait for agent A to start (which means begin_turn + persistence ran)
             await asyncio.to_thread(agent_started_a.wait, 3)
-            await asyncio.sleep(0.2)  # Let persistence code finish
+            await asyncio.sleep(0.2)
 
-            # ── Step 2: Verify question A is persisted ──
             vm_a = version_managers.get(session_a.id)
             assert vm_a is not None, (
                 f"Version manager for session A should exist. "
@@ -541,25 +491,20 @@ class TestSessionSwitchLifecycle:
                 "Question A should be persisted immediately"
             )
 
-            # ── Step 3: Unblock agent A and let it finish ──
             agent_block_a.set()
             try:
                 await asyncio.wait_for(ws_task_a, timeout=3)
             except (asyncio.TimeoutError, Exception):
                 ws_task_a.cancel()
 
-            await asyncio.sleep(0.5)  # Let agent thread finish
+            await asyncio.sleep(0.5)
 
-            # Agent A's result should also be persisted
             assert vm_a.commit_with_messages.call_count >= 2, (
                 f"Expected user question + agent result for session A, "
                 f"got {vm_a.commit_with_messages.call_count} calls"
             )
         finally:
             mock_patch.stop()
-
-
-# ── Bug 3: Reasoning content lost on session navigation ──────────
 
 
 class TestReasoningContentPersistence:
@@ -583,13 +528,11 @@ class TestReasoningContentPersistence:
 
         runtime, chat, agent, _memories = mock_runtime
 
-        # Create a real agent with mocked LLM
         agent = ReActAgent.__new__(ReActAgent)
         agent._output = lambda msg: None
         agent.llm_client = MagicMock()
         agent.llm_client.last_reasoning_content = "Deep thinking about the problem..."
 
-        # Build an ExecutionContext with reasoning_streamed=True
         ctx = ExecutionContext(
             question="test question",
             memory_manager=MagicMock(),
@@ -598,16 +541,13 @@ class TestReasoningContentPersistence:
                 step_id=1,
                 strategy_used="native_tools",
                 reasoning_content="Deep thinking about the problem...",
-                reasoning_streamed=True,  # Key: reasoning was streamed
+                reasoning_streamed=True,
             )],
         )
         ctx.steps[0].tool_outputs = ["some tool output"]
 
-        # Call _emit_answer_thought
         agent._emit_answer_thought(ctx)
 
-        # BEFORE FIX: memory_manager.append was NOT called (early return)
-        # AFTER FIX: memory_manager.append should be called with reasoning
         ctx.memory_manager.append.assert_called_once()
         call_args = ctx.memory_manager.append.call_args
         assert call_args[0][0] == "system", f"Expected role 'system', got {call_args[0][0]}"
@@ -625,14 +565,12 @@ class TestReasoningContentPersistence:
         runtime, chat, agent, _memories = mock_runtime
         session = chat.start_session()
 
-        # Simulate STM with reasoning content (as the fix would produce)
         stm = chat._get_or_create_memory(session.id).short_term
         stm.append("user", "what is 2+2?")
         stm.append("system", "[思考过程] Let me think about basic arithmetic...")
         stm.append("assistant", "I need to calculate 2+2")
         stm.append("system", "[最终答案] 2+2 = 4")
 
-        # Verify the reasoning content is in STM
         all_msgs = stm.get_all()
         reasoning_msgs = [m for m in all_msgs if "[思考过程]" in m.get("content", "")]
         assert len(reasoning_msgs) == 1, (
@@ -654,8 +592,6 @@ class TestReasoningContentPersistence:
         agent.llm_client = MagicMock()
         agent.llm_client.last_reasoning_content = ""
 
-        # Use a JSON response with a "thought" field — the non-streaming path
-        # parses the thought from JSON, and it differs from raw_text.
         json_response = '{"thought": "I should search for the answer", "tool": "search", "params": {"q": "test"}}'
         ctx = ExecutionContext(
             question="test question",
@@ -671,13 +607,11 @@ class TestReasoningContentPersistence:
         )
         ctx.steps[0].tool_outputs = ["some tool output"]
 
-        # Mock emit to capture events
         emitted = []
         ctx.emit = lambda evt_type, **kw: emitted.append((evt_type, kw))
 
         agent._emit_answer_thought(ctx)
 
-        # The existing path should still work: thought stored as "assistant"
         calls = ctx.memory_manager.append.call_args_list
         assert len(calls) == 1
         assert calls[0][0][0] == "assistant"

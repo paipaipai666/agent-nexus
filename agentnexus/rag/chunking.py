@@ -151,7 +151,6 @@ def _semantic_split(text: str, chunk_size: int, overlap: int) -> list[str]:
         overlapped = [chunks[0]]
         for index in range(1, len(chunks)):
             raw_prefix = chunks[index - 1][-overlap:]
-            # Find nearest word boundary to avoid splitting mid-word
             if len(raw_prefix) < overlap:
                 prefix = raw_prefix.strip()
             else:

@@ -331,7 +331,6 @@ class TestWebSocketAgentStream:
             if not message_sent:
                 message_sent = True
                 return {"type": "send_message", "content": "hello"}
-            # Wait for agent thread to reach the confirm call before disconnecting
             confirm_started.wait(timeout=2)
             raise WebSocketDisconnect()
 

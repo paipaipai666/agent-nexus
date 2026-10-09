@@ -53,7 +53,6 @@ def eval_trajectory(
     console.print(table)
     console.print(f"Passed: {passed}/{len(reports)}")
 
-    # Show details for failed traces
     for r in reports:
         if not r.passed:
             console.print(f"\n[bold red]FAIL[/bold red] {r.trace_id} (score={r.score:.1f})")
@@ -252,5 +251,3 @@ def eval_coherence(
         if not r.passed and r.issues:
             console.print(f"\n[bold red]FAIL {r.trace_id}[/bold red]")
             console.print(f"  [dim]{r.issues[:300]}[/dim]")
-
-

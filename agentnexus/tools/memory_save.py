@@ -6,12 +6,10 @@ from agentnexus.rag.embeddings import get_embedding_model
 
 _VALID_CATEGORIES = {
     "fact", "preference", "note",
-    # Legacy names — accepted and auto-migrated
     "user_preference", "entity_fact", "conclusion",
     "task_progress", "error_pattern", "tool_preference",
 }
 
-# Map old names to new
 _CATEGORY_MIGRATION = {
     "entity_fact": "fact",
     "conclusion": "fact",
@@ -73,7 +71,6 @@ def memory_save(content: str, category: str = "fact", importance: float = 0.85,
     if category not in _VALID_CATEGORIES:
         return f"[memory_save] 无效分类 '{category}'，有效值: fact, preference, note"
 
-    # Migrate legacy category names
     category = _CATEGORY_MIGRATION.get(category, category)
     importance = max(0.0, min(1.0, importance))
     context = (context or "").strip()
@@ -85,7 +82,6 @@ def memory_save(content: str, category: str = "fact", importance: float = 0.85,
         raw = model.encode(_embed_text(content, context), normalize_embeddings=True)
         embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
     except Exception:
-        # Save without embedding — will be re-embedded on next search
         embedding = []
 
     save_kwargs: dict = {

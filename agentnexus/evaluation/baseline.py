@@ -45,16 +45,13 @@ class BaselineManager:
         history_dir = suite_dir / "history"
         history_dir.mkdir(exist_ok=True)
 
-        # 添加时间戳
         report["baseline_timestamp"] = datetime.now().isoformat()
 
-        # 保存到 history
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         history_path = history_dir / f"{timestamp}.json"
         with open(history_path, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
 
-        # 更新 latest
         latest_path = suite_dir / "latest.json"
         with open(latest_path, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
@@ -130,7 +127,6 @@ class BaselineManager:
         pass_rate_diff = current_agg.get("pass_rate", 0) - baseline_agg.get("pass_rate", 0)
         avg_score_diff = current_agg.get("avg_score", 0) - baseline_agg.get("avg_score", 0)
 
-        # 逐 task 对比
         task_deltas: list[dict[str, Any]] = []
         baseline_tasks = {
             r.get("task_id", ""): r

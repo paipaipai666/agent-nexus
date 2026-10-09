@@ -22,10 +22,6 @@ from typing import Any, Callable
 from agentnexus.agents import json_helpers
 from agentnexus.agents.react_types import CallingStrategy, RetryReason
 
-# ── constants (moved from re_act_agent, re-exported there) ────────────
-
-# Native 模式下部分模型（如 OpenRouter stealth 系列）习惯在可见文本里写
-# "Thought: <分析> <答案>" 或 "Thought: <分析> 最终答案: <答案>"。
 _THOUGHT_MARKER_RE = re.compile(
     r"^\s*[*_]{0,2}\s*(?:thought|thinking|分析思考|思考过程|思考|想法|分析)\s*[*_]{0,2}\s*[:：]\s*",
     re.IGNORECASE,
@@ -63,9 +59,6 @@ def split_native_thought_answer(text: str) -> tuple[str, str]:
     return body, ""
 
 
-# ── decision types ─────────────────────────────────────────────────────
-
-
 @dataclass
 class ModelDecision:
     """Interpretation of one model response (native or JSON protocol).
@@ -76,29 +69,24 @@ class ModelDecision:
     an ANSWER_THOUGHT side-channel before the batch runs).
     """
 
-    kind: str                    # "tools" | "answer" | "fault"
+    kind: str
     tool_calls: list[dict] = field(default_factory=list)
     thought: str = ""
-    text: str = ""               # answer text (kind=answer) or commentary (kind=tools)
-    reason: RetryReason | None = None    # kind=fault
-    detail: str = ""                     # kind=fault
-    # fault sub-flags — handler-side side effects to perform:
-    fail_pending_calls: bool = False     # truncated with pending calls (pi semantics)
-    no_tools_no_text: bool = False       # native: degrade tool_calling
+    text: str = ""
+    reason: RetryReason | None = None
+    detail: str = ""
+    fail_pending_calls: bool = False
+    no_tools_no_text: bool = False
     recovered_protocol_json: bool = False
-    # answer display hints (handler decides memory/TUI side effects):
-    persist_reasoning: str = ""          # streamed reasoning to persist
-    display_thought: str = ""            # pre-answer thought to display
+    persist_reasoning: str = ""
+    display_thought: str = ""
 
 
 @dataclass
 class RecoverDecision:
-    kind: str                    # "round" | "salvage" | "degrade" | "abort"
+    kind: str
     reason: RetryReason | None = None
     detail: str = ""
-
-
-# ── interpret: native path (mirrors the old _on_receive_native branching) ──
 
 
 def interpret_native(
@@ -115,7 +103,6 @@ def interpret_native(
     """
     calls = tool_calls if isinstance(tool_calls, list) else []
 
-    # Truncation (finish_reason=length): never execute possibly-broken calls.
     if truncated:
         if calls:
             return ModelDecision(
@@ -126,11 +113,6 @@ def interpret_native(
                              detail="finish_reason=length")
 
     if calls:
-        # 决策1（2026-09-24 拍板）：允许模型不做可见思考直接调工具。
-        # thought 只是展示材料，不再作为门禁；为空时 handler 跳过展示。
-        # 决策3（2026-10-07）：同响应文本一律是旁白，不当最终答案——
-        # 终止只认显式信号（模型在 todo_update 里关闭全部 todo），见
-        # ReActAgent._on_tools_requested。
         thought = select_visible_thought(response_text, reasoning_text)
         terminal_text = (response_text or "").strip()
         return ModelDecision(
@@ -138,7 +120,6 @@ def interpret_native(
             text=terminal_text,
         )
 
-    # ── no tool calls ──
     text = response_text or reasoning_text
     if not text:
         return ModelDecision(kind="fault", no_tools_no_text=True)
@@ -192,7 +173,6 @@ def _recover_protocol_json(
             tool_calls=[{"name": parsed["tool"], "arguments": parsed["params"]}],
             thought="", recovered_protocol_json=True,
         )
-    # 仅接受显式 "answer" 键——单键/多键数据 JSON（如 {"温度": "26°C"}）原样保留
     if ptype == "answer" and '"answer"' in text:
         return ModelDecision(
             kind="answer", text=parsed["text"],
@@ -232,9 +212,6 @@ def select_visible_thought(response_text: str, reasoning_text: str) -> str:
     return text
 
 
-# ── interpret: JSON protocol path (mirrors CHECK_EMPTY → JSON_PARSE → CLASSIFY) ──
-
-
 def interpret_json(*, response_text: str, truncated: bool) -> ModelDecision:
     """Interpret one JSON-protocol response (fused pipeline).
 
@@ -262,9 +239,6 @@ def interpret_json(*, response_text: str, truncated: bool) -> ModelDecision:
         return ModelDecision(kind="answer", text=parsed["text"])
     return ModelDecision(kind="fault", reason=RetryReason.CLASSIFY_ERROR,
                          detail=str(parsed.get("reason", "unknown")))
-
-
-# ── recover (mirrors react_runtime.retry_gate + _on_retries_left tail) ──
 
 
 def retry_gate_decision(

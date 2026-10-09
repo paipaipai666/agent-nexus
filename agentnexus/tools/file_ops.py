@@ -50,12 +50,10 @@ def _get_allowed_roots() -> list[Path]:
     )
     roots = [get_effective_workspace()]
 
-    # Allow ~/.agentnexus for skills, config, memory, etc.
     agentnexus_home = Path(Path.home().resolve(strict=False)) / ".agentnexus"
     if agentnexus_home not in roots:
         roots.append(agentnexus_home)
 
-    # Allow the agentnexus package directory itself (for built-in resources)
     try:
         import agentnexus as _pkg
         pkg_dir = Path(_pkg.__file__).resolve(strict=False).parent
@@ -64,17 +62,11 @@ def _get_allowed_roots() -> list[Path]:
     except Exception:
         pass
 
-    # Per-run user attachments: exact file paths, matched by _is_within's
-    # p == r branch — the agent may read exactly these files, nothing else.
-    # Registered globally (not per-context) because tool execution happens
-    # on dispatcher threads that don't inherit ContextVars.
     for p in get_registered_attachment_paths():
         resolved = Path(p).resolve(strict=False)
         if resolved not in roots:
             roots.append(resolved)
 
-    # Mid-run user approvals (out-of-bounds HITL prompt) + the persistent
-    # allowlist from config. Both widen the sandbox only by explicit consent.
     for p in get_approved_extra_paths():
         resolved = Path(p).resolve(strict=False)
         if resolved not in roots:
@@ -110,8 +102,6 @@ def _resolve_safe(path: str) -> Path:
     workspace = get_effective_workspace()
     roots = _get_allowed_roots()
 
-    # If the path is absolute and already under an allowed root, use it directly.
-    # Otherwise, resolve relative to workspace.
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = workspace / path
@@ -119,12 +109,10 @@ def _resolve_safe(path: str) -> Path:
     def is_allowed(p: Path) -> bool:
         return any(_is_within(p, root) for root in roots)
 
-    # Layer 1: normpath resolves ".." without requiring the path to exist.
     normalized = Path(os.path.normpath(str(candidate)))
     if not is_allowed(normalized):
         raise PathEscapesAllowedRootsError(path, str(normalized), roots)
 
-    # Layer 2: resolve follows symlinks to catch link -> ../../outside.
     resolved = normalized.resolve(strict=False)
     if not is_allowed(resolved):
         raise PathEscapesAllowedRootsError(path, str(resolved), roots,
@@ -133,8 +121,6 @@ def _resolve_safe(path: str) -> Path:
     return resolved
 
 
-# File tools whose path argument is guarded by _resolve_safe. Used by
-# tool_runner to pre-flight the guard and ask the user before hard-failing.
 _PATH_GUARDED_TOOLS = {"file_read": "path", "file_write": "path", "file_list": "path"}
 
 
@@ -161,14 +147,11 @@ def path_guard_violation(name: str, arguments: dict) -> PathEscapesAllowedRootsE
 def _is_within(path: Path, root: Path) -> bool:
     """Check if path is within root (handles Windows 8.3 short names)."""
     try:
-        # resolve(strict=False) canonicalizes both long and short names,
-        # ensuring C:\Users\RUNNER~1 and C:\Users\runneradmin compare equal.
         p = path.resolve(strict=False)
         r = root.resolve(strict=False)
         return p == r or str(p).startswith(str(r) + os.sep)
     except (ValueError, OSError):
         return False
-
 
 
 def _fingerprint_file(path: Path) -> str:
@@ -324,7 +307,6 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
     file_size = p.stat().st_size
     header = f"[文件] {path} ({total} 行, 共 {file_size:,} 字节, version={version})"
 
-    # Explicit offset/limit: respect user intent directly
     if offset > 0 or limit is not None:
         max_lines = min(limit or LARGE_FILE_LINES, LARGE_FILE_LINES)
         sliced = lines[offset:offset + max_lines]
@@ -335,16 +317,13 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
             parts.append(f"... (省略 {total - offset - len(sliced)} 行，可用 offset={offset + len(sliced)} 继续读取)")
         return "\n".join(parts)
 
-    # Auto mode: three-tier strategy
     if total <= SMALL_FILE_LINES:
-        # Small file: full content
         parts = [header]
         for i, line in enumerate(lines, start=1):
             parts.append(f"{i:>6} | {line.rstrip()}")
         return "\n".join(parts)
 
     if total <= LARGE_FILE_LINES:
-        # Medium file: first 200 lines + hint
         sliced = lines[:SMALL_FILE_LINES]
         parts = [header]
         for i, line in enumerate(sliced, start=1):
@@ -353,7 +332,6 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
         parts.append(f"... (省略 {remaining} 行，可用 offset={SMALL_FILE_LINES} 继续读取)")
         return "\n".join(parts)
 
-    # Large file: metadata + 20-line preview
     preview = lines[:LARGE_FILE_PREVIEW_LINES]
     parts = [header]
     parts.append("[提示] 文件较大，请指定 offset 和 limit 参数读取具体内容。")
@@ -363,7 +341,6 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> str:
     for i, line in enumerate(preview, start=1):
         parts.append(f"{i:>6} | {line.rstrip()}")
     return "\n".join(parts)
-
 
 
 def file_write(path: str, content: str, mode: str = "create", expected_version: str | None = None) -> dict[str, Any]:
@@ -516,7 +493,6 @@ def file_write(path: str, content: str, mode: str = "create", expected_version: 
     }
 
 
-
 def file_list(path: str = ".", pattern: str | None = None) -> str:
     """List directory contents.
 
@@ -560,7 +536,6 @@ def file_list(path: str = ".", pattern: str | None = None) -> str:
             parts.append(f"  [FILE] {entry.name}  ({size_str}, {mtime})")
 
     return "\n".join(parts)
-
 
 
 def _format_size(size: int) -> str:

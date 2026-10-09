@@ -38,18 +38,18 @@ class EvalRun:
     chunk_size: int
     use_hybrid: bool
     faithfulness: float = 0.0
-    answer_relevancy: float = 0.0       # 回答是否切题（Judge LLM，不依赖 ground_truth）
-    answer_correctness: float = 0.0     # 与 ground_truth 比较
+    answer_relevancy: float = 0.0
+    answer_correctness: float = 0.0
     context_precision: float = 0.0
     context_recall: float = 0.0
-    context_relevancy: float = 0.0      # Embedding 相似度（非关键词重叠）
-    citation_precision: float = 0.0     # 回答中事实可映射到检索结果的比例
-    hit_rate: float = 0.0              # 检索命中率@k
-    mrr: float = 0.0                   # 平均倒数排名@k
-    retriever_recall: float = 0.0      # 召回器 Recall@50（粗排质量）
-    reranker_mrr: float = 0.0          # 重排器 MRR@10（精排质量）
-    task_success_rate: float = 0.0     # 端到端成功率
-    hallucination_rate: float = 0.0    # 负样本幻觉率
+    context_relevancy: float = 0.0
+    citation_precision: float = 0.0
+    hit_rate: float = 0.0
+    mrr: float = 0.0
+    retriever_recall: float = 0.0
+    reranker_mrr: float = 0.0
+    task_success_rate: float = 0.0
+    hallucination_rate: float = 0.0
     avg_latency_ms: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
@@ -76,15 +76,11 @@ EVAL_QUALITY_BATCH_PROMPT = load_prompt("eval_quality_batch")
 EVAL_CITATION_PROMPT = load_prompt("eval_citation")
 EVAL_REFUSAL_PROMPT = load_prompt("eval_refusal")
 
-# Keywords for detecting refusal in negative samples (legacy fallback)
 _REFUSAL_KEYWORDS = [
     "无法", "没有找到", "不能", "不确定", "不包含",
     "i don't know", "not found", "cannot", "unable",
     "无可奉告", "无法回答", "暂无", "无相关信息",
 ]
-
-
-# ── Text-matching helpers for deterministic metrics ──
 
 
 def _text_contains_reference(retrieved_chunks: list[str], reference: str, threshold: float = 0.6) -> bool:
@@ -98,7 +94,6 @@ def _text_contains_reference(retrieved_chunks: list[str], reference: str, thresh
     for chunk in retrieved_chunks:
         if ref_stripped in chunk:
             return True
-    # Fallback: token overlap
     ref_tokens = set(_simple_tokenize(ref_stripped))
     if not ref_tokens:
         return False
@@ -121,7 +116,6 @@ def _simple_tokenize(text: str) -> list[str]:
     return re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
 
 
-# ── Threshold profiles for CI gating ──
 THRESHOLD_PROFILES: dict[str, dict[str, float]] = {
     "strict": {
         "faithfulness": 0.95,
@@ -164,7 +158,6 @@ THRESHOLD_PROFILES: dict[str, dict[str, float]] = {
     },
 }
 
-# Backward-compatible alias
 DEFAULT_RAG_THRESHOLDS = THRESHOLD_PROFILES["balanced"]
 
 
@@ -260,7 +253,6 @@ class RAGEvaluator:
             ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
                 sample, full_ranked, top_k=top_k,
             )
-            # Retriever vs Reranker separation
             retriever_recall = self._score_retriever_recall(sample, full_ranked, top_k=50)
             reranker_mrr = self._score_reranker_mrr(sample, full_ranked, top_k=10)
             recall = 0.0
@@ -297,7 +289,7 @@ class RAGEvaluator:
                 max_tokens=max_tokens, top_k=top_k,
             )
             if not retrieved:
-                return "reject", False  # no retrieval = correct refusal, no hallucination
+                return "reject", False
             answer = self._generate_answer(sample.question, retrieved, _timeout=call_timeout)
             verdict = self._judge_refusal(sample.question, answer, retrieved, _timeout=call_timeout)
             is_hallucination = verdict == "hallucinate"
@@ -400,7 +392,6 @@ class RAGEvaluator:
 
         _log(f"    [4/4] 负样本完成 ({time.perf_counter() - t_neg:.1f}s)")
 
-        # Compute means
         run.faithfulness = _safe_mean(faithfulness_scores)
         run.answer_relevancy = _safe_mean(answer_relevancy_scores)
         run.answer_correctness = _safe_mean(correctness_scores)
@@ -433,7 +424,6 @@ class RAGEvaluator:
             run.rejection_rate = correct_refusals / len(negative_samples)
             run.hallucination_rate = hallucination_count / len(negative_samples)
 
-        # Task success rate: faithfulness >= 0.8 AND correctness >= 0.7 AND relevancy >= 0.75
         success_count = sum(
             1 for f, c, r in zip(faithfulness_scores, correctness_scores, answer_relevancy_scores)
             if f >= 0.8 and c >= 0.7 and r >= 0.75
@@ -469,8 +459,6 @@ class RAGEvaluator:
         candidate = Path(value)
         return candidate.suffix.lower() in {".pdf", ".md", ".txt"} and candidate.exists()
 
-    # Relevance score threshold: chunks below this are dropped from generation context.
-    # Keeps full_ranked intact for hit_rate/MRR computation.
     RELEVANCE_FILTER_THRESHOLD = 0.35
 
     def _filter_and_budget(
@@ -498,7 +486,6 @@ class RAGEvaluator:
         if not use_hybrid:
             raw = search(query, limit=top_k, namespace="eval")
             full_ranked = [r["text"] for r in raw]
-            # Dense branch pairs raw chroma text with the raw chroma score.
             pairs = [(r["text"], r.get("score", 0)) for r in raw]
             return self._filter_and_budget(pairs, full_ranked, max_tokens)
         dense_results = search(query, limit=top_k * 2, namespace="eval")
@@ -506,7 +493,6 @@ class RAGEvaluator:
         results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
         full_ranked = [r.text for r in results]
         expanded = retriever.expand_contexts(results) if hasattr(retriever, "expand_contexts") else results
-        # Hybrid branch pairs expanded display text with the result objects' scores.
         pairs = [(result_display_text(r), getattr(r, "score", 0)) for r in expanded]
         return self._filter_and_budget(pairs, full_ranked, max_tokens)
 
@@ -538,7 +524,6 @@ class RAGEvaluator:
         parsed = _parse_quality_batch(result)
         if parsed is not None:
             return parsed
-        # Fallback: individual calls
         faith = self._score_faithfulness(answer, contexts, _timeout)
         rel = self._score_answer_relevancy(question, answer, _timeout)
         corr = self._score_correctness(question, answer, ground_truth, _timeout)
@@ -586,8 +571,6 @@ class RAGEvaluator:
 
         return (precision, hit, mrr)
 
-    # ── Change 1: LLM-based precision & recall ──
-
     def _score_precision(self, sample: EvalSample, retrieved: list[str]) -> float:
         """LLM-based context precision: what fraction of retrieved chunks are relevant.
 
@@ -628,7 +611,6 @@ class RAGEvaluator:
                 scores.append(max(0.0, min(1.0, sim)))
             return sum(scores) / len(scores) if scores else 0.0
         except Exception:
-            # Fallback to keyword overlap if embedding fails
             query_terms = set(_simple_tokenize(query))
             if not query_terms:
                 return 0.0
@@ -648,18 +630,14 @@ class RAGEvaluator:
         Returns: 'reject', 'answer', or 'hallucinate'.
         Uses Judge LLM with structured prompt for nuanced detection.
         """
-        # Pass ALL contexts to judge (not just 3) to avoid false hallucination detection
         ctx = "\n---\n".join(contexts)
         prompt = EVAL_REFUSAL_PROMPT.format(
             question=question, context=ctx, answer=answer,
         )
         result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
         if not result:
-            # Fallback to keyword matching if Judge fails
             return "reject" if _is_refusal(answer) else "answer"
         normalized = result.strip().lower()
-        # Check for explicit rejection first (model said it can't answer)
-        # This handles case where model refuses but also adds extra explanation
         if "reject" in normalized or "拒绝" in normalized or "无法回答" in normalized:
             return "reject"
         if "hallucinate" in normalized or "幻觉" in normalized:
@@ -710,16 +688,12 @@ class RAGEvaluator:
         return 0.0
 
 
-# ── Module-level helpers ──
-
-
 def _parse_quality_batch(text: str | None) -> tuple[float, float, float] | None:
     """Parse batch quality score JSON. Returns (faith, rel, corr) or None on failure."""
     if not text:
         return None
     import json
     import re
-    # Try direct JSON parse
     stripped = text.strip()
     try:
         obj = json.loads(stripped)
@@ -730,7 +704,6 @@ def _parse_quality_batch(text: str | None) -> tuple[float, float, float] | None:
             return (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)), max(0.0, min(1.0, c)))
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
-    # Fallback: extract three floats from text
     nums = re.findall(r"(\d+\.?\d*)", stripped)
     if len(nums) >= 3:
         try:
@@ -751,13 +724,11 @@ def _parse_score(text: str | None) -> float:
     if not text:
         return 0.0
     import re
-    # Try last non-empty line first (CoT-aware)
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
     if lines:
         m = re.search(r"(\d+\.?\d*)", lines[-1])
         if m:
             return max(0.0, min(1.0, float(m.group(1))))
-    # Fallback: last number in full text
     matches = re.findall(r"(\d+\.?\d*)", text.strip())
     if matches:
         return max(0.0, min(1.0, float(matches[-1])))
@@ -790,7 +761,7 @@ def _bootstrap_ci(scores: list[float], n_resamples: int = 1000, ci: float = 0.95
 
     n = len(scores)
     means = []
-    rng = random.Random(42)  # deterministic seed for reproducibility
+    rng = random.Random(42)
     for _ in range(n_resamples):
         sample = [scores[rng.randint(0, n - 1)] for _ in range(n)]
         means.append(sum(sample) / n)

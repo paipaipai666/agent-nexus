@@ -17,10 +17,8 @@ def health():
 
     try:
         settings = get_settings()
-        # 构建轻量 runtime 用于健康检查
         from agentnexus.core.llm import AgentLLM
 
-        # 构造一个最小 runtime 对象给 health_checks 使用
         class _MiniRuntime:
             def __init__(self):
                 self.llm = AgentLLM()
@@ -45,7 +43,6 @@ def health():
             lines.append(f"  {icon} {name}: {s}{extra}")
             if detail:
                 lines.append(f"     {detail}")
-            # 磁盘空间特殊展示
             if "free_gb" in check:
                 lines.append(f"     Free: {check['free_gb']}GB / {check['total_gb']}GB ({check['used_pct']}% used)")
 

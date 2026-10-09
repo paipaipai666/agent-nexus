@@ -74,7 +74,6 @@ class TestComponentEvaluatorCheckLlm:
         stats: dict[str, list[float]] = {"llm": [], "tool_execution": [], "answer": []}
         spans = [{"name": "llm", "metadata": {"status": "error"}}]
         evaluator._check_llm(spans, "tid", report, stats)
-        # 10 - 2 (per error) - 2 (high error rate: 1/1 = 100%) = 6
         assert stats["llm"][0] == 6.0
         assert report.issue_count == 2
 
@@ -84,7 +83,7 @@ class TestComponentEvaluatorCheckLlm:
         stats: dict[str, list[float]] = {"llm": [], "tool_execution": [], "answer": []}
         spans = [{"name": "llm", "metadata": {"status": "ok", "truncated": True}}]
         evaluator._check_llm(spans, "tid", report, stats)
-        assert stats["llm"][0] == 9.0  # 10 - 1
+        assert stats["llm"][0] == 9.0
         assert report.issues[0].severity == "warning"
 
     def test_high_error_rate(self):
@@ -97,7 +96,6 @@ class TestComponentEvaluatorCheckLlm:
             {"name": "llm", "metadata": {"status": "ok"}},
         ]
         evaluator._check_llm(spans, "tid", report, stats)
-        # 2 errors - 2*2 = -4, plus -2 for high rate = 10 - 6 = 4
         assert stats["llm"][0] == 4.0
 
     def test_successful_llm_calls(self):
@@ -149,7 +147,7 @@ class TestComponentEvaluatorCheckToolExecution:
              "output": {}, "metadata": {"status": "error"}},
         ]
         evaluator._check_tool_execution(spans, "tid", report, stats)
-        assert stats["tool_execution"][0] == 8.0  # 10 - 2 for >50% failure
+        assert stats["tool_execution"][0] == 8.0
         assert report.issue_count == 1
 
     def test_timeout_detected(self):
@@ -160,7 +158,7 @@ class TestComponentEvaluatorCheckToolExecution:
                   "output": {"result_summary": "Tool timed out after 30s"},
                   "metadata": {"status": "ok"}}]
         evaluator._check_tool_execution(spans, "tid", report, stats)
-        assert stats["tool_execution"][0] == 9.0  # 10 - 1 for timeout
+        assert stats["tool_execution"][0] == 9.0
 
 
 class TestComponentEvaluatorCheckAnswer:
@@ -170,7 +168,7 @@ class TestComponentEvaluatorCheckAnswer:
         stats: dict[str, list[float]] = {"llm": [], "tool_execution": [], "answer": []}
         spans = [{"name": "llm", "metadata": {"status": "ok"}}]
         evaluator._check_answer(spans, "tid", report, stats)
-        assert stats["answer"][0] == 7.0  # 10 - 3 for missing answer
+        assert stats["answer"][0] == 7.0
 
     def test_answer_present(self):
         evaluator = ComponentEvaluator()
@@ -191,7 +189,7 @@ class TestComponentEvaluatorCheckAnswer:
         spans = [{"name": "final_answer", "output": {"answer": "降级 fallback answer"},
                   "metadata": {"status": "ok"}}]
         evaluator._check_answer(spans, "tid", report, stats)
-        assert stats["answer"][0] == 9.0  # 10 - 1
+        assert stats["answer"][0] == 9.0
         assert report.issues[0].severity == "warning"
 
     def test_no_llm_no_answer_no_penalty(self):
@@ -199,7 +197,6 @@ class TestComponentEvaluatorCheckAnswer:
         report = ComponentReport()
         stats: dict[str, list[float]] = {"llm": [], "tool_execution": [], "answer": []}
         evaluator._check_answer([], "tid", report, stats)
-        # No LLM spans and no answer spans → no score appended (nothing to evaluate)
         assert stats["answer"] == []
 
 

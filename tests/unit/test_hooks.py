@@ -255,7 +255,7 @@ class TestHookTiming:
         import time
 
         mgr = HookManager()
-        mgr._slow_threshold_ms = 1  # 1ms threshold for test
+        mgr._slow_threshold_ms = 1
 
         def slow_hook(ctx):
             time.sleep(0.01)
@@ -277,5 +277,3 @@ class TestHookTiming:
         with caplog.at_level(logging.WARNING, logger="agentnexus.core.hooks"):
             mgr.fire(HookType.BEFORE_TOOL_CALL, {})
         assert not any("slow" in r.message.lower() for r in caplog.records)
-
-

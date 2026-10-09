@@ -67,7 +67,6 @@ export default function KnowledgePage() {
   }, [docData])
   useEffect(() => { if (docError) console.error(docError) }, [docError])
 
-  // Cleanup polling and timeouts on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
@@ -75,7 +74,6 @@ export default function KnowledgePage() {
     }
   }, [])
 
-  // Resume polling for active upload on mount
   useEffect(() => {
     const saved = loadActiveUpload()
     if (saved && saved.runId) {
@@ -90,7 +88,7 @@ export default function KnowledgePage() {
 
     let lastPct = -1
     let staleTicks = 0
-    const MAX_STALE_TICKS = 30 // Stop after 30s of no progress change
+    const MAX_STALE_TICKS = 30
 
     pollRef.current = setInterval(async () => {
       try {
@@ -99,7 +97,6 @@ export default function KnowledgePage() {
         const pct = run.metadata?.progress_pct ?? 0
         const message = run.metadata?.progress_message || STAGE_LABELS[stage] || stage
 
-        // Track stale progress (no change in pct)
         if (pct === lastPct && run.status === 'running') {
           staleTicks++
           if (staleTicks >= MAX_STALE_TICKS) {
@@ -180,7 +177,7 @@ export default function KnowledgePage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
+      {}
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Knowledge Base</h1>
@@ -193,7 +190,7 @@ export default function KnowledgePage() {
         </button>
       </div>
 
-      {/* Progress Bar */}
+      {}
       {progress && (
         <div className="px-6 pb-3">
           <BorderBeam
@@ -221,7 +218,7 @@ export default function KnowledgePage() {
                 {progress.status === 'completed' ? '100%' : `${progress.pct}%`}
               </span>
             </div>
-            {/* Progress bar track */}
+            {}
             <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-1)' }}>
               <div
                 className="h-full rounded-full transition-all duration-300 ease-out"
@@ -244,7 +241,7 @@ export default function KnowledgePage() {
       )}
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {/* Search */}
+        {}
         <div className="flex gap-2">
           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search knowledge base..." className="input-field flex-1" />
           <button onClick={handleSearch} disabled={isSearching} className="btn-primary flex items-center gap-1.5 text-sm">
@@ -252,7 +249,7 @@ export default function KnowledgePage() {
           </button>
         </div>
 
-        {/* Search Results */}
+        {}
         {searchResults.length > 0 && (
           <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.05 }) }} className="space-y-2">
             <div className="flex items-center justify-between">
@@ -269,7 +266,7 @@ export default function KnowledgePage() {
           </div>
         )}
 
-        {/* Documents */}
+        {}
         <div ref={(el) => { if (el && documents.length > 0) animateEntrance(Array.from(el.children), { stagger: 0.04 }) }} className="space-y-1.5">
           {documents.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">

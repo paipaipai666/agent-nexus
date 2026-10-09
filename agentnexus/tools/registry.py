@@ -79,51 +79,51 @@ class RiskLevel(str, Enum):
     behaviors: tighter rate limits for high-risk tools, automatic HITL
     escalation after N calls, or risk-weighted audit detail levels.
     """
-    LOW = "low"          # read-only queries (search, file read)
-    MEDIUM = "medium"    # write ops, network requests
-    HIGH = "high"        # code execution, database writes, external payments
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 @dataclass
 class ToolMeta:
     """Each tool must declare these metadata fields before registration."""
 
-    name: str                            # unique identifier
-    description: str                     # human-readable, shown to LLM
-    param_schema: dict                   # JSON Schema for input validation
+    name: str
+    description: str
+    param_schema: dict
     allowed_agents: list[str] = field(default_factory=lambda: ["*"])
     risk_level: RiskLevel = RiskLevel.LOW
-    require_hitl: bool = False           # human-in-the-loop confirmation required
+    require_hitl: bool = False
     timeout_sec: int = 30
-    rate_limit_per_min: int = 0          # 0 = unlimited
-    output_schema: dict | None = None    # JSON Schema for output validation
+    rate_limit_per_min: int = 0
+    output_schema: dict | None = None
     audit_enabled: bool = True
     source_type: str = "unknown"
     source_id: str = "unknown"
     enabled: bool = True
     generation: int = 0
-    recoverable: bool = False            # result can be cleaned during STM compaction
-    max_retention: int = 5               # keep last N results when compacting
-    concurrency_safe: bool = False       # True = read-only, safe to run in parallel
-    lane: str = ""                     # named parallel lane (e.g. "subagent"); overrides concurrency_safe grouping
-    read_only: bool = False            # True = 只读工具，计划模式下允许调用
+    recoverable: bool = False
+    max_retention: int = 5
+    concurrency_safe: bool = False
+    lane: str = ""
+    read_only: bool = False
 
 
 @dataclass
 class AuditEntry:
     tool_name: str
     caller: str
-    params: str          # truncated / redacted
-    result_summary: str  # truncated
+    params: str
+    result_summary: str
     duration_ms: float
     hitl_triggered: bool
     error: str | None
     timestamp: float = field(default_factory=time.time)
-    risk_level: str = "low"              # ToolMeta.risk_level.value
-    schema_validation: str = ""          # 参数校验结果摘要
-    retry_count: int = 0                 # 重试次数
-    tool_selection_reason: str = ""      # 为什么选择这个工具
-    hitl_decision: str = ""              # hook_denied:* | hook_allowed | user_allowed | user_denied | no_channel
+    risk_level: str = "low"
+    schema_validation: str = ""
+    retry_count: int = 0
+    tool_selection_reason: str = ""
+    hitl_decision: str = ""
 
 
 class ToolRegistry:
@@ -137,9 +137,6 @@ class ToolRegistry:
         self._output_validators: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._rate_lock = threading.Lock()
-        # Session-scoped lane pools for long-running parallel tools (e.g. subagents).
-        # Lazily created per lane name; intentionally never shut down (same lifetime
-        # as the registry, mirroring self._executor above).
         self._lane_pools: dict[str, ThreadPoolExecutor] = {}
         from agentnexus.tools.confirm_bridge import CancelBridge, SubagentBridge
         self.cancel_bridge = CancelBridge()
@@ -147,16 +144,11 @@ class ToolRegistry:
         if jsonschema is None:
             logger.warning("jsonschema package not installed — tool parameter validation is disabled")
 
-    # ── registration ──────────────────────────────────────────────
-
     def register(self, meta: ToolMeta, func: Callable) -> None:
         if meta.name in self._tools:
             existing_meta, _ = self._tools[meta.name]
             existing_source = f"{existing_meta.source_type}:{existing_meta.source_id}"
             incoming_source = f"{meta.source_type}:{meta.source_id}"
-            # A source-less placeholder ("unknown:unknown") may be claimed by any
-            # concrete source — providers stamp their source via
-            # ToolProviderContext.mark_registered() through this public path.
             if existing_source != incoming_source and existing_source != "unknown:unknown":
                 raise ValueError(
                     f"Tool '{meta.name}' already registered by {existing_source}; "
@@ -237,8 +229,6 @@ class ToolRegistry:
     def unregister_source_type(self, source_type: str) -> list[str]:
         return self.unregister_where(lambda m: m.source_type == source_type)
 
-    # ── call path (the governance gate) ───────────────────────────
-
     def invoke(
         self,
         name: str,
@@ -252,7 +242,6 @@ class ToolRegistry:
 
         hook_mgr = get_hook_manager()
 
-        # ── before registry invoke hook ────────────────────────
         hook_mgr.fire(HookType.BEFORE_REGISTRY_INVOKE, {
             "name": name, "params": params, "caller": caller,
         })
@@ -264,7 +253,6 @@ class ToolRegistry:
         error = None
         result_str = ""
 
-        # 1. RBAC check
         try:
             if "*" not in meta.allowed_agents and caller not in meta.allowed_agents:
                 raise PermissionError(
@@ -274,23 +262,19 @@ class ToolRegistry:
             if not meta.enabled:
                 raise PermissionError(f"Tool '{name}' is disabled")
 
-            # 2. Skill tool policy hard gate
             if not filter_tool_meta(name, meta, tool_policy):
                 raise PermissionError(
                     f"Tool '{name}' is not visible under current skill tool_policy"
                 )
 
-            # 3. Parameter schema validation
             if meta.param_schema:
                 self._validate_params(name, params, self._param_validators.get(name))
 
-            # 4. Rate limiting
             if meta.rate_limit_per_min > 0:
                 self._check_rate_limit(name, meta.rate_limit_per_min)
 
             redacted_params = _redact_sensitive_params(params)
 
-            # 5. HITL gate
             if meta.require_hitl:
                 hitl_triggered = True
                 hook_mgr.fire(HookType.NOTIFICATION, {
@@ -299,10 +283,6 @@ class ToolRegistry:
                     "caller": caller,
                     "risk_level": meta.risk_level.value,
                 })
-                # PERMISSION_REQUEST hooks are a decision input to the HITL
-                # gate — never a bypass of it. Deny is always honored; allow
-                # requires the explicit hitl_hooks_may_approve opt-in, and
-                # either way the audit entry records the hook's involvement.
                 perm_ctx = hook_mgr.fire(HookType.PERMISSION_REQUEST, {
                     "name": name,
                     "params": redacted_params,
@@ -332,14 +312,6 @@ class ToolRegistry:
                         return "[blocked] 用户取消了该工具调用"
                     hitl_decision = "user_allowed"
 
-            # 6. Execute with timeout enforcement
-            # SEC-008: future.result(timeout=) provides a soft timeout — it raises
-            # TimeoutError on the caller side but cannot terminate the running thread.
-            # Python's ThreadPoolExecutor does not support thread cancellation.
-            # Subprocess-based tools (shell_exec) already have their
-            # own timeout= in subprocess.run calls. For non-subprocess tools (network,
-            # database), this is a Python language limitation — multiprocessing.Process
-            # would be needed for hard cancellation.
             span_input = {
                 "tool_name": name,
                 "caller": caller,
@@ -354,7 +326,6 @@ class ToolRegistry:
                     error = f"Tool '{name}' timed out after {meta.timeout_sec}s"
                     raise TimeoutError(error)
                 result_str = summarize_tool_result(result)[:500]
-                # 7. Output schema validation
                 if meta.output_schema:
                     self._validate_output(name, result, self._output_validators.get(name))
                 span.output = {"result_summary": result_str}
@@ -371,7 +342,6 @@ class ToolRegistry:
             if not error:
                 error = str(e)
             result_str = f"[error] {error}"
-            # Record schema validation failure in span metadata
             if "span" in locals() and span is not None:
                 is_validation = "validation" in error.lower() or "schema" in error.lower()
                 span.metadata = {
@@ -385,13 +355,11 @@ class ToolRegistry:
         finally:
             duration = (time.time() - start) * 1000
 
-            # ── after registry invoke hook ─────────────────────
             hook_mgr.fire(HookType.AFTER_REGISTRY_INVOKE, {
                 "name": name, "params": params, "caller": caller,
                 "duration_ms": round(duration, 1), "error": error,
             })
 
-            # 7. Audit
             if meta.audit_enabled:
                 self._audit_log.append(AuditEntry(
                     tool_name=name,
@@ -405,8 +373,6 @@ class ToolRegistry:
                     schema_validation="passed" if not error else "failed",
                     hitl_decision=hitl_decision,
                 ))
-
-    # ── query API (for LLM prompt building) ───────────────────────
 
     def get_available_tools(self, agent: str = "*", tool_policy: Any = None) -> str:
         """Return a formatted description of tools available to *agent*."""
@@ -439,7 +405,6 @@ class ToolRegistry:
                 continue
             if not filter_tool_meta(name, meta, tool_policy):
                 continue
-            # Strip default values from properties — OpenAI doesn't use them
             schema = {"type": "object", "properties": {}, "required": meta.param_schema.get("required", [])}
             props = meta.param_schema.get("properties", {})
             if props:
@@ -447,7 +412,6 @@ class ToolRegistry:
                     cleaned = {k: v for k, v in prop_schema.items() if k != "default"}
                     schema["properties"][prop_name] = cleaned
             else:
-                # No declared properties → empty schema (tool takes no args)
                 schema["properties"] = {}
                 schema.pop("required", None)
 
@@ -463,8 +427,6 @@ class ToolRegistry:
 
     def get_audit_log(self) -> list[AuditEntry]:
         return list(self._audit_log)
-
-    # ── internals ─────────────────────────────────────────────────
 
     def _get_tool(self, name: str) -> tuple[ToolMeta, Callable]:
         entry = self._tools.get(name)
@@ -513,7 +475,6 @@ class ToolRegistry:
         with self._rate_lock:
             now = time.time()
             window = self._rate_counters[name]
-            # Remove entries older than 60s
             cutoff = now - 60
             window[:] = [t for t in window if t > cutoff]
             if len(window) >= limit:

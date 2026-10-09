@@ -32,7 +32,6 @@ class TestAttachmentRoots:
             finally:
                 unregister_attachment_paths((str(f),))
 
-            # Unregister revokes access — no cross-run leakage.
             with pytest.raises(ValueError, match="路径越界|out of bounds"):
                 file_read(str(f))
         finally:

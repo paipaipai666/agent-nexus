@@ -1,14 +1,11 @@
 import { create } from 'zustand'
 
 interface UIState {
-  /** context sidebar collapsed (Ctrl+B) */
   sidebarCollapsed: boolean
   toggleSidebar: () => void
-  /** command palette */
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
   togglePalette: () => void
-  /** floating session info card on the chat page */
   infoPanelCollapsed: boolean
   toggleInfoPanel: () => void
 }

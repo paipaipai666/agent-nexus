@@ -58,11 +58,6 @@ def _rows_for(state: S):
     return [t for t in TRANSFER_TABLE if t.state == state]
 
 
-# ══════════════════════════════════════════════════════════════
-# 4. 表结构：出口集合封闭（totality 手动断言）
-# ══════════════════════════════════════════════════════════════
-
-
 class TestTableShape:
     def test_six_states_only(self):
         assert [s.name for s in S] == [
@@ -70,10 +65,9 @@ class TestTableShape:
         ]
 
     def test_await_model_exits_match_round_return_set(self):
-        # _on_round 返回封闭于 {TOOLS_REQUESTED, ANSWER_READY, FAULT, ROUND_READY}
         events = {t.event for t in _rows_for(S.AWAIT_MODEL)}
         assert events == {
-            None,                    # auto-advance 循环
+            None,
             E.TOOLS_REQUESTED,
             E.ANSWER_READY,
             E.FAULT,
@@ -81,24 +75,16 @@ class TestTableShape:
         }
 
     def test_recover_exits_match_recover_return_set(self):
-        # _on_recover 返回封闭于 {ROUND_READY, ANSWER_READY, ABORT}
         events = {t.event for t in _rows_for(S.RECOVER)}
         assert events == {E.ROUND_READY, E.ANSWER_READY, E.ABORT}
 
     def test_answer_is_total(self):
         events = {t.event for t in _rows_for(S.ANSWER)}
-        assert events == {E.ANSWER_VETOED, None}  # None = 无条件兜底
+        assert events == {E.ANSWER_VETOED, None}
 
     def test_execute_tool_exits_match_tool_return_set(self):
-        # _on_tools_requested 返回封闭于 {TOOLS_DONE, ANSWER_READY, FAULT}
-        # FAULT = 记忆写入失败等致命错误，禁止进入下一轮
         events = {t.event for t in _rows_for(S.EXECUTE_TOOL)}
         assert events == {E.TOOLS_DONE, E.ANSWER_READY, E.FAULT}
-
-
-# ══════════════════════════════════════════════════════════════
-# 决策1：无 Thought 直接调工具
-# ══════════════════════════════════════════════════════════════
 
 
 class TestNoThoughtGate:
@@ -135,22 +121,12 @@ class TestNoThoughtGate:
         assert "最大步数" in result.answer
 
 
-# ══════════════════════════════════════════════════════════════
-# 决策3：默认无 max_steps
-# ══════════════════════════════════════════════════════════════
-
-
 class TestDefaultNoMaxSteps:
     def test_default_is_unlimited(self):
         llm = _make_llm()
         assert ReActAgent(llm, ToolRegistry()).max_steps is None
         assert ExecutionContext(question="q").max_steps is None
         assert ReActAgent(llm, ToolRegistry(), max_steps=7).max_steps == 7
-
-
-# ══════════════════════════════════════════════════════════════
-# 工具批次：整批完成后才交还控制权
-# ══════════════════════════════════════════════════════════════
 
 
 class TestToolBatchMustComplete:
@@ -197,11 +173,6 @@ class TestToolBatchMustComplete:
         assert result.answer is not None
 
 
-# ══════════════════════════════════════════════════════════════
-# 跑飞兜底（非强制）：L1 闭环提示 + L3 token 预算提醒
-# ══════════════════════════════════════════════════════════════
-
-
 class TestRunawayGuards:
     def test_loop_warning_is_emitted_and_run_still_finishes(self):
         """连续相同工具调用 → 发 LOOP_WARNING + 软 nudge，但不强制终止。"""
@@ -235,9 +206,7 @@ class TestRunawayGuards:
 
         loop_warns = [e for e in emitted if e[0] is ReActEventType.LOOP_WARNING]
         assert loop_warns, "重复调用必须触发闭环提示"
-        # 提示有上限，不刷屏
         assert len(loop_warns) <= 2
-        # 没有被强制终止：模型自己给出答案
         assert result.answer == "看够了，这是答案。"
         assert any("闭环检测" in line for line in printed)
 
@@ -307,11 +276,6 @@ class TestRunawayGuards:
         assert not [e for e in emitted if e[0] is ReActEventType.BUDGET_REMINDER]
 
 
-# ══════════════════════════════════════════════════════════════
-# RECOVER 策略：返回封闭于 {ROUND_READY, ANSWER_READY, ABORT}
-# ══════════════════════════════════════════════════════════════
-
-
 class TestRecoverPolicy:
     def _ctx(self, llm, strategy=None):
         ctx = ExecutionContext(question="q", max_steps=None)
@@ -350,7 +314,7 @@ class TestRecoverPolicy:
         llm = _make_llm()
         agent = ReActAgent(llm, ToolRegistry(), output=lambda s: None)
         ctx = self._ctx(llm, strategy=CallingStrategy.JSON_MODE)
-        ctx.run_state.json_retries = 2  # == max_json_retries
+        ctx.run_state.json_retries = 2
         ctx.last_response_text = "not json"
         events = agent._on_recover(ctx, ReActEvent(E.FAULT, {
             "reason": RetryReason.PARSE_ERROR, "detail": "broken"}))

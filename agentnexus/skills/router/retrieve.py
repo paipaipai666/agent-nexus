@@ -26,7 +26,6 @@ def estimate_text_tokens(text: str) -> int:
         enc = _get_tiktoken_encoding()
         return len(enc.encode(text))
     except Exception:
-        # CJK-heavy text runs ~1.5–2 chars/token; stay slightly conservative.
         return max(1, (len(text) + 1) // 2)
 
 
@@ -94,7 +93,6 @@ def synthesize_intent_queries(entry: SkillEntry, max_queries: int = 8) -> list[s
         _add(f"{verb}{name}")
     for obj in objects[:3]:
         _add(f"{obj}相关的{verbs[0] if verbs else '处理'}")
-    # Headings from body (## Step …) act as scenario cues
     for line in entry_body_text(entry, 800).splitlines():
         stripped = line.strip().lstrip("#").strip()
         if 4 <= len(stripped) <= 40 and not stripped.endswith(("。", ".", ":")):

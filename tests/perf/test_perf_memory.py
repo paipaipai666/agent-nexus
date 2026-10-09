@@ -102,7 +102,6 @@ def test_stm_estimate_tokens(perf_env):
         stm.append("user", f"This is test message number {i} for token estimation purposes")
         stm.append("assistant", f"This is the response to message {i} with some additional content")
 
-    # Warm up: litellm.token_counter has cold-start overhead
     stm.estimate_tokens()
 
     times = []
@@ -145,7 +144,7 @@ def test_stm_estimate_scaling(perf_env, stm_size):
         stm.append("user", f"test message {i} " * 10)
         stm.append("assistant", f"response {i} " * 20)
 
-    stm.estimate_tokens()  # warmup
+    stm.estimate_tokens()
     assert isinstance(stm.estimate_tokens(), int)
 
     times = []

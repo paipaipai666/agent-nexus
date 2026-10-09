@@ -23,7 +23,6 @@ from agentnexus.evaluation.task import (
 
 logger = logging.getLogger(__name__)
 
-# 默认数据集目录
 DEFAULT_TASKS_DIR = Path(__file__).parent.parent / "eval_tasks"
 
 
@@ -36,10 +35,6 @@ class EvalDataset:
     @property
     def tasks_dir(self) -> Path:
         return self._tasks_dir
-
-    # ------------------------------------------------------------------
-    # Loading
-    # ------------------------------------------------------------------
 
     def load_task(self, task_id: str) -> EvalTask | None:
         """按 ID 加载单个 task。"""
@@ -73,7 +68,6 @@ class EvalDataset:
         """按名称加载 suite。"""
         suite_path = self._tasks_dir / suite_name / "_suite.yaml"
         if not suite_path.exists():
-            # 尝试在根目录查找
             suite_path = self._tasks_dir / f"{suite_name}_suite.yaml"
         if not suite_path.exists():
             return None
@@ -84,7 +78,6 @@ class EvalDataset:
             logger.error("Failed to load suite '%s': %s", suite_name, e)
             return None
 
-        # 加载 task_ids 引用的 task
         if suite.task_ids and not suite.tasks:
             all_tasks = self.load_all_tasks()
             task_map = {t.id: t for t in all_tasks}
@@ -98,7 +91,6 @@ class EvalDataset:
         if not self._tasks_dir.exists():
             return suites
 
-        # 查找 _suite.yaml 文件
         for suite_file in sorted(self._tasks_dir.rglob("_suite.yaml")):
             try:
                 suite = load_suite_from_yaml(suite_file)
@@ -112,7 +104,6 @@ class EvalDataset:
             except Exception:
                 continue
 
-        # 查找 {name}_suite.yaml 文件
         for suite_file in sorted(self._tasks_dir.glob("*_suite.yaml")):
             try:
                 suite = load_suite_from_yaml(suite_file)
@@ -127,10 +118,6 @@ class EvalDataset:
                 continue
 
         return suites
-
-    # ------------------------------------------------------------------
-    # Filtering
-    # ------------------------------------------------------------------
 
     def filter_tasks(
         self,
@@ -151,10 +138,6 @@ class EvalDataset:
             tasks = [t for t in tasks if all(tag in t.tags for tag in tags)]
         return tasks
 
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
     def validate(self) -> list[str]:
         """验证所有 task 的完整性。返回错误列表。"""
         errors: list[str] = []
@@ -162,20 +145,14 @@ class EvalDataset:
         seen_ids: set[str] = set()
 
         for task in tasks:
-            # 检查 ID 唯一性
             if task.id in seen_ids:
                 errors.append(f"Duplicate task ID: {task.id}")
             seen_ids.add(task.id)
 
-            # 检查 task 自身有效性
             task_errors = task.validate()
             errors.extend(task_errors)
 
         return errors
-
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
 
     def stats(self) -> dict[str, Any]:
         """数据集统计信息。"""
@@ -199,10 +176,6 @@ class EvalDataset:
             "by_eval_type": by_eval_type,
         }
 
-    # ------------------------------------------------------------------
-    # Save
-    # ------------------------------------------------------------------
-
     def save_task(self, task: EvalTask, directory: str | None = None) -> Path:
         """保存 task 到 YAML 文件。"""
         save_dir = Path(directory) if directory else self._tasks_dir / task.category
@@ -224,5 +197,3 @@ class EvalDataset:
             yaml.dump(suite.to_dict(), f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
         return file_path
-
-

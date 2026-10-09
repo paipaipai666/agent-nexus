@@ -72,8 +72,6 @@ class TestShortTermMemoryDeserialization:
 
     def test_from_json_wrong_types(self):
         """Non-list messages string iterates chars and may crash on token calc."""
-        # When messages is a string, iterating yields chars; _estimate_msg_tokens
-        # calls .get() on each char which raises AttributeError.
         with pytest.raises(AttributeError):
             ShortTermMemory.from_json('{"messages": "not a list"}')
 

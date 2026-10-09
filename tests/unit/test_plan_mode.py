@@ -33,9 +33,6 @@ EXPECTED_READ_ONLY = {
 }
 
 
-# ── helpers ──────────────────────────────────────────────────────
-
-
 def _meta(name: str, **kwargs) -> ToolMeta:
     return ToolMeta(
         name=name,
@@ -78,9 +75,6 @@ def gate():
     return SimpleNamespace(reg=reg, manager=manager, agent=agent, calls=calls)
 
 
-# ── PlanModeManager ──────────────────────────────────────────────
-
-
 class TestPlanModeManager:
     def test_unknown_session_is_inactive(self):
         m = PlanModeManager()
@@ -101,10 +95,10 @@ class TestPlanModeManager:
 
     def test_disable_is_idempotent(self):
         m = PlanModeManager()
-        m.disable("never-enabled")  # must not raise
+        m.disable("never-enabled")
         m.enable("s1")
         m.disable("s1")
-        m.disable("s1")  # double-disable: still off, no error
+        m.disable("s1")
         assert m.is_active("s1") is False
 
     def test_sessions_are_isolated(self):
@@ -115,9 +109,6 @@ class TestPlanModeManager:
         assert m.is_active("s1") is False
         m.enable("s2")
         assert m.is_active("s2") is True
-
-
-# ── read_only metadata ───────────────────────────────────────────
 
 
 class TestReadOnlyMetadata:
@@ -155,7 +146,7 @@ class TestReadOnlyMetadata:
             reg = ToolRegistry()
             try:
                 provider.register(reg, ctx.for_provider(name))
-            except Exception as e:  # env-dependent optional deps (playwright…)
+            except Exception as e:
                 skipped.append(f"{name}: {e}")
                 continue
             actual |= {
@@ -168,9 +159,6 @@ class TestReadOnlyMetadata:
             f"read_only annotation set drifted (skipped providers: {skipped}); "
             f"missing={sorted(EXPECTED_READ_ONLY - actual)}, extra={sorted(actual - EXPECTED_READ_ONLY)}"
         )
-
-
-# ── gate behavior ────────────────────────────────────────────────
 
 
 class TestPlanModeGate:
@@ -231,7 +219,6 @@ class TestPlanModeGate:
             plans = list((tmp_path / ".agentnexus" / "plans").glob("plan-*.md"))
             assert len(plans) == 1 and "# 计划" in plans[0].read_text(encoding="utf-8")
             assert str(plans[0]) in result
-            # writes now pass through
             assert agent._execute_tool("write_tool", {}) == "write_tool executed"
         finally:
             ws_mod.current_workspace.reset(token)
@@ -309,16 +296,16 @@ class TestPlanModeGate:
     def test_mid_run_toggle_both_directions(self, gate):
         gate.manager.enable("s1")
         assert isinstance(gate.agent._execute_tool("write_tool", {}), ToolError)
-        gate.manager.disable("s1")  # manual cancel mid-run, no re-binding
+        gate.manager.disable("s1")
         assert gate.agent._execute_tool("write_tool", {}) == "write_tool executed"
-        gate.manager.enable("s1")  # manual enable mid-run
+        gate.manager.enable("s1")
         blocked = gate.agent._execute_tool("write_tool", {})
         assert isinstance(blocked, ToolError)
 
     def test_mock_registry_fails_closed(self, gate):
         """A duck-typed registry whose meta.read_only is a truthy Mock must not pass."""
         gate.manager.enable("s1")
-        agent = _make_agent(MagicMock())  # get_meta() -> truthy MagicMock
+        agent = _make_agent(MagicMock())
         agent.set_plan_mode(PlanModeBinding(gate.manager, "s1"))
         result = agent._execute_tool("write_tool", {})
         assert isinstance(result, ToolError)
@@ -329,7 +316,6 @@ class TestPlanModeGate:
 
     def test_plan_save_failure_does_not_block_exit(self, gate, tmp_path):
         from agentnexus.tools import workspace as ws_mod
-        # .agentnexus exists as a FILE -> mkdir(parents=True) raises
         (tmp_path / ".agentnexus").write_text("blocker", encoding="utf-8")
         token = ws_mod.current_workspace.set(str(tmp_path))
         try:
@@ -413,7 +399,7 @@ class TestRejectedPlanPausesRun:
 
         assert len(rounds) == 1, "拒绝后不得进入第二轮自动重规划"
         assert result.answer == PLAN_REJECTED_ANSWER
-        assert manager.is_active("s1") is True  # 模式仍开，等待用户反馈后重提
+        assert manager.is_active("s1") is True
 
     def test_approval_does_not_end_run(self):
         """对照：批准后模型继续执行（不触发暂停快路径）。"""
@@ -457,9 +443,6 @@ class TestRejectedPlanPausesRun:
         agent._execute_tool(EXIT_PLAN_MODE_TOOL, {"plan": "draft"})
         assert binding.take_rejection() == PLAN_REJECTED_ANSWER
         assert binding.take_rejection() is None
-
-
-# ── MCP readOnlyHint ─────────────────────────────────────────────
 
 
 class TestMCPReadOnly:
@@ -524,9 +507,6 @@ class TestMCPReadOnly:
         reg = ToolRegistry()
         mgr.register_tools(reg)
         assert reg.get_meta("mcp_srv__lookup").read_only is True
-
-
-# ── ChatService + routes ─────────────────────────────────────────
 
 
 class TestChatServicePlanMode:

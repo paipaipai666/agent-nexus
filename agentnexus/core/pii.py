@@ -48,6 +48,5 @@ def mask_pii(text: str) -> str:
     return text
 
 
-# Backward-compatible private names used by older tests/imports.
 _contains_pii = contains_pii
 _mask_pii = mask_pii

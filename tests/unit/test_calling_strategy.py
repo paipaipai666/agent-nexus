@@ -61,7 +61,6 @@ class TestRobustJsonParse:
         assert result["type"] == "tool_call"
 
     def test_extra_text_after_brace(self):
-        # _try_fix_json handles this via brace matching
         result = ReActAgent._robust_json_parse(
             '{"answer": "done"} More text here...'
         )

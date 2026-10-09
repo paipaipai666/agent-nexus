@@ -29,13 +29,11 @@ export default function ThemeProvider({ children }: ThemeProviderProps) {
     localStorage.setItem('agentnexus-theme', theme)
   }, [theme])
 
-  // Restore the saved accent color once at startup
   useEffect(() => {
     initAccent()
   }, [])
 
   const toggleTheme = () => {
-    // Animate the color transition, then clean up so hover transitions stay snappy
     document.documentElement.classList.add('theme-anim')
     setTheme(prev => prev === 'dark' ? 'light' : 'dark')
     window.setTimeout(() => document.documentElement.classList.remove('theme-anim'), 260)

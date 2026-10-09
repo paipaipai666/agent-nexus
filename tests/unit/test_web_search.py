@@ -152,7 +152,7 @@ class TestSearchCache:
     def test_cache_key_hashable(self):
         key = _make_cache_key("test", 5, "basic", None, "general", False, None, None)
         assert isinstance(key, tuple)
-        d = {key: "value"}  # should not raise
+        d = {key: "value"}
 
     def test_cache_set_and_get(self):
         key = _make_cache_key("test", 5, "basic", None, "general", False, None, None)
@@ -167,13 +167,11 @@ class TestSearchCache:
     def test_cache_expiry(self):
         key = _make_cache_key("expire", 5, "basic", None, "general", False, None, None)
         results = [{"title": "T"}]
-        # Store with old timestamp
         _cache[key] = (monotonic() - 600, results)
         assert _cache_get(key) is None
-        assert key not in _cache  # evicted
+        assert key not in _cache
 
     def test_cache_max_size_eviction(self):
-        # Fill cache beyond 256 limit
         for i in range(260):
             key = _make_cache_key(f"q{i}", 5, "basic", None, "general", False, None, None)
             _cache_set(key, [{"title": f"T{i}"}])
@@ -199,12 +197,10 @@ class TestSearchCache:
             "results": [{"title": "Cached", "url": "https://cached.com",
                          "content": "c", "score": 0.9}]
         }
-        # First call hits API
         r1 = web_search_structured("cached query")
         assert mock_client.search.call_count == 1
-        # Second call should use cache
         r2 = web_search_structured("cached query")
-        assert mock_client.search.call_count == 1  # no additional API call
+        assert mock_client.search.call_count == 1
         assert r1 == r2
 
     @patch("agentnexus.tools.web_search._get_client")

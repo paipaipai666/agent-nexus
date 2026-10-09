@@ -9,7 +9,6 @@ import pytest
 def test_config_loading():
     from agentnexus.core.config import Settings
 
-    # No vendor defaults — empty until the user configures a provider
     s = Settings()
     assert s.llm_model_id == ""
     assert s.llm_base_url == ""
@@ -87,9 +86,6 @@ def test_cli_entry():
     assert app is not None
 
 
-# ── Provider system regression ─────────────────────────────────────────
-
-
 def test_provider_router_anthropic_uses_messages_codec():
     from agentnexus.core.providers.anthropic_provider import AnthropicMessagesProvider
     from agentnexus.core.providers.router import select_provider
@@ -146,12 +142,6 @@ def test_provider_singleton_cached():
     assert p1 is p2
 
 
-# ── Model normalization regression ─────────────────────────────────────
-
-
-# ── Capability detection regression ────────────────────────────────────
-
-
 def test_capability_registry_deepseek():
     from agentnexus.core.capabilities import detect_capabilities
 
@@ -172,7 +162,6 @@ def test_capability_registry_unknown_model():
     from agentnexus.core.capabilities import detect_capabilities
 
     caps = detect_capabilities("unknown/model", "https://example.com")
-    # Falls back to default — conservative
     assert caps.supports_tool_calling is False
 
 
@@ -184,13 +173,10 @@ def test_session_capability_tracker():
 
     tracker.mark_failed("tool_calling")
     assert tracker.is_available("tool_calling", True) is False
-    assert tracker.is_available("json_mode", True) is True  # other features unaffected
+    assert tracker.is_available("json_mode", True) is True
 
     tracker.reset("tool_calling")
     assert tracker.is_available("tool_calling", True) is True
-
-
-# ── Token estimation regression ────────────────────────────────────────
 
 
 def test_short_term_memory_token_estimation():
@@ -202,7 +188,7 @@ def test_short_term_memory_token_estimation():
 
     tokens = stm.estimate_tokens()
     assert tokens > 0
-    assert tokens < 100  # sanity check
+    assert tokens < 100
 
 
 def test_short_term_memory_token_estimation_chinese():
@@ -241,9 +227,6 @@ def test_llm_estimate_usage():
     assert usage["input_tokens"] > 0
     assert usage["output_tokens"] > 0
     assert usage["total_tokens"] == usage["input_tokens"] + usage["output_tokens"]
-
-
-# ── StreamResult regression ────────────────────────────────────────────
 
 
 def test_stream_result_properties():

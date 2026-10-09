@@ -13,13 +13,6 @@ const PLAN_MODE_OVERRIDE: SessionOverrideConfig<boolean, boolean> = {
   setServerValue: (sessionId, v) => api.setPlanMode(sessionId, v).then(d => d.plan_mode),
 }
 
-/** Plan-mode switch in the chat input's HUD row. Reflects the per-session
- *  server-side switch; the gate itself is enforced backend-side per tool
- *  call, so toggling works even mid-run.
- *
- *  Pre-session window (new chat defers session creation until the first
- *  message): the toggle stays clickable and stores an "armed" intent, which
- *  the session-creation path applies before the first message is sent. */
 export default function PlanModeToggle() {
   const { sessionId } = useSession()
   const { value: enabled, busy, commit } = useSessionOverride(sessionId, PLAN_MODE_OVERRIDE)

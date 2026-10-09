@@ -36,7 +36,7 @@ class MemoryBackend(Protocol):
 
 class BaseBackend:
     name = "base"
-    _generate: Any  # llm with .think(messages, silent=True)
+    _generate: Any
 
     def __init__(self, generate_llm):
         self._generate = generate_llm
@@ -84,7 +84,7 @@ class NaiveBackend(BaseBackend):
     def ingest(self, turns: list[Turn]) -> None:
         kept: list[str] = []
         total = 0
-        for t in reversed(turns):  # newest wins if the budget overflows
+        for t in reversed(turns):
             if total + len(t.content) > self._max_turn_chars:
                 break
             kept.append(f"{t.role}: {t.content}")
@@ -94,7 +94,7 @@ class NaiveBackend(BaseBackend):
     def answer(self, question: str) -> str:
         system = f"{SYSTEM_PROMPT}\n\n对话记录:\n{self._transcript}" if self._transcript \
             else SYSTEM_PROMPT
-        self._last_context = self._transcript   # full history IS its "retrieval"
+        self._last_context = self._transcript
         return self._ask(system, question)
 
 
@@ -140,8 +140,6 @@ class NexusBackend(BaseBackend):
         self._ensure_sandbox()
         for t in turns:
             self._mgr.append(t.role, t.content)
-            # Production write path: conclude() per user/assistant exchange
-            # runs the admission gate and extraction into LTM.
             if t.role == "user":
                 self._pending_user = t.content
             elif self._pending_user is not None:

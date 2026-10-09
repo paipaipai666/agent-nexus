@@ -15,11 +15,9 @@ import pytest
 
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-TOOL_ACCURACY_MIN = 0.80  # 80% minimum accuracy
-TOOL_ACCURACY_P95_MAX_MS = 200  # P95 latency for accuracy tests
-TOOL_ACCURACY_SIMILAR_MIN = 0.65  # 65% accuracy with similar tool names
+TOOL_ACCURACY_MIN = 0.80
+TOOL_ACCURACY_P95_MAX_MS = 200
+TOOL_ACCURACY_SIMILAR_MIN = 0.65
 
 
 def _percentile(data: list[float], p: int) -> float:
@@ -99,12 +97,10 @@ class MockToolSelector:
         if not available_tools:
             return "", False
 
-        # Simulate LLM selection with configurable accuracy
         import random
         if random.random() < self.accuracy_rate:
             selected = expected_tool
         else:
-            # Select a random wrong tool
             wrong_tools = [t for t in available_tools if t != expected_tool]
             selected = random.choice(wrong_tools) if wrong_tools else expected_tool
 
@@ -127,9 +123,6 @@ class MockToolSelector:
     def p95_latency_ms(self) -> float:
         """P95 latency in milliseconds."""
         return _p95_ms(self._call_latencies) if self._call_latencies else 0.0
-
-
-# ── Tool-Acc-1: Accuracy with many tools ───────────────────────────
 
 
 class TestToolAccuracyUnderLoad:
@@ -177,16 +170,11 @@ class TestToolAccuracyUnderLoad:
 
             accuracies.append((tool_count, selector.accuracy))
 
-        # Verify accuracy doesn't drop significantly with more tools
-        # Allow for some variance due to randomization
         base_accuracy = accuracies[0][1]
         for count, accuracy in accuracies[1:]:
             assert accuracy >= base_accuracy - 0.10, (
                 f"Accuracy dropped from {base_accuracy:.2%} to {accuracy:.2%} at {count} tools"
             )
-
-
-# ── Tool-Acc-2: Accuracy with similar tool names ──────────────────
 
 
 class TestToolAccuracyWithSimilarNames:
@@ -199,7 +187,6 @@ class TestToolAccuracyWithSimilarNames:
 
         selector = MockToolSelector(registry, accuracy_rate=0.90)
 
-        # Test with tools from same category
         search_tools = [name for name in registry._tools.keys() if name.startswith("search_")]
         test_cases = search_tools[:10]
 
@@ -228,9 +215,6 @@ class TestToolAccuracyWithSimilarNames:
 
         assert selector.accuracy >= TOOL_ACCURACY_SIMILAR_MIN, \
             f"Accuracy {selector.accuracy:.2%} < {TOOL_ACCURACY_SIMILAR_MIN:.2%} across categories"
-
-
-# ── Tool-Acc-3: Latency under accuracy testing ────────────────────
 
 
 class TestToolAccuracyLatency:
@@ -274,8 +258,6 @@ class TestToolAccuracyLatency:
             avg_latency_ms = (elapsed / len(test_cases)) * 1000
             latencies.append((tool_count, avg_latency_ms))
 
-        # Verify latency doesn't increase dramatically with tool count
-        # Allow for some variance due to system load
         for i in range(1, len(latencies)):
             prev_count, prev_latency = latencies[i-1]
             curr_count, curr_latency = latencies[i]
@@ -283,14 +265,9 @@ class TestToolAccuracyLatency:
             ratio = curr_latency / prev_latency if prev_latency > 0 else 1.0
             count_ratio = curr_count / prev_count
 
-            # Allow latency to increase up to 3x the tool count ratio
-            # to account for system load and other factors
             assert ratio < count_ratio * 3, (
                 f"Latency increased {ratio:.2f}x for {count_ratio:.2f}x more tools"
             )
-
-
-# ── Integration with real registry ────────────────────────────────
 
 
 class TestToolAccuracyIntegration:
@@ -301,7 +278,6 @@ class TestToolAccuracyIntegration:
         registry = ToolRegistry()
         _populate_registry(registry, 200)
 
-        # Perform some registry operations
         registry.unregister("tool_0050")
         registry.unregister("tool_0100")
 
@@ -321,7 +297,6 @@ class TestToolAccuracyIntegration:
         registry = ToolRegistry()
         _populate_registry(registry, 100)
 
-        # Update some tools
         for i in range(0, 100, 10):
             name = f"tool_{i:04d}"
             meta = _create_tool_meta(name, f"Updated tool {i}")

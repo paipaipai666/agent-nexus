@@ -231,7 +231,6 @@ class TestTodoTerminateSignal:
         llm.think.side_effect = mock_think
 
     def test_todo_add_batch_with_plan_text_does_not_finish_early(self):
-        # 事故复现路径：todo_add 批 + 计划旁白（旧启发式会误判为最终答案）
         agent, llm = self._make_agent()
         plan_text = ("The project is fairly large and has multiple modules. "
                      "I'll check the packaging configuration myself first, then "
@@ -251,8 +250,6 @@ class TestTodoTerminateSignal:
         assert result.answer == "Real final answer."
 
     def test_all_todos_done_with_answer_text_terminates(self):
-        # 显式信号：本批 todo_update 关闭全部 todo → 同响应文本即最终答案，
-        # 不必再开一轮（d99d823f 想保留的收益，改由信号驱动）
         agent, llm = self._make_agent()
         self._scripted(llm, [
             {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}},
@@ -271,7 +268,6 @@ class TestTodoTerminateSignal:
         assert result.answer == "两个任务都完成了，这是完整最终答案。"
 
     def test_all_todos_done_with_empty_text_continues(self):
-        # 信号存在但没有答案文本 → 不收尾，下一轮正常给答案
         agent, llm = self._make_agent()
         self._scripted(llm, [
             {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}}],
@@ -286,7 +282,6 @@ class TestTodoTerminateSignal:
         assert result.answer == "真正的最终答案。"
 
     def test_todo_update_without_closing_all_continues(self):
-        # 只关闭部分 todo → 不收尾
         agent, llm = self._make_agent()
         self._scripted(llm, [
             {"tool_calls": [{"name": "todo_add", "arguments": {"description": "任务A"}},

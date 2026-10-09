@@ -18,7 +18,7 @@ from agentnexus.evaluation.utils import find_trace, load_all_traces, load_trace_
 @dataclass
 class TrajectoryIssue:
     check: str
-    severity: str  # "error" | "warning"
+    severity: str
     detail: str
     evidence: str = ""
 
@@ -28,7 +28,7 @@ class TrajectoryReport:
     trace_id: str
     total_spans: int
     issues: list[TrajectoryIssue] = field(default_factory=list)
-    score: float = 10.0  # starts at 10, deductions for each issue
+    score: float = 10.0
 
     @property
     def passed(self) -> bool:
@@ -72,8 +72,6 @@ class TrajectoryEvaluator:
         traces = load_all_traces(traces_dir)
         return [self._evaluate_one(tid, spans) for tid, spans in traces.items()]
 
-    # ── per-trace evaluation ─────────────────────────────────────
-
     def _evaluate_one(self, trace_id: str, spans: list[dict]) -> TrajectoryReport:
         spans = sorted(spans, key=lambda s: s.get("start_time", 0))
         report = TrajectoryReport(trace_id=trace_id, total_spans=len(spans))
@@ -81,25 +79,18 @@ class TrajectoryEvaluator:
         tool_spans = [s for s in spans if s.get("name") == "tool"]
         llm_spans = [s for s in spans if s.get("name") == "llm"]
 
-        # 1. Duplicate call detection
         self._check_duplicate_calls(tool_spans, report)
 
-        # 2. Repeated failures
         self._check_repeated_failures(tool_spans, report)
 
-        # 3. Loop detection (excessive steps)
         self._check_loops(llm_spans, report)
 
-        # 4. Error cascade
         self._check_error_cascade(llm_spans, report)
 
-        # 5. Step efficiency
         self._check_step_efficiency(llm_spans, tool_spans, report)
 
         report.score = max(0, report.score)
         return report
-
-    # ── individual checks ─────────────────────────────────────────
 
     def _check_duplicate_calls(self, tool_spans: list[dict], report: TrajectoryReport):
         """Detect same tool + same input called >=3 times consecutively."""
@@ -119,7 +110,7 @@ class TrajectoryEvaluator:
                         severity="error",
                         detail=f"Tool '{a_name}' called 3+ times with identical params: {a_params[:60]}",
                     ))
-                    return  # report once per trace
+                    return
 
     def _check_repeated_failures(self, tool_spans: list[dict], report: TrajectoryReport):
         """Detect same tool failing >=3 times without switching."""

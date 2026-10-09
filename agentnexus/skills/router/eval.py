@@ -22,7 +22,7 @@ from typing import Any, Iterable
 @dataclass(frozen=True)
 class GoldItem:
     query: str
-    skill_id: str  # qualified id, e.g. default/docx
+    skill_id: str
 
 
 @dataclass
@@ -32,7 +32,7 @@ class HitReport:
     hit_at_3: float
     hit_at_5: float
     mrr: float
-    misses: list[tuple[str, str, tuple[str, ...]]]  # query, gold, top ids
+    misses: list[tuple[str, str, tuple[str, ...]]]
 
     def as_dict(self) -> dict[str, Any]:
         return {

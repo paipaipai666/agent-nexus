@@ -36,16 +36,16 @@ def _locomo_fixture() -> list[dict]:
         },
         "qa": [
             {"question": "Who does yoga?", "answer": "Caroline",
-             "evidence": ["D2:1"], "category": 4},                      # single-hop
+             "evidence": ["D2:1"], "category": 4},
             {"question": "When did Caroline greet Mel?", "answer": "May",
-             "evidence": ["D1:1"], "category": 2},                      # temporal
+             "evidence": ["D1:1"], "category": 2},
             {"question": "What car does Caroline drive?", "answer": "",
              "evidence": [], "category": 5,
-             "adversarial_answer": "a Tesla"},                          # adversarial
+             "adversarial_answer": "a Tesla"},
             {"question": "Likely career?", "answer": "Artist",
-             "evidence": ["D1:1"], "category": 3},                      # open-domain
+             "evidence": ["D1:1"], "category": 3},
             {"question": "Greeting and yoga?", "answer": "Both",
-             "evidence": ["D1:1", "D2:1"], "category": 1},              # multi-hop
+             "evidence": ["D1:1", "D2:1"], "category": 1},
         ],
     }]
 
@@ -96,27 +96,24 @@ def test_convert_locomo_category_mapping():
     convs = convert_locomo(_locomo_fixture())
     assert len(convs) == 1
     conv = convs[0]
-    # speaker_a → user, speaker_b → assistant, sessions in order
     assert [t.role for t in conv.turns] == ["user", "assistant", "user"]
     by_type = {q.qa_type: q for q in conv.questions}
     assert set(by_type) == {
         "single_hop", "temporal", "abstention", "open_domain", "multi_session",
     }
-    assert by_type["abstention"].answer == ABSTAIN_GOLD   # trap answer discarded
+    assert by_type["abstention"].answer == ABSTAIN_GOLD
     assert by_type["single_hop"].answer == "Caroline"
-    assert by_type["single_hop"].evidence == ["D2:1"]     # provenance preserved
+    assert by_type["single_hop"].evidence == ["D2:1"]
 
 
 def test_convert_longmemeval_type_mapping():
     convs = convert_longmemeval(_longmemeval_fixture())
-    # lme-4 has an unmapped question_type → dropped
     assert len(convs) == 3
     by_id = {c.id: c for c in convs}
     assert by_id["lme-1"].questions[0].qa_type == "single_hop"
     assert by_id["lme-2"].questions[0].qa_type == "knowledge_update"
     assert by_id["lme-2"].questions[0].evidence == ["session_9"]
     assert by_id["lme-3"].questions[0].answer == ABSTAIN_GOLD
-    # user/assistant roles preserved, haystack flattened
     assert [t.role for t in by_id["lme-2"].turns] == ["user", "user"]
 
 
@@ -145,7 +142,6 @@ def test_ensure_source_uses_cache(tmp_path, monkeypatch):
     cache = tmp_path / "memory"
     cache.mkdir(parents=True)
     (cache / "locomo10.json").write_text(
-        # pad past the >1KB partial-download guard in ensure_source
         json.dumps(_locomo_fixture()) + " " * 1200, encoding="utf-8")
     path = ensure_source("locomo", offline=True)
     assert path.exists()

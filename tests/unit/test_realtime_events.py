@@ -50,7 +50,6 @@ class TestRealTimeEventStreaming:
 
         run = service.send_message(session.id, "hello")
 
-        # Sync stream_events delivers all events after completion
         gui_events = []
         seq = 0
         for event in service.stream_events(run.id):
@@ -109,18 +108,15 @@ class TestRealTimeEventStreaming:
 
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
 
-        # Manually test _put_event
         service._async_run_events["test_run"] = asyncio.Queue()
         service._run_events["test_run"] = MagicMock()
 
         event = AgentEvent("test", {"data": "value"}, run_id="test_run")
         service._put_event("test_run", event)
 
-        # Event should be in async queue immediately
         async_q = service._async_run_events["test_run"]
         assert not async_q.empty()
 
-        # Get the event
         got = async_q.get_nowait()
         assert got.type == "test"
         assert got.payload == {"data": "value"}
@@ -132,14 +128,13 @@ class TestRealTimeEventStreaming:
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         service._async_run_events["test_run"] = asyncio.Queue()
 
-        # Put events and sentinel
         service._async_run_events["test_run"].put_nowait(
             AgentEvent("event1", {}, run_id="test_run")
         )
         service._async_run_events["test_run"].put_nowait(
             AgentEvent("event2", {}, run_id="test_run")
         )
-        service._async_run_events["test_run"].put_nowait(None)  # sentinel
+        service._async_run_events["test_run"].put_nowait(None)
 
         async def collect():
             events = []
@@ -307,7 +302,6 @@ class TestHITLConfirmBridge:
                 ws.send_json({"type": "confirm_request", "summary": summary}),
                 loop,
             )
-            # Simulate immediate approval
             future.set_result(True)
             return future.result()
 
@@ -352,7 +346,6 @@ class TestDualQueueArchitecture:
 
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
 
-        # Set up both queues
         import queue
         sync_q = queue.Queue()
         async_q = asyncio.Queue()
@@ -362,11 +355,9 @@ class TestDualQueueArchitecture:
         event = AgentEvent("test", {"data": "value"}, run_id="test_run")
         service._put_event("test_run", event)
 
-        # Sync queue should have event
         sync_event = sync_q.get_nowait()
         assert sync_event.type == "test"
 
-        # Async queue should have event
         async_event = async_q.get_nowait()
         assert async_event.type == "test"
 
@@ -377,7 +368,6 @@ class TestDualQueueArchitecture:
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
         event = AgentEvent("test", {}, run_id="nonexistent")
 
-        # Should not raise
         service._put_event("nonexistent", event)
 
     def test_send_message_populates_async_queue(self):
@@ -391,7 +381,6 @@ class TestDualQueueArchitecture:
         session = service.start_session()
         run = service.send_message(session.id, "hello")
 
-        # Async queue should have events
         async_q = service._async_run_events.get(run.id)
         assert async_q is not None
         assert not async_q.empty()

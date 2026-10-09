@@ -1,13 +1,3 @@
-/**
- * Test that simulates the exact React useEffect timing that caused the bug.
- *
- * The key insight: resetForSessionSwitch() runs synchronously in ChatPage's
- * useEffect, but the SessionProvider useEffect cleanup (which disconnects WS)
- * only runs AFTER React re-renders with the new sessionId. There's a gap where
- * old session event handlers are still active.
- *
- * Fix: resetForSessionSwitch() now calls agentWs.disconnect() immediately.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 class MockWebSocket {
@@ -53,80 +43,54 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
   })
 
   it('BUG SCENARIO: without disconnect in reset, stale answer corrupts new session', () => {
-    // This test verifies that the fix prevents the bug.
-    // Before the fix: resetForSessionSwitch() did NOT disconnect WS,
-    // so the old session's answer handler could fire during the async gap.
 
     const events: string[] = []
 
-    // === Session A is active ===
     agentWs.connect('session-A')
     const wsA = MockWebSocket.instances[0]
 
-    // Register handler AFTER connect (pool architecture)
     agentWs.on('answer', () => events.push('answer'))
 
-    // === resetForSessionSwitch() is called ===
-    // With the fix, this now disconnects the WebSocket immediately.
-    // Simulate the fixed resetForSessionSwitch:
-    agentWs.disconnect() // <-- THIS IS THE FIX
+    agentWs.disconnect()
 
-    // === Old session's answer arrives ===
-    // After disconnect, wsA's handlers are cleared, so this is a no-op
     wsA._receive({ type: 'answer', content: 'stale' })
-    expect(events).toEqual([]) // NOT received — handlers cleared by disconnect
+    expect(events).toEqual([])
 
-    // === api.createSession() resolves, new session connects ===
     agentWs.connect('session-B')
     const wsB = MockWebSocket.instances[1]
 
-    // Register handler for new session
     agentWs.on('answer', () => events.push('answer'))
 
-    // === User sends message on new session ===
     agentWs.sendMessage('new question')
     expect(wsB.send).toHaveBeenCalledWith(
       JSON.stringify({ type: 'send_message', content: 'new question' })
     )
 
-    // === New session receives response ===
     wsB._receive({ type: 'answer', content: 'new response' })
     expect(events).toEqual(['answer'])
   })
 
   it('BEFORE FIX: without disconnect, stale answer fires during async gap', () => {
-    // This simulates what happened BEFORE the fix.
-    // resetForSessionSwitch() did NOT call agentWs.disconnect().
 
     const events: string[] = []
 
-    // Session A is active
     agentWs.connect('session-A')
     const wsA = MockWebSocket.instances[0]
 
-    // Register handler AFTER connect
     agentWs.on('answer', () => events.push('answer'))
 
-    // resetForSessionSwitch() WITHOUT disconnect (old behavior)
-    // agentWs.disconnect() is NOT called — WebSocket stays connected
 
-    // Old session's answer arrives during async gap
     wsA._receive({ type: 'answer', content: 'stale' })
-    expect(events).toEqual(['answer']) // RECEIVED! This is the bug.
+    expect(events).toEqual(['answer'])
 
-    // Now when new session connects and user sends message,
-    // isRunning is already true from the stale answer handler,
-    // so the message gets queued instead of sent.
   })
 
   it('disconnect is idempotent — safe for useEffect cleanup to call again', () => {
     agentWs.connect('session-A')
 
-    // First disconnect (from resetForSessionSwitch)
     agentWs.disconnect()
     expect(agentWs.sessionId).toBeNull()
 
-    // Second disconnect (from useEffect cleanup) — should not throw
     expect(() => agentWs.disconnect()).not.toThrow()
     expect(agentWs.sessionId).toBeNull()
   })
@@ -134,7 +98,6 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
   it('full lifecycle: connect A -> reset(disconnect) -> connect B -> events on B work', () => {
     const events: Array<{ session: string; type: string }> = []
 
-    // Session A
     agentWs.connect('A')
     const handlerA = (type: string) => () => {
       events.push({ session: agentWs.sessionId || '?', type })
@@ -144,13 +107,10 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
 
     MockWebSocket.instances[0]._receive({ type: 'token', content: 'a1' })
 
-    // Reset (disconnect)
     agentWs.disconnect()
 
-    // Old WS tries to send — no effect (handlers cleared)
     MockWebSocket.instances[0]._receive({ type: 'answer', content: 'stale' })
 
-    // New session B
     agentWs.connect('B')
     const handlerB = (type: string) => () => {
       events.push({ session: agentWs.sessionId || '?', type })

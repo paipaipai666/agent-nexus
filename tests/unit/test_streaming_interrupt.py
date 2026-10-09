@@ -44,7 +44,7 @@ class TestStreamingErrorHandling:
 
     def test_empty_api_key_returns_empty(self):
         llm = AgentLLM(model="test/test-model", apiKey="sk-test", baseUrl="http://localhost:9999")
-        llm.api_key = ""  # Simulate empty key after init
+        llm.api_key = ""
         result = llm.think([{"role": "user", "content": "hi"}])
         assert result == ""
 
@@ -99,7 +99,6 @@ class TestStreamingErrorHandling:
         with patch.object(llm, "_call_via_provider", side_effect=_fail):
             result = llm.think([{"role": "user", "content": "hi"}])
             assert result == ""
-            # Non-transient errors (ValueError) stop immediately, no retries
             assert call_count[0] >= 1
             mock_sleep.assert_not_called()
 

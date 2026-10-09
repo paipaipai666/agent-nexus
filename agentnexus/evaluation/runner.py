@@ -41,8 +41,6 @@ class ReActAgentRunner:
 
             llm = AgentLLM()
             tool_registry = ToolRegistry()
-            # 与 AppRuntime 对齐: 内置工具按 provider 注册, 否则 eval 下
-            # agent 拿到空工具集, tool_use 类 task 被系统性低估。
             from agentnexus.tools import register_all_tools
             from agentnexus.tools.confirm_bridge import ConfirmBridge
             register_all_tools(
@@ -60,8 +58,6 @@ class ReActAgentRunner:
             )
 
             prompt = task.input.get("prompt", "")
-            # 真实 trace 上下文: agent 循环只在 active trace 下埋点,
-            # eval 若不建 trace, transcript 只能重建并丢失真实时间轴。
             trace_ctx = self._start_trace(task)
             try:
                 result = agent.run(question=prompt)
@@ -102,15 +98,13 @@ class ReActAgentRunner:
             error=error,
         )
 
-    # ── Trace lifecycle ────────────────────────────────────────────
-
     @staticmethod
     def _start_trace(task: EvalTask) -> Any | None:
         """Open a real trace context for the trial, unless one is already active."""
         try:
             from agentnexus.observability.tracer import trace_manager
             if trace_manager.active is not None:
-                return None  # 上游已开 trace, 不劫持别人的上下文
+                return None
             return trace_manager.start_trace(task.id, metadata={"eval_task": task.id})
         except Exception:
             return None
@@ -131,7 +125,6 @@ class ReActAgentRunner:
         from agentnexus.observability.tracer import TraceManager
 
         record = TraceManager._span_record(trace_id, span)
-        # Grader 协议: LLM 步骤约定名为 "llm", agent 循环的埋点名是 "plan_node"。
         if record["name"] == "plan_node":
             record["name"] = "llm"
         return record
@@ -160,8 +153,6 @@ class ReActAgentRunner:
 
             llm_span: dict[str, Any] = {
                 "name": "llm",
-                # 没有真实时钟来源 —— 省略时间键; graders 的 start_time 排序
-                # 缺键得到 0, 稳定排序保持这里的插入序 (即真实 step 顺序)。
                 "input": {"step_id": getattr(step, "step_id", i)},
                 "output": {"content": content[:500]},
                 "metadata": {

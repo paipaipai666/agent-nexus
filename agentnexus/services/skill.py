@@ -55,9 +55,6 @@ class SkillService:
         self.auto_route_enabled = auto_route
         self.auto_route_llm_fallback = auto_route_llm_fallback
         self.llm_client = llm_client
-        # The current skill is per-run-thread: concurrent chat sessions share
-        # this service, and a session-scoped skill must not leak into another
-        # session's auto-routing (each agent run lives on its own thread).
         self._local = threading.local()
         self._default_current: SkillEntry | None = None
         self.status = "idle"
@@ -65,14 +62,11 @@ class SkillService:
         self.last_route: SkillRoute | None = None
         self.selection_source = "none"
         self.enabled_skills: dict[str, bool] = {}
-        # Generation counter guarding the background embedding rebuild —
-        # a stale worker must not overwrite a newer index.
         self._embed_rebuild_gen = 0
         self._rebuild_router_index()
 
     @property
     def current(self) -> SkillEntry | None:
-        # 线程内显式设置过（含 None）就尊重该值；否则回退到全局默认技能。
         if hasattr(self._local, "current"):
             return self._local.current
         return self._default_current
@@ -148,7 +142,6 @@ class SkillService:
             return None
         try:
             entry = self.use(target)
-            # 默认技能是全局回退：所有运行线程在未自行选择时继承它。
             self._default_current = entry
             self.selection_source = "default"
             return entry
@@ -176,8 +169,6 @@ class SkillService:
             return None
         route = self.router.route_with_llm(text, entries, llm_client=llm_client)
         if route is None:
-            # Near-tie with no LLM: keep a soft recommendation only when there is
-            # a lexical leader. Pure-semantic blips and true ties stay abstain.
             top = candidates[0]
             has_lexical = any(
                 not t.startswith("semantic_match(") for t in top.matched_terms
@@ -189,7 +180,6 @@ class SkillService:
             self.last_route = top
             self.selection_source = "recommend"
             return top
-        # P1: only hard-activate on high confidence. Near-ties stay recommendations.
         if not self._should_hard_activate(route, candidates):
             self.last_route = route
             self.selection_source = "recommend"
@@ -236,9 +226,6 @@ class SkillService:
         if not self.router.use_embeddings or not entries:
             self.router.rebuild(entries)
             return
-        # Keyword-only index immediately; semantic embeddings load in a
-        # background thread so startup doesn't block on the
-        # torch/sentence-transformers import (~10s+ on first load).
         self.router.rebuild(entries, compute_embeddings=False)
         self._rebuild_embeddings_async(entries)
 
@@ -251,7 +238,7 @@ class SkillService:
                 from agentnexus.skills.router.retrieve import compute_skill_embeddings
                 embeddings = compute_skill_embeddings(entries)
                 if gen != self._embed_rebuild_gen:
-                    return  # superseded by a newer rebuild
+                    return
                 self.router.rebuild(entries, embeddings=embeddings)
             except Exception as exc:
                 logger.warning("Background skill embedding rebuild failed: %s", exc)

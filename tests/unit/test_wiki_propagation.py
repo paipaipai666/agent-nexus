@@ -67,7 +67,6 @@ class TestPropagateDegradation:
         self.mock_store.get_page.return_value = _make_page("p1", ConfidenceLevel.HIGH.value)
         self.mock_store.list_dependents.return_value = ["p2"]
         self.engine.propagate_degradation("p1", depth=3)
-        # At max depth, should not propagate
         self.mock_store.list_dependents.assert_not_called()
 
     def test_skips_missing_dependent_page(self):

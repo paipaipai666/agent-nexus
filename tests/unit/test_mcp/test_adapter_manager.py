@@ -66,8 +66,6 @@ class TestMcpToolManager:
         names = manager.list_subagent_tool_names()
         assert "mcp_foo__echo" in names
 
-    # ── _build_local_tool_name ───────────────────────────────────
-
     def test_build_local_tool_name_uses_tool_prefix(self):
         manager = MCPToolManager([])
         config = MCPServerConfig(name="my-server", transport="stdio", command="python", tool_prefix="my_prefix")
@@ -79,8 +77,6 @@ class TestMcpToolManager:
         config = MCPServerConfig(name="my-server", transport="stdio", command="python")
         name = manager._build_local_tool_name(config, "do-something")
         assert name == "mcp_my_server__do_something"
-
-    # ── _ensure_unique_name ──────────────────────────────────────
 
     def test_ensure_unique_name_returns_as_is_when_no_collision(self):
         manager = MCPToolManager([])
@@ -96,8 +92,6 @@ class TestMcpToolManager:
         manager._tool_descriptors["mcp_foo__bar"] = _make_descriptor(local_name="mcp_foo__bar")
         manager._tool_descriptors["mcp_foo__bar_2"] = _make_descriptor(local_name="mcp_foo__bar_2")
         assert manager._ensure_unique_name("mcp_foo__bar") == "mcp_foo__bar_3"
-
-    # ── _normalize_param_schema ──────────────────────────────────
 
     def test_normalize_param_schema_defaults(self):
         assert MCPToolManager._normalize_param_schema(None) == {"type": "object", "properties": {}}
@@ -119,8 +113,6 @@ class TestMcpToolManager:
 
     def test_normalize_param_schema_non_dict(self):
         assert MCPToolManager._normalize_param_schema("bad") == {"type": "object", "properties": {}}
-
-    # ── _should_import_tool ──────────────────────────────────────
 
     def test_should_import_no_lists(self):
         config = MCPServerConfig(name="x", transport="stdio", command="python")
@@ -154,8 +146,6 @@ class TestMcpToolManager:
         )
         assert MCPToolManager._should_import_tool(config, "search", "mcp_x__search") is True
         assert MCPToolManager._should_import_tool(config, "delete", "mcp_x__delete") is False
-
-    # ── _build_descriptor ────────────────────────────────────────
 
     def test_build_descriptor_returns_descriptor(self):
         manager = MCPToolManager([])
@@ -214,8 +204,6 @@ class TestMcpToolManager:
         assert descriptor.timeout_sec == 10
         assert descriptor.rate_limit_per_min == 1
 
-    # ── _make_tool_callable ──────────────────────────────────────
-
     def test_make_tool_callable_returns_wrapper(self, monkeypatch):
         manager = MCPToolManager([])
         manager._tool_descriptors["echo"] = _make_descriptor(local_name="echo")
@@ -230,8 +218,6 @@ class TestMcpToolManager:
         assert wrapper(message="hello") == "ok"
         assert called == [("echo", {"message": "hello"})]
         assert wrapper.__name__ == "mcp_echo"
-
-    # ── register_tools ───────────────────────────────────────────
 
     def test_register_tools_registers_on_executor(self):
         manager = MCPToolManager([])
@@ -260,8 +246,6 @@ class TestMcpToolManager:
         executor = ToolRegistry()
         assert manager.register_tools(executor) == []
 
-    # ── call_tool ────────────────────────────────────────────────
-
     def test_call_tool_raises_on_unknown_tool(self):
         manager = MCPToolManager([])
         manager._started = True
@@ -277,7 +261,7 @@ class TestMcpToolManager:
             local_name="echo", timeout_sec=15
         )
         manager._started = True
-        manager._loop = SimpleNamespace()  # just for _submit check
+        manager._loop = SimpleNamespace()
         submitted = []
 
         def fake_submit(coro, timeout):
@@ -287,9 +271,7 @@ class TestMcpToolManager:
         monkeypatch.setattr(manager, "_submit", fake_submit)
         result = manager.call_tool("echo", {"msg": "hi"})
         assert result == "mocked"
-        assert submitted[0][1] == 20  # timeout_sec + 5
-
-    # ── _call_tool_async ─────────────────────────────────────────
+        assert submitted[0][1] == 20
 
     def test_call_tool_async_happy_path(self):
         manager = MCPToolManager([])
@@ -366,8 +348,6 @@ class TestMcpToolManager:
         except RuntimeError as e:
             assert "未返回文本内容" in str(e)
 
-    # ── _disconnect_server ───────────────────────────────────────
-
     def test_disconnect_server_removes_runtime_and_descriptors(self):
         manager = MCPToolManager([])
         manager._server_runtimes["docs"] = SimpleNamespace(
@@ -382,9 +362,7 @@ class TestMcpToolManager:
     def test_disconnect_server_noop_for_unknown(self):
         manager = MCPToolManager([])
         asyncio.run(manager._disconnect_server("ghost"))
-        assert True  # no exception
-
-    # ── _close_all ───────────────────────────────────────────────
+        assert True
 
     def test_close_all_clears_everything(self):
         manager = MCPToolManager([])
@@ -395,13 +373,11 @@ class TestMcpToolManager:
         assert manager._server_runtimes == {}
         assert manager._tool_descriptors == {}
 
-    # ── start / close lifecycle ──────────────────────────────────
-
     def test_start_with_no_servers(self):
         manager = MCPToolManager([])
         manager.start()
         assert manager._started is True
-        assert manager._loop is None  # no loop needed
+        assert manager._loop is None
         manager.close()
         assert manager._started is False
 
@@ -427,8 +403,6 @@ class TestMcpToolManager:
         manager.close()
         assert manager._started is False
 
-    # ── _ensure_sdk_available ────────────────────────────────────
-
     def test_ensure_sdk_available_raises_when_mcp_missing(self, monkeypatch):
         def mock_import(name, *a, **kw):
             if name == "mcp":
@@ -441,8 +415,6 @@ class TestMcpToolManager:
             assert False, "Expected RuntimeError"
         except RuntimeError as e:
             assert "MCP SDK" in str(e)
-
-    # ── _connect_all ─────────────────────────────────────────────
 
     def test_connect_all_records_failures(self, monkeypatch):
         manager = MCPToolManager([
@@ -460,8 +432,6 @@ class TestMcpToolManager:
         assert "b" in manager._failures
         assert "a" not in manager._failures
 
-    # ── _submit ──────────────────────────────────────────────────
-
     def test_submit_raises_when_no_loop(self):
         manager = MCPToolManager([])
 
@@ -473,9 +443,6 @@ class TestMcpToolManager:
             assert False, "Expected RuntimeError"
         except RuntimeError as e:
             assert "event loop" in str(e)
-
-
-# ── _build_http_client_kwargs ───────────────────────────────────
 
 
 class TestBuildHttpClientKwargs:
@@ -534,6 +501,5 @@ class TestBuildHttpClientKwargs:
         import inspect
         sig = inspect.signature(streamable_http_client)
         params = list(sig.parameters.keys())
-        # At least one of url/server_url must be present
         assert "url" in params or "server_url" in params
         assert "http_client" in params

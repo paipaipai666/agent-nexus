@@ -62,7 +62,6 @@ def _format_span(span: dict, index: int) -> str:
 
     lines = [f"[bold]#{index} [{name}] status={status} latency={latency:.0f}ms[/bold]"]
 
-    # Input
     inp = span.get("input", {}) or {}
     if name == "tool":
         tool_name = inp.get("tool_name", "")
@@ -79,7 +78,6 @@ def _format_span(span: dict, index: int) -> str:
         task_text = inp.get("task", "")
         lines.append(f"  Task: {task_text[:200]}")
 
-    # Output
     out = span.get("output", {}) or {}
     if name == "final_answer":
         answer = out.get("answer", "")
@@ -93,7 +91,6 @@ def _format_span(span: dict, index: int) -> str:
         if content:
             lines.append(f"  Content: {str(content)[:200]}")
 
-    # Errors
     if status == "error":
         error = out.get("error", "") or meta.get("error", "")
         if error:
@@ -101,10 +98,6 @@ def _format_span(span: dict, index: int) -> str:
 
     return "\n".join(lines)
 
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
 
 @app.command("show")
 def transcript_show(
@@ -138,7 +131,6 @@ def transcript_show(
         console.print(_format_span(span, i), style=f"color({color})")
         console.print()
 
-    # Summary
     tool_spans = [s for s in spans if s.get("name") == "tool"]
     llm_spans = [s for s in spans if s.get("name") == "llm"]
     error_count = sum(1 for s in spans if s.get("metadata", {}).get("status") == "error")
@@ -240,7 +232,6 @@ def transcript_list(
                 if name == "final_answer":
                     traces[tid]["has_answer"] = True
 
-    # 过滤
     entries = list(traces.values())
     if tool:
         entries = [e for e in entries if tool in e["tools"]]
@@ -372,7 +363,6 @@ def transcript_failures(
                     err = (span.get("output", {}) or {}).get("error", "unknown")
                     traces[tid]["errors"].append(str(err)[:100])
 
-    # 筛选失败的
     failures = [
         t for t in traces.values()
         if not t["has_answer"] or t["errors"]

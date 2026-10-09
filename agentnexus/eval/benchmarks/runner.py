@@ -26,9 +26,6 @@ from .schema import DENSE, HYBRID, RETRIEVAL_MODES, BenchmarkData, DatasetResult
 
 logger = logging.getLogger(__name__)
 
-# Embedding is computed inside chroma.upsert_documents / chroma.search; both
-# route through agentnexus.rag.embeddings. Tests inject a fake encoder via
-# this seam instead of loading sentence-transformers.
 EmbeddingEncoder = Callable[[list[str]], list[list[float]]]
 
 
@@ -60,9 +57,6 @@ class BenchmarkIndex:
         """Index every document as one unit (document-level, BEIR protocol)."""
         _, chroma_upsert = self._lazy_chroma()
 
-        # Rebuild from a clean slate: a collection left behind by an interrupted
-        # run may carry a different embedding dimension (e.g. after switching
-        # models), which would fail the first upsert.
         self.clear()
         self._texts = {doc.doc_id: doc.indexed_text for doc in data.docs}
 
@@ -129,11 +123,9 @@ class BenchmarkIndex:
         if mode == HYBRID:
             if self._bm25_source is not None:
                 self._bm25.build(self._bm25_source)
-                self._bm25_source = None  # release tokenized corpus memory
+                self._bm25_source = None
             fused_ranked: list[list[str]] = []
             for query, dense_ranking in zip(queries, dense_ranked, strict=True):
-                # reciprocal_rank_fusion consumes rank order only (it re-derives
-                # 1/(k+rank+1), k=60, itself), so the score field is a placeholder.
                 dense_scores = [(doc_id, 0.0) for doc_id in dense_ranking]
                 sparse_scores = self._bm25.search(query, top_k=depth)
                 fused = _ranking.reciprocal_rank_fusion(dense_scores, sparse_scores, k=60)
@@ -165,10 +157,6 @@ def run_retrieval(
     namespace = namespace or f"benchmark-{data.suite}-{data.dataset}"
     embedding_model = get_settings().embedding_model
 
-    # Benchmark corpora are one-shot evaluation artifacts: keep their ChromaDB
-    # in a throwaway directory instead of the user's main knowledge-base store.
-    # The main store's delete/recreate path is unreliable under load (soft-deleted
-    # collections, compaction races), and a benchmark run must never touch it.
     import shutil
     import tempfile
 

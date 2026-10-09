@@ -17,13 +17,11 @@ from agentnexus.services.skill import SkillService
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.workflow import Workflow
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-ACCURACY_60_MIN = 0.95     # 95% at 60 skills (existing baseline)
-ACCURACY_200_MIN = 0.90    # 90% at 200 skills
-ACCURACY_500_MIN = 0.85    # 85% at 500 skills
-ACCURACY_1000_MIN = 0.80   # 80% at 1000 skills
-ACCURACY_DEGRADATION_MAX = 0.15  # Max drop from baseline
+ACCURACY_60_MIN = 0.95
+ACCURACY_200_MIN = 0.90
+ACCURACY_500_MIN = 0.85
+ACCURACY_1000_MIN = 0.80
+ACCURACY_DEGRADATION_MAX = 0.15
 
 
 def _entry(skill_id: str, name: str, description: str) -> SkillEntry:
@@ -41,7 +39,6 @@ def _entry(skill_id: str, name: str, description: str) -> SkillEntry:
     return SkillEntry("default", skill_id, name, description, Path("SKILL.md"), workflow, source_kind="skill")
 
 
-# Domain-specific entries with distinct terminology
 _DOMAIN_ENTRIES = [
     ("docx", "DOCX", "Create edit inspect and format Microsoft Word docx documents. 生成 word 文档。"),
     ("pdf", "PDF", "Read split merge rotate and extract content from PDF documents."),
@@ -64,11 +61,9 @@ _DOMAIN_ENTRIES = [
 def _build_entries(count: int) -> list[SkillEntry]:
     """Build a list of SkillEntry instances with domain + generic entries."""
     entries = []
-    # Add domain entries first (up to count)
     for i in range(min(count, len(_DOMAIN_ENTRIES))):
         sid, name, desc = _DOMAIN_ENTRIES[i]
         entries.append(_entry(sid, name, desc))
-    # Fill remaining with generic entries
     for i in range(len(_DOMAIN_ENTRIES), count):
         entries.append(_entry(
             f"skill-{i:04d}",
@@ -80,7 +75,6 @@ def _build_entries(count: int) -> list[SkillEntry]:
 
 def _build_test_cases(entries: list[SkillEntry]) -> list[tuple[str, str]]:
     """Build (query, expected_qualified_id) test cases from domain entries."""
-    # Map of query patterns to expected skill IDs
     query_skill_map = [
         ("生成一份word docx文档", "default/docx"),
         ("extract pages from this pdf file", "default/pdf"),
@@ -98,12 +92,8 @@ def _build_test_cases(entries: list[SkillEntry]) -> list[tuple[str, str]]:
         ("create a backup of the data", "default/backup"),
         ("scan for security vulnerabilities", "default/security"),
     ]
-    # Filter to only include skills that exist in entries
     existing_ids = {e.qualified_id for e in entries}
     return [(q, sid) for q, sid in query_skill_map if sid in existing_ids]
-
-
-# ── Skill-Acc-S1: Accuracy at 500+ scale ─────────────────────────
 
 
 class TestSkillRouterAccuracyScale:
@@ -186,9 +176,6 @@ class TestSkillRouterAccuracyScale:
             f"Accuracy {accuracy:.2%} < {ACCURACY_1000_MIN:.2%} at 1000 skills"
 
 
-# ── Skill-Acc-S2: Accuracy degradation analysis ──────────────────
-
-
 class TestSkillRouterAccuracyDegradation:
     """Analyze how accuracy degrades as skill count increases."""
 
@@ -204,7 +191,7 @@ class TestSkillRouterAccuracyDegradation:
 
             test_cases = _build_test_cases(entries)
             hits = 0
-            iterations = max(3, 1500 // len(test_cases))  # ~1500 total calls
+            iterations = max(3, 1500 // len(test_cases))
             for query, expected in test_cases * iterations:
                 service.reset()
                 route = service.maybe_auto_select(query)
@@ -241,16 +228,12 @@ class TestSkillRouterAccuracyDegradation:
             accuracy = hits / (len(test_cases) * 5)
             accuracies.append((count, accuracy))
 
-        # Check no single step drops more than 10%
         for i in range(1, len(accuracies)):
             prev_count, prev_acc = accuracies[i - 1]
             curr_count, curr_acc = accuracies[i]
             drop = prev_acc - curr_acc
             assert drop <= 0.10, \
                 f"Cliff drop of {drop:.2%} from {prev_count} to {curr_count} skills"
-
-
-# ── Skill-Acc-S3: Latency-accuracy trade-off ─────────────────────
 
 
 class TestSkillRouterAccuracyLatencyTradeOff:
@@ -277,7 +260,6 @@ class TestSkillRouterAccuracyLatencyTradeOff:
             accuracy = hits / (len(test_cases) * 10)
             avg_latency_ms = (elapsed / (len(test_cases) * 10)) * 1000
 
-            # Latency should stay under 5ms per routing call
             assert avg_latency_ms < 5.0, \
                 f"Avg latency {avg_latency_ms:.2f}ms >= 5ms at {count} skills (accuracy={accuracy:.2%})"
 
@@ -301,14 +283,11 @@ class TestSkillRouterAccuracyLatencyTradeOff:
             avg_latency_ms = (elapsed / (len(test_cases) * 10)) * 1000
             latencies.append((count, avg_latency_ms))
 
-        # Verify latency scales reasonably with skill count
-        # Allow for some variance in latency measurements
         for i in range(1, len(latencies)):
             prev_count, prev_lat = latencies[i - 1]
             curr_count, curr_lat = latencies[i]
             count_ratio = curr_count / prev_count
             lat_ratio = curr_lat / prev_lat if prev_lat > 0 else 1.0
-            # Allow latency to scale up to 1.5x the skill count ratio
             assert lat_ratio < count_ratio * 1.5, (
                 f"Latency scaled {lat_ratio:.2f}x for {count_ratio:.2f}x more skills"
             )

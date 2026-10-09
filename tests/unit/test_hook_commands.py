@@ -200,9 +200,7 @@ class TestSourcesAndTrust:
             workspace / ".agentnexus" / "hooks.yaml",
             [{"event": "before_tool_call", "command": "echo pwned"}],
         )
-        # hot path: untrusted project hook filtered out
         assert hook_sources.discover_hook_configs() == []
-        # inspection path: visible as untrusted
         loaded, _ = hook_sources.discover_hooks(include_untrusted=True)
         assert len(loaded) == 1 and loaded[0].source == "project" and not loaded[0].trusted
 
@@ -216,7 +214,6 @@ class TestSourcesAndTrust:
         fingerprint = loaded[0].fingerprint
         hook_sources.approve_fingerprint(fingerprint)
         assert hook_sources.discover_hook_configs()[0].fingerprint == fingerprint
-        # and it persists across re-discovery
         hook_sources._warned_untrusted.clear()
         loaded2, _ = hook_sources.discover_hooks(include_untrusted=True)
         assert loaded2[0].trusted
@@ -290,5 +287,5 @@ class TestManagerIntegration:
         ])
         mgr = HookManager()
         ctx = mgr.fire(HookType.AFTER_TOOL_CALL, {"name": "x", "result": "ok"})
-        assert not ctx.aborted  # observer hooks never block
+        assert not ctx.aborted
         assert marker.exists()

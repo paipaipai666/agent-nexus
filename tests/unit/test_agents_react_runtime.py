@@ -80,7 +80,6 @@ class TestRoundRecording:
         assert len(ctx.pending_tool_calls) == 1
         assert ctx.pending_tool_calls[0]["name"] == "web_search"
         assert ctx.pending_tool_calls[0]["arguments"] == {"q": "test"}
-        # OpenAI contract: empty/missing ids are synthesized
         assert str(ctx.pending_tool_calls[0].get("id") or "").strip()
         assert ctx.last_response_text == "先查一下"
 

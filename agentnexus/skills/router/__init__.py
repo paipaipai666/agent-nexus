@@ -59,7 +59,6 @@ from agentnexus.skills.router.types import (
     SkillRouterIndex,
 )
 
-# Backward-compatible aliases
 _score_indexed_entry = score_indexed_entry
 _score_metadata_alignment = score_metadata_alignment
 _score_fuzzy_match = score_fuzzy_match
@@ -100,19 +99,16 @@ def _score_entry(
 
 
 __all__ = [
-    # Types
     "SkillRoute",
     "SkillRouteDecision",
     "IntentSignals",
     "IndexedSkillMetadata",
     "SkillRouterIndex",
     "LLMDecision",
-    # Main classes
     "SkillRecommender",
-    "SkillRouter",  # backward-compat alias
-    # Functions
+    "SkillRouter",
     "decide_with_llm",
-    "route_with_llm",  # backward-compat
+    "route_with_llm",
     "tokenize",
     "extract_intent_signals",
     "score_indexed_entry",
@@ -140,7 +136,6 @@ __all__ = [
     "fuzzy_match_term",
     "split_mixed_script_boundaries",
     "augment_tokens_with_known_phrases",
-    # Telemetry
     "RouteEvent",
     "RouteTelemetry",
 ]

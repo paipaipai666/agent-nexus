@@ -39,7 +39,6 @@ class BenchmarkData:
     queries: list[BenchmarkQuery]
     qrels: dict[str, dict[str, int]]
     license_note: str = ""
-    # e2e extras: gold answers and null-query markers (MultiHop-RAG track)
     answers: dict[str, str] = field(default_factory=dict)
     null_query_ids: set[str] = field(default_factory=set)
 
@@ -47,10 +46,6 @@ class BenchmarkData:
         return {qid: len(doc_scores) for qid, doc_scores in self.qrels.items()}
 
 
-# Retrieval modes. ``dense`` matches the official BEIR leaderboard pipeline
-# (single dense retriever, no reranker); ``hybrid`` is this project's own
-# RRF(dense, BM25) stack and is reported alongside, never mixed into the
-# leaderboard-comparable number.
 DENSE = "dense"
 HYBRID = "hybrid"
 RETRIEVAL_MODES = (DENSE, HYBRID)

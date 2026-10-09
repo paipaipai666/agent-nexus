@@ -33,10 +33,6 @@ def _make_config(**overrides):
     return config
 
 
-# ---------------------------------------------------------------------------
-# build_local_tool_name
-# ---------------------------------------------------------------------------
-
 class TestBuildLocalToolName:
     """Tests for the build_local_tool_name helper."""
 
@@ -51,17 +47,12 @@ class TestBuildLocalToolName:
     def test_special_characters_sanitized(self):
         config = _make_config(tool_prefix="my-server", name="s")
         result = build_local_tool_name(config, "tool@v2!")
-        # trailing special chars are stripped by sanitize_name
         assert result == "mcp_my_server__tool_v2"
 
     def test_tool_prefix_empty_string_uses_server_name(self):
         config = _make_config(tool_prefix="", name="fallback")
         assert build_local_tool_name(config, "tool") == "mcp_fallback__tool"
 
-
-# ---------------------------------------------------------------------------
-# normalize_param_schema
-# ---------------------------------------------------------------------------
 
 class TestNormalizeParamSchema:
     """Tests for the normalize_param_schema helper."""
@@ -92,10 +83,6 @@ class TestNormalizeParamSchema:
         normalize_param_schema(schema)
         assert schema == {"type": "string"}
 
-
-# ---------------------------------------------------------------------------
-# should_import_tool
-# ---------------------------------------------------------------------------
 
 class TestShouldImportTool:
     """Tests for the should_import_tool helper."""
@@ -131,10 +118,6 @@ class TestShouldImportTool:
         )
         assert should_import_tool(config, "remote_tool", "local_tool") is False
 
-
-# ---------------------------------------------------------------------------
-# build_tool_descriptor
-# ---------------------------------------------------------------------------
 
 class TestBuildToolDescriptor:
     """Tests for the build_tool_descriptor helper."""
@@ -198,10 +181,6 @@ class TestBuildToolDescriptor:
         assert desc.rate_limit_per_min == 5
 
 
-# ---------------------------------------------------------------------------
-# resource_descriptor_from_sdk
-# ---------------------------------------------------------------------------
-
 class TestResourceDescriptorFromSdk:
     """Tests for the resource_descriptor_from_sdk helper."""
 
@@ -234,10 +213,6 @@ class TestResourceDescriptorFromSdk:
         assert desc.name == ""
         assert desc.uri == ""
 
-
-# ---------------------------------------------------------------------------
-# prompt_descriptor_from_sdk
-# ---------------------------------------------------------------------------
 
 class TestPromptDescriptorFromSdk:
     """Tests for the prompt_descriptor_from_sdk helper."""

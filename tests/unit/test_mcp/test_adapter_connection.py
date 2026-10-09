@@ -10,8 +10,6 @@ import pytest
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp.adapter import MCPToolManager
 
-# ── HTTP transport connection tests ──────────────────────────────
-
 
 class TestHttpConnectServer:
     def test_http_connect_success(self, monkeypatch):
@@ -87,9 +85,6 @@ class TestHttpConnectServer:
 
             with pytest.raises((TimeoutError, asyncio.TimeoutError)):
                 asyncio.run(manager._connect_server(manager._servers[0]))
-
-
-# ── stdio transport _connect_server tests ────────────────────────
 
 
 class TestStdioConnectServer:
@@ -209,9 +204,6 @@ class TestStdioConnectServer:
         assert "mcp_demo__delete" not in manager._tool_descriptors
 
 
-# ── _connect_server: list_tools() failure paths ─────────────────
-
-
 class TestConnectServerFailurePaths:
     def test_list_tools_failure_cleans_up_http(self, monkeypatch):
         """HTTP: if session.list_tools() raises, exit stack must be cleaned up and error propagated."""
@@ -299,9 +291,6 @@ class TestConnectServerFailurePaths:
         assert manager._tool_descriptors == {}
 
 
-# ── HTTP transport initialize() failure ─────────────────────────
-
-
 class TestHttpInitializeFailure:
     def test_http_initialize_failure_cleans_up_stack(self, monkeypatch):
         """HTTP: session.initialize() must clean up exit stack on failure."""
@@ -327,9 +316,6 @@ class TestHttpInitializeFailure:
 
         assert "api" not in manager._server_runtimes
         assert manager._tool_descriptors == {}
-
-
-# ── _connect_all complete test suite ────────────────────────────
 
 
 class TestConnectAllSuite:

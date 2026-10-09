@@ -16,8 +16,7 @@ from agentnexus.core.config import get_settings
 _tavily_client: TavilyClient | None = None
 _seen_urls: set[str] = set()
 
-# --- Search result cache (TTL-based) ---
-_CACHE_TTL_SEC = 300  # 5 minutes
+_CACHE_TTL_SEC = 300
 _cache: dict[tuple, tuple[float, list[dict]]] = {}
 
 
@@ -59,7 +58,6 @@ def _cache_get(key: tuple) -> list[dict] | None:
 def _cache_set(key: tuple, results: list[dict]) -> None:
     """Store results in cache with current timestamp."""
     _cache[key] = (monotonic(), results)
-    # Evict oldest entries if cache grows too large
     if len(_cache) > 256:
         oldest_key = min(_cache, key=lambda k: _cache[k][0])
         del _cache[oldest_key]
@@ -87,16 +85,14 @@ def _pick_depth(query: str) -> str:
                   "compare", "analyze", "review", "latest", "trend", "pros and cons")
     if any(kw in lower for kw in complex_kw):
         return "advanced"
-    # 年份/时效性查询 → advanced
     now = datetime.now()
     current_year = str(now.year)
     if current_year in lower:
         return "advanced"
-    # 具体日期/时间表达式 → advanced
     time_patterns = (
-        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}",   # 2026-06-01, 2026/6/1
-        r"\d{1,2}月\d{1,2}[日号]?",          # 6月1日, 6月1号
-        r"\d{1,2}月",                         # 6月, 12月
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}",
+        r"\d{1,2}月\d{1,2}[日号]?",
+        r"\d{1,2}月",
         r"(今[天日]|昨[天日]|明[天日]|前天|后天)",
         r"(本[周星期礼拜]|上[周星期礼拜]|下[周星期礼拜])",
         r"(本[月]|上[月]|下[月])",
@@ -143,7 +139,6 @@ def web_search_structured(
 
     depth = search_depth or _pick_depth(query)
 
-    # Check cache (only for non-raw-content queries to avoid stale long text)
     cache_key = _make_cache_key(
         query, max_results, depth, time_range, topic, include_answer,
         tuple(include_domains) if include_domains else None,
@@ -202,7 +197,6 @@ def web_search_structured(
 
     result = structured[:max_results]
 
-    # Store in cache
     if include_raw_content is not True:
         _cache_set(cache_key, result)
 

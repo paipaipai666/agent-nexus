@@ -11,11 +11,6 @@ interface AppShellProps {
   children: ReactNode
 }
 
-/**
- * v2.3 app shell — no activity bar. Titlebar (36) / [ContextSidebar 232 | main]
- * / StatusBar (24). The single sidebar switches content by section: chat shows
- * projects/sessions (+ Settings at the bottom), settings shows the sub-nav.
- */
 export default function AppShell({ children }: AppShellProps) {
   const location = useLocation()
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)

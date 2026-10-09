@@ -31,7 +31,6 @@ class TestConfusionMatrix:
         cm = ConfusionMatrix()
         cm.add("unknown_actual", SynthesisLevel.DIRECT_QUOTE.value)
         cm.add(SynthesisLevel.DIRECT_QUOTE.value, "unknown_predicted")
-        # No crash, no increment
         assert all(
             cm.matrix[a][p] == 0 for a in cm.labels for p in cm.labels
         )
@@ -42,11 +41,10 @@ class TestConfusionMatrix:
 
     def test_false_degradation_rate_counts_high_to_low(self):
         cm = ConfusionMatrix()
-        # direct_quote predicted as synthesis = degradation
         cm.add(SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.SYNTHESIS.value)
         cm.add(SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.DIRECT_QUOTE.value)
         rate = cm.false_degradation_rate()
-        assert rate == 0.5  # 1 degraded out of 2 total
+        assert rate == 0.5
 
     def test_miss_rate_zero_when_empty(self):
         cm = ConfusionMatrix()
@@ -54,11 +52,10 @@ class TestConfusionMatrix:
 
     def test_miss_rate_counts_low_predicted_as_high(self):
         cm = ConfusionMatrix()
-        # synthesis predicted as direct_quote = miss
         cm.add(SynthesisLevel.SYNTHESIS.value, SynthesisLevel.DIRECT_QUOTE.value)
         cm.add(SynthesisLevel.SYNTHESIS.value, SynthesisLevel.SYNTHESIS.value)
         rate = cm.miss_rate()
-        assert rate == 0.5  # 1 missed out of 2 total
+        assert rate == 0.5
 
     def test_to_dict_returns_expected_keys(self):
         cm = ConfusionMatrix()
@@ -130,7 +127,6 @@ class TestEvaluateThresholds:
 class TestSuggestThresholdAdjustments:
     def test_no_adjustments_when_matrix_balanced(self):
         cm = ConfusionMatrix()
-        # All correct predictions
         for label in cm.labels:
             cm.add(label, label)
         current = dict(DEFAULT_THRESHOLDS)
@@ -139,7 +135,6 @@ class TestSuggestThresholdAdjustments:
 
     def test_lowers_jaccard_direct_quote_on_high_miss_rate(self):
         cm = ConfusionMatrix()
-        # Direct quote consistently predicted as paraphrase
         for _ in range(10):
             cm.add(SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value)
         current = dict(DEFAULT_THRESHOLDS)
@@ -148,7 +143,6 @@ class TestSuggestThresholdAdjustments:
 
     def test_lowers_cosine_paraphrase_on_high_degradation(self):
         cm = ConfusionMatrix()
-        # Paraphrase consistently predicted as cross_reference
         for _ in range(10):
             cm.add(SynthesisLevel.PARAPHRASE.value, SynthesisLevel.CROSS_REFERENCE.value)
         current = dict(DEFAULT_THRESHOLDS)
@@ -165,10 +159,8 @@ class TestSuggestThresholdAdjustments:
 
     def test_raises_jaccard_on_false_positive_direct_quote(self):
         cm = ConfusionMatrix()
-        # Many non-DQ predicted as DQ (false positives)
         for _ in range(10):
             cm.add(SynthesisLevel.PARAPHRASE.value, SynthesisLevel.DIRECT_QUOTE.value)
-        # Also some real DQ to have a baseline
         for _ in range(2):
             cm.add(SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.DIRECT_QUOTE.value)
         current = dict(DEFAULT_THRESHOLDS)
@@ -221,5 +213,4 @@ class TestRunCalibration:
             CalibrationSample("s1", "text", ["c1"], ["chunk"], SynthesisLevel.DIRECT_QUOTE.value)
         ]
         result = run_calibration(mock_store, samples, max_rounds=5)
-        # Perfect score < 0.1, should stop after 1 round
         assert result["rounds"] == 1

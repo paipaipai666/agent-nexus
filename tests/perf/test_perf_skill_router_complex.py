@@ -23,8 +23,6 @@ from agentnexus.services.skill import SkillService
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.workflow import Workflow
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
 SYNONYM_LATENCY_MAX_MS = 10.0
 MULTILINGUAL_ACCURACY_MIN = 0.70
 DISAMBIGUATION_ACCURACY_MIN = 0.65
@@ -170,8 +168,6 @@ def _create_comprehensive_skills() -> list[SkillEntry]:
     ]
 
 
-# ── Test Cases ──────────────────────────────────────────────────────
-
 SYNONYM_CASES = [
     ("创建一个word文档", "docx"),
     ("编辑doc文件", "docx"),
@@ -188,21 +184,16 @@ SYNONYM_CASES = [
 ]
 
 MULTILINGUAL_CASES = [
-    # Chinese
     ("创建一份文档", "docx"),
     ("编写一段代码", "code"),
     ("搜索相关资料", "search"),
-    # English
     ("Create a document", "docx"),
     ("Write some code", "code"),
     ("Search for information", "search"),
-    # Mixed
     ("帮我写一个Python脚本", "code"),
     ("Create一份word文档", "docx"),
-    # Japanese
     ("ドキュメントを作成する", "docx"),
     ("コードを書く", "code"),
-    # Korean
     ("문서를 작성하세요", "docx"),
     ("코드를 작성하세요", "code"),
 ]
@@ -245,9 +236,6 @@ COMPOSITE_CASES = [
 ]
 
 
-# ── Performance Tests ───────────────────────────────────────────────
-
-
 class TestSynonymPerformance:
     """Test synonym matching performance."""
 
@@ -283,7 +271,6 @@ class TestSynonymPerformance:
                 hits += 1
 
         accuracy = hits / len(SYNONYM_CASES)
-        # Record accuracy for analysis
         print(f"\nSynonym accuracy: {accuracy:.2%} ({hits}/{len(SYNONYM_CASES)})")
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_OFFLOAD_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
+_OFFLOAD_MAX_AGE_SECONDS = 24 * 3600
 
 
 def offload_large_result(content: str, offload_dir: str, session_id: str) -> str:

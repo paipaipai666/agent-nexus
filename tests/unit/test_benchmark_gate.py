@@ -27,7 +27,6 @@ def _write_report(path, suite, metrics_by_dataset):
 def gated_reports(tmp_path, monkeypatch):
     from agentnexus.core.config import get_settings
 
-    # traces_dir is the traces root; reports live under <traces_dir>/evals
     monkeypatch.setattr(get_settings(), "traces_dir", str(tmp_path))
     evals_dir = tmp_path / "evals"
     evals_dir.mkdir()
@@ -51,11 +50,10 @@ def test_gate_fails_when_any_dataset_below_min(gated_reports):
 
 
 def test_gate_skips_hand_captured_baseline(gated_reports):
-    # the manually captured comparison baseline must never satisfy a gate
     _write_report(gated_reports / "benchmark-multihop-baseline-20260920.json", "multihop", {"MultiHopRAG": 0.99})
     runner = CliRunner()
     result = runner.invoke(app, ["eval", "benchmark", "gate", "-s", "multihop", "--min", "0.5"])
-    assert result.exit_code == 2  # no eligible report found
+    assert result.exit_code == 2
 
 
 def test_gate_explicit_report_path(gated_reports):

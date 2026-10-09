@@ -186,7 +186,7 @@ class TestCheckRepeatedFailures:
         ]
         report = TrajectoryReport(trace_id="t", total_spans=6)
         TrajectoryEvaluator()._check_repeated_failures(spans, report)
-        assert report.score == 8.5  # only the second streak of 3 triggers
+        assert report.score == 8.5
 
 
 class TestCheckLoops:
@@ -300,7 +300,6 @@ class TestEvaluateOne:
         spans = [{"name": "llm", "start_time": i, "metadata": {"status": "error"}}
                  for i in range(10)]
         report = TrajectoryEvaluator()._evaluate_one("test", spans)
-        # loop: -2.0, error_cascade: -1.5, step_efficiency: 0 (no tools)
         assert report.score >= 0
 
     def test_spans_sorted_by_start_time(self):

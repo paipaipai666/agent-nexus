@@ -26,7 +26,7 @@ def update_env(tmp_path, monkeypatch):
     from agentnexus.rag.models import KnowledgeBaseRecord
     from agentnexus.rag.store import KnowledgeBaseCatalog
     from agentnexus.storage.chroma import get_collection, reset_storage_client, resolve_collection_name
-    reset_storage_client()  # 清掉模块级 _collections 缓存，避免跨测试串目录
+    reset_storage_client()
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
     kbs.get_knowledge_base_catalog = lambda: cat
     kb_id = resolve_collection_name(namespace="default")

@@ -17,7 +17,6 @@ _STOPWORDS = {
     "需要", "使用", "用于", "这个", "一个", "帮我", "帮", "一下", "点",
 }
 
-# ── Verb / Object / Alias Inference Dictionaries ────────────────────
 
 _VERB_LEXICON: dict[str, list[str]] = {
     "创建": ["create", "新建", "建立"],
@@ -119,10 +118,6 @@ _CONNECTOR_PATTERNS: list[tuple[str, str, str]] = [
     (r"(.+?)的话就", "conditional", "conditional"),
 ]
 
-# NOTE: Composite action overrides are a global heuristic. When a query contains
-# multiple verbs, this table picks which verb should drive skill selection.
-# A future improvement would allow per-skill override metadata so individual
-# skills can declare their own composite-action preferences.
 _COMPOSITE_ACTION_OVERRIDES: dict[tuple[str, ...], str] = {
     ("搜索", "总结"): "搜索",
     ("分析", "总结"): "总结",
@@ -132,9 +127,6 @@ _COMPOSITE_ACTION_OVERRIDES: dict[tuple[str, ...], str] = {
     ("写", "测试"): "写",
     ("下载", "转换"): "转换",
 }
-
-
-# ── Data Classes ────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -152,7 +144,7 @@ class SkillRouteDecision:
     candidates: tuple[SkillRoute, ...]
     uncertain: bool
     reason: str
-    mode: str = "single"  # single / multi_intent / ambiguous / abstain
+    mode: str = "single"
     confidence: float = 0.0
     secondary_skills: tuple[str, ...] = ()
 

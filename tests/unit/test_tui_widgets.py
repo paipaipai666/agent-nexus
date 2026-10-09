@@ -4,8 +4,6 @@ from unittest.mock import MagicMock, patch
 
 from pydantic import SecretStr
 
-# ── hud._format_k ────────────────────────────────────────────────
-
 
 class TestFormatK:
     def test_zero(self):
@@ -54,9 +52,6 @@ class TestFormatK:
         assert _format_k(1_000_000) == "1.0m"
 
 
-# ── message._safe ────────────────────────────────────────────────
-
-
 class TestSafe:
     def test_normal_text(self):
         from agentnexus.tui.widgets.message import _safe
@@ -80,7 +75,6 @@ class TestSafe:
         from agentnexus.tui.widgets.message import _safe
 
         result = _safe("[bold]text[/bold]")
-        # _safe wraps in Rich Text, preventing markup parsing
         assert "[bold]" in str(result)
 
     def test_bracket_chars(self):
@@ -88,9 +82,6 @@ class TestSafe:
 
         result = _safe("arr[0] = 1")
         assert "arr[0]" in str(result)
-
-
-# ── message.render_diff_with_colors ──────────────────────────────
 
 
 class TestRenderDiffWithColors:
@@ -152,11 +143,7 @@ class TestRenderDiffWithColors:
         from agentnexus.tui.widgets.message import render_diff_with_colors
 
         result = render_diff_with_colors("+[bold]text[/bold]")
-        # Square brackets should be escaped with backslash
         assert "\\[bold\\]" in result
-
-
-# ── observability.tracer._truncate ─────────────────────────────────
 
 
 class TestTruncate:
@@ -169,7 +156,7 @@ class TestTruncate:
         from agentnexus.observability.tracer import _truncate
 
         result = _truncate("hello world this is long", 10)
-        assert len(result) > 10  # includes suffix
+        assert len(result) > 10
         assert "截断" in result
 
     def test_exact_limit(self):
@@ -193,11 +180,7 @@ class TestTruncate:
         from agentnexus.observability.tracer import _truncate
 
         result = _truncate("hello", 0)
-        # limit=0 → text[:0] + suffix
         assert "截断" in result
-
-
-# ── ConfirmDialog initialization ─────────────────────────────────
 
 
 class TestConfirmDialog:
@@ -221,9 +204,6 @@ class TestConfirmDialog:
         assert dialog._tool_name == "my_tool"
 
 
-# ── InputBar messages ────────────────────────────────────────────
-
-
 class TestInputBarMessages:
     def test_app_submit_has_text(self):
         from agentnexus.tui.widgets.input_bar import InputBar
@@ -236,9 +216,6 @@ class TestInputBarMessages:
 
         msg = InputBar.AppInputChanged("typed")
         assert msg.text == "typed"
-
-
-# ── ChatMessage initialization ───────────────────────────────────
 
 
 class TestChatMessage:
@@ -262,9 +239,6 @@ class TestChatMessage:
         assert "assistant" in msg.classes
 
 
-# ── ToolCall initialization ──────────────────────────────────────
-
-
 class TestToolCall:
     def test_stores_attributes(self):
         from agentnexus.tui.widgets.message import ToolCall
@@ -280,9 +254,6 @@ class TestToolCall:
         tc = ToolCall("tool")
         assert tc.result == ""
         assert tc.duration_ms == 0
-
-
-# ── SidePanel initialization ─────────────────────────────────────
 
 
 class TestSidePanel:
@@ -396,9 +367,6 @@ class TestSidePanel:
         panel = SidePanel()
         panel.update_memory([])
         assert panel._skill_info["status"] == "idle"
-
-
-# ── SidePanel render methods ─────────────────────────────────────
 
 
 class TestSidePanelRender:
@@ -586,9 +554,6 @@ class TestSidePanelRender:
         assert "·" in result
 
 
-# ── HUD initialization ───────────────────────────────────────────
-
-
 def _make_hud_settings(model_id="test-model", base_url=""):
     settings = MagicMock()
     settings.llm_model_id = model_id
@@ -675,9 +640,6 @@ class TestHUD:
         assert hud._can_redo is False
 
 
-# ── HUD._build_text ──────────────────────────────────────────────
-
-
 class TestHUDBuildText:
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=128000)
     @patch("agentnexus.tui.widgets.hud.get_settings")
@@ -743,9 +705,6 @@ class TestHUDBuildText:
         assert "abc12345" in text
         assert "undo" in text
         assert "redo" in text
-
-
-# ── AgentNexusTUI initialization ─────────────────────────────────
 
 
 class TestAgentNexusTUI:

@@ -33,10 +33,8 @@ def test_dimension_meets_threshold(report, dimension):
 
 
 def test_default_cases_cover_all_dimensions():
-    # Judge probes are opt-in; the full dimension set is covered with them enabled.
     covered = {c.dimension for c in default_cases(include_judge=True)}
     assert covered == set(DIMENSIONS)
-    # Default (offline) suite excludes the judge dimension.
     offline = {c.dimension for c in default_cases()}
     assert "quality" not in offline
 

@@ -40,13 +40,11 @@ def config(
         "skill_context_max_tokens",
     ]
 
-    # Support both positional args (nexus config <key> <value>) and legacy flags (--set/--value)
     if set_key is not None and key is None:
         key = set_key
         value = set_value
 
     if key is not None:
-        # ── Set mode ──
         if key not in SETTABLE_KEYS:
             console.print(f"[red]Invalid config key: {key}[/red]")
             console.print(f"Available keys: [dim]{', '.join(SETTABLE_KEYS)}[/dim]")
@@ -63,7 +61,6 @@ def config(
         console.print(f"[dim]Config file: {config_path}[/dim]")
         return
 
-    # ── View mode ──
     table = Table(title="AgentNexus Configuration", box=box.ROUNDED)
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="green")

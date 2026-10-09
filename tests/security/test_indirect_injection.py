@@ -65,7 +65,6 @@ class TestSystemPromptProtection:
             memory_context="",
             conversation_context="",
         )
-        # Injection payload should appear as literal text in tools message
         tools_msg = messages[1]["content"]
         assert "{question}" in tools_msg
         assert "{tools}" in tools_msg
@@ -114,7 +113,6 @@ class TestSystemPromptProtection:
         )
         all_text = " ".join(m["content"] for m in messages)
         assert payload in all_text
-        # System rules message should start with the expected text
         assert messages[0]["content"].startswith("你是一个遵循")
 
 
@@ -174,7 +172,6 @@ class TestKbDocumentInjection:
             memory_context=payload,
             conversation_context="",
         )
-        # Payload should be in a system message, not in a user message
         system_msgs = [m for m in messages if m["role"] == "system"]
         all_system_text = " ".join(m["content"] for m in system_msgs)
         assert payload in all_system_text
@@ -314,9 +311,7 @@ class TestConversationContextInjection:
             memory_context="",
             conversation_context=conv_ctx,
         )
-        # System rules should start correctly
         assert messages[0]["content"].startswith("你是一个遵循")
-        # Conversation context should appear in a system message
         all_text = " ".join(m["content"] for m in messages)
         assert "== 近期对话 ==" in all_text or "== 对话历史摘要 ==" in all_text
 

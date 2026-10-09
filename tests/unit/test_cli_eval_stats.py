@@ -160,7 +160,6 @@ class TestComputeCalibration:
         printed = " ".join(
             str(args[0]) for args, _ in mock_console.print.call_args_list
         )
-        # Precision section should have correlation computed (>= 3 samples)
         assert "precision" in printed.lower()
         assert "spearman" in printed.lower()
 
@@ -188,6 +187,5 @@ class TestComputeCalibration:
         printed = " ".join(
             str(args[0]) for args, _ in mock_console.print.call_args_list
         )
-        # Recall section should have correlation computed
         assert "recall" in printed.lower()
         assert "spearman" in printed.lower()

@@ -1,18 +1,3 @@
-/**
- * Subagent visibility: subagent_event frames drive the per-session subagent
- * metadata used by the InfoPanel sidebar (name / status / current tool).
- *
- * Contract under test (backend emits these on the session WS):
- *   started      → status thinking, carries name/role/task
- *   tool_call    → status tool_calling, currentTool = tool_name
- *   tool_result  → back to thinking
- *   token/reasoning → sidebar meta must NOT change (trajectory-only)
- *   finished     → terminal status (completed / interrupted / failed)
- *
- * Harness note: mirrors parallel-tool-cards.test.tsx — static imports are
- * impossible here because vi.resetModules() requires wsPool/SessionManager
- * to be re-imported fresh inside beforeEach (module-loading boundary test).
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
@@ -41,7 +26,6 @@ class MockWebSocket {
   }
 }
 
-// Test sleep — plain promise; the tsconfig lib predates Promise.withResolvers.
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 interface Meta {
@@ -79,9 +63,6 @@ describe('Subagent sidebar metadata (desktop)', () => {
     vi.resetModules()
     MockWebSocket.instances = []
     ;(globalThis as Record<string, unknown>).WebSocket = MockWebSocket
-    // Dynamic imports (not static): the module registry is reset per test
-    // (vi.resetModules), so these must be re-imported fresh — same pattern
-    // as parallel-tool-cards.test.tsx.
     const wsMod = await import('../services/ws')
     wsPool = wsMod.wsPool
     const smMod = await import('../components/session/SessionManager')
@@ -139,7 +120,7 @@ describe('Subagent sidebar metadata (desktop)', () => {
     })
     meta = latestSubs.get('sub_abc123')
     expect(meta?.status).toBe('thinking')
-    expect(meta?.currentTool).toBeUndefined()  // cleared once no longer tool_calling
+    expect(meta?.currentTool).toBeUndefined()
 
     await act(async () => {
       ws._receive(ev('finished', { status: 'completed', summary: 'done', steps_used: 2 }))

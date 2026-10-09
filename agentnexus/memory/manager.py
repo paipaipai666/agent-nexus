@@ -63,10 +63,7 @@ class MemoryManager:
         self._engine.history_dir = f"{base}/history"
         self._pipeline = MemoryExtractionPipeline(self)
         self._last_write_count: int = 0
-        # Resolve ctx_max off the main thread so startup never blocks on registry I/O.
         threading.Thread(target=self._resolve_ctx_max_async, daemon=True, name="mem-ctx-resolve").start()
-
-    # ── Compaction state properties (delegating to the engine) ───────
 
     @property
     def compact_threshold(self) -> int:
@@ -109,8 +106,6 @@ class MemoryManager:
             self._engine.ctx_max = ctx_max
             self._engine.compact_threshold = ctx_max - self._settings.autocompact_buffer_tokens
 
-    # ── Embedding model lifecycle ────────────────────────────────────
-
     def _preload_embed_model(self):
         """Background thread: load embedding model without blocking startup."""
         try:
@@ -148,13 +143,10 @@ class MemoryManager:
         Prefers the incremental counter (O(1)) when available and populated,
         falls back to full re-encoding.
         """
-        # Use incremental counter if it has been populated (non-zero or messages are empty)
         stm = self.short_term
         if stm._token_count > 0 or len(stm._messages) == 0:
             return stm._token_count
         return stm.estimate_tokens()
-
-    # ── LTM context retrieval ────────────────────────────────────────
 
     def init_session(self, question: str) -> str:
         """Build session-start memory context: project index/state + LTM recall."""
@@ -177,21 +169,17 @@ class MemoryManager:
             return ""
         ltm_limit = 5
         ltm_similarity = 0.5
-        # Use the question directly — don't pollute embedding with noisy concatenation
         query_text = question
         if self.short_term:
             recent = self.short_term.get_all()
             if recent:
                 summary = self.short_term.get_summary()
                 if summary:
-                    # Prepend summary for richer context when available
                     query_text = f"{summary[:300]} {question}"
         query_vec = embedding_to_list(self._get_embed_model().encode(query_text, normalize_embeddings=True))
         memories = self.long_term.search(
             query_embedding=query_vec, limit=ltm_limit, min_similarity=ltm_similarity)
 
-        # Always update snapshot — even if no memories match this query,
-        # we need the baseline for future has_new_memories() checks.
         self._update_ltm_snapshot()
 
         if not memories:
@@ -231,29 +219,23 @@ class MemoryManager:
         """Reload LTM context after new memories are detected."""
         return self.init_session(question)
 
-    # ── Append pipeline (offload + compaction trigger) ───────────────
-
     def append(self, role: str, content: str, metadata: dict | None = None) -> None:
         from agentnexus.core.hooks import HookType, get_hook_manager
 
         hook_mgr = get_hook_manager()
 
-        # ── before memory hook ───────────────────────────────────
         hook_mgr.fire(HookType.BEFORE_MEMORY_OP, {
             "op": "append", "role": role, "content": content,
         })
 
-        # Layer 1: offload large tool results to disk
         if role == "tool" and self._settings.offload_enabled:
             threshold = self._settings.large_result_threshold
             if len(content.encode("utf-8", errors="replace")) > threshold:
                 content = self._offload_large_result(content)
         self.short_term.append(role, content, metadata=metadata)
-        # Recursive guard: don't trigger compaction from within compaction
         if not self._engine.compacting:
             self.maybe_compact()
 
-        # ── after memory hook ────────────────────────────────────
         hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
             "op": "append", "role": role, "content": content,
         })
@@ -261,8 +243,6 @@ class MemoryManager:
     def _offload_large_result(self, content: str) -> str:
         """Write large tool result to disk, return a stub with preview."""
         return offload_large_result(content, self._offload_dir, self.session_id)
-
-    # ── Compaction delegates (see CompactionEngine) ──────────────────
 
     def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
                       is_auto: bool = True) -> int:
@@ -295,8 +275,6 @@ class MemoryManager:
 
     def bridge_read(self, filepath: str, content_preview: str = "") -> None:
         self._engine.bridge_read(filepath, content_preview)
-
-    # ── Extraction delegates (see MemoryExtractionPipeline) ──────────
 
     def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
         self._pipeline.run(question, answer, allow_memory)

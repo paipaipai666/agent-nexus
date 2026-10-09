@@ -9,7 +9,6 @@ from agentnexus.core.config import get_settings
 from agentnexus.observability.tracer import trace_span
 
 logger = logging.getLogger(__name__)
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS long_term_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +51,7 @@ CREATE TABLE IF NOT EXISTS pending_memories (
 );
 CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_memories(status);
 """
+
 
 LTM_COLLECTION = "long_term_memories"
 _ltm_collection = None
@@ -130,12 +130,10 @@ class LongTermMemory:
         )
         self._conn.commit()
 
-    # TTL per category (days). None = never expires.
     _CATEGORY_TTL: dict[str, int | None] = {
-        "fact": None,           # permanent — facts don't auto-expire
-        "preference": None,     # permanent — preferences persist until explicitly changed
-        "note": 90,             # 90 days default, refreshed on access
-        # Legacy names (for existing data before migration)
+        "fact": None,
+        "preference": None,
+        "note": 90,
         "entity_fact": None,
         "conclusion": None,
         "user_preference": None,
@@ -145,12 +143,10 @@ class LongTermMemory:
         "conversation": 90,
     }
 
-    # Score decay half-life per category (hours). None = no decay (permanent).
     _CATEGORY_HALF_LIFE_HOURS: dict[str, int | None] = {
         "fact": None,
         "preference": None,
         "note": 48,
-        # Legacy names
         "entity_fact": None,
         "conclusion": None,
         "user_preference": None,
@@ -228,7 +224,6 @@ class LongTermMemory:
         """Compute dynamic importance: base + access boost - age decay."""
         base = row.get("importance", 0.5) or 0.5
         access_count = row.get("access_count", 0) or 0
-        # Logarithmic access boost: caps at ~0.2 for 50+ accesses
         access_boost = 0.1 * min(2.0, math.log(1 + access_count))
         return min(1.0, base + access_boost)
 
@@ -248,7 +243,6 @@ class LongTermMemory:
         })
 
         with self._lock:
-            # Pre-save eviction check: if count >= max_memories * 1.1, evict first to avoid burst growth
             count_row_pre = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
             if count_row_pre["cnt"] >= self._max_memories * 1.1:
                 self._evict_if_needed()
@@ -259,8 +253,6 @@ class LongTermMemory:
             )
             existing = cur.fetchone()
             if existing:
-                # Boost importance on repeated mention, cap at 1.0.
-                # Update last_accessed_at (TTL refresh) — not created_at (immutable).
                 boosted = min(existing["importance"] + 0.05, 1.0)
                 new_importance = max(boosted, importance)
                 self._conn.execute(
@@ -291,13 +283,7 @@ class LongTermMemory:
                 row_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
             self._conn.commit()
-            # Ordering note: SQLite commit precedes the ChromaDB upsert below.
-            # SQLite is the source of truth; if the upsert fails, the memory is
-            # still persisted and the failure is logged as non-fatal.
-            # The inverse ordering in _evict_if_needed (ChromaDB-first) ensures
-            # we never leave orphan vectors if the ChromaDB delete fails.
 
-            # Post-save eviction (inside lock to keep count check atomic)
             count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
             if count_row["cnt"] > self._max_memories:
                 self._evict_if_needed()
@@ -319,7 +305,6 @@ class LongTermMemory:
                 )
                 self._conn.commit()
 
-        # ── after ltm save hook ────────────────────────────────
         hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
             "session_id": session_id, "content": content,
             "category": category, "importance": importance,
@@ -339,8 +324,6 @@ class LongTermMemory:
                 return
 
             excess = current - self._max_memories
-            # Fetch chroma_ids for evicted rows before deleting
-            # Use effective_importance (base + access boost) for eviction ordering
             to_evict = self._conn.execute(
                 "SELECT id, chroma_id, category, importance, access_count, "
                 "COALESCE(last_accessed_at, created_at) as ref_time "
@@ -354,16 +337,14 @@ class LongTermMemory:
             chroma_ids = [r["chroma_id"] for r in to_evict if r["chroma_id"]]
             ids_to_delete = [r["id"] for r in to_evict]
 
-            # Delete from ChromaDB first
             if chroma_ids:
                 try:
                     self._ensure_chroma()
                     self._chroma_col.delete(ids=chroma_ids)
                 except Exception as e:
                     logger.warning("ChromaDB eviction failed, skipping SQLite delete to avoid orphans: %s", e)
-                    return  # Don't delete SQLite rows if ChromaDB failed
+                    return
 
-            # Then delete from SQLite
             placeholders = ",".join("?" for _ in ids_to_delete)
             self._conn.execute(
                 f"DELETE FROM long_term_memories WHERE id IN ({placeholders})", ids_to_delete
@@ -387,7 +368,6 @@ class LongTermMemory:
 
         for row in rows:
             category = row["category"]
-            # Get the oldest medium-score entries in this category (keep newest 3)
             entries = self._conn.execute(
                 "SELECT id, content, importance FROM long_term_memories "
                 "WHERE category = ? AND importance BETWEEN 0.3 AND 0.6 "
@@ -398,16 +378,13 @@ class LongTermMemory:
             if len(entries) <= 5:
                 continue
 
-            # Keep the newest 3, merge the rest into one summary
             to_merge = entries[:-3]
             merged_content = "; ".join(e["content"] for e in to_merge)[:1000]
             avg_importance = sum(e["importance"] for e in to_merge) / len(to_merge)
 
-            # Delete old entries
             for e in to_merge:
                 self.delete(e["id"])
 
-            # Save merged summary (without embedding — will be re-embedded on next update)
             self.save(
                 session_id="system",
                 content=f"[合并记忆] {merged_content}",
@@ -435,7 +412,7 @@ class LongTermMemory:
         for r in rows:
             ttl_days = self._CATEGORY_TTL.get(r["category"])
             if ttl_days is None:
-                continue  # permanent category
+                continue
             try:
                 ref = datetime.fromisoformat(r["ref_time"])
             except (ValueError, TypeError):
@@ -499,7 +476,7 @@ class LongTermMemory:
         try:
             chroma_results = self._chroma_col.query(
                 query_embeddings=[query_embedding],
-                n_results=max(limit * 5, 50),  # wider net to catch entity_facts that rank lower
+                n_results=max(limit * 5, 50),
                 where=where_filter,
             )
         except Exception as e:
@@ -548,7 +525,6 @@ class LongTermMemory:
             d["_score"] = round(s[0], 3)
             results.append(d)
 
-        # ── after ltm search hook ──────────────────────────────
         hook_mgr.fire(HookType.AFTER_LTM_SEARCH, {
             "category": category, "limit": limit,
             "result_count": len(results),
@@ -569,7 +545,6 @@ class LongTermMemory:
         if not rows:
             return []
 
-        # Batch fetch all embeddings in a single ChromaDB call
         all_ids = [r["chroma_id"] for r in rows]
         try:
             chroma_results = self._chroma_col.get(ids=all_ids, include=["embeddings"])
@@ -577,7 +552,6 @@ class LongTermMemory:
             logger.warning("ChromaDB batch get failed in fallback search: %s", e)
             return []
 
-        # Build id -> embedding map from batch results
         id_vec_map: dict[str, list[float]] = {}
         result_ids = chroma_results.get("ids", [])
         raw_embs = chroma_results.get("embeddings")
@@ -586,7 +560,6 @@ class LongTermMemory:
             if emb is not None:
                 id_vec_map[cid] = emb
 
-        # Precompute query norm once
         norm_q = math.sqrt(sum(a * a for a in query_embedding))
         if norm_q == 0:
             return []
@@ -684,8 +657,6 @@ class LongTermMemory:
             self._write_counter = 0
             logger.info("Cleared all long-term memories")
 
-    # ── Pending (quarantine) area for curator-proposed memories ─────
-
     def add_pending(self, content: str, scope: str = "user", category: str = "fact",
                     kind: str = "", workspace_path: str = "", context: str = "",
                     importance: float = 0.8, source: str = "curator",
@@ -758,7 +729,6 @@ class LongTermMemory:
             self.set_pending_status(pending_id, "approved")
             return {"status": "approved", "scope": "project", "target": str(pm.root)}
 
-        # user scope → LTM (with source supersession)
         vec: list[float] = []
         if embed_model is not None:
             try:

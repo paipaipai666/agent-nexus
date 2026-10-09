@@ -1,9 +1,5 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
-// ── Chat attachments ────────────────────────────────────────────
-/** Local file attached to a chat message — referenced by absolute path,
- *  never copied. Backend reads images as vision blocks, other files via
- *  file_read against the injected path. */
 export interface AttachmentRef {
   path: string
   name: string
@@ -15,7 +11,6 @@ const ATTACH_IMAGE_EXTS: Record<string, true> = {
   '.png': true, '.jpg': true, '.jpeg': true, '.gif': true, '.webp': true,
 }
 
-/** Derive mime from extension — backend only branches on image/*. */
 export function mimeForPath(p: string): string {
   const dot = p.lastIndexOf('.')
   const ext = dot >= 0 ? p.slice(dot).toLowerCase() : ''
@@ -29,7 +24,6 @@ export function humanSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// ── Version control (checkpoints) types ─────────────────────────────────
 export interface VersionCheckpoint {
   id: string
   session_id: string
@@ -41,7 +35,6 @@ export interface VersionCheckpoint {
   created_at: string
 }
 
-// ── Timeline (observability) types ──────────────────────────────────────
 export interface TimelineEvent {
   id: number
   run_id: string
@@ -52,7 +45,6 @@ export interface TimelineEvent {
   payload: Record<string, unknown>
 }
 
-// ── Subagent visibility types ───────────────────────────────────────────
 export interface SubagentInfo {
   subagent_id: string
   name: string
@@ -66,9 +58,6 @@ export interface SubagentInfo {
   error: string
 }
 
-// ── LLM provider profile types ──────────────────────────────────────────
-/** Opaque capability override — YAML/advanced only, never edited in the UI.
- *  Round-tripped on save so UI edits don't wipe config.yaml overrides. */
 export interface ModelOverride {
   context_length?: number | null
   max_output_tokens?: number | null
@@ -94,10 +83,9 @@ export interface DiscoveredModel {
 export interface ProviderDraft {
   name: string
   base_url: string
-  api_key: string // '' = keep the stored key
-  timeout: number // not editable in UI — preserved from server/YAML
+  api_key: string
+  timeout: number
   models: ModelDraft[]
-  // transient discovery state (never persisted)
   discovered?: DiscoveredModel[]
   discovering?: boolean
 }
@@ -105,16 +93,15 @@ export interface ProviderDraft {
 export interface ProviderInfo {
   name: string
   base_url: string
-  api_key: string // '****' when set, '' when empty
+  api_key: string
   timeout: number
   models: ModelDraft[]
 }
 
-/** Wire format for PUT /api/config/llm/providers. */
 export interface ProviderSaveInput {
   name: string
   base_url: string
-  api_key?: string // omitted = keep stored key
+  api_key?: string
   timeout?: number
   models: ModelDraft[]
 }
@@ -152,7 +139,6 @@ async function uploadRequest<T>(path: string, file: File, query?: Record<string,
 }
 
 export const api = {
-  // Session
   createSession: (skill?: string, workspace?: string | null) =>
     request<{ session_id: string; workspace: string | null }>('/api/session', {
       method: 'POST',
@@ -170,7 +156,6 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
-  /** Session thinking-effort override. `effort` null = follow Settings default. */
   setThinkingEffort: (sessionId: string, effort: string | null) =>
     request<{ session_id: string; thinking_effort: string | null }>(`/api/session/${sessionId}/thinking-effort`, {
       method: 'POST',
@@ -188,21 +173,18 @@ export const api = {
   restoreSession: (sessionId: string) =>
     request<{ session_id: string; restored: boolean }>('/api/session/restore', {
       method: 'POST',
-      body: JSON.stringify({ skill: sessionId }),  // backend reuses skill field for session_id
+      body: JSON.stringify({ skill: sessionId }),
     }),
-  // Todos
   getTodos: (sessionId: string) =>
     request<{ items: Array<{ id: number; description: string; status: string }>; count: number }>(
       `/api/session/${sessionId}/todos`
     ),
 
-  // Subagents (visibility)
   getSubagents: (sessionId: string) =>
     request<{ session_id: string; subagents: SubagentInfo[] }>(
       `/api/session/${sessionId}/subagents`
     ),
 
-  // Timeline (observability)
   getSessionEvents: (sessionId: string, after = 0) =>
     request<{ session_id: string; events: TimelineEvent[]; last_id: number; count: number }>(
       `/api/session/${sessionId}/events?after=${after}`
@@ -230,7 +212,6 @@ export const api = {
       `/api/session/${sessionId}/context-steps/${runId}`
     ),
 
-  // Knowledge
   listDocuments: (signal?: AbortSignal) =>
     request<{ documents: any[]; total_chunks: number }>('/api/kb/documents', { signal }),
 
@@ -267,7 +248,6 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Skills
   listSkills: () =>
     request<{ skills: Array<{ id: string; display_name: string; description: string; enabled: boolean }>; count: number }>('/api/skills'),
 
@@ -288,7 +268,6 @@ export const api = {
       method: 'POST',
     }),
 
-  // Memory
   listMemories: (limit = 20) =>
     request<{ memories: any[]; count: number }>(`/api/memory/long?limit=${limit}`),
 
@@ -322,7 +301,6 @@ export const api = {
       method: 'POST',
     }),
 
-  // Config
   getConfig: () => request<Record<string, any>>('/api/config'),
 
   updateConfig: (key: string, value: string) =>
@@ -336,7 +314,6 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(persona),
     }),
-  // LLM providers (multi-provider, multi-model switchable profiles)
   getLlmProviders: () =>
     request<{
       providers: ProviderInfo[]
@@ -380,7 +357,6 @@ export const api = {
       session_disabled: string[]
     }>('/api/config/llm/capabilities'),
 
-  // Stats
   getStats: (days = 7) => request<Record<string, any>>(`/api/stats?days=${days}`),
 
   getLogs: (days = 7) => request<{ traces: any[] }>(`/api/logs?days=${days}`),
@@ -388,7 +364,6 @@ export const api = {
   getTraceDetail: (traceId: string) =>
     request<{ trace_id: string; spans: any[] }>(`/api/logs/${traceId}`),
 
-  // Health
   getHealth: () =>
     request<{
       status: string
@@ -397,7 +372,6 @@ export const api = {
       timestamp: number
     }>('/health'),
 
-  // Alerts
   getAlerts: (days = 7, severity?: string) =>
     request<{
       alerts: Array<{
@@ -414,11 +388,9 @@ export const api = {
   getAlertRules: () =>
     request<{ rules: Array<{ type: string; index: number }>; total: number }>('/api/alerts/rules'),
 
-  // Audit
   getAudit: (limit = 50, tool?: string) =>
     request<{ entries: any[] }>(`/api/audit?limit=${limit}${tool ? `&tool=${tool}` : ''}`),
 
-  // MCP
   getMcpStatus: () => request<Record<string, any>>('/api/mcp/status'),
 
   listMcpTools: (server?: string) =>
@@ -453,7 +425,6 @@ export const api = {
       body: JSON.stringify({ server }),
     }),
 
-  // Version Control (session-scoped — checkpoints are stored per session)
   getVersionStatus: (sessionId: string) =>
     request<{ session_id: string; head: VersionCheckpoint | null; can_undo: boolean; can_redo: boolean }>(`/api/version/status?session_id=${sessionId}`),
 
@@ -478,10 +449,8 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId, custom_instructions: customInstructions }),
     }),
 
-  // Extensions / Plugins
   getExtensions: () => request<Record<string, any>>('/api/config/extensions'),
 
-  // Runtime Status
   getRuntimeStatus: (sessionId?: string) => {
     const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
     return request<{
@@ -494,7 +463,6 @@ export const api = {
     }>(`/api/runtime/status${qs}`)
   },
 
-  // Eval — Tasks
   listEvalTasks: (category?: string, difficulty?: string, evalType?: string) => {
     const params = new URLSearchParams()
     if (category) params.set('category', category)
@@ -518,7 +486,6 @@ export const api = {
       body: JSON.stringify({ n_trials: nTrials }),
     }),
 
-  // Eval — Suites
   listEvalSuites: () =>
     request<{ suites: Array<{ name: string; eval_type: string; description: string; task_count: number }> }>('/api/eval/suites'),
 
@@ -544,7 +511,6 @@ export const api = {
       method: 'POST',
     }),
 
-  // Eval — Legacy
   listEvalDatasets: () =>
     request<{ datasets: Array<{ name: string; filename: string; samples: number }> }>('/api/eval/datasets'),
 
@@ -560,7 +526,6 @@ export const api = {
   getEvalStats: () =>
     request<any>('/api/eval/stats'),
 
-  // Wiki
   getWikiStats: (namespace = 'default') =>
     request<{ page_count: number; statement_count: number; pending_reviews: number; confidence_distribution: Record<string, number>; calibration_needed: boolean }>(
       `/api/wiki/stats?namespace=${namespace}`

@@ -75,7 +75,6 @@ def check_memory_health(runtime: Any) -> dict[str, Any]:
         mm = runtime.memory_manager
         if mm is None:
             return {"status": "ok", "detail": "Memory manager not initialized"}
-        # 简单检查：尝试获取记忆数量
         count = len(mm) if hasattr(mm, "__len__") else "unknown"
         return {"status": "ok", "memory_count": count}
     except Exception as e:
@@ -89,7 +88,6 @@ def check_traces_dir(runtime: Any) -> dict[str, Any]:
         traces_dir = Path(get_settings().traces_dir)
         if not traces_dir.exists():
             traces_dir.mkdir(parents=True, exist_ok=True)
-        # 测试写入
         test_file = traces_dir / ".health_check"
         test_file.write_text("ok", encoding="utf-8")
         test_file.unlink()

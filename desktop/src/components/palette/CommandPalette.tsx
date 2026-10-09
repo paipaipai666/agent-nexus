@@ -18,10 +18,6 @@ interface PaletteItem {
   run: () => void
 }
 
-/**
- * Ctrl+K command palette (v2): grouped results, live filter, full keyboard
- * control. Overlay surface = surface-2 + border + elevated shadow.
- */
 export default function CommandPalette() {
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
@@ -31,7 +27,6 @@ export default function CommandPalette() {
   const [recents, setRecents] = useState<{ session_id: string; preview: string }[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Global shortcuts: Ctrl+K palette, Ctrl+B sidebar
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
@@ -43,7 +38,6 @@ export default function CommandPalette() {
     return () => window.removeEventListener('keydown', onKey)
   }, [togglePalette, toggleSidebar])
 
-  // Lazy-load recent sessions each time the palette opens
   useEffect(() => {
     if (!paletteOpen) return
     setQuery('')
@@ -94,7 +88,6 @@ export default function CommandPalette() {
     return q ? all.filter((i) => i.label.toLowerCase().includes(q)) : all
   }, [recents, query, navigate, theme, toggleTheme, toggleSidebar])
 
-  // Grouped view preserving order
   const groups = useMemo(() => {
     const out: { name: string; items: { item: PaletteItem; index: number }[] }[] = []
     items.forEach((item, index) => {

@@ -77,7 +77,6 @@ class TestPartialAnswerJoin:
         last = ctx.messages[-1]["content"]
         assert "请缩短本次输出" not in last, "不得要求缩短长回答"
         assert "继续" in last
-        # 多次截断要累加
         ctx.last_response_text = "（续写片段）"
         agent._emit_retry_nudge(ctx, RetryReason.TRUNCATED, "length")
         assert ctx.run_state.partial_answer == "报告第一章写到一半（续写片段）"

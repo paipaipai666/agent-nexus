@@ -27,9 +27,6 @@ MODULES = {
 TREES = {name: ast.parse(path.read_text(encoding="utf-8"))
          for name, path in MODULES.items()}
 
-# 决策函数里可能构造事件的辅助函数前缀（有界传递解析）。
-# 注意 `_fail_` / `_degrade_` / `_maybe_` 必须包含：_on_round 的 ROUND_READY
-# 就是经 _fail_truncated_tool_calls 返回的，漏掉会形成审计盲点。
 _HELPER_PREFIXES = (
     "_on_", "_fail_", "_degrade_", "_maybe_", "_record_", "_emit_",
     "execute_", "record_", "retry_", "parse_",

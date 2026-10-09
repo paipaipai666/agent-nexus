@@ -16,12 +16,9 @@ import pytest
 
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-AGENT_ACCURACY_MIN = 0.60  # 60% minimum accuracy
-# Note: Lower threshold due to randomization in mock LLM
-AGENT_ACCURACY_P95_MAX_MS = 1000  # P95 latency for agent runs
-AGENT_STEP_P95_MAX_MS = 200  # P95 latency per step
+AGENT_ACCURACY_MIN = 0.60
+AGENT_ACCURACY_P95_MAX_MS = 1000
+AGENT_STEP_P95_MAX_MS = 200
 
 
 def _percentile(data: list[float], p: int) -> float:
@@ -99,20 +96,17 @@ class MockAgentLLM:
         import json
         import random
 
-        # Simulate tool selection
         if random.random() < self.accuracy_rate:
             selected_tool = self._expected_tool
         else:
             wrong_tools = [t for t in self._available_tools if t != self._expected_tool]
             selected_tool = random.choice(wrong_tools) if wrong_tools else self._expected_tool
 
-        # Simulate thinking time
         time.sleep(random.uniform(0.01, 0.05))
 
         latency = time.perf_counter() - start
         self._call_latencies.append(latency)
 
-        # Return tool call in expected format
         return json.dumps({
             "thought": f"I need to use {selected_tool}",
             "tool_calls": [{"name": selected_tool, "arguments": {"query": "test"}}]
@@ -162,9 +156,6 @@ class AgentToolSelectionTracker:
         return _p95_ms(self._selection_latencies) if self._selection_latencies else 0.0
 
 
-# ── Agent-TS-1: Accuracy with many tools ──────────────────────────
-
-
 class TestAgentToolSelectionAccuracy:
     """Test agent tool selection accuracy with many tools."""
 
@@ -183,12 +174,10 @@ class TestAgentToolSelectionAccuracy:
         for expected_tool in test_cases:
             mock_llm.set_expected_tool(expected_tool)
 
-            # Simulate agent tool selection
             start = time.perf_counter()
             response = mock_llm.think([{"role": "user", "content": f"Use {expected_tool}"}])
             latency = time.perf_counter() - start
 
-            # Parse response to get selected tool
             import json
             try:
                 parsed = json.loads(response)
@@ -235,16 +224,11 @@ class TestAgentToolSelectionAccuracy:
 
             accuracies.append((tool_count, tracker.accuracy))
 
-        # Verify accuracy doesn't drop significantly
-        # Allow for significant variance due to randomization
         base_accuracy = accuracies[0][1]
         for count, accuracy in accuracies[1:]:
             assert accuracy >= base_accuracy - 0.35, (
                 f"Accuracy dropped from {base_accuracy:.2%} to {accuracy:.2%} at {count} tools"
             )
-
-
-# ── Agent-TS-2: Latency under accuracy testing ────────────────────
 
 
 class TestAgentToolSelectionLatency:
@@ -303,7 +287,6 @@ class TestAgentToolSelectionLatency:
             avg_latency_ms = (elapsed / len(test_cases)) * 1000
             latencies.append((tool_count, avg_latency_ms))
 
-        # Verify latency doesn't increase dramatically
         for i in range(1, len(latencies)):
             prev_count, prev_latency = latencies[i-1]
             curr_count, curr_latency = latencies[i]
@@ -311,9 +294,6 @@ class TestAgentToolSelectionLatency:
             ratio = curr_latency / prev_latency if prev_latency > 0 else 1.0
             assert ratio < 2.0, \
                 f"Latency increased {ratio:.2f}x when tool count went from {prev_count} to {curr_count}"
-
-
-# ── Agent-TS-3: Complex queries ──────────────────────────────────
 
 
 class TestAgentToolSelectionComplexQueries:
@@ -329,7 +309,6 @@ class TestAgentToolSelectionComplexQueries:
 
         tracker = AgentToolSelectionTracker()
 
-        # Complex query patterns
         complex_queries = [
             ("Search for files containing 'error' in the logs directory", "tool_0010"),
             ("Read the configuration file at /etc/app.conf", "tool_0020"),
@@ -368,7 +347,6 @@ class TestAgentToolSelectionComplexQueries:
 
         tracker = AgentToolSelectionTracker()
 
-        # Ambiguous queries
         ambiguous_queries = [
             "Handle the data processing task",
             "Manage the system resources",
@@ -377,7 +355,6 @@ class TestAgentToolSelectionComplexQueries:
             "Update the relevant records",
         ]
 
-        # Use first tool as expected for ambiguous queries
         expected_tool = "tool_0001"
 
         for query in ambiguous_queries:
@@ -394,12 +371,8 @@ class TestAgentToolSelectionComplexQueries:
             except json.JSONDecodeError:
                 pass
 
-        # Lower threshold for ambiguous queries
         assert tracker.accuracy >= AGENT_ACCURACY_MIN - 0.15, \
             f"Accuracy {tracker.accuracy:.2%} < {AGENT_ACCURACY_MIN - 0.15:.2%} with ambiguous queries"
-
-
-# ── Integration tests ────────────────────────────────────────────
 
 
 class TestAgentToolSelectionIntegration:
@@ -410,7 +383,6 @@ class TestAgentToolSelectionIntegration:
         executor = ToolRegistry()
         _populate_executor(executor, 100)
 
-        # Perform some executor operations
         executor.unregister("tool_0050")
         executor.unregister("tool_0100")
 
@@ -444,7 +416,6 @@ class TestAgentToolSelectionIntegration:
         executor = ToolRegistry()
         _populate_executor(executor, 80)
 
-        # Update some tools
         for i in range(0, 80, 10):
             name = f"tool_{i:04d}"
             executor.register(

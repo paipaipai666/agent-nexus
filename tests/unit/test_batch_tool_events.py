@@ -15,7 +15,6 @@ from agentnexus.agents.react_types import (
     ReActEventType,
 )
 
-# ── helpers ──────────────────────────────────────────────────────────
 
 def _make_ctx(*tool_names: str) -> ExecutionContext:
     """Build an ExecutionContext with pending tool calls for the given names."""
@@ -52,8 +51,6 @@ def _noop_output(_msg: str) -> None:
     pass
 
 
-# ── tests ────────────────────────────────────────────────────────────
-
 def test_batch_emits_tool_done_for_each_tool():
     """RED: batch path must emit TOOL_DONE for each tool, like the single path does."""
     from agentnexus.agents.react_runtime import execute_pending_tools_batch
@@ -72,12 +69,10 @@ def test_batch_emits_tool_done_for_each_tool():
     tool_done_events = [e for e in events if e.type == ReActEventType.TOOL_DONE]
     tool_start_events = [e for e in events if e.type == ReActEventType.TOOL_START]
 
-    # TOOL_START events should be emitted (this already works)
     assert len(tool_start_events) == 2, (
         f"Expected 2 TOOL_START events, got {len(tool_start_events)}"
     )
 
-    # TOOL_DONE events should be emitted per tool (this is the bug)
     assert len(tool_done_events) == 2, (
         f"Expected 2 TOOL_DONE events, got {len(tool_done_events)}. "
         "Batch path does not emit TOOL_DONE — GUI shows 'Calling: X' forever."
@@ -141,11 +136,9 @@ def test_tool_done_emitted_in_completion_order():
     done_names = [e.payload["name"] for e in events if e.type == ReActEventType.TOOL_DONE]
     assert done_names == ["fast_tool", "slow_tool"]
 
-    # call ids ride along so the GUI settles the right card
     done_ids = {e.payload["id"] for e in events if e.type == ReActEventType.TOOL_DONE}
     assert done_ids == {"call_slow_tool", "call_fast_tool"}
 
-    # conversation recording still follows the original call order
     tool_msgs = [m for m in ctx.messages if m.get("role") == "tool"]
     assert [m["content"] for m in tool_msgs] == ["result_of_slow_tool", "result_of_fast_tool"]
 

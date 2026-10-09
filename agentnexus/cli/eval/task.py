@@ -20,16 +20,11 @@ from rich.table import Table
 
 from agentnexus.cli import console, eval_app
 
-# 注册 task 和 suite 子命令到 eval_app
 task_app = typer.Typer(name="task", help="评估任务管理")
 suite_app = typer.Typer(name="suite", help="评估套件管理")
 eval_app.add_typer(task_app, name="task")
 eval_app.add_typer(suite_app, name="suite")
 
-
-# ---------------------------------------------------------------------------
-# Task Commands
-# ---------------------------------------------------------------------------
 
 @task_app.command("list")
 def task_list(
@@ -142,10 +137,6 @@ def task_run(
         ))
 
 
-# ---------------------------------------------------------------------------
-# Suite Commands
-# ---------------------------------------------------------------------------
-
 @suite_app.command("list")
 def suite_list(
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
@@ -230,10 +221,6 @@ def suite_show(
     console.print_json(json.dumps(suite, ensure_ascii=False, indent=2))
 
 
-# ---------------------------------------------------------------------------
-# Baseline Commands
-# ---------------------------------------------------------------------------
-
 baseline_app = typer.Typer(name="baseline", help="Baseline 管理")
 suite_app.add_typer(baseline_app, name="baseline")
 
@@ -276,7 +263,6 @@ def baseline_save(
 
     service = EvalService()
 
-    # 运行套件获取当前结果
     console.print(f"[bold]运行套件 {suite_name} 以生成 baseline...[/bold]")
     result = service.run_suite(suite_name)
     path = service.save_baseline(suite_name, result)

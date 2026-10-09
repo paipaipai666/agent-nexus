@@ -58,7 +58,6 @@ class TestSystemPromptContainment:
         agent = ReActAgent(llm, executor, max_steps=2, output=lambda _: None)
         result = agent.run("读文件并回复")
         assert result is not None
-        # Answer should be the mock LLM's answer, not the system prompt content
         assert result.answer is not None
 
 

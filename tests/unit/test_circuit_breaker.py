@@ -30,7 +30,7 @@ class TestProtectAdmission:
         with pytest.raises(CircuitOpenError):
             with cb.protect():
                 pass
-        assert cb.failure_count == 1  # unchanged by the rejected call
+        assert cb.failure_count == 1
 
 
 class TestProbe:
@@ -75,8 +75,6 @@ class TestRecording:
         assert cb.is_open
 
     def test_on_open_called_on_exceptional_exit_even_below_threshold(self):
-        # protect() invokes on_open on every exceptional exit (after
-        # record_failure); tripping detection is the callback's job.
         cb = CircuitBreaker(failure_threshold=3)
         opened = []
         with pytest.raises(ValueError):

@@ -19,8 +19,8 @@ LoaderFn = Callable[..., BenchmarkData]
 
 @dataclass(frozen=True)
 class DatasetRef:
-    loader: str  # key into LOADER_REGISTRY
-    spec: object  # loader-specific spec (e.g. BEIRDatasetSpec)
+    loader: str
+    spec: object
     display: str
 
 
@@ -49,12 +49,6 @@ def _load(ref: DatasetRef, offline: bool = False) -> LoadedDataset:
     data = loader(ref.spec, offline=offline)
     return LoadedDataset(ref=ref, data=data)
 
-
-# ── Suites ────────────────────────────────────────────────────────────
-# beir-lite: small corpus footprint, research-friendly licenses, and each
-# stresses a different retrieval shape (domain vocabulary, claim-evidence
-# ranking, argument similarity). Big corpora (DBPedia, MSMARCO, Quora,
-# TREC-COVID) are deliberately excluded from the lite suite.
 
 SUITES: dict[str, SuiteSpec] = {
     "beir-lite": SuiteSpec(

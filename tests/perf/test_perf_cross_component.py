@@ -18,12 +18,10 @@ from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.workflow import Workflow
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-PIPELINE_ACCURACY_MIN = 0.70  # 70% end-to-end accuracy
-PIPELINE_LATENCY_P95_MAX_MS = 2000  # P95 end-to-end latency
-SKILL_SELECTION_ACCURACY_MIN = 0.85  # 85% skill selection accuracy
-TOOL_CALL_ACCURACY_MIN = 0.75  # 75% tool call accuracy within skill
+PIPELINE_ACCURACY_MIN = 0.70
+PIPELINE_LATENCY_P95_MAX_MS = 2000
+SKILL_SELECTION_ACCURACY_MIN = 0.85
+TOOL_CALL_ACCURACY_MIN = 0.75
 
 
 def _percentile(data: list[float], p: int) -> float:
@@ -40,9 +38,6 @@ def _percentile(data: list[float], p: int) -> float:
 def _p95_ms(stats_data: list[float]) -> float:
     """95th percentile in milliseconds."""
     return _percentile(stats_data, 95) * 1000
-
-
-# ── Helpers ────────────────────────────────────────────────────────
 
 
 def _create_skill_entry(skill_id: str, name: str, description: str, tools: list[str]) -> SkillEntry:
@@ -74,9 +69,6 @@ def _create_tool_meta(name: str, description: str, skill_id: str) -> ToolMeta:
 def _make_handler(tool_name: str) -> Any:
     """Create a handler that returns the tool name."""
     return lambda **kwargs: f"result_from_{tool_name}"
-
-
-# ── Domain-specific test data ──────────────────────────────────────
 
 
 DOMAIN_SKILLS = [
@@ -138,9 +130,6 @@ DOMAIN_SKILLS = [
 ]
 
 
-# ── Pipeline tracker ──────────────────────────────────────────────
-
-
 class PipelineTracker:
     """Track full pipeline accuracy and latency."""
 
@@ -195,7 +184,7 @@ class MockSkillRouter:
 
     def __init__(self, accuracy_rate: float = 0.90):
         self.accuracy_rate = accuracy_rate
-        self._skill_map: dict[str, list[str]] = {}  # query_keyword -> skill_ids
+        self._skill_map: dict[str, list[str]] = {}
 
     def register_skill(self, skill_id: str, queries: list[str]):
         """Register a skill with its typical queries."""
@@ -210,7 +199,6 @@ class MockSkillRouter:
         if random.random() < self.accuracy_rate:
             return expected_skill
 
-        # Select a random wrong skill
         wrong_skills = [s for s in available_skills if s != expected_skill]
         return random.choice(wrong_skills) if wrong_skills else expected_skill
 
@@ -228,12 +216,8 @@ class MockToolSelector:
         if random.random() < self.accuracy_rate:
             return expected_tool
 
-        # Select a random wrong tool
         wrong_tools = [t for t in available_tools if t != expected_tool]
         return random.choice(wrong_tools) if wrong_tools else expected_tool
-
-
-# ── Cross-1: Full pipeline accuracy ──────────────────────────────
 
 
 class TestCrossComponentPipelineAccuracy:
@@ -241,13 +225,11 @@ class TestCrossComponentPipelineAccuracy:
 
     def test_pipeline_accuracy_baseline(self):
         """Verify baseline pipeline accuracy."""
-        # Setup
         skill_registry = SkillRegistry([])
         tool_registry = ToolRegistry()
         skill_router = MockSkillRouter(accuracy_rate=0.90)
         tool_selector = MockToolSelector(accuracy_rate=0.95)
 
-        # Register skills and tools
         skill_entries = []
         for skill_data in DOMAIN_SKILLS:
             entry = _create_skill_entry(
@@ -266,22 +248,19 @@ class TestCrossComponentPipelineAccuracy:
 
         skill_registry._entries = skill_entries
 
-        # Track pipeline
         tracker = PipelineTracker()
 
         for skill_data in DOMAIN_SKILLS:
             for query in skill_data["queries"]:
                 start = time.perf_counter()
 
-                # Step 1: Skill selection
                 selected_skill = skill_router.select_skill(
                     query,
                     skill_data["skill_id"],
                     [s.workflow_id for s in skill_entries],
                 )
 
-                # Step 2: Tool selection within skill
-                expected_tool = skill_data["tools"][0]  # Use first tool as expected
+                expected_tool = skill_data["tools"][0]
                 available_tools = skill_data["tools"]
                 selected_tool = tool_selector.select_tool(query, expected_tool, available_tools)
 
@@ -304,11 +283,9 @@ class TestCrossComponentPipelineAccuracy:
         skill_router = MockSkillRouter(accuracy_rate=0.88)
         tool_selector = MockToolSelector(accuracy_rate=0.93)
 
-        # Create more skills
         skill_entries = []
         all_skills = DOMAIN_SKILLS.copy()
 
-        # Add generic skills
         for i in range(10):
             skill_data = {
                 "skill_id": f"generic_{i:02d}",
@@ -319,7 +296,6 @@ class TestCrossComponentPipelineAccuracy:
             }
             all_skills.append(skill_data)
 
-        # Register all skills and tools
         for skill_data in all_skills:
             entry = _create_skill_entry(
                 skill_data["skill_id"],
@@ -337,7 +313,6 @@ class TestCrossComponentPipelineAccuracy:
 
         skill_registry._entries = skill_entries
 
-        # Track pipeline
         tracker = PipelineTracker()
 
         for skill_data in all_skills:
@@ -360,9 +335,6 @@ class TestCrossComponentPipelineAccuracy:
             f"Pipeline accuracy {tracker.pipeline_accuracy:.2%} < {PIPELINE_ACCURACY_MIN - 0.05:.2%} with more skills"
 
 
-# ── Cross-2: Full pipeline latency ───────────────────────────────
-
-
 class TestCrossComponentPipelineLatency:
     """Test full pipeline latency."""
 
@@ -371,18 +343,15 @@ class TestCrossComponentPipelineLatency:
         skill_router = MockSkillRouter(accuracy_rate=0.90)
         tool_selector = MockToolSelector(accuracy_rate=0.95)
 
-        # Setup skills
         for skill_data in DOMAIN_SKILLS:
             skill_router.register_skill(skill_data["skill_id"], skill_data["queries"])
 
-        # Measure latency
         latencies = []
 
         for skill_data in DOMAIN_SKILLS:
             for query in skill_data["queries"]:
                 start = time.perf_counter()
 
-                # Simulate full pipeline
                 skill_router.select_skill(
                     query,
                     skill_data["skill_id"],
@@ -409,7 +378,6 @@ class TestCrossComponentPipelineLatency:
         skill_router = MockSkillRouter(accuracy_rate=0.90)
         tool_selector = MockToolSelector(accuracy_rate=0.95)
 
-        # Create many skills
         all_skills = DOMAIN_SKILLS.copy()
         for i in range(20):
             all_skills.append({
@@ -423,11 +391,10 @@ class TestCrossComponentPipelineLatency:
         for skill_data in all_skills:
             skill_router.register_skill(skill_data["skill_id"], skill_data["queries"])
 
-        # Measure latency
         latencies = []
 
         for skill_data in all_skills:
-            for query in skill_data["queries"][:1]:  # Test 1 query per skill
+            for query in skill_data["queries"][:1]:
                 start = time.perf_counter()
 
                 skill_router.select_skill(
@@ -446,9 +413,6 @@ class TestCrossComponentPipelineLatency:
 
         assert avg_latency_ms < PIPELINE_LATENCY_P95_MAX_MS / 4, \
             f"Average latency {avg_latency_ms:.1f}ms with {len(all_skills)} skills"
-
-
-# ── Cross-3: Accuracy-latency trade-off ──────────────────────────
 
 
 class TestCrossComponentAccuracyLatencyTradeOff:
@@ -494,8 +458,6 @@ class TestCrossComponentAccuracyLatencyTradeOff:
                     ),
                 })
 
-        # Verify trade-off is reasonable
-        # Higher accuracy settings should produce higher accuracy
         for result in results:
             if result["skill_accuracy_setting"] >= 0.90 and result["tool_accuracy_setting"] >= 0.90:
                 assert result["pipeline_accuracy"] >= PIPELINE_ACCURACY_MIN, (
@@ -534,12 +496,11 @@ class TestCrossComponentAccuracyLatencyTradeOff:
                         latency = time.perf_counter() - start
                         tracker.track(selected_skill, skill_data["skill_id"], selected_tool, expected_tool, latency)
 
-                # Score = accuracy / latency (higher is better)
                 avg_latency_ms = (
                     (sum(tracker._latencies) / len(tracker._latencies)) * 1000
                     if tracker._latencies else 1.0
                 )
-                score = tracker.pipeline_accuracy / (avg_latency_ms / 1000)  # Normalize
+                score = tracker.pipeline_accuracy / (avg_latency_ms / 1000)
 
                 if score > best_score:
                     best_score = score
@@ -550,7 +511,6 @@ class TestCrossComponentAccuracyLatencyTradeOff:
                         "avg_latency_ms": avg_latency_ms,
                     }
 
-        # Verify we found a reasonable configuration
         assert best_config is not None, "No optimal configuration found"
         assert best_config["pipeline_accuracy"] >= PIPELINE_ACCURACY_MIN, (
             f"Best config accuracy {best_config['pipeline_accuracy']:.2%} < {PIPELINE_ACCURACY_MIN:.2%}"

@@ -258,7 +258,7 @@ class _AutoBackend:
     """auto chain: native sandbox, then docker, then warned local fallback."""
 
     def available(self) -> str | None:
-        return None  # always degrades to local fallback
+        return None
 
     def execute(self, command: str, work_dir: str, timeout_sec: int, settings=None) -> str:
         return _execute_shell_auto(command, work_dir, settings, timeout_sec)
@@ -271,8 +271,6 @@ _BACKENDS: dict[str, SandboxBackend] = {
     "local_unsafe": _LocalUnsafeBackend(),
 }
 
-# Ordered degradation chain for backend="auto". Resolution happens at call
-# time through each adapter, so module-level monkeypatching keeps working.
 _AUTO_CHAIN: tuple[tuple[str, SandboxBackend], ...] = (
     ("native", _BACKENDS["native"]),
     ("docker", _BACKENDS["docker"]),
@@ -370,23 +368,6 @@ def _execute_shell_seatbelt(command: str, work_dir: str, timeout_sec: int) -> st
         cmd = [sandbox_exec, "-f", str(profile), "/bin/sh", "-lc", command]
         return _run_shell_command(cmd, timeout=timeout_sec, cwd=work_dir)
 
-
-# ---------------------------------------------------------------------------
-# Windows native sandbox — restricted token + Low integrity level + job object
-#
-# Mirrors the approach of Gemini CLI's GeminiSandbox helper and Codex CLI's
-# restricted-token backend, implemented with stdlib ctypes (no pywin32
-# dependency). Works unelevated: CreateProcessAsUser accepts a restricted
-# version of the caller's own primary token without SeAssignPrimaryTokenPrivilege
-# (Vista+), and lowering the token integrity level to Low never requires a
-# privilege.
-#
-# ponytail: filesystem/integrity isolation only — no network restriction on
-# this backend (the docker backend uses --network none). No memory limits
-# (docker uses --memory). Job assignment is best-effort: if the host process
-# already runs inside a job, AssignProcessToJobObject may fail and we lose
-# tree-kill, but token isolation still holds.
-# ---------------------------------------------------------------------------
 
 _WINDOWS_API: dict | None = None
 
@@ -546,8 +527,6 @@ def _windows_low_il_env(work_dir: str) -> tuple[str, str]:
     Gemini CLI's approach) and return a Low-integrity temp dir for TMP/TEMP."""
     icacls = shutil.which("icacls")
     if icacls:
-        # Best-effort: failure leaves the sandbox read-only outside Low-IL dirs,
-        # never blocks execution.
         subprocess.run(
             [icacls, work_dir, "/setintegritylevel", "Low"],
             capture_output=True,
@@ -589,8 +568,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
 
     cwd, tmp_dir = _windows_low_il_env(work_dir)
 
-    # Anonymous pipes for stdout/stderr; both inheritable so the child can
-    # write them, read ends made non-inheritable so the child can't keep them.
     sa = api["SECURITY_ATTRIBUTES"]()
     sa.nLength = ctypes.sizeof(sa)
     sa.lpSecurityDescriptor = None
@@ -612,7 +589,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
     out_chunks: list[bytes] = []
     err_chunks: list[bytes] = []
     try:
-        # 1. Restricted, Low-IL primary token.
         h_token = HANDLE()
         if not api["OpenProcessToken"](api["GetCurrentProcess"](), TOKEN_ALL_ACCESS, ctypes.byref(h_token)):
             raise ShellSandboxUnavailable(f"OpenProcessToken failed: {ctypes.get_last_error()}")
@@ -625,7 +601,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
         if not api["ConvertStringSidToSidW"]("S-1-16-4096", ctypes.byref(low_sid)):
             raise ShellSandboxUnavailable(f"ConvertStringSidToSid failed: {ctypes.get_last_error()}")
 
-        # TOKEN_MANDATORY_LABEL { SID_AND_ATTRIBUTES { Sid, Attributes } }
         class _SID_AND_ATTRIBUTES(ctypes.Structure):
             _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", DWORD)]
 
@@ -638,7 +613,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
         if not api["SetTokenInformation"](h_restricted, TOKEN_INTEGRITY_LEVEL, ctypes.byref(tml), ctypes.sizeof(tml)):
             raise ShellSandboxUnavailable(f"SetTokenInformation(IL) failed: {ctypes.get_last_error()}")
 
-        # 2. Environment: redirect TMP/TEMP into the Low-IL workspace temp dir.
         env = dict(os.environ)
         env["TMP"] = tmp_dir
         env["TEMP"] = tmp_dir
@@ -653,7 +627,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
         si.hStdOutput = h_out_write
         si.hStdError = h_err_write
 
-        # 3. Launch suspended so the job object catches every child process.
         cmdline = f"cmd.exe /d /c {command}"
         if not api["CreateProcessAsUserW"](
             h_restricted,
@@ -675,7 +648,6 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
         api["CloseHandle"](h_err_write)
         h_err_write = None
 
-        # 4. Job object: kill the whole tree when the job handle closes.
         h_job = api["CreateJobObjectW"](None, None)
         if h_job:
             limits = api["JOBOBJECT_BASIC_LIMIT_INFORMATION"]()
@@ -685,12 +657,11 @@ def _execute_windows_native(command: str, work_dir: str, timeout_sec: int) -> st
             )
             if not api["AssignProcessToJobObject"](h_job, pi.hProcess):
                 api["CloseHandle"](h_job)
-                h_job = None  # already in a job: lose tree-kill only
+                h_job = None
 
         api["ResumeThread"](pi.hThread)
         api["CloseHandle"](pi.hThread)
 
-        # 5. Drain pipes on threads (avoids pipe-buffer deadlock), wait w/ timeout.
         def _drain(handle, chunks):
             buf = ctypes.create_string_buffer(65536)
             read = DWORD()
@@ -752,7 +723,7 @@ def _docker_daemon_available(docker: str) -> tuple[bool, str]:
             encoding="utf-8",
             errors="replace",
         )
-    except Exception as exc:  # timeout, spawn failure, ...
+    except Exception as exc:
         return False, str(exc)
     if probe.returncode == 0:
         return True, ""

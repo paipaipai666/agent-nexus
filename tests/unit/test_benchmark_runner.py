@@ -72,13 +72,12 @@ def test_run_retrieval_perfect_rankings(fake_embeddings, isolated_chroma, mode):
     assert result.n_docs == 3
     assert result.n_queries == 2
     assert result.n_queries_with_rels == 2
-    # exact-text queries must rank their relevant doc first under both modes
     assert result.metrics["ndcg@10"] == pytest.approx(1.0)
     assert result.metrics["map"] == pytest.approx(1.0)
     assert result.metrics["hits@10"] == pytest.approx(1.0)
     assert result.metrics["recall@100"] == pytest.approx(1.0)
     assert result.mode == mode
-    assert result.embedding_model  # records whichever model settings reported
+    assert result.embedding_model
     assert result.elapsed_s >= 0.0
 
 

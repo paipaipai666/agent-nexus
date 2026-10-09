@@ -50,9 +50,6 @@ from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# ── FSM redesign Step 1: decision logic + shared constants live in
-#    agentnexus.agents.decisions (pure functions).  Names re-exported here
-#    for backward compatibility with internal call sites. ──
 _split_native_thought_answer = decisions.split_native_thought_answer
 _THOUGHT_MARKER_RE = decisions._THOUGHT_MARKER_RE
 
@@ -61,17 +58,13 @@ REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
 
 MAX_JSON_RETRIES = 2
 
-# ── 跑飞兜底（非强制，只提示）──
-# L1 闭环：连续相同工具调用触发提示；最多提示这么多次，避免刷屏。
 MAX_LOOP_WARNINGS = 2
 LOOP_NUDGE = (
     "[系统提示] 检测到你在重复相同的工具调用，且结果没有实质变化。"
     "请换一种方式继续，或者基于已有信息给出当前能给出的结论。"
 )
-# L3 预算：累计 token 跨过这些比例时提醒一次（不终止）。
 BUDGET_REMINDER_RATIOS = (0.8, 1.0)
 
-# Re-export for backward compatibility
 __all__ = ["ReActAgent", "CallingStrategy", "AgentStep"]
 
 
@@ -90,17 +83,9 @@ class ReActAgent:
                  agent_id: str = "react_agent"):
         self.llm_client = llm_client
         self.tool_executor = tool_executor
-        # Run-scoped attachments; set by ChatService via run(images=...,
-        # attachment_note=...), consumed by _build_messages, cleared in
-        # run()'s finally. Kept off the user's message so bubbles/history
-        # stay clean.
         self._run_images: list[dict] = []
         self._run_attachment_note: str = ""
-        # 决策3（2026-09-24 拍板）：默认不设步数上限。
-        # max_steps=None 表示无限（跑飞兜底见 docs/fsm-redesign-proposal.md §9，
-        # 靠闭环检测 + 软提示 + 用户取消，不再靠硬性步数终止）。
         self.max_steps = max_steps
-        # 跑飞兜底 L3：token 预算（None = 不设）。跨阈值只提醒，不终止。
         self.token_budget = token_budget
         self._output = output or print
         self._confirm = confirm_fn or self._default_confirm
@@ -117,23 +102,14 @@ class ReActAgent:
         self._workflow_context: str = ""
         self._cancel_checker: Callable[[], bool] | None = None
         self._round_persist: Callable[[], bool] | None = None
-        self._todo_list = None  # Set externally after construction
-        # Plan-mode binding (per-session in server mode); None = plan mode off.
+        self._todo_list = None
         self._plan_mode: PlanModeBinding | None = None
         self._thinking_effort: str | None = None
         self._degrade_count = 0
-        # Persona and behavioral fragments — loaded once, stable across sessions
         settings = get_settings()
         self._persona_text: str = compile_persona_fragment(settings.persona)
         self._behavior_fragments_text: str = load_core_fragments()
-        # User-defined appendix injected at the very end of the system
-        # context — highest-priority user instruction surface, still
-        # subordinate to the safety rules in the fixed rules prefix.
         self._append_system_prompt: str = (settings.append_system_prompt or "").strip()
-
-    # ================================================================
-    # Public API (unchanged)
-    # ================================================================
 
     @property
     def total_usage(self) -> dict:
@@ -171,8 +147,6 @@ class ReActAgent:
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
         """Install a cooperative cancellation callback for the next run."""
         self._cancel_checker = checker
-        # Forward to the LLM client so its watcher can close an in-flight
-        # stream immediately on cancel (产品决策: 取消 = 立刻停止).
         if hasattr(self.llm_client, "set_cancel_checker"):
             self.llm_client.set_cancel_checker(checker)
 
@@ -231,7 +205,6 @@ class ReActAgent:
 
         hook_mgr = get_hook_manager()
 
-        # ── agent start hook ─────────────────────────────────────
         hook_mgr.fire(HookType.AGENT_START, {
             "question": question,
             "agent_id": self.agent_id,
@@ -240,13 +213,9 @@ class ReActAgent:
         self._total_usage = {"input_tokens": 0, "output_tokens": 0}
         self._step_count = 0
         self._degrade_count = 0
-        # Run-scoped attachments — _build_messages reads these on every
-        # rebuild so they must live on the agent, not on ctx.messages.
         self._run_images = images or []
         self._run_attachment_note = attachment_note or ""
 
-        # ── user prompt submit hook (root agent only; subagent task text
-        #    is internal, not a user prompt) ─────────────────────
         is_subagent = self.agent_id.startswith("subagent_")
         if not is_subagent:
             prompt_ctx = hook_mgr.fire(HookType.USER_PROMPT_SUBMIT, {
@@ -262,15 +231,9 @@ class ReActAgent:
             question = prompt_ctx.payload.get("prompt", question)
         self._drift_detector = DriftDetector(
             original_goal=question,
-            # DriftDetector 用 max_steps 算子任务超支比例；None（不设上限）
-            # 时传 0，其内部 `<= 0` 守卫会跳过该检查（drift_detector.py:237）
             max_steps=self.max_steps if isinstance(self.max_steps, int) else 0,
         )
 
-        # Publish the cancel checker so subagent tool closures (running on
-        # dispatcher lane threads) stop at their next step boundary when the
-        # parent run is cancelled. Note: sessions sharing one executor share
-        # this bridge — the last run to start wins.
         cancel_bridge = getattr(self.tool_executor, "cancel_bridge", None)
         if cancel_bridge is not None:
             cancel_bridge.set_checker(self._cancel_checker)
@@ -308,11 +271,9 @@ class ReActAgent:
             self._total_usage = {"input_tokens": 0, "output_tokens": 0}
             self._step_count = 0
         finally:
-            # Stale attachments must never leak into a later run on this instance.
             self._run_images = []
             self._run_attachment_note = ""
 
-        # ── agent end hook ───────────────────────────────────────
         hook_mgr.fire(HookType.AGENT_END, {
             "answer": answer,
             "steps": len(steps),
@@ -338,14 +299,8 @@ class ReActAgent:
             "_on_emit_answer": self._on_emit_answer,
         }
 
-    # ================================================================
-    # FSM Handlers — each returns list[ReActEvent] for the event queue
-    # ================================================================
-
     def _on_init(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """INIT + START -> build prompts, messages, memory; select strategy."""
-        # Session-scoped capability tracker owned by the LLM client: degrade
-        # marks survive across runs and reset on model hot-switch (configure()).
         session_caps = self.llm_client.session_tracker
         run_state = ctx.run_state
         memory_state = ctx.memory_state
@@ -356,12 +311,9 @@ class ReActAgent:
 
         memory_manager = memory_state.memory_manager
         if memory_manager:
-            # Persist the user turn FIRST — a failing LTM/embedding lookup must
-            # never drop the conversation («继续» after errors had no context).
             memory_manager.append("user", run_state.question)
             try:
                 memory_state.memory_context = memory_manager.init_session(run_state.question)
-                # 时间线可观测：启动时注入了什么记忆上下文
                 if memory_state.memory_context:
                     ctx.emit(ReActEventType.MEMORY_REFRESH,
                              phase="init",
@@ -378,7 +330,6 @@ class ReActAgent:
         if self.conversation_mode and memory_manager:
             memory_state.conv_ctx = self._build_conversation_context(memory_manager)
 
-        # Build messages with stable prefix for prompt caching
         ctx.messages = self._build_messages(
             tool_state.tools_desc,
             run_state.question,
@@ -398,7 +349,6 @@ class ReActAgent:
                 if self.conversation_mode:
                     new_conv = self._build_conversation_context(memory_manager)
                     memory_state.conv_ctx = new_conv
-                # Rebuild messages with stable prefix structure
                 new_messages = self._build_messages(
                     new_tools_desc,
                     run_state.question,
@@ -407,7 +357,6 @@ class ReActAgent:
                     workflow_context=self._workflow_context,
                     native_tools=(run_state.strategy == CallingStrategy.NATIVE_TOOLS),
                 )
-                # Replace exactly the initial block; keep accumulated messages after it
                 ctx.messages[:ctx.initial_count] = new_messages
                 ctx.initial_count = len(new_messages)
 
@@ -415,19 +364,16 @@ class ReActAgent:
                 try:
                     rebuild()
                 finally:
-                    # 时间线可观测：压缩后系统提示词/前缀已重建，上下文将变化
                     ctx.emit(ReActEventType.COMPACTION, phase="rebuild")
 
             memory_manager.on_after_compact = _after_compact
 
-            # 压缩过程关键阶段进时间线（过滤细碎事件，payload 只留标量）
             _COMPACT_PHASES = {"start", "complete", "circuit_open", "ltm_drain", "history_archived"}
 
             def _on_compact(evt: dict):
                 phase = evt.get("event", "")
                 if phase not in _COMPACT_PHASES:
                     return
-                # 键名用 phase：bridge 会把 payload.event 覆写成事件类型名
                 payload = {"phase": phase}
                 payload.update({k: v for k, v in evt.items()
                                 if k != "event" and isinstance(v, (str, int, float, bool))})
@@ -435,9 +381,7 @@ class ReActAgent:
 
             memory_manager.on_compact = _on_compact
 
-        return []  # 落点 AWAIT_MODEL，由 auto-advance 触发第一轮 _on_round
-
-    # ── AWAIT_MODEL 循环体 ──
+        return []
 
     def _on_round(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """一轮模型往返 + 解释成决策事件。
@@ -445,7 +389,6 @@ class ReActAgent:
         返回封闭于 {TOOLS_REQUESTED, ANSWER_READY, FAULT, ROUND_READY}，
         与 TRANSFER_TABLE 的 AWAIT_MODEL 行一一对应（totality 由测试断言）。
         """
-        # 步数上限（决策3：默认 None 不设上限；配置时软收尾给出诚实答案，不强制）
         if (ctx.run_state.max_steps is not None
                 and ctx.run_state.current_step >= ctx.run_state.max_steps):
             self._output("已达到最大步数，流程终止。")
@@ -457,7 +400,6 @@ class ReActAgent:
                 )
             return [ReActEvent(ReActEventType.ANSWER_READY)]
 
-        # 关闭上一步的 plan_node span（如果存在）
         prev_span = ctx.run_state._current_step_span
         if prev_span is not None:
             try:
@@ -470,7 +412,6 @@ class ReActAgent:
 
         ctx.run_state.current_step += 1
 
-        # 创建当前步骤的 plan_node span
         trace_ctx = trace_manager.active
         if trace_ctx:
             step_span = trace_ctx.start_span("plan_node", {
@@ -480,14 +421,12 @@ class ReActAgent:
             })
             ctx.run_state._current_step_span = step_span
 
-        # 每 3 步执行一次漂移检测
         if ctx.run_state.current_step > 0 and ctx.run_state.current_step % 3 == 0:
             drift_signals = self._drift_detector.check(
                 step_index=ctx.run_state.current_step,
                 current_goal=ctx.run_state.question[:200],
             )
             if drift_signals:
-                # 记录漂移信号到 trace
                 if trace_ctx:
                     with trace_ctx._lock:
                         for signal in drift_signals:
@@ -496,13 +435,11 @@ class ReActAgent:
                                 signal.step_index, signal.signal_type.value,
                                 signal.severity.value, signal.detail,
                             )
-                # 时间线可观测：所有信号（含 warning）都进事件流，UI 才能解释上下文突变
                 for signal in drift_signals:
                     ctx.emit(ReActEventType.DRIFT_SIGNAL,
                              signal_type=signal.signal_type.value,
                              severity=signal.severity.value,
                              detail=signal.detail)
-                # 如果检测到 critical 漂移，注入提示让 Agent 重新聚焦
                 critical = [s for s in drift_signals if s.severity.value == "critical"]
                 if critical:
                     try:
@@ -519,7 +456,6 @@ class ReActAgent:
         streamed_reasoning = {"flag": False}
 
         def _stream_token(token: str, is_reasoning: bool = False):
-            # 检查取消信号——流式输出期间也能响应 ESC 中断
             checker = ctx.run_state.cancel_checker
             if checker is not None and checker():
                 raise AgentCancelled("cancelled")
@@ -529,7 +465,6 @@ class ReActAgent:
             else:
                 ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
 
-        # 观测：在发起模型调用前快照将发送的完整上下文（仅导出副本，不改写 ctx.messages）
         observer = getattr(self, "_context_observer", None)
         if observer is not None:
             try:
@@ -545,7 +480,6 @@ class ReActAgent:
             on_token=_stream_token,
             effort=getattr(self, "_thinking_effort", None),
         )
-        # 时间线可观测：一次模型调用的量化指标（latency/tokens/cache/策略）
         try:
             _usage = self.llm_client.last_usage or {}
             ctx.emit(ReActEventType.LLM_CALL,
@@ -565,9 +499,6 @@ class ReActAgent:
             return [ReActEvent(ReActEventType.FAULT,
                                {"fatal": True, "detail": err})]
 
-        # ── 记录本轮 step（替代旧 RECEIVE_RESPONSE 态的 record_llm_response）──
-        # reasoning_streamed 必须反映"是否真流式展示过"，而不是"有没有 reasoning
-        # 内容"——否则未流式时 ANSWER_THOUGHT 补展示路径会被永久压死。
         step = AgentStep(
             step_id=ctx.run_state.current_step,
             strategy_used=ctx.run_state.strategy,
@@ -580,14 +511,12 @@ class ReActAgent:
         if isinstance(cur, dict):
             ctx._total_usage["input_tokens"] += cur.get("input_tokens", 0)
             ctx._total_usage["output_tokens"] += cur.get("output_tokens", 0)
-        # 跑飞兜底 L3：token 预算提醒
         self._maybe_remind_budget(ctx)
         if ctx.memory_state.memory_manager:
             ctx.memory_state.memory_manager.mark_api_call()
         ctx.last_response_text = response_text
         ctx.last_reasoning = self.llm_client.last_reasoning_content or ""
 
-        # ── 解释成决策（decisions.py 纯函数）──
         if ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
             d = decisions.interpret_native(
                 response_text=ctx.last_response_text,
@@ -603,11 +532,8 @@ class ReActAgent:
                 truncated=self.llm_client.last_truncated,
             )
 
-        # ── fault → RECOVER ──
         if d.kind == "fault":
             if d.fail_pending_calls:
-                # 截断 + 待执行调用：整批标错、不执行，直接再来一轮
-                # （原 _fail_truncated_tool_calls → ALL_TOOLS_DONE → 下一轮的语义）
                 return self._fail_truncated_tool_calls(ctx)
             return [ReActEvent(ReActEventType.FAULT, {
                 "reason": d.reason,
@@ -615,18 +541,14 @@ class ReActAgent:
                 "no_tools_no_text": d.no_tools_no_text,
             })]
 
-        # ── answer → ANSWER ──
         if d.kind == "answer":
             memory_manager = ctx.memory_state.memory_manager
             if d.recovered_protocol_json or ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
-                # JSON 协议答案 / 协议 JSON 还原：沿用旧 _on_classified_answer 的思考展示
                 self._emit_answer_thought(ctx)
             elif d.persist_reasoning:
-                # 推理已通过流式逐 token 展示；只把推理落盘以便会话恢复。
                 if memory_manager:
                     memory_manager.append("system", f"[思考过程] {d.persist_reasoning}")
             elif d.display_thought:
-                # 思考与答案分通道/可拆分 → 补展示思考。
                 if memory_manager:
                     memory_manager.append("assistant", d.display_thought,
                                           metadata={"display_only": True})
@@ -634,7 +556,6 @@ class ReActAgent:
             ctx.last_answer = self._join_partial_answer(ctx, d.text)
             return [ReActEvent(ReActEventType.ANSWER_READY, {"text": d.text})]
 
-        # ── tools → EXECUTE_TOOL ──
         if d.recovered_protocol_json:
             ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
                 [{
@@ -668,8 +589,6 @@ class ReActAgent:
     def _on_round_advance(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """TOOLS_DONE / ROUND_READY 的接收态：无需副作用，auto-advance 继续。"""
         return []
-
-    # ── NATIVE_TOOLS path ──
 
     def _fail_truncated_tool_calls(self, ctx: ExecutionContext) -> list[ReActEvent]:
         """Fail every pending tool call from a truncated response (pi semantics).
@@ -719,10 +638,8 @@ class ReActAgent:
         payload = event.payload
         thought = payload.get("thought", "")
         is_native = payload.get("strategy") == CallingStrategy.NATIVE_TOOLS.name
-        # JSON 协议路径的 thinking 展示（原生路径已在 _on_native_tool_calls 输出）
         if thought and not is_native:
             self._output(f"思考: {thought}")
-        # 漂移记录（旧 _on_tool_done 职责；batch 合并后逐调用记录）
         for tc in list(ctx.tool_state.pending_tool_calls):
             self._record_tool_drift(ctx, tc)
         react_runtime.execute_pending_tools_batch(
@@ -731,7 +648,6 @@ class ReActAgent:
             execute_tool=self._execute_tool,
             output=self._output,
         )
-        # 计划被拒绝：立即以"暂停等待用户指示"结束回合，不让模型自行重规划。
         if self._plan_mode is not None:
             rejection = self._plan_mode.take_rejection()
             if rejection:
@@ -744,14 +660,8 @@ class ReActAgent:
                         "detail": f"记忆写入失败，未保存本轮结果: {e}",
                     })]
                 return [ReActEvent(ReActEventType.ANSWER_READY)]
-        # ── 跑飞兜底 L1：闭环检测（连续相同工具调用）→ 用户可见警告 + 软 nudge ──
         self._maybe_warn_loop(ctx)
-        ctx.run_state.json_retries = 0  # 成功的工具轮重置 JSON 重试预算
-        # ── 显式终止信号（pi 风格）：模型在本批用 todo_update 关闭全部 todo ──
-        # 清单全部 done 是模型的显式收尾声明（对照 2026-10-07 事故：旧启发式
-        # 用"长文本+记账批次"猜答案，把计划旁白当成最终答案提前收尾）。
-        # 三个条件缺一不可：本批有 todo_update（防历史残留误触发）、
-        # 清单非空且全部 done、同响应携带非空可见文本作为答案。
+        ctx.run_state.json_retries = 0
         closed = any(tc.get("name") == "todo_update" for tc in payload.get("tool_calls", []))
         if closed and self._todo_list is not None:
             items = self._todo_list.list_items()
@@ -771,7 +681,6 @@ class ReActAgent:
             ctx.messages.append(
                 {"role": "user",
                  "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
-        # Tools + observations must be durable BEFORE the next round starts.
         try:
             self._persist_round()
         except Exception as e:
@@ -838,18 +747,12 @@ class ReActAgent:
                 params_hash=params_hash,
             )
 
-    # ── Non-NATIVE (JSON) path ──
-    # （Step 3 起 JSON 协议的 empty/parse/classify 全部收进 _on_round 的
-    #   decisions.interpret_json，以下中间态 handler 已删除）
-
     def _on_answer_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EXECUTE_TOOL + ANSWER_READY -> terminal answer already in ctx.last_answer."""
         reason = self._fire_agent_stop(ctx)
         if reason:
             return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
-        return []  # EMIT_ANSWER handler will read ctx.last_answer
-
-    # ── RECOVER ──
+        return []
 
     def _on_recover(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
         """RECOVER 落地：统一的重试 / 降档 / 兜底 / 终止策略。
@@ -859,13 +762,11 @@ class ReActAgent:
         """
         payload = event.payload
 
-        # ── 致命错误（LLM 调用失败等）→ 终止 ──
         if payload.get("fatal"):
             detail = payload.get("detail") or "LLM call failed"
             self._output(f"错误: {detail}")
             return [ReActEvent(ReActEventType.ABORT)]
 
-        # ── 原生"无工具无文本" → 直接降档工具能力 ──
         if payload.get("no_tools_no_text"):
             ctx.memory_state.session_caps.mark_failed("tool_calling")
             return self._degrade_and_continue(ctx)
@@ -873,7 +774,6 @@ class ReActAgent:
         reason = payload.get("reason")
         detail = payload.get("detail", "")
 
-        # ── JSON 类故障：重试预算 → 降档 → 兜底提取 ──
         if reason in (RetryReason.EMPTY_RESPONSE, RetryReason.PARSE_ERROR,
                       RetryReason.CLASSIFY_ERROR, RetryReason.TRUNCATED):
             kind = decisions.retry_gate_decision(
@@ -888,9 +788,6 @@ class ReActAgent:
             if kind == "degrade":
                 ctx.memory_state.session_caps.mark_failed("json_mode")
                 return self._degrade_and_continue(ctx)
-            # salvage：从原文里硬提取答案，交 ANSWER 态统一处理
-            # （stop hook 否决在 ANSWER 落点的 _on_answer_ready 里执行；
-            #   这里不能直接发 ANSWER_VETOED——RECOVER 没有这一行会 FSMError）
             if ctx.steps:
                 ctx.steps[-1].error_message = f"JSON parse failed: {detail or reason}"
             ctx.last_answer = self._join_partial_answer(
@@ -911,9 +808,6 @@ class ReActAgent:
             ctx.messages.append(
                 {"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
         elif reason == RetryReason.TRUNCATED:
-            # Answer-stage truncation: continue writing — never ask to shorten
-            # (that destroys long-form reports). Tool-stage truncation is handled
-            # earlier via _fail_truncated_tool_calls and never reaches here.
             self._output(
                 f"[续写 {ctx.json_retries}/{ctx.max_json_retries}] 上一次回复达到输出长度上限，从断点继续")
             self._stash_partial_answer(ctx, ctx.last_response_text)
@@ -932,8 +826,6 @@ class ReActAgent:
                 f"{self._build_json_format_section()}"})
             memory_manager = ctx.memory_state.memory_manager
             if memory_manager and ctx.last_response_text:
-                # Skip empty appends — a blank assistant row renders as an
-                # empty thinking card in history (and pollutes the journal).
                 memory_manager.append("assistant", ctx.last_response_text)
 
     def _degrade_and_continue(self, ctx: ExecutionContext) -> list[ReActEvent]:
@@ -946,9 +838,6 @@ class ReActAgent:
         new_strategy = ctx.run_state.strategy.name
         self._output(f"[策略降级] → {new_strategy}")
         if ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
-            # The initial block was built without the text tool list (native
-            # schemas carried it). JSON strategies read tool names/params from
-            # that list, so rebuild the initial block to inject it.
             new_messages = self._build_messages(
                 ctx.tool_state.tools_desc,
                 ctx.run_state.question,
@@ -960,8 +849,6 @@ class ReActAgent:
             ctx.messages[:ctx.initial_count] = new_messages
             ctx.initial_count = len(new_messages)
         return [ReActEvent(ReActEventType.ROUND_READY, {"strategy": new_strategy})]
-
-    # ── Terminal states ──
 
     def _on_error_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """ERROR_ABORT + ABORT -> terminate."""
@@ -996,7 +883,6 @@ class ReActAgent:
 
     def _on_emit_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
         """EMIT_ANSWER -> output answer, save memory, conclude."""
-        # 关闭最后一个 plan_node span
         prev_span = ctx.run_state._current_step_span
         if prev_span is not None:
             try:
@@ -1019,7 +905,6 @@ class ReActAgent:
             if memory_state.memory_manager:
                 memory_state.memory_manager.append("system", f"[最终答案] {answer}")
                 memory_state.memory_manager.conclude(run_state.question, answer)
-            # Final answer is in STM — durable before the turn is marked done.
             self._persist_round()
             span.output = {
                 "answer": str(answer)[:500],
@@ -1043,10 +928,6 @@ class ReActAgent:
         )})
         return []
 
-    # ================================================================
-    # Static / helper methods (unchanged from original)
-    # ================================================================
-
     def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
         return decisions.select_strategy(session_caps, self.llm_client.capabilities)
 
@@ -1055,8 +936,6 @@ class ReActAgent:
         text = text or ""
         if not text:
             return
-        # Prefer the answer body over a complete JSON envelope so continuation
-        # concatenates prose, not stacked `{"answer":...}` shells.
         body = text
         try:
             import json as _json
@@ -1106,9 +985,6 @@ class ReActAgent:
         return json_helpers.parse_json_response(text)
 
     def _emit_answer_thought(self, ctx: ExecutionContext) -> None:
-        # When reasoning was streamed, persist the reasoning_content to STM
-        # so it survives session navigation (the streaming tokens are lost
-        # when the user navigates away and back).
         if any(step.reasoning_streamed for step in ctx.steps):
             reasoning = ctx.last_reasoning or ""
             if reasoning:
@@ -1153,7 +1029,6 @@ class ReActAgent:
         """Build messages array with stable prefix for prompt caching."""
         compiled = self._compiled_session_profile
         todo_context = self._todo_list.format_context() if self._todo_list else ""
-        # Merge agent-level persona and behavior fragments into conversation context
         extra_blocks: list[str] = []
         if self._persona_text:
             extra_blocks.append(self._persona_text)
@@ -1184,8 +1059,6 @@ class ReActAgent:
             project_instructions=load_project_instructions(),
             append_system_prompt=appendix,
         )
-        # Attachment note reaches the LLM prompt only — never the user's
-        # message text — so bubbles and history stay clean.
         effective_question = question + self._run_attachment_note
         messages = assemble_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
@@ -1196,12 +1069,6 @@ class ReActAgent:
             include_tools_desc=not native_tools,
         )
         if self._run_images and messages:
-            # Attach vision images to the flattened question message. This
-            # rebuilds on every LLM call (tool-set changes etc.), so the
-            # injection must happen here rather than on ctx.messages.
-            # ponytail: images re-sent each ReAct step (~1.5k tokens/img/call)
-            # and are not counted in the STM truncation budget; degrade to
-            # first-step-only injection if that becomes a cost problem.
             for msg in reversed(messages):
                 if msg.get("role") == "user":
                     content = msg.get("content")
@@ -1222,10 +1089,8 @@ class ReActAgent:
     def _execute_tool(self, name: str, arguments: dict) -> str | dict | ToolError:
         pm = self._plan_mode
         if pm is not None and pm.active():
-            # 规则 1：exit_plan_mode 特判 —— 提交计划走审批，在 run 线程执行。
             if name == EXIT_PLAN_MODE_TOOL:
                 return pm.request_exit(str(arguments.get("plan") or ""), confirm=self._confirm)
-            # 规则 2：subagent_run 不拦角色，把子代理工具集物理裁成只读集。
             if name == "subagent_run":
                 ro = sorted(
                     n for n in self.tool_executor.list_tools()
@@ -1233,8 +1098,6 @@ class ReActAgent:
                 )
                 arguments = {**arguments, "allowed_tools": ro}
             else:
-                # 规则 3/4：严格 is True —— duck-typed/mock 注册表的 truthy
-                # read_only 不得放行（fail-closed，同 dispatcher 的 lane 防御）。
                 meta = self.tool_executor.get_meta(name)
                 if meta is None or getattr(meta, "read_only", False) is not True:
                     return ToolError(
@@ -1244,7 +1107,6 @@ class ReActAgent:
                         suggested_action="用只读工具完成调研，然后调用 exit_plan_mode(plan=...) 提交最终计划文档申请退出",
                     )
         elif name == EXIT_PLAN_MODE_TOOL:
-            # 文案不得含"已批准/可以执行"含义（模型会把报错当授权继续写）。
             return "[exit_plan_mode] 当前不在计划模式，未提交任何计划供审批。"
         policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
         return execute_tool(

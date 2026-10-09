@@ -280,7 +280,6 @@ class TestMixedLanguageQueries:
         service.reset()
         route = service.maybe_auto_select("把这份PDF转换成word")
         assert route is not None
-        # Should match either pdf or docx
         assert route.entry.workflow_id in ["pdf", "docx"]
 
     def test_mixed_search_english(self, service: SkillService):
@@ -288,7 +287,7 @@ class TestMixedLanguageQueries:
         service.reset()
         route = service.maybe_auto_select("搜索Python documentation")
         assert route is not None
-        assert route.entry.workflow_id in ["search", "code"]  # Python pulls to code
+        assert route.entry.workflow_id in ["search", "code"]
 
 
 class TestJapaneseQueries:
@@ -312,8 +311,7 @@ class TestJapaneseQueries:
         """Japanese query for code."""
         service.reset()
         route = service.maybe_auto_select("コードを書く")
-        # Katakana is split into individual chars by jieba, so routing may fail
-        assert route is None or route.entry.workflow_id == "code"  # tokenizer limitation
+        assert route is None or route.entry.workflow_id == "code"
 
     def test_japanese_search(self, service: SkillService):
         """Japanese query for search."""

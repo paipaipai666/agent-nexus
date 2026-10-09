@@ -207,8 +207,6 @@ def benchmark_run_rgb(
         out_text = _json.dumps(result, ensure_ascii=False, indent=2)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         default_name = f"rgb-rejudge-{stamp}.json"
-        # rejudge results are only useful persisted — default to writing the
-        # report even without an explicit --ci (stdout alone is lossy).
         _write_payload(out_text, report, True if not report else ci, default_name)
         raise typer.Exit(code=0)
 
@@ -485,7 +483,6 @@ def _latest_suite_report(suite: str) -> Path | None:
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-    # exclude the hand-captured baseline file
     candidates = [p for p in candidates if "-baseline-" not in p.name]
     return candidates[0] if candidates else None
 

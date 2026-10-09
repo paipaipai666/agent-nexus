@@ -150,16 +150,11 @@ def execute_pending_tools_batch(
         except Exception:
             return ""
 
-    # Emit actions for all tools
     for tc in calls:
         output(f"行动: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['arguments'].items())})")
         ctx.emit(ReActEventType.TOOL_START, name=tc["name"], arguments=tc["arguments"],
                  id=tc.get("id", ""), risk_level=_risk_of(tc["name"]))
 
-    # Dispatch with read/write partitioning. Each finished call reports
-    # immediately (completion order) so the UI settles that tool's card
-    # instead of waiting for the whole batch; conversation recording below
-    # still happens in the original call order.
     dispatcher = ToolDispatcher(registry)
 
     def _notify_done(result_obj) -> None:
@@ -173,7 +168,6 @@ def execute_pending_tools_batch(
 
     results = dispatcher.execute(calls, execute_tool, on_done=_notify_done)
 
-    # Record results in original order
     for tc, result_obj in zip(calls, results):
         observation = result_obj.result if result_obj.error is None else result_obj.error
         rendered_observation = summarize_tool_result(observation)

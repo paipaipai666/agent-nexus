@@ -30,16 +30,13 @@ def _tokenize(text: str) -> set[str]:
     Handles mixed Chinese/English: Chinese characters become individual tokens,
     English words stay together. Punctuation is stripped.
     """
-    # Remove punctuation, normalize whitespace
     cleaned = re.sub(r"[^\w\s一-鿿]", " ", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     tokens: set[str] = set()
     for segment in cleaned.split():
-        # Check if segment contains Chinese characters
         has_chinese = bool(re.search(r"[一-鿿]", segment))
         if has_chinese:
-            # Split Chinese characters individually, keep English words together
             buf = []
             for ch in segment:
                 if "一" <= ch <= "鿿":
@@ -82,7 +79,6 @@ def cosine_similarity(text_a: str, text_b: str) -> float:
     vecs = embedding_service.embed_texts([text_a, text_b])
     if len(vecs) < 2:
         return 0.0
-    # Dot product of normalized vectors = cosine similarity
     return sum(a * b for a, b in zip(vecs[0], vecs[1]))
 
 
@@ -111,8 +107,6 @@ class VerifyThresholds:
         )
 
 
-#: Pre-calibration defaults. Single source for calibration's DEFAULT_THRESHOLDS;
-#: values mirror the core settings wiki_* defaults.
 DEFAULT_VERIFY_THRESHOLDS = VerifyThresholds(
     jaccard_direct_quote=0.6,
     jaccard_paraphrase=0.4,
@@ -130,15 +124,11 @@ class MechanicalVerifier:
 
     def __init__(self, thresholds: dict[str, float] | None = None):
         t = VerifyThresholds.from_settings(thresholds)
-        # Flat mirrors so verification methods can reference self.<threshold> directly.
         self.jaccard_direct_quote = t.jaccard_direct_quote
         self.jaccard_paraphrase = t.jaccard_paraphrase
         self.cosine_paraphrase = t.cosine_paraphrase
         self.cosine_source = t.cosine_source
 
-        # Level-keyed dispatch for verify_statement. SynthesisLevel is a str-enum,
-        # so a plain string level (statement.synthesis_level) looks itself up; levels
-        # absent from the table (synthesis, unknown) stay synthesis.
         def _single(stmt, _texts, primary):
             return self._verify_single_source(stmt.text, primary)
 
@@ -165,7 +155,6 @@ class MechanicalVerifier:
             The verified synthesis level (one of SynthesisLevel values).
         """
         if not statement.source_chunk_ids:
-            # No source chunks — must be synthesis
             return SynthesisLevel.SYNTHESIS.value
 
         primary_chunk_id = statement.source_chunk_ids[0]
@@ -175,9 +164,6 @@ class MechanicalVerifier:
             logger.warning("Chunk %s not found in chunk_texts, marking as synthesis", primary_chunk_id)
             return SynthesisLevel.SYNTHESIS.value
 
-        # Step 1/2: direct_quote/paraphrase → single-source check,
-        # cross_reference → per-source-chunk check. Levels absent from the
-        # table (synthesis, unknown) stay synthesis — nothing to verify.
         strategy = self._strategies.get(statement.synthesis_level)
         if strategy is None:
             return SynthesisLevel.SYNTHESIS.value
@@ -185,24 +171,19 @@ class MechanicalVerifier:
 
     def _verify_single_source(self, statement_text: str, chunk_text: str) -> str:
         """Verify a statement claimed to be direct_quote or paraphrase."""
-        # First check Jaccard (cheap, no model loading)
         jac = jaccard_similarity(statement_text, chunk_text)
         if jac >= self.jaccard_direct_quote:
             return SynthesisLevel.DIRECT_QUOTE.value
         if jac >= self.jaccard_paraphrase:
-            # Jaccard suggests paraphrase, confirm with cosine
             cos = cosine_similarity(statement_text, chunk_text)
             if cos >= self.cosine_paraphrase:
                 return SynthesisLevel.PARAPHRASE.value
-            # Jaccard high but cosine low — likely shared vocabulary but different meaning
             return SynthesisLevel.CROSS_REFERENCE.value
 
-        # Jaccard low — check cosine for semantic similarity
         cos = cosine_similarity(statement_text, chunk_text)
         if cos >= self.cosine_paraphrase:
             return SynthesisLevel.PARAPHRASE.value
 
-        # Both low — not well-supported by this chunk
         return SynthesisLevel.SYNTHESIS.value
 
     def _verify_multi_source(
@@ -230,7 +211,6 @@ class MechanicalVerifier:
         if len(valid_chunks) == 0:
             return SynthesisLevel.SYNTHESIS.value
         if len(valid_chunks) == 1:
-            # Only one valid source — reclassify as paraphrase
             return self._verify_single_source(
                 statement_text, chunk_texts.get(valid_chunks[0], "")
             )

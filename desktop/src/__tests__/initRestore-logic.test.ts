@@ -1,7 +1,3 @@
-/**
- * Tests the initRestore logic with various backend/cache states.
- * Simulates the exact decision tree in ChatPage.tsx.
- */
 import { describe, it, expect } from 'vitest'
 
 type Message = { id: string; role: string; content: string }
@@ -17,10 +13,8 @@ function simulateInitRestore(opts: {
   let messages = [...currentMessages]
 
   if (hasAssistant) {
-    // Backend has the complete answer — cache is stale, clear it
     return { messages, source: 'backend-complete' }
   } else if (loaded && agentWasRunning) {
-    // Backend has user message only (agent still running), cache has streaming
     if (cachedMessages) {
       const ids = new Set(messages.map(m => m.id))
       const newMsgs = cachedMessages.filter(m => !ids.has(m.id))
@@ -28,7 +22,6 @@ function simulateInitRestore(opts: {
     }
     return { messages, source: 'backend+cache-merge' }
   } else if (!loaded) {
-    // Backend empty — use cache
     if (cachedMessages) {
       messages = cachedMessages
     }
@@ -48,7 +41,7 @@ describe('initRestore decision tree', () => {
       agentWasRunning: true,
       backendResult: { loaded: true, hasAssistant: true },
       cachedMessages: [userMsg, partialAnswer],
-      currentMessages: [userMsg, fullAnswer], // loadAndDisplayMessages set these
+      currentMessages: [userMsg, fullAnswer],
     })
     expect(result.source).toBe('backend-complete')
     expect(result.messages.find(m => m.role === 'assistant')?.content).toBe('The answer is 4.')
@@ -59,7 +52,7 @@ describe('initRestore decision tree', () => {
       agentWasRunning: true,
       backendResult: { loaded: true, hasAssistant: false },
       cachedMessages: [userMsg, partialAnswer],
-      currentMessages: [userMsg], // loadAndDisplayMessages set user msg only
+      currentMessages: [userMsg],
     })
     expect(result.source).toBe('backend+cache-merge')
     expect(result.messages.length).toBe(2)
@@ -89,22 +82,17 @@ describe('initRestore decision tree', () => {
   })
 
   it('BUG BEFORE FIX: backend always has user msg → hasData=true → cache cleared', () => {
-    // Before the fix, we checked `hasData` (always true because user msg exists)
-    // instead of `hasAssistant` (false because agent hasn't finished).
-    // This caused the cache to be cleared even when the agent was still running.
 
     const oldLogicResult = (() => {
-      const hasData = true // backend always has at least user msg
+      const hasData = true
       if (hasData) {
         return { source: 'backend', cacheCleared: true }
       }
       return { source: 'cache', cacheCleared: false }
     })()
 
-    // Old logic: hasData=true → cache cleared → streaming content lost!
     expect(oldLogicResult.cacheCleared).toBe(true)
 
-    // New logic: hasAssistant=false → cache NOT cleared → streaming preserved
     const newLogicResult = simulateInitRestore({
       agentWasRunning: true,
       backendResult: { loaded: true, hasAssistant: false },

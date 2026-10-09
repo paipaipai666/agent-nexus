@@ -30,16 +30,6 @@ QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
 MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
 HYDE_PROMPT = load_prompt("rag_hyde")
 
-# ── Process-wide reranker cache ──────────────────────────────────────────
-# A CrossEncoder is a ~2.3 GB fp32 model. load_reranker() used to construct
-# one per retriever, and kb_search calls it whenever `._reranker is None` —
-# in the incident environment the tokenizer step then failed on a
-# HuggingFace Hub round-trip (offline/GFW, WinError 10060) AFTER the weights
-# were already materialized, so every search re-loaded and discarded 2.3 GB.
-# Concurrent subagent kb_search calls turned that churn into a multi-GB
-# private-memory ratchet (see experiments/probe_wave_repro.py). Successes
-# are cached process-wide; failures are cached briefly so a bad
-# network/config cannot churn multi-GB loads on every search.
 _RERANKER_FAILURE_TTL_S = 300.0
 _CACHED_RERANKER: "CrossEncoder | None" = None
 _CACHED_RERANKER_NAME: str | None = None
@@ -72,7 +62,6 @@ def _build_cross_encoder(cross_encoder_cls, model_name: str) -> "CrossEncoder":
     try:
         return cross_encoder_cls(local_path, local_files_only=True)
     except TypeError:
-        # older sentence-transformers without local_files_only forwarding
         return cross_encoder_cls(local_path)
 
 
@@ -473,10 +462,6 @@ class HybridRetriever:
         metadata_filters: dict[str, object] | None = None,
     ) -> list[SearchResult]:
         sparse = self._bm25.search(query, top_k=top_k * 2, metadata_filters=metadata_filters)
-        # RAG-011: Two-level RRF is intentional — first fuses expanded queries for
-        # multi-query recall, then fuses dense vs sparse. The dense side accumulates
-        # scores from multiple queries while BM25 has one query's ranking. This is
-        # by design for improved recall, not a bug.
         fused = reciprocal_rank_fusion(dense_results, sparse, k=rrf_k)
         boosted: list[tuple[str, float]] = []
         for chunk_id, score in fused.items():
@@ -517,10 +502,6 @@ class HybridRetriever:
     ) -> list[SearchResult]:
         pairs = [(query, self._chunks[chunk_id].text) for chunk_id, _ in candidates if chunk_id in self._chunks]
         chunk_ids = [chunk_id for chunk_id, _ in candidates if chunk_id in self._chunks]
-        # ponytail: fixed batch caps activation memory so the torch CPU
-        # allocator high-water stays bounded under concurrent subagent load
-        # (unbatched predict scales with candidate count — was the 16-22GB RSS
-        # driver). Batch 16 × 512 tokens peaks in the hundreds of MB.
         scores = _predict_in_batches(self._reranker, pairs)
         scored = [(chunk_id, float(score)) for chunk_id, score in zip(chunk_ids, scores)]
         filtered = [
@@ -554,7 +535,7 @@ def _predict_in_batches(reranker, pairs: list[tuple[str, str]]) -> list[float]:
     try:
         import torch
         ctx = torch.inference_mode()
-    except Exception:  # torch absent (hash-fallback embeddings) — predict still works
+    except Exception:
         import contextlib
         ctx = contextlib.nullcontext()
     all_scores: list[float] = []
@@ -667,7 +648,6 @@ def _fuse_dense_candidates(
             fused[item["id"]] = fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
     if hypothetical_document:
         hyde_hits = chroma_search(hypothetical_document, limit=10, namespace=namespace)
-        # HyDE weight reduced from 0.8 to 0.5 to mitigate hallucination bias
         for rank, item in enumerate(hyde_hits):
             fused[item["id"]] = fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
     return sorted(fused.items(), key=lambda x: x[1], reverse=True)

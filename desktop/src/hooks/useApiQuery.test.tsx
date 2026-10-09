@@ -54,7 +54,7 @@ describe('useApiQuery', () => {
     let capturedSignal: AbortSignal | undefined
     const fetcher = vi.fn((signal: AbortSignal) => {
       capturedSignal = signal
-      return new Promise<string>(() => {}) // never resolves
+      return new Promise<string>(() => {})
     })
     const { unmount } = renderHook(() => useApiQuery(fetcher, []))
 

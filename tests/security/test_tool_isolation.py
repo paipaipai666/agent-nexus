@@ -126,7 +126,6 @@ class TestToolNoRollback:
             file_write("norollback.txt", "replaced data", mode="overwrite")
             content = (tmp_path / "norollback.txt").read_text(encoding="utf-8")
             assert content == "replaced data"
-            # No .bak file should exist
             baks = list(tmp_path.glob("*.bak"))
             assert len(baks) == 0
 

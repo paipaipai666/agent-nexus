@@ -224,7 +224,6 @@ class TestOpenAIProvider:
         usage_mock.prompt_tokens = 10
         usage_mock.completion_tokens = 5
         usage_mock.total_tokens = 15
-        # Remove cache-related attributes to simulate no cache fields
         del usage_mock.prompt_cache_hit_tokens
         del usage_mock.prompt_cache_miss_tokens
         usage_mock.prompt_tokens_details = None
@@ -286,11 +285,9 @@ class TestOpenAIProvider:
         usage_mock.prompt_tokens = 500
         usage_mock.completion_tokens = 30
         usage_mock.total_tokens = 530
-        # Simulate OpenAI structure
         details_mock = MagicMock()
         details_mock.cached_tokens = 400
         usage_mock.prompt_tokens_details = details_mock
-        # No DeepSeek fields
         del usage_mock.prompt_cache_hit_tokens
         del usage_mock.prompt_cache_miss_tokens
 
@@ -318,7 +315,6 @@ class TestOpenAIProvider:
         usage_mock.prompt_tokens = 10
         usage_mock.completion_tokens = 5
         usage_mock.total_tokens = 15
-        # Remove cache-related attributes
         del usage_mock.prompt_cache_hit_tokens
         del usage_mock.prompt_cache_miss_tokens
         usage_mock.prompt_tokens_details = None

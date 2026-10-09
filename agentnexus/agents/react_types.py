@@ -5,20 +5,13 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, NamedTuple
 
-# ============================================================
-# CallingStrategy — how the agent communicates with the LLM
-# ============================================================
 
 class CallingStrategy(Enum):
-    NATIVE_TOOLS = auto()   # tools → LLM native tool_calls (tier 1)
-    JSON_MODE = auto()      # response_format={"type":"json_object"} + text parse (tier 2)
-    PROMPT_JSON = auto()    # prompt instructs JSON format + text parse (tier 3)
-    PLAIN_TEXT = auto()     # pure natural language, no structured output (tier 4)
+    NATIVE_TOOLS = auto()
+    JSON_MODE = auto()
+    PROMPT_JSON = auto()
+    PLAIN_TEXT = auto()
 
-
-# ============================================================
-# AgentStep — single ReAct decision step audit entity
-# ============================================================
 
 @dataclass
 class AgentStep:
@@ -32,53 +25,35 @@ class AgentStep:
     error_message: str | None = None
 
 
-# ============================================================
-# ReActState — FSM states（FSM 重设计 Step 3，2026-09-24）
-#
-# 6 个状态，只做真正的决策点；流水线步骤（准备参数、解析 JSON 等）
-# 全部收进 handler / decisions.py，不再占状态位。
-# ============================================================
-
 class ReActState(Enum):
-    INIT = auto()         # 入口：建上下文、选协议档位
-    AWAIT_MODEL = auto()  # 一轮模型往返 + 解释成标准化决策（auto-advance 循环）
-    EXECUTE_TOOL = auto() # 执行工具批次
-    RECOVER = auto()      # 所有"出问题了怎么办"的收口：重试 / 降档 / 兜底 / 终止
-    ANSWER = auto()       # 交最终答案（可被 AGENT_STOP 钩子打回）
-    DONE = auto()         # 终态
+    INIT = auto()
+    AWAIT_MODEL = auto()
+    EXECUTE_TOOL = auto()
+    RECOVER = auto()
+    ANSWER = auto()
+    DONE = auto()
 
-
-# ============================================================
-# ReActEventType — events that drive state transitions
-# （FSM 重设计 Step 3：收敛到 8 个队列事件 + 5 个旁路观测；
-#   旧名保留为 alias，一个发布周期后删除）
-# ============================================================
 
 class ReActEventType(Enum):
-    # ── 队列事件：驱动状态机。决策函数返回值封闭于这几种，
-    #    转移表因此是全函数（totality 在测试里断言）。──
-    START = auto()          # 用户调用 run(question)
-    TOOLS_REQUESTED = auto()  # 解释器：模型要调工具（payload: tool_calls/thought/text）
-    ANSWER_READY = auto()   # 解释器：这是最终答案（payload 可带 text）
-    FAULT = auto()          # 本轮输出不可用 / 致命错误（payload: reason/detail/fatal）
-    TOOLS_DONE = auto()     # 整批工具执行完成
-    ROUND_READY = auto()    # recover 决策：再来一轮模型调用
-    ABORT = auto()          # 终止
-    ANSWER_VETOED = auto()  # AGENT_STOP 钩子否决了最终答案（payload: reason）
-    # ── 旁路观测：ctx.emit，不进队列，只给 TUI 实时展示 ──
-    TOOL_DONE = auto()      # 单工具完成
-    TOOL_START = auto()     # 工具即将执行
-    STREAM_TOKEN = auto()   # LLM 流式 token
-    STREAM_REASONING = auto()  # LLM 流式 reasoning
-    ANSWER_THOUGHT = auto() # 答案前的思考展示
-    LOOP_WARNING = auto()   # 跑飞兜底 L1：检测到闭环（重复工具调用）
-    BUDGET_REMINDER = auto()  # 跑飞兜底 L3：token 预算提醒
-    # ── 旁路观测：时间线可观测性（bridge 透传落盘，不进 FSM 队列）──
-    LLM_CALL = auto()       # 一次模型调用完成（payload: model/strategy/latency/tokens/cache）
-    DRIFT_SIGNAL = auto()   # 漂移检测信号（payload: signal_type/severity/detail）
-    COMPACTION = auto()     # 上下文压缩事件（payload: phase/tokens_before/after）
-    MEMORY_REFRESH = auto()  # LTM/记忆上下文刷新（payload: chars/preview）
-    # ── 旧名 alias（兼容 TUI / 下游测试，勿在新代码中使用）──
+    START = auto()
+    TOOLS_REQUESTED = auto()
+    ANSWER_READY = auto()
+    FAULT = auto()
+    TOOLS_DONE = auto()
+    ROUND_READY = auto()
+    ABORT = auto()
+    ANSWER_VETOED = auto()
+    TOOL_DONE = auto()
+    TOOL_START = auto()
+    STREAM_TOKEN = auto()
+    STREAM_REASONING = auto()
+    ANSWER_THOUGHT = auto()
+    LOOP_WARNING = auto()
+    BUDGET_REMINDER = auto()
+    LLM_CALL = auto()
+    DRIFT_SIGNAL = auto()
+    COMPACTION = auto()
+    MEMORY_REFRESH = auto()
     TOOLS_FOUND = TOOLS_REQUESTED
     CLASSIFIED_TOOL = TOOLS_REQUESTED
     ALL_TOOLS_DONE = TOOLS_DONE
@@ -102,21 +77,13 @@ class ReActEventType(Enum):
     NO_RETRIES = FAULT
 
 
-# ============================================================
-# RetryReason — typed category for RETRY_GATE decisions
-# ============================================================
-
 class RetryReason(Enum):
-    EMPTY_RESPONSE = auto()    # LLM returned empty response text
-    PARSE_ERROR = auto()       # JSON parse failed (detail carries parser message)
-    CLASSIFY_ERROR = auto()    # parsed payload is neither tool_call nor answer
-    THOUGHT_MISSING = auto()   # native tool_calls without visible thought text
-    TRUNCATED = auto()         # output cut by token limit (finish_reason=length)
+    EMPTY_RESPONSE = auto()
+    PARSE_ERROR = auto()
+    CLASSIFY_ERROR = auto()
+    THOUGHT_MISSING = auto()
+    TRUNCATED = auto()
 
-
-# ============================================================
-# ReActEvent — structured event emitted during FSM execution
-# ============================================================
 
 @dataclass
 class ReActEvent:
@@ -124,23 +91,15 @@ class ReActEvent:
     payload: dict = field(default_factory=dict)
     step_id: int = 0
     timestamp: float = field(default_factory=time.time)
-    seq: int = 0  # monotonic per-run order across FSM queue and ctx.emit side-channel
+    seq: int = 0
 
-
-# ============================================================
-# Transition — single row in the transfer table
-# ============================================================
 
 class Transition(NamedTuple):
     state: ReActState
-    event: ReActEventType | None  # None = unconditional (always fire)
+    event: ReActEventType | None
     next_state: ReActState
-    handler: str  # method name on ReActAgent
+    handler: str
 
-
-# ============================================================
-# ExecutionContext — shared mutable state across handlers
-# ============================================================
 
 @dataclass
 class RunState:
@@ -148,24 +107,22 @@ class RunState:
     current_step: int = 0
     json_retries: int = 0
     strategy: CallingStrategy = CallingStrategy.PROMPT_JSON
-    max_steps: int | None = None    # None = 不设上限（决策3，2026-09-24 拍板）
+    max_steps: int | None = None
     max_json_retries: int = 2
-    # ── 跑飞兜底（L1 闭环 / L3 预算）：只提示，不强制终止 ──
-    loop_warn_count: int = 0        # 已发出的闭环提示次数（上限见 MAX_LOOP_WARNINGS）
-    token_budget: int | None = None  # None = 不设预算
-    token_reminders: int = 0        # 已发出的预算提醒次数
-    stop_vetoes: int = 0       # consecutive AGENT_STOP hook vetoes (cap prevents loops)
+    loop_warn_count: int = 0
+    token_budget: int | None = None
+    token_reminders: int = 0
+    stop_vetoes: int = 0
     thinking_enabled: bool = False
     cancel_checker: Any = None
-    _current_step_span: Any = None  # TraceSpan for current plan_node (avoid circular import)
-    # Partial answer accumulated across length-truncated rounds (continue-on-truncate).
+    _current_step_span: Any = None
     partial_answer: str = ""
 
 
 @dataclass
 class MemoryRetrievalState:
-    session_caps: Any = None       # SessionCapabilityTracker
-    memory_manager: Any = None     # MemoryManager
+    session_caps: Any = None
+    memory_manager: Any = None
     memory_context: str = ""
     conv_ctx: str = ""
 
@@ -196,26 +153,20 @@ class ExecutionContext:
     memory_state: MemoryRetrievalState = field(default_factory=MemoryRetrievalState)
     tool_state: ToolCallState = field(default_factory=ToolCallState)
 
-    # -- mutable LLM state --
     messages: list[dict] = field(default_factory=list)
 
-    # -- audit trail --
     steps: list[AgentStep] = field(default_factory=list)
     _total_usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
 
-    # -- per-step transient --
     last_response_text: str = ""
     last_reasoning: str = ""
     last_answer: str | None = None
 
-    # -- compaction rebuild anchor: length of the initial message block --
     initial_count: int = 0
 
-    # -- monotonic event order (FSM queue + emit side-channel share it) --
     _event_seq: int = 0
 
-    # -- TUI event side-channel (bypasses FSM queue) --
-    _on_emit: Any = None  # Callable[[ReActEvent, ReActState | None, ReActState | None], None]
+    _on_emit: Any = None
 
     question = _state_property("run_state", "question")
     current_step = _state_property("run_state", "current_step")
@@ -304,10 +255,6 @@ class ExecutionContext:
             evt = ReActEvent(event_type, dict(payload), self.current_step, seq=self.next_seq())
             self._on_emit(evt, None, None)
 
-
-# ============================================================
-# ReActResult — structured return from ReActAgent.run()
-# ============================================================
 
 @dataclass
 class ReActResult:

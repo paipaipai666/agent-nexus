@@ -12,7 +12,6 @@ from agentnexus.observability.stats import (
 
 class TestCost:
     def test_default_pricing_without_override(self):
-        # No vendor table — default 10.0 / 30.0 CNY per Mtok
         assert _cost(1000, 500, "deepseek-v4-flash") == (1000 * 10.0 + 500 * 30.0) / 1_000_000
 
     def test_alias_model_uses_same_default(self):
@@ -41,7 +40,6 @@ class TestCost:
 
 class TestShortModel:
     def test_alias_resolved(self):
-        # No alias table — id is preserved
         assert _short_model("deepseek-chat") == "deepseek-chat"
 
     def test_no_alias(self):
@@ -74,7 +72,6 @@ class TestComputeStats:
     def test_empty_traces_dir(self, temp_agentnexus_home):
         traces_dir = temp_agentnexus_home / "traces"
         traces_dir.mkdir(parents=True, exist_ok=True)
-        # Create an empty jsonl file
         (traces_dir / "2025-01-01.jsonl").write_text("", encoding="utf-8")
         stats = compute_stats(str(traces_dir))
         assert stats.total_tasks == 0
@@ -166,8 +163,6 @@ class TestComputeStats:
             "\n".join(lines), encoding="utf-8"
         )
         stats = compute_stats(str(traces_dir))
-        # trace-1 has 2 plan_nodes -> 1 retry, trace-2 has 1 plan_node -> 0 retries
-        # avg_retries = (1 + 0) / 2 = 0.5
         assert stats.avg_retries == 0.5
 
     def test_filters_by_days(self, temp_agentnexus_home):
@@ -248,7 +243,6 @@ class TestComputeStats:
         stats = compute_stats(str(traces_dir))
         assert "deepseek-v3" in stats.by_model
         assert "deepseek-v4-flash" in stats.by_model
-        # Default pricing 10/30 CNY per Mtok (no vendor table)
         assert stats.by_model["deepseek-v3"]["input_tokens"] == 300
         assert stats.by_model["deepseek-v3"]["output_tokens"] == 100
         assert stats.by_model["deepseek-v3"]["cost_cny"] == (300 * 10.0 + 100 * 30.0) / 1_000_000
@@ -344,7 +338,6 @@ class TestComputeStats:
         stats = compute_stats(str(traces_dir))
         assert stats.total_cache_hit_tokens == 1100
         assert stats.total_cache_miss_tokens == 400
-        # hit_rate = 1100 / (1100 + 400) = 0.7333...
         assert abs(stats.cache_hit_rate - 1100 / 1500) < 0.001
 
     def test_no_cache_data_defaults_to_zero(self, temp_agentnexus_home):

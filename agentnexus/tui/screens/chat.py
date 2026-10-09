@@ -70,7 +70,6 @@ COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
 
 class ChatArea(Widget):
     """Scrollable message area."""
-
     DEFAULT_CSS = """
     ChatArea {
         height: 100%;
@@ -119,7 +118,7 @@ class ChatScreen(Screen):
         self._current_tool_name: str = ""
         self._current_tool_widget = None
         self._current_tool_started_at = 0.0
-        self._last_user_msg_widget = None  # express_reaction attaches emoji here
+        self._last_user_msg_widget = None
         self._turn_tool_names: list[str] = []
         self._turn_thought_count = 0
         self._skill_registry: SkillRegistry | None = None
@@ -142,7 +141,6 @@ class ChatScreen(Screen):
         self._chat_service.mark_processing(False)
         self._current_run_id: str = ""
         self._current_turn = None
-        # Hook compact events for TUI visibility
         if self._memory:
             self._memory._on_compact = self._on_compact_event
 
@@ -211,7 +209,6 @@ class ChatScreen(Screen):
             if not content:
                 continue
             if role == "tool":
-                # Parse tool name and result
                 tool_name = ""
                 tool_result = content
                 if content.startswith("Action: "):
@@ -219,7 +216,6 @@ class ChatScreen(Screen):
                     if len(parts) > 1:
                         action_part = parts[0]
                         tool_result = parts[1].replace("Observation: ", "", 1)
-                        # Extract tool name: "Action: tool_name[{...}]"
                         bracket_idx = action_part.find("[")
                         if bracket_idx > 0:
                             tool_name = action_part[len("Action: "):bracket_idx].strip()
@@ -228,8 +224,6 @@ class ChatScreen(Screen):
                 self._chat_area.add_system(content)
             else:
                 self._chat_area.add_message(role, content)
-
-    # ── custom submit ──────────────────────────────────────────
 
     def on_input_bar_app_submit(self, event: InputBar.AppSubmit):
         text = event.text
@@ -240,7 +234,6 @@ class ChatScreen(Screen):
         if text.startswith("/"):
             self._handle_command(text)
         elif self._chat_service.is_processing:
-            # Agent is busy — queue the message
             self._chat_service.enqueue_message(self._chat_session.id, text)
         else:
             self._chat_service.mark_processing(True)
@@ -262,8 +255,6 @@ class ChatScreen(Screen):
         event.stop()
         self.action_focus_input()
 
-    # ── keybindings ────────────────────────────────────────────
-
     def action_clear_screen(self):
         self._chat_area.clear_all()
 
@@ -281,8 +272,6 @@ class ChatScreen(Screen):
             self.query_one("#chat-input", Input).focus()
         except Exception as e:
             logger.debug("Failed to focus chat input: %s", e)
-
-    # ── version control helpers ──────────────────────────────────
 
     def _restore_stm_from_version(self):
         """Replace current STM with the version HEAD's snapshot."""
@@ -319,14 +308,11 @@ class ChatScreen(Screen):
             )
         except Exception as e:
             logger.debug("Failed to update side panel version: %s", e)
-        # Refresh top bar
         try:
             tb = self.query_one("#top-bar", Static)
             tb.update(self._render_top_bar())
         except Exception as e:
             logger.debug("Failed to refresh top bar: %s", e)
-
-    # ── commands ──────────────────────────────────────────────
 
     def _handle_command(self, text: str):
         parts = text.split(maxsplit=1)
@@ -460,18 +446,15 @@ class ChatScreen(Screen):
         settings = get_settings()
         workspace = str(Path.cwd())
 
-        # Validate session exists
         if not ConversationVersionManager.session_belongs_to_workspace(
             settings.memory_db_path, session_id, workspace
         ):
             self._chat_area.add_system(f"[red]会话不存在:[/red] {session_id}")
             return
 
-        # Switch to new session
         self._version.session_id = session_id
         self._restore_stm_from_version()
 
-        # Clear and re-render
         self._chat_area.clear_all()
         self._chat_area.add_system(f"[green]已切换到会话:[/] {session_id}")
         self._render_restored_history()
@@ -1200,13 +1183,10 @@ class ChatScreen(Screen):
             except Exception as e:
                 logger.debug("Failed to display auto-route snapshot: %s", e)
         self._refresh_skill_panel()
-        # Pass workflow context to agent as a separate system message
         workflow_ctx = getattr(workflow_result, "workflow_context", None)
         if workflow_ctx and hasattr(self._agent, "set_workflow_context"):
             self._agent.set_workflow_context(workflow_ctx)
         return workflow_result.enhanced_question
-
-    # ── spinner animation ────────────────────────────────────
 
     def _stop_spinner(self):
         if self._spinner_timer is not None:
@@ -1361,8 +1341,6 @@ class ChatScreen(Screen):
                 lines.append(f"failed: {name} -> {reason}")
         return "\n".join(lines)
 
-    # ── compact event handling ───────────────────────────────
-
     def _on_compact_event(self, event: dict):
         """Called from agent thread — forward to main thread for UI update."""
         self.app.call_from_thread(self._apply_compact_event, event)
@@ -1396,8 +1374,6 @@ class ChatScreen(Screen):
             self._hud.set_compacting(False)
             self._chat_area.add_system("[green]✓ 熔断器已重置[/] 恢复正常压缩能力")
 
-    # ── agent execution ───────────────────────────────────────
-
     @work(exclusive=True)
     async def _run_agent(self, text: str):
         self._agent_worker = get_current_worker()
@@ -1415,10 +1391,6 @@ class ChatScreen(Screen):
             self._refresh_mcp_panel()
             self._refresh_skill_panel()
 
-        # ── Thread-safe confirmation bridge ──
-        # agent thread calls _confirm(params) → this sets up a
-        # threading.Event, pushes ConfirmDialog on the main Textual
-        # thread, blocks until user responds, then returns True/False.
         def _tui_confirm(params_summary: str) -> bool:
             event = threading.Event()
             result_holder = [False]
@@ -1446,7 +1418,6 @@ class ChatScreen(Screen):
         if bridge is not None:
             bridge.set_target(_tui_confirm)
 
-        # ── Mount loading indicator ──
         loading = Static("[#fab283]● Working...[/]", id="loading-indicator")
         self._chat_area.mount(loading)
         self._chat_area.call_after_refresh(self._chat_area.scroll_end)
@@ -1518,8 +1489,6 @@ class ChatScreen(Screen):
                 self._stop_spinner()
                 tool_name = event.payload.get("name", "")
                 if tool_name == "express_reaction":
-                    # Entertainment reaction — attach an emoji row under the
-                    # user's message instead of showing a tool card.
                     from agentnexus.tools.user_reaction import (
                         REACTION_EMOJI,
                         parse_reaction_arguments,
@@ -1547,7 +1516,6 @@ class ChatScreen(Screen):
             elif etype == E.TOOL_DONE:
                 self._stop_spinner()
                 if event.payload.get("name", "") == "express_reaction":
-                    # Already presented as an emoji under the user's message.
                     return
                 result = event.payload.get("result", "")
                 if self._current_tool_started_at:
@@ -1564,7 +1532,6 @@ class ChatScreen(Screen):
                     elif tool_lower == "subagent_run":
                         result = format_subagent_result(result)
                     else:
-                        # Try to extract and render diff with colors for structured results
                         diff_parts = extract_diff_parts(result)
                         if diff_parts:
                             message, diff_text = diff_parts
@@ -1674,7 +1641,6 @@ class ChatScreen(Screen):
             self._drain_message_queue()
             return
 
-        # ── Remove loading indicator ──
         try:
             self._chat_area.query_one("#loading-indicator").remove()
         except Exception as e:
@@ -1683,14 +1649,12 @@ class ChatScreen(Screen):
         if answer:
             loop = asyncio.get_running_loop()
             if self._streaming_msg_widget:
-                # ── Real streaming: finalize with Markdown render ──
                 content_w = self._streaming_msg_widget.query_one("#msg-content", Static)
                 rendered = await loop.run_in_executor(None, Markdown, answer)
                 content_w.update(rendered)
                 self._streaming_msg_widget = None
                 self._streaming_buffer = ""
             else:
-                # ── Fallback: simulated typing effect ──
                 msg_widget = ChatMessage("assistant", "")
                 await self._chat_area.mount(msg_widget)
                 self._chat_area.call_after_refresh(self._chat_area.scroll_end)
@@ -1721,7 +1685,6 @@ class ChatScreen(Screen):
                     total_input=usage.get("input_tokens", 0),
                     total_output=usage.get("output_tokens", 0),
                 )
-            # Auto-commit after successful answer
             self._commit_if_answered(text, answer)
             self._record_turn_summary(text, answer)
             self._refresh_todo_panel()
@@ -1747,7 +1710,6 @@ class ChatScreen(Screen):
                 _session_id, text = next_item
                 self._chat_area.add_system("[dim]处理排队消息...[/]")
                 self._chat_service.mark_processing(True)
-                # Defer to allow the current @work(exclusive=True) worker to finish
                 self.set_timer(0, lambda: self._run_agent(text))
 
 

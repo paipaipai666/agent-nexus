@@ -17,10 +17,6 @@ logger = logging.getLogger(__name__)
 
 EXTRACT_PROMPT = load_prompt("memory_extract")
 
-# Phase 1: merged from 6 categories → 3
-# fact: entity facts + conclusions (permanent, high importance)
-# preference: user preferences + tool preferences (permanent, high importance)
-# note: task progress + error patterns + conversation context (temporary, medium importance)
 MEMORY_CATEGORIES = {
     "fact": 0.85,
     "preference": 0.9,
@@ -82,8 +78,6 @@ def iter_memory_items(data: dict):
             if not isinstance(content, str) or len(content.strip()) < 5:
                 continue
             yield category, importance, content.strip(), context
-
-
 _CONFLICT_PROMPT = """判断以下两条记忆是否矛盾（信息冲突、互相排斥）。只回答 "矛盾" 或 "不矛盾"。
 
 判断要点：
@@ -120,8 +114,6 @@ def _check_conflict(
             new_context=new_context or "（无）",
         )
         result = llm.think([{"role": "user", "content": prompt}], silent=True) or ""
-        # Exact match, not substring: "不矛盾" contains "矛盾", so a substring
-        # check would treat every non-conflict answer as a conflict.
         return result.strip() == "矛盾"
     except Exception:
         logger.debug("Conflict check failed, assuming no conflict", exc_info=True)
@@ -149,7 +141,6 @@ def _parse_context(metadata_json: Any) -> str:
     return ctx.strip() if isinstance(ctx, str) else ""
 
 
-# ── module-level lock for the extraction pipeline ───────────────────
 _extraction_lock = threading.Lock()
 
 
@@ -165,7 +156,6 @@ def extract_and_save_memories(
     metrics = get_metrics()
     metrics.incr("extraction_attempts")
 
-    # ── Segment 1: LLM extraction (unlocked — slow network call) ────
     prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
     response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
     data = parse_memory_payload(response)
@@ -175,11 +165,6 @@ def extract_and_save_memories(
         if not item:
             continue
 
-        # ── PII fallback: regex scan after LLM extraction ───────────
-        # Prompt tells LLM not to extract PII, but LLM is non-deterministic.
-        # This catches phone numbers, emails, IDs that slipped through.
-        # Context is masked too — it gets embedded and fed into the conflict
-        # prompt, so it must not carry PII either.
         if contains_pii(item):
             item = mask_pii(item)
             metrics.incr("pii_masked_count")
@@ -189,11 +174,8 @@ def extract_and_save_memories(
             metrics.incr("pii_masked_count")
             logger.warning("PII detected in extracted memory context, masked: %s", context[:60])
 
-        # ── Segment 1.5: Embedding generation (unlocked — slow compute/API) ──
-        # D: embed content + context so the scene/evidence broadens recall.
         vec = embedding_to_list(embed_model.encode(_embed_text(item, context), normalize_embeddings=True))
 
-        # ── Segment 2: Dedup query (locked — fast DB read) ──────────
         with _extraction_lock:
             if vec:
                 existing = long_term.search(query_embedding=vec, limit=3, min_similarity=0.90)
@@ -202,13 +184,6 @@ def extract_and_save_memories(
                     logger.debug("Skipping duplicate memory: %s", item[:80])
                     continue
 
-        # ADD-only: no inline conflict resolution (0 LLM calls on the hot
-        # path). Near-duplicates below the dedup threshold coexist; the
-        # background curator reconciles contradictions with full context.
-
-        # ── Segment 4: Double-check + save (locked — fast DB write) ─
-        # metadata is omitted entirely when context is empty, so callers
-        # relying on the historical save() kwargs are unaffected.
         save_kwargs: dict[str, Any] = {
             "session_id": session_id,
             "content": item,
@@ -219,7 +194,6 @@ def extract_and_save_memories(
         if context:
             save_kwargs["metadata"] = {"context": context}
         with _extraction_lock:
-            # Double-check: another thread may have written a duplicate
             if vec:
                 recheck = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
                 if recheck:

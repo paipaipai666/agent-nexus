@@ -10,9 +10,8 @@ FIT_TOKEN_BUDGET_100_CHUNKS_P95_MAX_MS = 10
 PARSE_SCORE_100_TEXTS_P95_MAX_MS = 5
 CONTEXT_RELEVANCY_10_CHUNKS_P95_MAX_MS = 20
 
-# Retrieval quality regression guards
-RETRIEVAL_HIT_RATE_THRESHOLD = 0.85  # hit_rate@10 must stay above
-RETRIEVAL_MRR_THRESHOLD = 0.60       # MRR@10 must stay above
+RETRIEVAL_HIT_RATE_THRESHOLD = 0.85
+RETRIEVAL_MRR_THRESHOLD = 0.60
 
 
 def test_chunk_all_15_docs(benchmark, perf_env):
@@ -40,13 +39,11 @@ def test_retrieval_quality_keyword(perf_env):
 
     reset_storage_client()
 
-    # Chunk and index
     full_text = "\n\n".join(KNOWLEDGE_BASE)
     chunks = chunk_text(full_text, strategy=ChunkStrategy.FIXED, chunk_size=512, chunk_overlap=50)
     delete_collection(namespace="perf_qual")
     build_knowledge_base(chunks, load_reranker=False, namespace="perf_qual")
 
-    # Build hybrid retriever
     retriever = HybridRetriever(namespace="perf_qual")
     retriever.rebuild_from_catalog()
 
@@ -69,7 +66,6 @@ def test_retrieval_quality_keyword(perf_env):
             mrrs.append(0.0)
             continue
 
-        # Keyword-based relevance check against reference_contexts
         relevant_flags = []
         for chunk in truncated:
             is_relevant = any(ref in chunk for ref in sample.reference_contexts)
@@ -97,8 +93,6 @@ def test_retrieve_10_queries(perf_env):
 
     reset_storage_client()
 
-    # Insert data into the default "documents" collection so _retrieve's
-    # internal search() call finds it without requiring a namespace.
     texts = KNOWLEDGE_BASE
     insert_documents(
         texts,
@@ -106,7 +100,6 @@ def test_retrieve_10_queries(perf_env):
         ids=[f"kb_doc_{i:04d}" for i in range(len(texts))],
     )
 
-    # Build a hybrid retriever that has BM25 + dense search capability.
     retriever = HybridRetriever(namespace="default")
     retriever.build_bm25(texts)
 
@@ -124,7 +117,7 @@ def test_retrieve_10_queries(perf_env):
 
 def test_bootstrap_ci_100_scores(benchmark):
     from agentnexus.rag.evaluator import _bootstrap_ci
-    scores = [i / 100 for i in range(100)]  # 0.0 to 0.99
+    scores = [i / 100 for i in range(100)]
     result = benchmark(_bootstrap_ci, scores)
     assert result[0] <= result[1]
 

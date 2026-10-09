@@ -18,8 +18,6 @@ import pytest
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp.adapter import MCPToolDescriptor, MCPToolManager
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
 CALL_TOOL_P95_MAX_MS = 50
 CONCURRENT_8_P95_MAX_MS = 200
 
@@ -98,9 +96,6 @@ def _start_mocked_manager(configs: list[MCPServerConfig]) -> MCPToolManager:
     return manager
 
 
-# ── MCP-P1: Server startup latency ─────────────────────────────────
-
-
 class TestMCPStartupLatency:
     """Measure time to start MCPToolManager with mocked transports."""
 
@@ -153,9 +148,6 @@ class TestMCPStartupLatency:
         assert ten < single * 10 * 3, f"Startup did not scale linearly: 1={single:.3f}s, 10={ten:.3f}s"
 
 
-# ── MCP-P2: Tool call latency (call_tool p95) ──────────────────────
-
-
 class TestMCPToolCallLatency:
     """Measure call_tool round-trip latency with mocked async dispatch."""
 
@@ -197,9 +189,6 @@ class TestMCPToolCallLatency:
         assert result is not None
         p95 = _p95_ms(benchmark.stats.stats.data)
         assert p95 < CALL_TOOL_P95_MAX_MS, f"call_tool p95={p95:.1f}ms >= {CALL_TOOL_P95_MAX_MS}ms"
-
-
-# ── MCP-P3: Concurrent tool call resource contention ───────────────
 
 
 class TestMCPConcurrentContention:

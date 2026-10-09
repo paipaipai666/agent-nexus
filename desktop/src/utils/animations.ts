@@ -1,9 +1,7 @@
 import { gsap } from 'gsap'
 
-// Shared easing — snappy, premium feel
 const EASE = 'power3.out'
 
-/** Fade + slide up entrance */
 export function animateEntrance(elements: Element | Element[], opts?: { stagger?: number; delay?: number; y?: number }) {
   const targets = Array.isArray(elements) ? elements : [elements]
   if (targets.length === 0) return
@@ -22,7 +20,6 @@ export function animateEntrance(elements: Element | Element[], opts?: { stagger?
   )
 }
 
-/** Staggered card entrance for grid layouts */
 export function animateCardGrid(cards: Element[]) {
   if (cards.length === 0) return
   gsap.fromTo(
@@ -40,7 +37,6 @@ export function animateCardGrid(cards: Element[]) {
   )
 }
 
-/** Chat message entrance — slide from side based on role */
 export function animateMessage(el: Element, role: 'user' | 'assistant' | 'system' | 'tool') {
   const x = role === 'user' ? 20 : -20
   gsap.fromTo(

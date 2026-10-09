@@ -209,6 +209,5 @@ def rerank_with_llm(
     reranked = [by_id[sid] for sid in ordered_ids if sid in by_id]
     if not reranked:
         return list(candidates)
-    # Keep unmatched candidates after the LLM-ordered ones (stable fallback).
     rest = [c for c in candidates if c.entry.qualified_id not in {r.entry.qualified_id for r in reranked}]
     return reranked + rest

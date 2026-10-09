@@ -75,7 +75,7 @@ export default function EvalPage() {
       try {
         const bl = await api.getEvalBaseline(s.name)
         results.push({ suite: s.name, ...bl })
-      } catch { /* no baseline */ }
+      } catch {  }
     }
     return results
   }, [])
@@ -164,7 +164,7 @@ export default function EvalPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
+      {}
       <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
           <FlaskConical size={20} style={{ color: 'var(--accent)' }} />
@@ -180,7 +180,7 @@ export default function EvalPage() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {}
       <div className="px-6 flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
         {tabs.map(t => (
           <button
@@ -197,9 +197,9 @@ export default function EvalPage() {
         ))}
       </div>
 
-      {/* Content */}
+      {}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-        {/* Validation Result */}
+        {}
         {validation && (
           <div className="p-3 rounded-lg text-sm" style={{ background: validation.valid ? 'var(--green-muted)' : 'var(--red-muted)', border: '1px solid var(--border)' }}>
             {validation.valid ? (
@@ -215,7 +215,7 @@ export default function EvalPage() {
           </div>
         )}
 
-        {/* Tasks Tab */}
+        {}
         {activeTab === 'tasks' && (
           <>
             <div className="flex gap-2 mb-2">
@@ -271,7 +271,7 @@ export default function EvalPage() {
           </>
         )}
 
-        {/* Suites Tab */}
+        {}
         {activeTab === 'suites' && (
           <>
             <div className="flex items-center gap-2 mb-2">
@@ -322,12 +322,12 @@ export default function EvalPage() {
           </>
         )}
 
-        {/* Results Tab */}
+        {}
         {activeTab === 'results' && (
           <>
             {suiteResult ? (
               <div className="space-y-3">
-                {/* Summary Card */}
+                {}
                 <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-medium" style={{ color: 'var(--fg)' }}>{suiteResult.suite_name} ({suiteResult.eval_type})</h3>
@@ -346,7 +346,7 @@ export default function EvalPage() {
                   </div>
                 </div>
 
-                {/* Per-Task Results */}
+                {}
                 <h3 className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Task Results</h3>
                 {suiteResult.task_reports?.map((tr: any) => (
                   <div key={tr.task_id} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
@@ -363,7 +363,7 @@ export default function EvalPage() {
                   </div>
                 ))}
 
-                {/* Regression Result */}
+                {}
                 {regression && (
                   <div className="p-4 rounded-lg" style={{ background: regression.has_regression ? 'var(--red-muted)' : 'var(--green-muted)', border: '1px solid var(--border)' }}>
                     <h3 className="font-medium mb-2" style={{ color: 'var(--fg)' }}>Regression Report</h3>
@@ -389,7 +389,7 @@ export default function EvalPage() {
           </>
         )}
 
-        {/* Baselines Tab */}
+        {}
         {activeTab === 'baselines' && (
           <>
             {baselines.length === 0 ? (

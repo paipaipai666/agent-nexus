@@ -27,8 +27,6 @@ class StateMachine:
 
     def __init__(self, table: list[Transition]):
         self._table = table
-        # Indexed lookup — exact (state, event) first, then the state's
-        # unconditional (event=None) transition. Table order no longer matters.
         self._by_key: dict[tuple[ReActState, ReActEventType | None], Transition] = {}
         for t in table:
             key = (t.state, t.event)
@@ -80,9 +78,9 @@ class StateMachine:
             if self._queue:
                 event = self._queue.popleft()
             elif not self._try_auto_advance(ctx, handlers):
-                break  # no events and no unconditional transitions → exit
+                break
             else:
-                continue  # auto-advance consumed, re-check queue
+                continue
 
             t = self._lookup(event)
             if t is None:
@@ -120,7 +118,6 @@ class StateMachine:
         self._state = transition.next_state
         self._notify(event, from_state, transition.next_state)
 
-        # Invoke handler BEFORE DONE check — handler may set ctx.last_answer
         handler_fn = handlers.get(transition.handler)
         if handler_fn:
             self._raise_if_cancelled(ctx)

@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 
-# NOTE: The old `from agentnexus.cli import eval` import was broken.
-# Commands are now registered via the eval/ subpackage.
-# This file only exports compatibility symbols.
-
 RAGEvaluator = None
 
 

@@ -52,7 +52,6 @@ async def connect_server(
     stack = AsyncExitStack()
     server_states[config.name] = MCPServerState.CONNECTING
 
-    # ── before mcp connect hook ──────────────────────────────
     from agentnexus.core.hooks import HookType, get_hook_manager
     hook_mgr = get_hook_manager()
     hook_mgr.fire(HookType.BEFORE_MCP_CONNECT, {
@@ -95,7 +94,6 @@ async def connect_server(
         await import_capabilities(runtime)
         failures.pop(config.name, None)
 
-        # ── after mcp connect hook (success) ─────────────────
         hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
             "server_name": config.name, "transport": config.transport,
             "success": True, "state": server_states[config.name].value,
@@ -106,7 +104,6 @@ async def connect_server(
         await stack.aclose()
         server_states[config.name] = MCPServerState.DISCONNECTED
 
-        # ── after mcp connect hook (error) ───────────────────
         hook_mgr.fire(HookType.AFTER_MCP_CONNECT, {
             "server_name": config.name, "transport": config.transport,
             "success": False, "state": "disconnected",

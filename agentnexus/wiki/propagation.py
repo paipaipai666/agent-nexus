@@ -40,8 +40,6 @@ class PropagationEngine:
         settings = get_settings()
         self.max_depth = max_depth or settings.wiki_propagation_max_depth
 
-    # ── Degradation ─────────────────────────────────────────────────
-
     def propagate_degradation(self, page_id: str, depth: int = 0):
         """Cascade confidence degradation to dependent pages.
 
@@ -71,10 +69,7 @@ class PropagationEngine:
                     dep_id, new_confidence,
                     flag=f"depends_on_degraded_page:{page_id}",
                 )
-                # Recurse
                 self.propagate_degradation(dep_id, depth + 1)
-
-    # ── Recovery ────────────────────────────────────────────────────
 
     def propagate_recovery(self, page_id: str, depth: int = 0):
         """Cascade recovery: re-verify dependent pages (don't auto-recover).
@@ -88,7 +83,6 @@ class PropagationEngine:
         dependents = self.store.list_dependents(page_id)
         for dep_id in dependents:
             self._reverify_page(dep_id)
-            # Recurse
             self.propagate_recovery(dep_id, depth + 1)
 
     def _reverify_page(self, page_id: str):
@@ -109,15 +103,12 @@ class PropagationEngine:
                 changed = True
 
         if changed:
-            # Recompute page confidence
             updated_page = self.store.get_page(page_id)
             if updated_page:
                 new_conf = self.router.compute_page_confidence(updated_page)
                 if new_conf != updated_page.confidence:
                     self.store.update_page_confidence(page_id, new_conf)
                     logger.info("Page %s confidence updated to %s after re-verification", page_id, new_conf)
-
-    # ── RAG → Wiki Reverse Trigger ──────────────────────────────────
 
     def on_chunk_update(self, chunk_ids: list[str]):
         """When RAG chunks are updated, re-verify all wiki statements that reference them.
@@ -147,21 +138,17 @@ class PropagationEngine:
                 self.store.update_statement_synthesis_level(stmt.statement_id, new_level)
                 affected_pages.add(stmt.page_id)
 
-                # Propagate based on direction
                 if self.router.is_degradation(old_level, new_level):
                     self.propagate_degradation(stmt.page_id)
                 else:
                     self.propagate_recovery(stmt.page_id)
 
-        # Recompute confidence for directly affected pages
         for page_id in affected_pages:
             page = self.store.get_page(page_id)
             if page:
                 new_conf = self.router.compute_page_confidence(page)
                 if new_conf != page.confidence:
                     self.store.update_page_confidence(page_id, new_conf)
-
-    # ── Helper ──────────────────────────────────────────────────────
 
     def _get_chunk_texts(self, stmt: WikiStatement) -> dict[str, str]:
         """Fetch chunk texts for a statement's source chunk IDs.
@@ -171,14 +158,11 @@ class PropagationEngine:
         if not stmt.source_chunk_ids:
             return {}
 
-        # Import here to avoid circular dependency at module level
         from agentnexus.rag.store import get_knowledge_base_catalog
 
         catalog = get_knowledge_base_catalog()
         result: dict[str, str] = {}
         for chunk_id in stmt.source_chunk_ids:
-            # Try to find the chunk in the RAG catalog
-            # We need to search across all documents — use a direct query
             try:
                 rows = catalog._conn.execute(
                     "SELECT text FROM document_chunks WHERE chunk_id = ?",

@@ -79,10 +79,8 @@ class TestRegistryRateLimit:
         """After 60s window, rate counter resets (verify cleanup does not crash)."""
         for _ in range(3):
             self.registry.invoke("limited_tool", {}, caller="test")
-        # Simulate time passing — just verify window cleanup is safe
         now = time.time()
         self.registry._rate_counters["limited_tool"] = [now - 70]
-        # One more call should work since old entries were removed
         result = self.registry.invoke("limited_tool", {}, caller="test")
         assert result == "ok"
 

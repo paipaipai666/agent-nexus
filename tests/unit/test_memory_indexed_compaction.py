@@ -28,10 +28,8 @@ class TestCompactIndexedPrimitive:
         assert "段1摘要" in msgs[0]["content"]
         assert msgs[0]["metadata"]["memory_index"] is True
         assert msgs[0]["metadata"]["seg_start"] == 0
-        # 尾部原文保留角色结构
         assert msgs[-1]["content"] == "msg19"
         assert msgs[-1]["role"] == "assistant"
-        # 中间原文已移除
         joined = "\n".join(m["content"] for m in msgs)
         assert "msg3\n" not in joined
 
@@ -41,7 +39,6 @@ class TestCompactIndexedPrimitive:
             stm.append(m["role"], m["content"])
         stm.compact_indexed([(0, 14, "第一轮摘要")], keep_recent=6)
         first_entry = stm.get_all()[0]
-        # 追加 10 条新消息后再压一轮
         for m in _msgs(10, "new"):
             stm.append(m["role"], m["content"])
         stm.compact_indexed([(14, 26, "第二轮摘要")], keep_recent=6)
@@ -58,9 +55,7 @@ class TestSegmentSummarize:
         result = segment_summarize(_msgs(26), llm, keep_recent=6, seg_size=10)
         assert result is not None
         assert [(s, e) for s, e, _ in result.entries] == [(0, 10), (10, 20)]
-        # 尾部 6 条（20-25）不索引
         assert all("msg25" not in s for _, _, s in result.entries)
-        # 归档清单覆盖全部 20 条被索引消息，全局序号从 0 起
         assert [i for i, _ in result.archived] == list(range(20))
         assert result.archived[0][1]["content"] == "msg0"
 
@@ -74,7 +69,6 @@ class TestSegmentSummarize:
         assert result is not None
         assert result.entries[0][0] == 14, "序号必须从既有索引续排"
         assert result.archived[0][0] == 14, "归档序号同样从既有索引续排"
-        # LLM 输入不得包含旧索引文本（无复利的关键断言）
         for c in llm.think.call_args_list:
             assert "旧" not in c[0][0][0]["content"], "已有索引不得重新喂给 LLM"
 
@@ -156,7 +150,6 @@ class TestEngineIndexedCompaction:
         mgr.maybe_compact()
         msgs = mgr.short_term.get_all()
         index_entries = [m for m in msgs if m.get("metadata", {}).get("memory_index")]
-        # 20 条 - 6 尾 = 14 条待索引，seg_size=4 → 4 段
         assert len(index_entries) == 4
         assert msgs[-1]["content"] == "消息19"
         assert llm.think.call_count == 4
@@ -173,7 +166,6 @@ class TestEngineIndexedCompaction:
             mgr.short_term.append("user", f"消息{i}")
         mgr.short_term._token_count = 0
         mgr.maybe_compact()
-        # 第二轮：换一批消息，捕获 prompt
         llm.think.reset_mock()
         llm.think.side_effect = lambda msgs, silent=True: "第二轮产出物"
         for i in range(20, 36):
@@ -182,7 +174,6 @@ class TestEngineIndexedCompaction:
         mgr.maybe_compact()
         for c in llm.think.call_args_list:
             assert "第一轮产出物" not in c[0][0][0]["content"]
-        # 旧条目仍在且未被改写
         entries = [m for m in mgr.short_term.get_all()
                    if m.get("metadata", {}).get("memory_index")]
         assert any("第一轮产出物" in m["content"] for m in entries)
@@ -209,10 +200,10 @@ class TestEngineIndexedCompaction:
             "agentnexus.memory.short_term.ShortTermMemory.estimate_tokens",
             lambda self: 125000)
         llm = MagicMock()
-        llm.think.side_effect = lambda msgs, silent=True: "段小结内容" * 30  # 长条目逼出折叠
+        llm.think.side_effect = lambda msgs, silent=True: "段小结内容" * 30
         mgr = self._make_mgr(llm)
         mgr._engine.history_dir = str(tmp_path)
-        mgr._settings.memory_index_max_tokens = 60  # 极小预算 → 折叠
+        mgr._settings.memory_index_max_tokens = 60
         for i in range(20):
             mgr.short_term.append("user", f"重要消息{i} " + "内容" * 20)
         mgr.short_term._token_count = 0
@@ -221,7 +212,6 @@ class TestEngineIndexedCompaction:
         dirs = [m for m in msgs if m.get("metadata", {}).get("archive_dir")]
         assert dirs, "超预算必须产生归档目录"
         assert "history_search" in dirs[0]["content"]
-        # 归档文件存在且行数=被索引的消息数（20-6=14），序号 0-13
         hfile = tmp_path / "test.jsonl"
         assert hfile.exists()
         import json as _json
@@ -277,21 +267,19 @@ class TestFoldIndex:
 
     def test_folds_oldest_keeps_newest(self):
         stm = self._stm_with_entries([200, 200, 10])
-        folded = stm.fold_index(60)  # 预算只够最后一条小条目
+        folded = stm.fold_index(60)
         assert folded == 2
         msgs = stm.get_all()
         dirs = [m for m in msgs if m.get("metadata", {}).get("archive_dir")]
         assert len(dirs) == 1
         assert "消息1-20" in dirs[0]["content"]
         assert "history_search" in dirs[0]["content"]
-        # 最新条目和原文尾部保留
         assert any("摘摘" in m["content"] for m in msgs if not m.get("metadata", {}).get("archive_dir"))
         assert msgs[-1]["content"] == "最近的问题"
 
     def test_directory_not_refolded(self):
         stm = self._stm_with_entries([200, 200, 10])
         stm.fold_index(60)
-        # 再来一轮：目录必须存活，不得被二次折叠
         stm.append("system", "[历史索引 消息31-40] " + "新" * 200,
                    metadata={"memory_index": True, "seg_start": 30, "seg_end": 40})
         stm.fold_index(60)

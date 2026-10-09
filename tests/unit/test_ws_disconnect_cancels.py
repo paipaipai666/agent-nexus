@@ -108,7 +108,7 @@ async def test_disconnect_cancels_active_run(runtime_chat_session):
     async def disconnect_once_started():
         await asyncio.to_thread(started.wait, 5)
         await _wait_for(lambda: chat._session_last_run.get(session.id) is not None)
-        await asyncio.sleep(0.2)  # 让 send_message 进入 agent.run
+        await asyncio.sleep(0.2)
         should_disconnect.set()
 
     ws = _make_ws(should_disconnect)
@@ -146,8 +146,6 @@ async def test_disconnect_after_completion_does_not_reinterrupt(runtime_chat_ses
 
     async def disconnect_after_snapshot():
         await asyncio.wait_for(run_started_sent.wait(), timeout=5)
-        # 等 run 真正 settle（turn 对象在 _turns 里时 get_run_snapshot
-        # 返回的是实时 record，必须等 status 离开 running）。
         await _wait_for(lambda: (
             (rid := chat._session_last_run.get(session.id)) is not None
             and not chat.is_run_active(rid)
@@ -190,7 +188,6 @@ async def test_disconnect_during_confirm_wakes_and_cancels_run(runtime_chat_sess
 
     async def disconnect_during_confirm():
         await asyncio.to_thread(confirm_started.wait, 5)
-        # 等 confirm_request 真正发到 socket（ws_confirm 已注册为桥目标）
         await _wait_for(lambda: chat._session_last_run.get(session.id) is not None)
         await asyncio.sleep(0.2)
         should_disconnect.set()

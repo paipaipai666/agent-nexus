@@ -50,7 +50,6 @@ def _glob_to_regex(pattern: str) -> re.Pattern:
         elif c == "[":
             j = i + 1
             if j < n and pattern[j] == "!":
-                # Convert [!seq] to [^seq] for regex
                 parts.append("[^")
                 j += 1
             else:
@@ -62,7 +61,6 @@ def _glob_to_regex(pattern: str) -> re.Pattern:
                 parts.append("]")
                 i = j + 1
             else:
-                # No closing ], treat as literal
                 parts[-1] = re.escape(c)
                 i += 1
         else:
@@ -143,7 +141,6 @@ def grep_search(
     for line in lines[:max_results]:
         if ":" not in line:
             continue
-        # rg output: file:lineno:content
         idx = line.find(":")
         if idx == -1:
             continue

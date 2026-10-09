@@ -6,8 +6,6 @@ import pytest
 
 from agentnexus.rag.ranking import BM25Index, reciprocal_rank_fusion, tokenize
 
-# ── BM25Index.build() ─────────────────────────────────────────
-
 
 class TestBM25Build:
     @pytest.mark.parametrize("chunk_records", [100, 500, 1000], indirect=True)
@@ -19,9 +17,6 @@ class TestBM25Build:
 
         benchmark(_build)
         assert len(index._chunk_ids) == len(chunk_records)
-
-
-# ── BM25Index.search() ────────────────────────────────────────
 
 
 class TestBM25Search:
@@ -44,9 +39,6 @@ class TestBM25Search:
         assert len(result) <= top_k
 
 
-# ── reciprocal_rank_fusion ────────────────────────────────────
-
-
 class TestReciprocalRankFusion:
     def test_fusion_100_results_each(self, benchmark):
         dense = [(f"dense_{i}", 1.0 - i * 0.01) for i in range(100)]
@@ -65,9 +57,6 @@ class TestReciprocalRankFusion:
 
         result = benchmark(reciprocal_rank_fusion, dense, sparse)
         assert len(result) == 150
-
-
-# ── tokenize() ────────────────────────────────────────────────
 
 
 class TestTokenize:

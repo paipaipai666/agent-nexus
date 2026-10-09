@@ -4,10 +4,6 @@ import { useTheme } from '../theme/ThemeProvider'
 import { useUIStore } from '../../services/ui'
 import { navItemForPath, settingsItemForPath } from '../layout/nav'
 
-/**
- * v2 titlebar (36px, frameless drag region):
- * logo + wordmark · route breadcrumb · command-palette trigger / theme / window controls.
- */
 export default function Titlebar() {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
@@ -25,7 +21,7 @@ export default function Titlebar() {
         WebkitAppRegion: 'drag',
       } as React.CSSProperties}
     >
-      {/* App identity */}
+      {}
       <div className="w-[232px] shrink-0 px-3 flex items-center gap-2">
         <span
           className="grid place-items-center w-5 h-5 rounded-[5px] font-mono font-bold text-[12px]"
@@ -38,7 +34,7 @@ export default function Titlebar() {
         </span>
       </div>
 
-      {/* Breadcrumb */}
+      {}
       <div
         className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-[13px]"
         style={{ color: 'var(--fg-muted)' }}
@@ -63,7 +59,7 @@ export default function Titlebar() {
         )}
       </div>
 
-      {/* Controls */}
+      {}
       <div className="flex items-center h-full ml-auto" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           onClick={() => setPaletteOpen(true)}

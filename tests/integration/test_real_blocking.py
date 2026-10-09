@@ -16,9 +16,6 @@ import pytest
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 class _FakeChatService:
     class _Handle:
@@ -72,10 +69,6 @@ def _make_large_content(size_mb: float) -> bytes:
     return (line * (target // len(line) + 1)).encode("utf-8")[:target]
 
 
-# ---------------------------------------------------------------------------
-# Real Blocking Tests — the bug: large file upload blocks other endpoints
-# ---------------------------------------------------------------------------
-
 class TestRealEventLoopBlocking:
     """Verify event loop stays responsive during ACTUAL large file I/O.
 
@@ -93,23 +86,19 @@ class TestRealEventLoopBlocking:
         """
         content_10mb = _make_large_content(10)
 
-        # Mock only the deep ingestion internals — file I/O runs for real
         with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
-            # Simulate slow ingestion (2s) to keep background task alive
             def slow_ingest(*args, **kwargs):
                 time.sleep(2)
                 return MagicMock(), MagicMock()
 
             mock_ingest.side_effect = slow_ingest
 
-            # Upload 10MB file
             resp = client.post(
                 "/api/kb/documents",
                 files={"file": ("big.txt", content_10mb, "text/plain")},
             )
             assert resp.status_code == 200
 
-            # Immediately hit other endpoints — these must respond fast
             start = time.monotonic()
             health = client.get("/health")
             docs = client.get("/api/kb/documents")
@@ -117,7 +106,6 @@ class TestRealEventLoopBlocking:
 
             assert health.status_code == 200
             assert docs.status_code == 200
-            # If event loop is blocked, this takes >>1s. Should be <0.5s.
             assert elapsed < 1.0, (
                 f"Other endpoints took {elapsed:.2f}s — event loop is blocked!"
             )
@@ -135,7 +123,6 @@ class TestRealEventLoopBlocking:
             )
             assert resp.status_code == 200
 
-            # Other endpoints must still be responsive
             start = time.monotonic()
             health = client.get("/health")
             config = client.get("/api/config")
@@ -169,7 +156,6 @@ class TestRealEventLoopBlocking:
                 except Exception as e:
                     errors.append((i, str(e)))
 
-            # Fire 3 uploads concurrently
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
                 futures = [pool.submit(upload, i) for i in range(3)]
                 concurrent.futures.wait(futures, timeout=30)
@@ -180,10 +166,6 @@ class TestRealEventLoopBlocking:
             assert status == 200, f"Upload {i} got status {status}"
             assert elapsed < 5.0, f"Upload {i} took {elapsed:.2f}s"
 
-
-# ---------------------------------------------------------------------------
-# Real Memory Tests — verify actual memory behavior with real file I/O
-# ---------------------------------------------------------------------------
 
 class TestRealMemoryUsage:
     """Verify memory usage with actual file I/O (not mocked)."""
@@ -207,7 +189,6 @@ class TestRealMemoryUsage:
             )
             assert resp.status_code == 200
 
-            # Wait for file I/O to complete
             time.sleep(0.5)
 
             snap_after = tracemalloc.take_snapshot()
@@ -216,17 +197,12 @@ class TestRealMemoryUsage:
         stats = snap_after.compare_to(snap_before, "lineno")
         total_increase = sum(s.size_diff for s in stats if s.size_diff > 0)
 
-        # Should NOT hold 3 copies of the file in memory
         file_size = len(content)
         assert total_increase < file_size * 3, (
             f"Memory +{total_increase / 1024 / 1024:.1f}MB for "
             f"{file_size / 1024 / 1024:.1f}MB file — likely read into memory"
         )
 
-
-# ---------------------------------------------------------------------------
-# Real Streaming Tests — verify chunked read/write works
-# ---------------------------------------------------------------------------
 
 class TestRealStreamingBehavior:
     """Verify the file is streamed to disk, not loaded entirely into memory."""
@@ -255,7 +231,6 @@ class TestRealStreamingBehavior:
             upload_elapsed = time.monotonic() - start
 
         assert resp.status_code == 200
-        # Upload should return well before ingestion finishes
         assert upload_elapsed < 2.0, (
             f"Upload took {upload_elapsed:.2f}s — should return immediately"
         )
@@ -294,10 +269,6 @@ class TestRealStreamingBehavior:
         assert "大型文档" in resp.json()["filename"]
 
 
-# ---------------------------------------------------------------------------
-# Progress Monotonicity — real ingestion path
-# ---------------------------------------------------------------------------
-
 class TestRealProgressMonotonicity:
     """Verify progress percentage never decreases during real ingestion."""
 
@@ -318,7 +289,6 @@ class TestRealProgressMonotonicity:
         with patch("agentnexus.rag.kb_service.get_knowledge_base_catalog") as mock_cat:
             mock_cat.return_value = MagicMock()
 
-            # Simulate realistic stage sequence
             stages = [
                 ("loading", 10, "Loading document"),
                 ("enriching", 30, "Enriching (1/10)"),
@@ -340,7 +310,6 @@ class TestRealProgressMonotonicity:
                 _update_run_progress(run, stage=stage, stage_pct=pct, message=msg)
                 observed_pcts.append(pct)
 
-        # Every step must be >= previous
         for i in range(1, len(observed_pcts)):
             assert observed_pcts[i] >= observed_pcts[i - 1], (
                 f"Progress decreased at step {i}: "

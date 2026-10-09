@@ -11,22 +11,21 @@ _QUERY_REWRITE_PROMPT = """\
 查询: {query}
 关键词:"""
 
-# Keywords that indicate the query is about a personal entity fact (name, age, etc.)
+
 _ENTITY_QUERY_KEYWORDS = frozenset([
     "名字", "姓名", "叫什么", "几岁", "多大", "哪里人", "在哪工作",
     "住在", "年龄", "生日", "电话", "邮箱", "地址", "职业", "学校",
     "哪个公司", "做什么工作", "什么职业", "哪个城市",
 ])
 
-# Category migration map (old → new)
 _CATEGORY_MIGRATION = {
     "entity_fact": "fact", "conclusion": "fact",
     "user_preference": "preference", "tool_preference": "preference",
     "task_progress": "note", "error_pattern": "note", "conversation": "note",
 }
 
-_MAX_CONTENT_TOKENS = 200  # ~800 chars for Chinese text
-_MAX_CONTEXT_TOKENS = 80   # tighter budget — context is a one-sentence rationale
+_MAX_CONTENT_TOKENS = 200
+_MAX_CONTEXT_TOKENS = 80
 
 
 def _is_entity_query(query: str) -> bool:
@@ -53,13 +52,11 @@ def _diversify_results(results: list[dict], limit: int = 5) -> list[dict]:
         cat = r.get("category", "unknown")
         by_category.setdefault(cat, []).append(r)
 
-    # Pick top-1 from each category first
     diversified = []
     for cat_results in by_category.values():
         if cat_results:
             diversified.append(cat_results[0])
 
-    # Fill remaining by score (skip already picked)
     seen_ids = {r.get("id") for r in diversified}
     remaining = [r for r in results if r.get("id") not in seen_ids]
     remaining.sort(key=lambda r: r.get("_score", 0), reverse=True)
@@ -94,7 +91,6 @@ def memory_search(query: str, category: str = "") -> str:
     ltm = get_long_term_memory()
     model = get_embedding_model()
 
-    # Rewrite query for better embedding match
     search_query = _rewrite_query(query)
 
     try:
@@ -110,7 +106,6 @@ def memory_search(query: str, category: str = "") -> str:
     if not results:
         return "[memory_search] 未找到相关记忆"
 
-    # Entity query boost: if query is about personal info, ensure fact category is represented
     if _is_entity_query(query) and not category:
         has_fact = any(r["category"] in ("fact", "entity_fact") for r in results)
         if not has_fact:
@@ -128,10 +123,8 @@ def memory_search(query: str, category: str = "") -> str:
                         merged.append(r)
                 results = merged
 
-    # Diversify: ensure at least 1 result per category
     results = _diversify_results(results, limit=5)
 
-    # Format output with token budget
     lines = [f"相关记忆 (查询: '{search_query}'):"]
     for r in results:
         sim = r.get("_score", 0)
@@ -139,10 +132,6 @@ def memory_search(query: str, category: str = "") -> str:
         cat_display = _CATEGORY_MIGRATION.get(r['category'], r['category'])
         content = _truncate_content(r['content'])
         lines.append(f"- {star} [{cat_display}] {content}")
-        # B: inject the one-sentence rationale only when present, so the agent
-        # can tell a general preference from a scene-specific one. Absent
-        # context produces no extra line — output stays byte-identical to
-        # before. (init_session does NOT inject context, by design.)
         ctx = _parse_context(r.get("metadata_json"))
         if ctx:
             lines.append(f"    └ 来源: {_truncate_content(ctx, _MAX_CONTEXT_TOKENS)}")

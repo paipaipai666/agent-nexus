@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-// Mock the API module
 vi.mock('../services/api', () => ({
   api: {
     getRecentSessions: vi.fn(),
@@ -23,7 +22,6 @@ function renderSidebar(path = '/') {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // Default: empty sessions
   vi.mocked(api.getRecentSessions).mockResolvedValue({ sessions: [], count: 0 })
 })
 
@@ -34,7 +32,6 @@ afterEach(() => {
 describe('Sidebar session-updated event', () => {
   it('loads sessions on mount', async () => {
     renderSidebar()
-    // Wait for async load
     await act(async () => {
       await new Promise(r => setTimeout(r, 50))
     })
@@ -56,28 +53,22 @@ describe('Sidebar session-updated event', () => {
 
     renderSidebar()
 
-    // Wait for initial load
     await act(async () => {
       await new Promise(r => setTimeout(r, 50))
     })
 
-    // Update mock to return sessions
     vi.mocked(api.getRecentSessions).mockResolvedValue({ sessions, count: 1 })
 
-    // Fire session-updated event
     act(() => {
       window.dispatchEvent(new Event('session-updated'))
     })
 
-    // Wait for the sidebar to re-fetch and render
     await act(async () => {
       await new Promise(r => setTimeout(r, 50))
     })
 
-    // Verify API was called again (initial mount + event trigger)
     expect(api.getRecentSessions).toHaveBeenCalledTimes(3)
 
-    // Verify session preview is displayed
     expect(screen.getByText('Hello world')).toBeInTheDocument()
   })
 
@@ -88,11 +79,8 @@ describe('Sidebar session-updated event', () => {
       await new Promise(r => setTimeout(r, 50))
     })
 
-    // Initial load should still fetch
     expect(api.getRecentSessions).toHaveBeenCalledTimes(1)
 
-    // Fire event — sidebar is on settings route, shouldn't trigger refresh
-    // (the route-based refresh is skipped, but the event-based one still fires)
     vi.mocked(api.getRecentSessions).mockResolvedValue({
       sessions: [{
         session_id: 's2',
@@ -114,7 +102,6 @@ describe('Sidebar session-updated event', () => {
       await new Promise(r => setTimeout(r, 50))
     })
 
-    // The event listener fires regardless of route
     expect(api.getRecentSessions).toHaveBeenCalledTimes(2)
   })
 
@@ -127,8 +114,6 @@ describe('Sidebar session-updated event', () => {
 
     unmount()
 
-    // After unmount, firing the event should not cause an error
-    // and the API should not be called again
     const callCount = vi.mocked(api.getRecentSessions).mock.calls.length
     act(() => {
       window.dispatchEvent(new Event('session-updated'))

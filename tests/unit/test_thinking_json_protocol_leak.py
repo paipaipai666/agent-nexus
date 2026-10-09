@@ -32,7 +32,6 @@ class TestThinkingDoesNotDisableProbe:
         caps = detect_capabilities("any-model", "https://api.example.com")
 
         assert caps.supports_thinking is True
-        # 关键：thinking 覆盖不应把「其余能力仍是默认值、可探测」也抹掉
         assert caps.from_default_fallback is True, (
             "只配置 model_thinking 时不应跳过 tool_calling/json_mode 探测"
         )
@@ -62,7 +61,6 @@ class TestProbeThenNativeStrategy:
 
         real = AgentLLM.__dict__["_merge_probed_capabilities"]
         client = object.__new__(AgentLLM)
-        # Unique endpoint per case so probe cache cannot leak across tests
         client.model = f"test/model-{tool_calling}-{thinking}"
         client.base_url = f"https://api.example.com/v1/{tool_calling}/{thinking}"
         client._capabilities = None

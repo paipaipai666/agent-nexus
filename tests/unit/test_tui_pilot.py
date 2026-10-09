@@ -10,9 +10,6 @@ from textual.widgets import Button, Label, Static
 pytestmark = pytest.mark.asyncio
 
 
-# ── ConfirmDialog tests ──────────────────────────────────────────────
-
-
 class ConfirmTestApp(App):
     """Minimal app that pushes ConfirmDialog and captures the dismiss result."""
 
@@ -30,7 +27,6 @@ class ConfirmTestApp(App):
 
 
 class TestConfirmDialogPilot:
-
     async def test_compose_buttons_present(self):
         """Both confirm and cancel buttons are rendered."""
         app = ConfirmTestApp("test_tool", "some params")
@@ -128,10 +124,6 @@ class TestConfirmDialogPilot:
             assert title is not None
 
 
-# ── HUD widget tests ────────────────────────────────────────────────
-
-
-
 def _settings_with_profile(m, model="n/a"):
     """Configure a mocked get_settings to expose the active-profile contract."""
     m.return_value.llm_model_id = model
@@ -146,7 +138,6 @@ class HUDTestApp(App):
 
 
 class TestHUDWidgetPilot:
-
     async def test_compose_shows_model_name(self):
         """HUD displays the short model name from settings."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
@@ -218,9 +209,6 @@ class TestHUDWidgetPilot:
                 assert "undo" in rendered
 
 
-# ── AgentNexusTUI main app tests ────────────────────────────────────
-
-
 def _make_mock_version():
     v = MagicMock()
     v.status.return_value = {
@@ -240,7 +228,6 @@ def _make_mock_agent():
 
 
 class TestAgentNexusTUIPilot:
-
     async def test_app_launch_sets_title(self):
         """App TITLE is AgentNexus and ChatScreen is pushed on mount."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:

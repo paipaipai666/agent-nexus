@@ -10,16 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Question taxonomy, aligned with LongMemEval's core abilities plus the
-# short-term axes (distractor filtering / state tracking) our probe research
-# flagged as uncovered:
-#   single_hop        — one fact, stated once
-#   multi_session     — must combine facts from separated turns/sessions
-#   knowledge_update  — a later turn supersedes an earlier fact; answer = current
-#   temporal          — question about the earlier (superseded) state
-#   distractor_filter — answer must ignore planted irrelevant content
-#   abstention        — answer is not in the conversation; system should say so
-#   open_domain       — needs world knowledge beyond the conversation (LOCOMO)
 QA_TYPES = (
     "single_hop",
     "multi_session",
@@ -33,7 +23,7 @@ QA_TYPES = (
 
 @dataclass
 class Turn:
-    role: str           # "user" | "assistant"
+    role: str
     content: str
 
 
@@ -41,18 +31,11 @@ class Turn:
 class BenchQuestion:
     id: str
     question: str
-    answer: str                 # gold short phrase (abstention: e.g. "无法确定")
+    answer: str
     qa_type: str = "single_hop"
-    # Source-location labels from the public benchmarks (LoCoMo dia_ids like
-    # "D1:3", LongMemEval session ids). Unused by the current metrics — kept
-    # for the day LTM writes carry provenance and true evidence-Recall@k
-    # becomes computable.
     evidence: list[str] = field(default_factory=list)
 
 
-# qa_types where "gold appears in the retrieved context" is not a valid
-# expectation: abstention gold is a canonical phrase, open-domain gold needs
-# world knowledge beyond the dialogue.
 NO_RETRIEVAL_CHECK = ("abstention", "open_domain")
 
 
@@ -74,9 +57,6 @@ class QuestionResult:
     f1: float = 0.0
     judge_correct: bool | None = None
     prompt_chars: int = 0
-    # Retrieval-level (model-free) measurement: the memory context the backend
-    # actually injected for this question, and whether the gold answer is
-    # covered by it. None when the qa_type makes coverage meaningless.
     context_chars: int = 0
     retrieval_hit: bool | None = None
     error: str = ""

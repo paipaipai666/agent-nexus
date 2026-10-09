@@ -84,5 +84,3 @@ select = ["E", "F", "I", "W"]
 ignore = ["E402", "E501", "F841"]
 
 [tool.pyinstaller]
-# PyInstaller build config — uses agentnexus.spec for full control
-# Run: pyinstaller agentnexus.spec --noconfirm

@@ -16,8 +16,6 @@ from agentnexus.tools.mcp.adapter import (
 
 from .conftest import FakeExitStack, _make_descriptor
 
-# ── Resource cleanup tests ──────────────────────────────────────
-
 
 class TestResourceCleanup:
     @staticmethod
@@ -102,7 +100,7 @@ class TestResourceCleanup:
         monkeypatch.setattr(manager, "_submit", fake_submit)
         monkeypatch.setattr(threading.Thread, "join", lambda self, timeout: None)
 
-        manager.close()  # must not raise
+        manager.close()
         assert manager._started is False
 
     def test_asyncexitstack_aclose_called_on_disconnect(self):
@@ -122,9 +120,6 @@ class TestResourceCleanup:
 
         asyncio.run(manager._disconnect_server("api"))
         assert closed is True
-
-
-# ── Timeout tests ───────────────────────────────────────────────
 
 
 class TestTimeoutBehavior:
@@ -191,10 +186,7 @@ class TestTimeoutBehavior:
         monkeypatch.setattr(manager, "_submit", fake_submit)
         result = manager.call_tool("tool", {})
         assert result == "ok"
-        assert captured[0] == 15  # timeout_sec + 5
-
-
-# ── Event loop lifecycle tests ──────────────────────────────────
+        assert captured[0] == 15
 
 
 class TestEventLoopLifecycle:
@@ -295,9 +287,6 @@ class TestEventLoopLifecycle:
         thread.join(timeout=5)
 
 
-# ── _submit real Event Loop tests ───────────────────────────────
-
-
 class TestSubmitRealLoop:
     def teardown_method(self):
         if hasattr(self, "_loop") and self._loop is not None:
@@ -359,9 +348,6 @@ class TestSubmitRealLoop:
 
         manager._loop.call_soon_threadsafe(manager._loop.stop)
         thread.join(timeout=5)
-
-
-# ── start() success path tests ─────────────────────────────────
 
 
 class TestStartSuccess:
@@ -428,9 +414,6 @@ class TestStartSuccess:
         assert manager._thread is None
 
 
-# ── start() idempotency tests ──────────────────────────────────
-
-
 class TestStartIdempotency:
     def test_start_when_already_started_returns_immediately(self, monkeypatch):
         """start() must return early when _started is already True."""
@@ -446,8 +429,8 @@ class TestStartIdempotency:
         monkeypatch.setattr(manager, "_connect_all", fake_connect_all)
 
         manager.start()
-        assert manager._loop is None  # no loop created
-        assert called == []  # _connect_all not called
+        assert manager._loop is None
+        assert called == []
 
     def test_start_no_servers_sets_started_without_loop(self):
         """start() with no servers must set started and not create loop."""
@@ -456,9 +439,6 @@ class TestStartIdempotency:
         assert manager._started is True
         assert manager._loop is None
         assert manager._thread is None
-
-
-# ── _run_loop exception handling ────────────────────────────────
 
 
 class TestRunLoopExceptionHandling:
@@ -494,9 +474,6 @@ class TestRunLoopExceptionHandling:
         thread.join(timeout=5)
 
 
-# ── call_lock concurrency tests ─────────────────────────────────
-
-
 class TestCallLockConcurrency:
     def test_call_lock_serializes_concurrent_calls(self):
         """Two concurrent tool calls on the same server must be serialized by call_lock."""
@@ -522,12 +499,11 @@ class TestCallLockConcurrency:
         async def run():
             t1 = asyncio.create_task(manager._call_tool_async(descriptor, {}))
             t2 = asyncio.create_task(manager._call_tool_async(descriptor, {}))
-            await asyncio.sleep(0.05)  # let t1 acquire lock
+            await asyncio.sleep(0.05)
             event.set()
             await asyncio.gather(t1, t2)
 
         asyncio.run(run())
-        # enter/exit pairs must be non-overlapping
         assert call_order == ["enter", "exit", "enter", "exit"]
 
     def test_call_lock_released_on_error(self):
@@ -550,7 +526,6 @@ class TestCallLockConcurrency:
         async def run():
             with pytest.raises(RuntimeError):
                 await manager._call_tool_async(descriptor, {})
-            # lock must be free for a second call
             with pytest.raises(RuntimeError):
                 await manager._call_tool_async(descriptor, {})
             assert call_count == ["called", "called"]

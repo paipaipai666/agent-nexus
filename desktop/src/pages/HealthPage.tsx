@@ -92,7 +92,7 @@ export default function HealthPage() {
 
         {health && (
           <>
-            {/* Overall Status */}
+            {}
             <div className="p-5 rounded-lg flex items-center gap-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
               <StatusIcon status={health.status} size={32} />
               <div>
@@ -107,7 +107,7 @@ export default function HealthPage() {
               </div>
             </div>
 
-            {/* Individual Checks */}
+            {}
             <div className="space-y-3">
               {Object.entries(health.checks).map(([name, check]) => {
                 const Icon = checkIcons[name] || Heart

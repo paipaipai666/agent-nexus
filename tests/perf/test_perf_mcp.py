@@ -43,9 +43,6 @@ def _make_config(name: str) -> MCPServerConfig:
     return MCPServerConfig(name=name, transport="stdio", command="python")
 
 
-# ── Manager creation ────────────────────────────────────────────────
-
-
 def test_mcp_manager_create_empty(benchmark):
     def _run():
         return MCPToolManager([])
@@ -62,9 +59,6 @@ def test_mcp_manager_create_many_servers(benchmark):
 
     result = benchmark(_run)
     assert len(result._servers) == 100
-
-
-# ── Status snapshot scaling ─────────────────────────────────────────
 
 
 def test_mcp_status_snapshot_small(benchmark):
@@ -98,9 +92,6 @@ def test_mcp_status_snapshot_large(benchmark):
     assert p95 < STATUS_SNAPSHOT_P95_MAX_MS, f"p95={p95:.1f}ms >= {STATUS_SNAPSHOT_P95_MAX_MS}ms"
 
 
-# ── Build descriptor ────────────────────────────────────────────────
-
-
 def test_mcp_build_descriptor_single(benchmark):
     manager = MCPToolManager([])
     config = _make_config("perf")
@@ -130,9 +121,6 @@ def test_mcp_build_descriptor_many(benchmark):
     assert len(descriptors) == 100
     p95 = _p95_ms(benchmark.stats.stats.data)
     assert p95 < BUILD_DESCRIPTOR_P95_MAX_MS, f"p95={p95:.1f}ms >= {BUILD_DESCRIPTOR_P95_MAX_MS}ms"
-
-
-# ── Register tools ──────────────────────────────────────────────────
 
 
 def test_mcp_register_tools_empty(benchmark):
@@ -186,9 +174,6 @@ def test_mcp_register_tools_with_filter(benchmark):
     assert len(registered) == 50
 
 
-# ── Tool name sanitization ──────────────────────────────────────────
-
-
 def test_mcp_sanitize_name_many(benchmark):
     from agentnexus.tools.mcp.adapter import _sanitize_name
 
@@ -199,9 +184,6 @@ def test_mcp_sanitize_name_many(benchmark):
 
     results = benchmark(_run)
     assert len(results) == 100
-
-
-# ── Normalize tool result ───────────────────────────────────────────
 
 
 def test_mcp_normalize_result_many(benchmark):
@@ -222,9 +204,6 @@ def test_mcp_normalize_result_many(benchmark):
 
     texts = benchmark(_run)
     assert len(texts) == 200
-
-
-# ── Ensure unique name ──────────────────────────────────────────────
 
 
 def test_mcp_ensure_unique_name_many_collisions(benchmark):

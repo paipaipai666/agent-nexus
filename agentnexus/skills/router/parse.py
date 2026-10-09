@@ -21,7 +21,6 @@ def extract_intent_signals(
     connectors: list[tuple[str, int]] = []
     priority_mode = "default"
 
-    # Detect connector patterns
     for pattern, mode, _kind in _CONNECTOR_PATTERNS:
         match = re.search(pattern, text_lower)
         if match:
@@ -29,7 +28,6 @@ def extract_intent_signals(
             priority_mode = mode
             break
 
-    # Detect parallel connectors
     if not connectors:
         for sep in ["并", "同时", "以及", " and ", "顺便", "另外"]:
             idx = text_lower.find(sep)
@@ -38,7 +36,6 @@ def extract_intent_signals(
                 priority_mode = "parallel"
                 break
 
-    # Extract action verbs with positions
     action_verbs: list[tuple[str, int]] = []
     for canonical, synonyms in _VERB_LEXICON.items():
         all_forms = [canonical] + synonyms
@@ -51,7 +48,6 @@ def extract_intent_signals(
             if term.lower() in lowered_forms:
                 action_verbs.append((canonical, len(text_lower)))
 
-    # Extract object nouns with positions
     object_nouns: list[tuple[str, int]] = []
     for canonical, synonyms in _OBJECT_LEXICON.items():
         all_forms = [canonical] + synonyms
@@ -67,7 +63,6 @@ def extract_intent_signals(
     action_verbs.sort(key=lambda x: x[1])
     object_nouns.sort(key=lambda x: x[1])
 
-    # Determine primary action/object based on priority mode
     primary_action: str | None = None
     primary_object: str | None = None
 

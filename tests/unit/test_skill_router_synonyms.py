@@ -342,7 +342,6 @@ class TestCrossCategorySynonyms:
         service.reset()
         route = service.maybe_auto_select("编写代码文档")
         assert route is not None
-        # Should match code, not docx
         assert route.entry.workflow_id == "code"
 
     def test_search_not_confused_with_database(self, service: SkillService):
@@ -350,7 +349,6 @@ class TestCrossCategorySynonyms:
         service.reset()
         route = service.maybe_auto_select("搜索数据库")
         assert route is not None
-        # Should match database, not search
         assert route.entry.workflow_id == "database"
 
     def test_email_document_distinct(self, service: SkillService):

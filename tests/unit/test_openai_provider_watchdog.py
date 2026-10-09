@@ -31,7 +31,7 @@ class _HangingStream:
         if not self._yielded:
             self._yielded = True
             return _FakeChunk("first")
-        threading.Event().wait()  # hang until abort closes us
+        threading.Event().wait()
         raise AssertionError("unreachable")
 
     def close(self):
@@ -80,7 +80,7 @@ def test_hung_stream_aborted_after_chunk_gap():
             items.append(chunk)
 
     assert [c.choices[0].delta.content for c in items] == ["first"]
-    assert stream.closed  # abort fired, unblocking the pump thread
+    assert stream.closed
 
 
 def test_slow_stream_chunks_below_gap_pass_through():
@@ -95,7 +95,6 @@ def test_slow_stream_chunks_below_gap_pass_through():
 
 def test_total_budget_blows_long_running_stream():
     provider = OpenAIProvider()
-    # timeout=1 -> total budget 2s (patched mult); 0.4s x 5 chunks exhausts it
     stream = _SlowStream(gap_s=0.4, n=10)
     provider._active_stream = stream
 

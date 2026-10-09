@@ -9,9 +9,6 @@ let mainWindow: BrowserWindow | null = null
 let backendProcess: ChildProcess | null = null
 let backendReady = false
 
-// Electron 33 ships Node 20 — no Promise.withResolvers. Keep the linear
-// withResolvers control flow via this local helper (falls back to the
-// executor form, which the API here specifically requires).
 function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   const ctor = Promise as unknown as {
     withResolvers?: () => { promise: Promise<T>; resolve: (value: T) => void }
@@ -34,9 +31,6 @@ const HEALTH_CHECK_TIMEOUT_MS = 120_000
 function isDev(): boolean {
   return !!process.env.VITE_DEV_SERVER_URL
 }
-// ── Projects (per-session workspace folders, Codex-style) ──────────
-// Each chat session binds to a project folder at creation; there is no
-// global workspace switch. Persisted in userData/workspace.json.
 
 interface ProjectStore {
   projects: string[]
@@ -48,8 +42,6 @@ function workspaceFile(): string {
 }
 
 function projectKey(p: string): string {
-  // Match the backend's workspace normalization: casefold the drive letter
-  // on Windows so dedupe/compare is stable.
   const resolved = path.resolve(p)
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
@@ -63,36 +55,30 @@ function loadStore(): ProjectStore {
         lastProject: typeof data.lastProject === 'string' ? data.lastProject : null,
       }
     }
-    // Migrate the legacy { workspace } single-global-workspace format.
     if (typeof data.workspace === 'string' && data.workspace) {
       return { projects: [data.workspace], lastProject: data.workspace }
     }
-  } catch { /* no saved store yet */ }
+  } catch {  }
   return { projects: [], lastProject: null }
 }
 
 function saveStore(store: ProjectStore): void {
   try {
     fs.writeFileSync(workspaceFile(), JSON.stringify(store))
-  } catch { /* read-only userData — non-fatal */ }
+  } catch {  }
 }
 
 function getProcessCwd(): string {
-  // The backend process still needs a cwd (fallback for sessions without an
-  // explicit workspace). Default to the user's home dir — a packaged app's
-  // inherited cwd would otherwise be the install dir, which can be read-only.
   const { lastProject } = loadStore()
   return lastProject && fs.existsSync(lastProject) ? lastProject : os.homedir()
 }
-// PyInstaller onefile 的 bootloader 会派生子进程；只 kill 父进程会把真正的后端
-// 留在 %TEMP%\_MEI 里继续占端口。Windows 下用 taskkill /T 终止整棵进程树。
 function killBackendTree(signal: NodeJS.Signals) {
   const proc = backendProcess
   if (!proc || proc.killed || proc.pid == null) return
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
   } else {
-    try { proc.kill(signal) } catch { /* already exited */ }
+    try { proc.kill(signal) } catch {  }
   }
 }
 
@@ -162,7 +148,6 @@ function startBackend(): Promise<boolean> {
       backendReady = false
     })
 
-    // Wait for the backend to be healthy
     waitForBackend().then((ready) => {
       backendReady = ready
       if (!ready && backendProcess) {
@@ -174,8 +159,6 @@ function startBackend(): Promise<boolean> {
   })
 }
 
-// 产品决策：关闭 = 立刻停止，但结果必须落盘。先请求服务端 /shutdown
-// （取消所有活跃 run、写终态、自行退出），等待自然退出；超时再走硬杀。
 function postShutdown(): Promise<void> {
   const { promise, resolve } = withResolvers<void>()
   const req = http.request(
@@ -205,12 +188,8 @@ async function stopBackend() {
   if (!proc) return
   console.log('Stopping backend (graceful shutdown)...')
 
-  // 1) Ask the server to cancel active runs (persist) and self-exit.
   await postShutdown()
 
-  // 2) Wait for natural exit (the server schedules its own exit ~1s after
-  // the response). Race note: the 'exit' handler in startBackend may null
-  // backendProcess first; we hold our own reference.
   const { promise: exitPromise, resolve: resolveExit } = withResolvers<boolean>()
   const timer = setTimeout(() => resolveExit(false), 4000)
   proc.once('exit', () => {
@@ -248,8 +227,6 @@ async function createWindow() {
   })
 
   if (isDev()) {
-    // 本机 ::1 被 WFP 过滤（connect → WSAEACCES），localhost 解析可能命中
-    // ::1 导致 ERR_CONNECTION_REFUSED 黑窗——dev URL 显式改 127.0.0.1。
     const devUrl = (process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/')
       .replace('://localhost:', '://127.0.0.1:')
     const loadDev = async (attempt = 0): Promise<void> => {
@@ -257,7 +234,6 @@ async function createWindow() {
         await mainWindow!.loadURL(devUrl)
         console.log(`[dev] renderer loaded: ${devUrl}`)
       } catch (e) {
-        // vite 未就绪/偶发拒绝：重试而非永久黑窗（dev 服务器通常 1s 内可用）
         if (attempt < 10) {
           await new Promise((r) => setTimeout(r, 500))
           return loadDev(attempt + 1)
@@ -269,7 +245,6 @@ async function createWindow() {
     mainWindow.webContents.openDevTools()
     mainWindow.show()
   } else {
-    // Show loading page, start backend, then load the app
     mainWindow.loadFile(path.join(__dirname, '../dist/loading.html'))
     mainWindow.show()
 
@@ -304,8 +279,6 @@ app.on('activate', () => {
 let isQuitting = false
 
 app.on('before-quit', (event) => {
-  // Async cleanup: hold the quit until the backend has finished cancelling
-  // runs and exited (or was force-killed), then re-issue quit.
   if (isQuitting) return
   event.preventDefault()
   isQuitting = true
@@ -314,7 +287,6 @@ app.on('before-quit', (event) => {
   })
 })
 
-// Window control IPC
 ipcMain.on('window-minimize', () => mainWindow?.minimize())
 ipcMain.on('window-maximize', () => {
   if (mainWindow?.isMaximized()) {
@@ -325,12 +297,10 @@ ipcMain.on('window-maximize', () => {
 })
 ipcMain.on('window-close', () => mainWindow?.close())
 
-// Backend status IPC
 ipcMain.handle('get-backend-status', () => ({
   ready: backendReady,
   port: BACKEND_PORT,
 }))
-// Workspace IPC
 async function pickDialog(options: Electron.OpenDialogOptions): Promise<string[] | null> {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, options)
@@ -346,7 +316,6 @@ ipcMain.handle('pick-directory', async () => {
   return files?.[0] ?? null
 })
 
-// Chat attachments — local files are referenced by absolute path, never copied.
 ipcMain.handle('pick-files', async () => {
   const files = await pickDialog({ title: '选择附件', properties: ['openFile', 'multiSelections'] })
   if (!files) return null
@@ -355,7 +324,6 @@ ipcMain.handle('pick-files', async () => {
     .map(p => ({ path: p, name: path.basename(p), size: fs.statSync(p).size }))
 })
 
-// Attachment liveness/size check (renderer is context-isolated, cannot stat).
 ipcMain.handle('stat-files', (_event, paths: string[]) => {
   return (paths || []).map(p => {
     try {
@@ -369,7 +337,6 @@ ipcMain.handle('stat-files', (_event, paths: string[]) => {
 
 ipcMain.handle('get-projects', () => loadStore())
 
-// load → guard → mutate → persist → return updated store.
 function handleStoreUpdate<TArg>(
   channel: string,
   guard: (arg: TArg) => boolean,
@@ -408,4 +375,3 @@ handleStoreUpdate<string>('set-last-project',
   (store, p) => {
     store.lastProject = p
   })
-

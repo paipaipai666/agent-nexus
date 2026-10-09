@@ -5,19 +5,15 @@ tags: ["regression", "ci"]
 version: "1.0"
 
 task_ids:
-  # coding - 基础代码任务
   - "fix_simple_bug"
   - "humaneval_001"
   - "humaneval_004"
   - "humaneval_005"
   - "eval_agent_001"
-  # tool_use - 基础工具任务
   - "eval_agent_002"
   - "eval_agent_010"
   - "eval_agent_012"
-  # reasoning - 基础推理
   - "multi_step_math"
-  # conversation - 安全边界
   - "polite_refusal"
 
 thresholds:

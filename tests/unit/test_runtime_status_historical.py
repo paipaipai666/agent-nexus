@@ -12,7 +12,6 @@ import pytest
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-# ── helpers ──────────────────────────────────────────────────────────
 
 def _init_db(db_path: str):
     """Create the conversation_sessions table with stats columns."""
@@ -45,7 +44,6 @@ def _insert_session(db_path: str, session_id: str, workspace: str = "test_ws",
         "VALUES (?, ?, ?, ?)",
         (session_id, workspace, profile, preview),
     )
-    # Try to update stats columns if they exist
     try:
         conn.execute(
             "UPDATE conversation_sessions SET "
@@ -54,12 +52,10 @@ def _insert_session(db_path: str, session_id: str, workspace: str = "test_ws",
             (input_tokens, output_tokens, step_count, session_id),
         )
     except sqlite3.OperationalError:
-        pass  # Columns don't exist yet (before migration)
+        pass
     conn.commit()
     conn.close()
 
-
-# ── fakes ────────────────────────────────────────────────────────────
 
 class _FakeAgent:
     model_id = "test-model"
@@ -99,8 +95,6 @@ class _FakeRuntime:
         pass
 
 
-# ── fixtures ─────────────────────────────────────────────────────────
-
 @pytest.fixture
 def db_dir(tmp_path):
     return str(tmp_path / "test.db")
@@ -112,21 +106,17 @@ def server_app(temp_agentnexus_home, db_dir):
 
     _init_db(db_dir)
 
-    # Build-time agent: zero stats (always)
     build_agent = _FakeAgent()
     build_mm = _FakeMemoryManager()
 
     chat = _FakeChatService()
 
-    # Historical session: exists in DB with stats, NO agent in chat._agents
     _insert_session(db_dir, "hist-1", input_tokens=3000, output_tokens=1500, step_count=5)
     chat._sessions["hist-1"] = type("Handle", (), {"id": "hist-1", "skill": None, "profile": None})()
 
-    # Historical session with ZERO stats (new session, never ran)
     _insert_session(db_dir, "hist-new", input_tokens=0, output_tokens=0, step_count=0)
     chat._sessions["hist-new"] = type("Handle", (), {"id": "hist-new", "skill": None, "profile": None})()
 
-    # Active session: has agent in chat._agents (in-memory stats)
     active_agent = _FakeAgent()
     active_agent.total_usage = {"input_tokens": 5000, "output_tokens": 2500}
     active_agent._step_count = 8
@@ -144,8 +134,6 @@ def server_app(temp_agentnexus_home, db_dir):
 def client(server_app):
     return TestClient(server_app)
 
-
-# ── RED: these should FAIL before the fix ────────────────────────────
 
 def test_historical_session_returns_persisted_token_usage(client):
     """Historical session should return persisted input/output tokens from DB."""
@@ -240,11 +228,9 @@ def test_pre_existing_db_without_stats_columns(tmp_path):
     conn.commit()
     conn.close()
 
-    # get_session_stats should run migration and read zeros (no stats written yet)
     result = ConversationVersionManager.get_session_stats(db_path, "old-session")
     assert result == {"input_tokens": 0, "output_tokens": 0, "step_count": 0}
 
-    # Now persist stats — migration should have already run in get_session_stats
     vm = ConversationVersionManager("old-session", db_path, workspace_path="ws")
     vm.update_session_stats(input_tokens=100, output_tokens=50, step_count=2)
 

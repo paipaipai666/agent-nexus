@@ -75,7 +75,6 @@ class TestModelResolution:
     def test_unknown_active_model_falls_back_to_flat(self):
         s = Settings(llm_model_id="flat", llm_base_url="https://x.example.com",
                      llm_api_key="sk-k", active_model="gone/missing")
-        # resolve_active_model returns None; flat fallback kicks in
         model, *_ = s.get_active_llm_profile()
         assert model == "flat"
 
@@ -87,7 +86,7 @@ class TestJudgeProfile:
                      judge_api_key="sk-judge", judge_model_id="legacy/x")
         model, base, key, _ = s.get_judge_profile()
         assert model == "judge-model"
-        assert key.get_secret_value() == "sk-x"  # provider's own key
+        assert key.get_secret_value() == "sk-x"
 
     def test_judge_follows_task_model_by_default(self):
         p = _provider(models=[ModelEntry(model_id="task-model")])
@@ -126,7 +125,7 @@ class TestPerModelCapabilityOverride:
         s = Settings(llm_providers=[p])
         monkeypatch.setattr(capabilities, "get_settings", lambda: s)
         caps = detect_capabilities("custom-model2", "https://x.example.com/v1")
-        assert caps.supports_vision is False  # conservative default, no crash
+        assert caps.supports_vision is False
 
     def test_find_model_override_entry_matches_base_url_loosely(self):
         p = _provider(base="https://x.example.com/v1/")
@@ -173,7 +172,6 @@ class TestValidateProviders:
                                                models=[{"model_id": "m"}])])
 
     def test_masked_key_kept_on_merge_semantics(self):
-        # api_key None flows through; the route merges the stored key
         out = _validate_providers([ProviderInput(
             name="sf", base_url="https://x.example.com/v1")])
         assert out[0]["api_key"] is None
@@ -221,7 +219,7 @@ class TestActiveProfileLegacy:
 class TestAgentLLMConfigure:
     def test_configure_hot_switches_model_and_resets_capability_cache(self):
         llm = AgentLLM(model="openai/gpt-4o", api_key="sk-1", base_url="https://api.openai.com")
-        llm._capabilities = object()  # pretend capabilities were detected
+        llm._capabilities = object()
         llm._session_tracker = object()
 
         llm.configure(model="anthropic/claude-sonnet", base_url="https://api.anthropic.com",
@@ -237,5 +235,4 @@ class TestAgentLLMConfigure:
     def test_configure_keeps_model_id_as_written(self):
         llm = AgentLLM(model="openai/gpt-4o", api_key="sk-1", base_url="https://api.openai.com")
         llm.configure(model="deepseek-chat", base_url="https://api.deepseek.com", api_key="sk-3")
-        # No vendor-prefix guessing — model id is used exactly as configured
         assert llm.model == "deepseek-chat"

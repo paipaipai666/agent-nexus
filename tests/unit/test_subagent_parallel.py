@@ -45,7 +45,6 @@ def _make_registry(subagent_workers: int = 2) -> ToolRegistry:
             ),
             lambda **kw: "ok",
         )
-        # Pre-create the lane pool under the patched settings
         registry.get_lane_pool("subagent")
     return registry
 
@@ -98,7 +97,7 @@ class TestLaneRouting:
         ]
         results = ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
 
-        assert [r.result for r in results] == ["ok", "ok", "ok"]  # order preserved
+        assert [r.result for r in results] == ["ok", "ok", "ok"]
         assert thread_names["subagent_run"].startswith("lane-subagent")
         assert not thread_names["web_search"].startswith("lane-subagent")
         assert thread_names["file_write"] == threading.main_thread().name
@@ -134,7 +133,7 @@ class TestSubagentConcurrencyCap:
         results = ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
 
         assert [r.result for r in results] == ["done"] * 5
-        assert state["peak"] == cap  # hits the cap but never exceeds it
+        assert state["peak"] == cap
 
     def test_lane_tasks_actually_run_in_parallel(self):
         registry = _make_registry(subagent_workers=2)
@@ -158,7 +157,7 @@ class TestSubagentConcurrencyCap:
         ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
         elapsed = time.monotonic() - start
 
-        assert elapsed < 0.7  # serial execution would take ≥ 0.8s
+        assert elapsed < 0.7
 
 
 class TestCancelBridgePropagation:
@@ -199,8 +198,6 @@ class TestCancelBridgePropagation:
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         tool(task="t", role="explorer")
 
-        # The checker is always installed now: the wall-clock deadline cancels
-        # the child through it even when no cancel bridge exists.
         assert received["checker"] is not None
         assert received["checker"]() is False
 
@@ -234,7 +231,6 @@ class TestInheritedTraceLinkage:
         finally:
             trace_manager.end_trace()
 
-        # No active trace now — worker must see None, not a stale link
         ToolDispatcher(registry).execute(calls, execute_fn=lambda n, a: registry.get_tool(n)(**a))
 
         assert seen[0] == parent_id

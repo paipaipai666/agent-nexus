@@ -7,8 +7,6 @@ import {
 } from 'lucide-react'
 import { api, type TimelineEvent } from '../services/api'
 
-// WS GUI events drop step_id/db id, so live updates poll the REST cursor —
-// one authoritative stream, 1.5s latency, no id-mapping hacks.
 const POLL_MS = 1500
 
 const NODE_STYLE: Record<string, { icon: typeof Circle; color: string; label: string }> = {
@@ -29,15 +27,12 @@ const NODE_STYLE: Record<string, { icon: typeof Circle; color: string; label: st
   skill_auto_selected: { icon: Sparkles, color: 'var(--cyan)', label: 'Skill route' },
 }
 
-// TurnRecord.status vocabulary: running | finished | empty_answer | failed | interrupted.
 const RUN_STATUS_STYLE: Record<string, { color: string; label: string } | undefined> = {
   failed: { color: 'var(--red)', label: 'Run failed' },
   interrupted: { color: 'var(--red)', label: 'Run interrupted' },
   empty_answer: { color: 'var(--amber)', label: 'Run finished (no answer)' },
 }
 
-// 纯 FSM 转移事件 —— 时间线上是噪声（TOOLS_DONE/ANSWER_READY 与紧随其后的
-// tool_done/Answer 表达同一件事），渲染时过滤，落盘仍保留完整日志。
 const HIDDEN_JOURNAL: Record<string, true> = {
   START: true, TOOLS_DONE: true, ROUND_READY: true, ANSWER_READY: true, ABORT: true,
 }
@@ -109,7 +104,6 @@ function nodeDetail(e: TimelineEvent): string {
     case 'message_delta':
       return String(p.text || '').slice(0, 200)
     case 'run_finished':
-      // 真出错时把具体原因顶出来，而不是只标一个 error
       return join([p.status ? `status=${String(p.status)}` : '', p.error, p.reason, p.detail])
     case 'token_summary':
       return join([
@@ -145,7 +139,6 @@ export default function TimelinePage() {
       .catch(() => { setEvents([]) })
   }, [])
 
-  // Initial load on session switch + polling cursor for live append.
   useEffect(() => {
     if (!sessionId) return
     setEvents([]); lastIdRef.current = 0; setSelected(null); setCtx(null)
@@ -163,7 +156,6 @@ export default function TimelinePage() {
     return () => clearInterval(t)
   }, [sessionId, loadInitial])
 
-  // Load context snapshot for the selected event's step.
   useEffect(() => {
     if (!selected || !sessionId || selected.step_id <= 0) { if (!selected || selected.step_id <= 0) setCtx(null); return }
     let cancelled = false
@@ -228,7 +220,7 @@ export default function TimelinePage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Timeline column */}
+        {}
         <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-4">
           {!sessionId ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
@@ -300,7 +292,7 @@ export default function TimelinePage() {
           )}
         </div>
 
-        {/* Context panel */}
+        {}
         <div
           className="w-[420px] shrink-0 overflow-y-auto px-4 py-4"
           style={{ borderLeft: '1px solid var(--border)' }}

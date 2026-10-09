@@ -40,8 +40,8 @@ class CoherenceReport:
     @property
     def passed(self) -> bool:
         if self.total_steps < 4:
-            return True  # short traces don't stress coherence
-        return self.coherence_score >= 8.5  # scaled to 0-10, 8.5 ≈ 0.85
+            return True
+        return self.coherence_score >= 8.5
 
     def summary(self) -> str:
         return f"Trace: {self.trace_id} | Steps: {self.total_steps} | Coherence: {self.coherence_score:.1f}/10"
@@ -55,7 +55,7 @@ class CoherenceEvaluator:
         for f in sorted(Path(traces_dir).glob("*.jsonl"), reverse=True):
             traces = load_trace_spans(f)
             for tid, spans in traces.items():
-                if len(spans) >= 3:  # need enough steps
+                if len(spans) >= 3:
                     reports.append(self._evaluate_one(tid, spans))
         return reports
 
@@ -74,7 +74,6 @@ class CoherenceEvaluator:
             report.coherence_score = 10.0
             return report
 
-        # Build step summary for the judge
         steps_text_parts = []
         for i, s in enumerate(named):
             name = s.get("name", "unknown")
@@ -93,7 +92,7 @@ class CoherenceEvaluator:
                 silent=True,
             ) or ""
         except Exception:
-            return report  # return with score=0 on judge failure
+            return report
 
         score = self._parse_score(response)
         report.coherence_score = score
@@ -112,4 +111,4 @@ class CoherenceEvaluator:
             m = re.search(r'(\d+\.?\d*)', response)
         if m:
             return min(10.0, max(0.0, float(m.group(1))))
-        return 5.0  # default mid-score on parse failure
+        return 5.0

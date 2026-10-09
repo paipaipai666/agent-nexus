@@ -22,7 +22,7 @@ def catalog(tmp_path, monkeypatch):
     import agentnexus.rag.kb_service as kbs
     from agentnexus.rag.store import KnowledgeBaseCatalog
     from agentnexus.storage.chroma import reset_storage_client, resolve_collection_name
-    reset_storage_client()  # 清掉模块级 _collections 缓存，避免跨测试串目录
+    reset_storage_client()
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
     monkeypatch.setattr(kbs, "get_knowledge_base_catalog", lambda: cat)
     kb_id = resolve_collection_name(namespace="default")
@@ -80,7 +80,6 @@ class TestIncrementalSkip:
         """同来源存在多个文档 = 历史异常态，必须走替换路径自愈而非跳过。"""
         from agentnexus.rag.kb_service import persist_ingested_document
         persist_ingested_document(_artifacts("doc.md", "第一版"), "default")
-        # 手工制造异常：同 source 塞第二个文档（旧时代遗留/部分失败痕迹）
         extra = _artifacts("doc.md", "幽灵版").document
         extra.kb_id = catalog.list_documents()[0].kb_id
         from agentnexus.rag.ids import make_document_version, make_source_id
@@ -97,7 +96,6 @@ class TestIncrementalSkip:
         from agentnexus.rag.kb_service import persist_ingested_document
         artifacts = _artifacts("doc.md", "内容")
         persist_ingested_document(artifacts, "default")
-        # 删掉 chunks 模拟不完整态
         catalog._conn.execute(
             "DELETE FROM document_chunks WHERE document_id = ?",
             (artifacts.document.document_id,))

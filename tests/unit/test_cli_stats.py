@@ -81,7 +81,6 @@ class TestStatsCmd:
         with isolated_filesystem():
             os.makedirs("traces")
             now = time.time()
-            # Need a "task" span for total_tasks > 0
             task_record = {
                 "trace_id": "tr-001", "name": "task",
                 "start_time": now - 10, "latency_ms": 100,
@@ -113,7 +112,6 @@ class TestStatsCmd:
             try:
                 result = runner.invoke(app, ["stats"])
                 assert result.exit_code == 0
-                # Check for cache hit rate display (use ASCII fallback for encoding issues)
                 assert "80.0%" in result.stdout or "cache" in result.stdout.lower()
             finally:
                 cfg._settings_cache = None

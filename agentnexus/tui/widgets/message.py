@@ -23,23 +23,17 @@ def render_diff_with_colors(diff_text: str) -> str:
     colored_lines = []
 
     for line in lines:
-        # Escape Rich markup special characters in the content
         escaped_line = line.replace('[', '\\[').replace(']', '\\]')
 
         if line.startswith('---') or line.startswith('+++'):
-            # File headers - bold
             colored_lines.append(f"[bold]{escaped_line}[/bold]")
         elif line.startswith('-'):
-            # Removed lines - red background
             colored_lines.append(f"[white on red]{escaped_line}[/white on red]")
         elif line.startswith('+'):
-            # Added lines - green background
             colored_lines.append(f"[white on green]{escaped_line}[/white on green]")
         elif line.startswith('@@'):
-            # Hunk headers - cyan background
             colored_lines.append(f"[white on dark_cyan]{escaped_line}[/white on dark_cyan]")
         else:
-            # Context lines - default
             colored_lines.append(escaped_line)
 
     return '\n'.join(colored_lines)
@@ -85,7 +79,6 @@ class ChatMessage(Widget):
                 w = Static(_safe(code), classes="msg-code")
                 w.styles.height = "auto"
                 self.mount(w)
-
 
     def attach_reaction(self, emoji: str, comment: str = ""):
         """Mount a small emoji reaction row under this message (user bubbles).

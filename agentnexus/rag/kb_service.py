@@ -125,7 +125,7 @@ def delete_document_and_vectors(namespace: str, document_id: str) -> int:
         try:
             log_id = catalog.log_deletion_failure(namespace, document_id, chunk_ids, str(e))
         except Exception:
-            log_id = -1  # 日志都写不进时，异常信息里仍带全上下文
+            log_id = -1
         raise DeleteIncompleteError(log_id, document_id, deleted, e) from e
     return deleted
 
@@ -143,7 +143,6 @@ def retry_failed_deletion(log_id: int) -> dict:
     except Exception as e:
         catalog.update_deletion_log_status(log_id, "failed", str(e))
         raise
-    # 幂等兜底：若中间态期间有人重嵌过，确保向量也被清掉
     if entry["chunk_ids"]:
         delete_documents(ids=entry["chunk_ids"], namespace=entry["namespace"])
     catalog.update_deletion_log_status(log_id, "completed")
@@ -206,8 +205,6 @@ def persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> di
 
     artifacts.document.kb_id = kb_record.kb_id
 
-    # 跳过条件要求：恰好一个同来源文档、版本一致、且确实带 chunks
-    # （多版本共存是历史异常态，走替换路径自愈；空 chunks 视为不完整写入）
     existing = catalog.list_documents_by_source(kb_record.kb_id, artifacts.document.source_id)
     if (len(existing) == 1
             and existing[0].document_version == artifacts.document.document_version
@@ -257,7 +254,6 @@ def finish_ingestion_run(
     run.documents_seen = documents_seen
     run.chunks_written = chunks_written
     run.error_message = error_message
-    # Merge metadata instead of replacing to preserve progress keys
     run.metadata = {**run.metadata, **(metadata or {})}
     run.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     catalog = get_knowledge_base_catalog()
@@ -303,7 +299,6 @@ def ingest_one_document(
     run = start_ingestion_run(namespace, effective_uri, run_id=run_id)
     started_at = time.perf_counter()
 
-    # Stage: loading
     _update_run_progress(run, stage="loading", stage_pct=10, message="Loading document")
 
     try:
@@ -324,7 +319,6 @@ def ingest_one_document(
             enrichment_progress_callback=_enrichment_progress if enable_contextual else None,
         )
 
-        # Stage: embedding + persisting
         _update_run_progress(run, stage="embedding", stage_pct=80, message="Generating embeddings")
         stats = persist_ingested_document(artifacts, namespace)
         _update_run_progress(run, stage="persisting", stage_pct=90, message="Saving to database")
@@ -358,7 +352,6 @@ def ingest_one_document(
         "replaced_chunks": stats["replaced_chunks"],
     })
 
-    # Auto-generate wiki pages from the ingested document
     _update_run_progress(run, stage="wiki", stage_pct=95, message="Generating wiki pages")
     try:
         from agentnexus.wiki.wiki_service import WikiService
@@ -392,9 +385,6 @@ def search_kb(
     has_list: bool | None = None,
     heading_depth: int | None = None,
 ):
-    # Reuse the process-wide singleton (same path the kb_search tool uses) —
-    # per-call construction reloads every chunk into RAM and re-triggers
-    # reranker loading, ratcheting private memory upward under concurrency.
     retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return []

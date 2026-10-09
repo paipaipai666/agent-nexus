@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
-
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS session_todos (
     id         INTEGER NOT NULL,
@@ -32,7 +31,7 @@ CREATE TABLE IF NOT EXISTS session_todos (
 class TodoItem:
     id: int
     description: str
-    status: str  # "pending" | "in_progress" | "done"
+    status: str
     created_at: str
     updated_at: str
 
@@ -51,8 +50,6 @@ class SessionTodoList:
         self._session_id = session_id
         self._items: list[TodoItem] = []
         self._next_id: int = 1
-        # 可观测性回调：add/update 时通知（action, item）。由 chat 服务接线到
-        # 时间线事件；回调抛错不得影响 todo 本身 —— 调用处各自包 try。
         self.on_change: Callable[[str, TodoItem], None] | None = None
         self._db: sqlite3.Connection | None = None
 
@@ -66,8 +63,6 @@ class SessionTodoList:
             except Exception as e:
                 logger.warning("TodoList SQLite init failed, falling back to in-memory: %s", e)
                 self._db = None
-
-    # ── persistence helpers ──────────────────────────────────────
 
     def _load(self):
         """Load items from SQLite into memory."""
@@ -104,8 +99,6 @@ class SessionTodoList:
             self._db.commit()
         except Exception as e:
             logger.warning("TodoList persist failed: %s", e)
-
-    # ── public API ───────────────────────────────────────────────
 
     def add(self, description: str) -> TodoItem:
         now = datetime.now(timezone.utc).isoformat()

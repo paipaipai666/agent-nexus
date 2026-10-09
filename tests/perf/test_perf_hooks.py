@@ -17,9 +17,6 @@ def _lightweight_hook(ctx: HookContext) -> None:
     _ = ctx.payload.get("key")
 
 
-# ── HookManager.fire() with N hooks ──────────────────────────
-
-
 class TestHookManagerFire:
     @pytest.mark.parametrize("hook_count", [0, 10, 50])
     def test_fire_scaling(self, benchmark, hook_count):
@@ -66,9 +63,6 @@ class TestHookManagerFire:
 
         result = benchmark(mgr.fire, HookType.BEFORE_TOOL_CALL, {"key": "value"})
         assert result.aborted
-
-
-# ── Concurrent fire ───────────────────────────────────────────
 
 
 class TestConcurrentFire:

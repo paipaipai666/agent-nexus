@@ -56,9 +56,6 @@ def _ensure_kb_and_chunks(catalog, count, kb_id="perf_kb", namespace="perf"):
     return _make_chunks(count, kb_id=kb_id)
 
 
-# ── KnowledgeBaseCatalog init ─────────────────────────────────────────
-
-
 def test_catalog_init(benchmark, perf_env):
     from agentnexus.rag.store import KnowledgeBaseCatalog
 
@@ -86,9 +83,6 @@ def test_upsert_knowledge_base(benchmark, perf_env):
 
     benchmark(catalog.upsert_knowledge_base, record)
     catalog.close()
-
-
-# ── Upsert chunks ─────────────────────────────────────────────────────
 
 
 def test_upsert_chunks_10(benchmark, perf_env):
@@ -128,9 +122,6 @@ def test_upsert_chunks_1000(benchmark, perf_env):
     catalog.close()
 
 
-# ── List chunks ───────────────────────────────────────────────────────
-
-
 def test_list_chunks_by_kb_10000(perf_env):
     from agentnexus.rag.store import KnowledgeBaseCatalog
 
@@ -146,9 +137,6 @@ def test_list_chunks_by_kb_10000(perf_env):
     assert p95 < LIST_CHUNKS_10000_P95_MAX_MS, f"list_chunks_by_kb p95={p95:.0f}ms"
     assert len(result) == 10000
     catalog.close()
-
-
-# ── List documents ────────────────────────────────────────────────────
 
 
 def test_list_documents_1000(benchmark, perf_env):
@@ -188,9 +176,6 @@ def test_list_documents_1000(benchmark, perf_env):
     catalog.close()
 
 
-# ── Metadata encoding throughput ──────────────────────────────────────
-
-
 def test_metadata_encode_decode(perf_env):
     from agentnexus.rag.store import _decode_metadata, _encode_metadata
 
@@ -220,9 +205,6 @@ def test_metadata_encode_decode(perf_env):
     assert len(decoded) == count
     for i, d in enumerate(decoded):
         assert d["index"] == i
-
-
-# ── Knowledge base listing ────────────────────────────────────────────
 
 
 def test_list_knowledge_bases(benchmark, perf_env):

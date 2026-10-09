@@ -1,30 +1,3 @@
-/**
- * Regression test: reasoning (thinking) must never render BELOW the answer
- * on the desktop chat surface.
- *
- * Bug report: 桌面端有时"agent 的最终答案或者某次的输出内容优先于思考
- * 内容被展示出来"（TUI 无此现象）。
- *
- * Root cause chain:
- *  1. The backend can legitimately deliver reasoning deltas AFTER content
- *     deltas. agentnexus/core/llm.py and providers/openai_provider.py dispatch
- *     `content` before `reasoning_content` within a single chunk, and
- *     interleaved-reasoning models (e.g. Gemini) emit content chunks before
- *     reasoning chunks. Wire order: token(...) -> reasoning(...).
- *  2. SessionManager's `reasoning` WS handler appends a new thinking card at
- *     the END of the message list (no positional correction), while the `token`
- *     handler has already created the answer draft at the end — and nulls
- *     currentReasoningIds on every token, so each later reasoning segment
- *     opens another card below the draft.
- *  3. services/chat.py suppresses ANSWER_THOUGHT once reasoning streamed
- *     (has_reasoning), so no corrective `thinking` event ever arrives.
- *  => Rendered order: [answer, thinking]. TUI never renders STREAM_REASONING,
- *     so it cannot hit this.
- *
- * These tests drive the REAL SessionManager + wsPool via a MockWebSocket and
- * assert final message order. They fail against the buggy handler and pass
- * once reasoning insertion mirrors the thinking handler's splice-before-draft.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
@@ -55,7 +28,6 @@ class MockWebSocket {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-/** Capture live messages from the SessionManager context. */
 function makeProbe(
   useSession: typeof import('../components/session/SessionManager').useSession,
   onMessages: (msgs: Array<{ id: string; role: string; content: string }>) => void,
@@ -94,7 +66,6 @@ describe('Reasoning/answer display order (desktop)', () => {
         <Probe />
       </SessionManager>,
     )
-    // Activate session s1: creates it in the Map → subscribe effect wires WS handlers.
     await act(async () => {
       const { screen } = await import('@testing-library/react')
       screen.getByTestId('activate').click()
@@ -114,12 +85,11 @@ describe('Reasoning/answer display order (desktop)', () => {
   const answerIndex = () => latestMessages.findIndex(m => m.role === 'assistant')
 
   it('content delta followed by reasoning delta (same-chunk order from llm.py) keeps thinking above the answer', async () => {
-    // Backend order per core/llm.py: content dispatched before reasoning_content.
     await act(async () => {
       ws._receive({ type: 'run_started', run_id: 'run-1' })
       ws._receive({ type: 'token', content: 'The answer is 42.' })
       ws._receive({ type: 'reasoning', content: 'Let me reason step by step.' })
-      await sleep(30) // let any RAF flush settle
+      await sleep(30)
     })
 
     expect(answerIndex()).toBeGreaterThanOrEqual(0)
@@ -145,11 +115,9 @@ describe('Reasoning/answer display order (desktop)', () => {
     expect(sysIdx).toBeGreaterThanOrEqual(0)
     expect(ansIdx).toBeGreaterThanOrEqual(0)
     expect(sysIdx).toBeLessThan(ansIdx)
-    // Content integrity: both tokens accumulated into ONE draft, reasoning kept.
     const ans = latestMessages[ansIdx]
     expect(ans.content).toBe('The answer is 42.')
     expect(latestMessages[sysIdx].content).toBe('Thinking first. ')
-    // Every thinking card must precede the answer message.
     for (let i = 0; i < latestMessages.length; i++) {
       if (latestMessages[i].role === 'system') expect(i).toBeLessThan(ansIdx)
     }
@@ -196,7 +164,6 @@ describe('Reasoning/answer display order (desktop)', () => {
       await sleep(10)
     })
 
-    // No "Thinking..." / blank system cards from empty thought.
     const systemCards = latestMessages.filter(m => m.role === 'system')
     expect(systemCards.length).toBe(0)
     expect(latestMessages.some(m => m.content.includes('Thinking'))).toBe(false)
@@ -207,11 +174,9 @@ describe('Reasoning/answer display order (desktop)', () => {
   it('tool flow: thinking commits before the tool card, duplicate draft is discarded, next step renders after', async () => {
     await act(async () => {
       ws._receive({ type: 'run_started', run_id: 'run-1' })
-      // Step 1: streamed thought text + thinking card, then a tool call.
       ws._receive({ type: 'token', content: 'Thought: let me check. Answer: nothing yet.' })
       ws._receive({ type: 'thinking', content: 'Let me check the files.' })
       ws._receive({ type: 'tool_call', tool_name: 'file_read' })
-      // Step 2 (after tool_result): reasoning + answer.
       ws._receive({ type: 'tool_result', tool_name: 'file_read', result: 'ok' })
       ws._receive({ type: 'reasoning', content: 'Now I know. ' })
       ws._receive({ type: 'token', content: 'Final answer.' })
@@ -226,17 +191,13 @@ describe('Reasoning/answer display order (desktop)', () => {
     const tIdx = roles.indexOf('system')
     const toolIdx = roles.indexOf('tool')
     const aIdx = roles.indexOf('assistant')
-    // thinking → tool → (step 2) reasoning → answer
     expect(tIdx).toBeGreaterThanOrEqual(0)
     expect(toolIdx).toBeGreaterThan(tIdx)
     expect(aIdx).toBeGreaterThan(toolIdx)
-    // Only ONE assistant message (step-1 duplicate draft was discarded)…
     expect(roles.filter(r => r === 'assistant').length).toBe(1)
-    // …and all system cards precede it.
     for (let i = 0; i < latestMessages.length; i++) {
       if (latestMessages[i].role === 'system') expect(i).toBeLessThan(aIdx)
     }
-    // Content integrity: step-2 tokens accumulated into one draft.
     expect(latestMessages[aIdx].content).toBe('Final answer.')
   })
 
@@ -284,7 +245,6 @@ describe('Reasoning/answer display order (desktop)', () => {
       ws._receive({ type: 'token', content: 'Draft' })
       await sleep(30)
     })
-    // History reload lands mid-run
     await act(async () => {
       if (!setMessagesRef.current) throw new Error('setMessages not captured')
       setMessagesRef.current([

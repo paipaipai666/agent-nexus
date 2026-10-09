@@ -33,7 +33,7 @@ class TestPreview:
     def test_default_max_len_500(self):
         text = "a" * 600
         result = _preview(text)
-        assert len(result) == 503  # 500 + 3 for "..."
+        assert len(result) == 503
         assert result.endswith("...")
 
 
@@ -57,13 +57,12 @@ class TestAgentLLMInit:
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://default.url"
         mock_settings.return_value.llm_timeout = 60
-        # AgentLLM resolves the active provider profile (flat fields are the fallback)
         mock_settings.return_value.get_active_llm_profile.return_value = (
             "default-model", "https://default.url", SecretStr("key"), 60,
         )
 
         llm = AgentLLM()
-        assert llm.model == "default-model"  # exactly as configured
+        assert llm.model == "default-model"
         assert llm.api_key == "key"
         assert llm.base_url == "https://default.url"
         assert llm.timeout == 60
@@ -76,7 +75,7 @@ class TestAgentLLMInit:
         mock_settings.return_value.llm_timeout = 60
 
         llm = AgentLLM(model="custom", apiKey="custom-key", baseUrl="https://custom.url", timeout=30)
-        assert llm.model == "custom"  # exactly as configured
+        assert llm.model == "custom"
         assert llm.api_key == "custom-key"
         assert llm.base_url == "https://custom.url"
         assert llm.timeout == 30
@@ -112,7 +111,7 @@ class TestThinkRetryLoop:
         def fake_call(messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None, on_token=None, effort=None):
             call_count[0] += 1
             if call_count[0] == 1:
-                return ""  # simulates transient failure (empty = retry)
+                return ""
             return "final answer"
 
         llm = AgentLLM()
@@ -318,7 +317,7 @@ class TestCall:
         mock_settings.return_value.model_tool_calling = None
         mock_settings.return_value.model_json_mode = None
         mock_settings.return_value.model_thinking = False
-        mock_settings.return_value.model_thinking_effort = "high"  # ignored while off
+        mock_settings.return_value.model_thinking_effort = "high"
         mock_settings.return_value.find_model_override_entry.return_value = None
         mock_trace.active = None
 
@@ -348,7 +347,6 @@ class TestCall:
         mock_trace.active = None
 
         llm = AgentLLM()
-        # capabilities.detect_capabilities reads settings via its own import
         with patch("agentnexus.core.capabilities.get_settings", return_value=mock_settings.return_value):
             provider = MagicMock()
             provider.stream_chat.return_value = _make_result(text="ok")
@@ -489,7 +487,7 @@ class TestCapabilityProbe:
     def test_unknown_model_without_probe_stays_conservative(self, temp_agentnexus_home, monkeypatch):
         """Without a catalog or successful probe, flags stay off."""
 
-        self._patch_provider(monkeypatch, None)  # probe cannot run
+        self._patch_provider(monkeypatch, None)
         client = AgentLLM(model="stealth/never-known", api_key="k",
                           base_url="https://example.test/v1")
         assert client.capabilities.supports_tool_calling is False
@@ -510,7 +508,6 @@ class TestPerCallStateIsolation:
             barrier.wait()
             client.last_tool_calls = [{"name": f"tool_{tag}", "arguments": {}}]
             client.last_error = f"err_{tag}"
-            # 给对方线程一点覆盖时间
             import time
             time.sleep(0.05)
             seen[tag] = [client.last_tool_calls, client.last_error]

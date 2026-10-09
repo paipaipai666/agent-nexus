@@ -38,7 +38,7 @@ def build_environment_block(
     cwd_text = str(cwd)
     moment = now if now is not None else datetime.now().astimezone()
     stamp = moment.strftime("%Y-%m-%d %H:%M")
-    raw_offset = moment.strftime("%z")  # e.g. "+0800"; empty when unknown
+    raw_offset = moment.strftime("%z")
     offset = f" (UTC{raw_offset[:3]}:{raw_offset[3:]})" if raw_offset else ""
     terminal = (
         os.environ.get("TERM_PROGRAM")
@@ -72,7 +72,6 @@ def _collect_chain(cwd: Path, global_path: Path | None) -> list[tuple[Path, str]
     candidates: list[Path] = []
     if global_path is not None and global_path.is_file():
         candidates.append(global_path)
-    # Filesystem root → cwd; deeper files win on conflict.
     for directory in reversed([cwd, *cwd.parents]):
         candidate = directory / _AGENTS_FILENAME
         if candidate.is_file():
@@ -129,9 +128,6 @@ def load_project_instructions(
             f'<project_instructions path="{path.as_posix()}">\n{text}\n</project_instructions>'
         )
 
-    # Budget: fill from HIGHEST precedence so tight budgets always keep the
-    # files closest to cwd; the per-file cap < total budget guarantees at
-    # least the deepest file always survives.
     total = len(header)
     kept_reversed: list[str] = []
     dropped = 0

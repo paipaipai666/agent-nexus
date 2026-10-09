@@ -13,9 +13,6 @@ from typing import Any
 
 import yaml
 
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
 
 class TaskCategory(str, Enum):
     """任务能力分类。"""
@@ -44,27 +41,23 @@ class EvalType(str, Enum):
 
 class GraderType(str, Enum):
     """评分器类型。"""
-    DETERMINISTIC = "deterministic"          # 代码测试、字符串匹配
-    LLM_RUBRIC = "llm_rubric"              # LLM-as-judge
-    STATIC_ANALYSIS = "static_analysis"      # ruff / mypy / bandit
-    STATE_CHECK = "state_check"              # 环境状态验证
-    TOOL_CALLS = "tool_calls"               # 工具调用验证
-    CODE_EXECUTION = "code_execution"        # 代码执行测试
-    TRANSCRIPT = "transcript"                # 转录约束
-    HUMAN = "human"                          # 人工评分
-    COMPOSITE = "composite"                  # 组合评分
+    DETERMINISTIC = "deterministic"
+    LLM_RUBRIC = "llm_rubric"
+    STATIC_ANALYSIS = "static_analysis"
+    STATE_CHECK = "state_check"
+    TOOL_CALLS = "tool_calls"
+    CODE_EXECUTION = "code_execution"
+    TRANSCRIPT = "transcript"
+    HUMAN = "human"
+    COMPOSITE = "composite"
 
 
 class ScoringMode(str, Enum):
     """组合评分模式。"""
-    WEIGHTED = "weighted"    # 加权求和
-    BINARY = "binary"        # 全部通过才算通过
-    HYBRID = "hybrid"        # required 必须通过 + 加权其余
+    WEIGHTED = "weighted"
+    BINARY = "binary"
+    HYBRID = "hybrid"
 
-
-# ---------------------------------------------------------------------------
-# Grader Config
-# ---------------------------------------------------------------------------
 
 @dataclass
 class GraderConfig:
@@ -118,10 +111,6 @@ class GraderConfig:
         return result
 
 
-# ---------------------------------------------------------------------------
-# Tracked Metrics
-# ---------------------------------------------------------------------------
-
 DEFAULT_TRACKED_METRICS = [
     "n_turns",
     "n_toolcalls",
@@ -129,10 +118,6 @@ DEFAULT_TRACKED_METRICS = [
     "latency",
 ]
 
-
-# ---------------------------------------------------------------------------
-# Task Definition
-# ---------------------------------------------------------------------------
 
 @dataclass
 class EvalTask:
@@ -220,10 +205,6 @@ class EvalTask:
         return errors
 
 
-# ---------------------------------------------------------------------------
-# Suite Definition
-# ---------------------------------------------------------------------------
-
 @dataclass
 class SuiteThresholds:
     """套件级别的阈值配置。
@@ -290,10 +271,6 @@ class EvalSuite:
             result["task_ids"] = self.task_ids
         return result
 
-
-# ---------------------------------------------------------------------------
-# YAML Loader
-# ---------------------------------------------------------------------------
 
 def _parse_grader(data: dict[str, Any]) -> GraderConfig:
     """从 dict 解析 GraderConfig。"""
@@ -378,10 +355,10 @@ def load_tasks_from_dir(directory: str | Path) -> list[EvalTask]:
         return tasks
     for yaml_file in sorted(dir_path.rglob("*.yaml")):
         if yaml_file.name.startswith("_"):
-            continue  # 跳过 _suite.yaml 等元文件
+            continue
         try:
             task = load_task_from_yaml(yaml_file)
             tasks.append(task)
         except Exception:
-            continue  # 跳过无效文件
+            continue
     return tasks

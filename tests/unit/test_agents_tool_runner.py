@@ -115,7 +115,6 @@ class TestExecuteTool:
         )
         assert isinstance(result, ToolError)
         assert result.error_code == "VALIDATION_FAILED"
-        # LOW-02: ValueError is a safe domain exception, message preserved
         assert "bad input" in result.message
 
     @patch("agentnexus.core.hooks.get_hook_manager")
@@ -247,7 +246,6 @@ class TestHitlAcrossThreadHop:
 
     @patch("agentnexus.core.hooks.get_hook_manager")
     def test_confirm_bridge_no_target_still_fails_closed(self, mock_get_hook):
-
         from agentnexus.agents.tool_runner import execute_tool
         from agentnexus.tools.confirm_bridge import ConfirmBridge
         from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry

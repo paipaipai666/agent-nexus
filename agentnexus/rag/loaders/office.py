@@ -82,13 +82,11 @@ def _extract_docx_paragraphs(file_path: str) -> list[tuple[str, str | None]]:
         if text:
             paragraphs.append((text, style_name))
 
-    # Extract tables (w:tbl elements)
     for tbl in body.findall("w:tbl", _DOCX_NS):
         rows = []
         for tr in tbl.findall("w:tr", _DOCX_NS):
             cells = []
             for tc in tr.findall("w:tc", _DOCX_NS):
-                # Extract all paragraph text within each cell
                 cell_parts = []
                 for p in tc.findall("w:p", _DOCX_NS):
                     cell_text = ''.join(

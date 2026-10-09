@@ -45,11 +45,10 @@ class E2ERecord:
     noise_rate: float
     query: str
     generation: str
-    correct: bool | None  # None = generated but not yet judged (generate-only mode)
-    judge_score: float | None  # None for rule-judged rejection tasks or pending
+    correct: bool | None
+    judge_score: float | None
     latency_s: float
     error: str = ""
-    # retrieval attribution: how many of the top-k contexts were positive docs
     retrieval_pos_hits: int | None = None
     retrieval_pos_total: int | None = None
 
@@ -134,7 +133,6 @@ def _make_llm(model_selector: str):
             baseUrl=provider.base_url,
             timeout=provider.timeout,
         )
-    # fall back to the active task model
     profile = settings.get_active_llm_profile()
     model_id, base_url, api_key, timeout = profile
     return AgentLLM(model=model_id, apiKey=api_key.get_secret_value(), baseUrl=base_url, timeout=timeout)
@@ -156,7 +154,7 @@ def _process_rgb_query(
     error = ""
     generation = ""
     judge_score: float | None = None
-    correct: bool | None = None  # None until judged (rules, LLM, or later rejudge)
+    correct: bool | None = None
     pos_hits: int | None = None
     pos_total: int | None = None
     try:
@@ -195,8 +193,7 @@ def _process_rgb_query(
             correct, judge_score, judge_error = judge_noise_answer(query, generation, judge, limiter)
             if judge_error:
                 error = judge_error
-        # else generate-only: correct/judge_score stay None for rejudge
-    except Exception as exc:  # per-query isolation: one bad query must not kill the run
+    except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         logger.warning("RGB query %s failed: %s", query.query_id, error)
 
@@ -255,7 +252,6 @@ def run_rgb_e2e(
         judge_name = f"{getattr(judge, 'model', 'judge')}"
     limiter = RateLimiter(rpm)
 
-    # One throwaway ChromaDB for the whole run; per-query collections inside it.
     import shutil
     import tempfile
     from pathlib import Path
@@ -279,9 +275,6 @@ def run_rgb_e2e(
             reinforce_refusal=reinforce_refusal,
         )
 
-    # Concurrent workers hide high per-call latency (free-tier APIs often run
-    # 10-20s/call at peak); the shared RateLimiter still caps the aggregate
-    # at rpm, so workers only fill the pipe, never exceed the quota.
     workers = max(1, min(6, round(rpm / 3))) if rpm else 1
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -555,8 +548,6 @@ def rejudge_report(
         record["rejudge_error"] = error
         return record
 
-    # Concurrent like the generation loop: shared limiter caps the aggregate,
-    # workers hide per-call latency (thinking-mode judges run seconds each).
     workers = max(1, min(6, round(rpm / 10))) if rpm else 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for position, record in enumerate(pool.map(_rejudge_one, records), 1):
@@ -573,7 +564,6 @@ def rejudge_report(
             n_errors += 1
         else:
             n_correct += bool(record.get("correct_new"))
-            # generate-only reports store correct=None — nothing to compare against
             if record.get("correct") is not None:
                 comparable += 1
                 agree += int(bool(record["correct"]) == bool(record["correct_new"]))

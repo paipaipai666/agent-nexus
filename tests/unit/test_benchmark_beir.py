@@ -28,7 +28,6 @@ def fake_beir(tmp_path, monkeypatch):
     zip_path = cache / "minicorpus.zip"
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "w") as zf:
-        # real BEIR zips nest everything under a top-level "<name>/" directory
         zf.writestr("minicorpus/corpus.jsonl", "\n".join(json.dumps(item) for item in corpus))
         zf.writestr("minicorpus/queries.jsonl", "\n".join(json.dumps(item) for item in queries))
         zf.writestr("minicorpus/qrels/test.tsv", qrels_tsv)
@@ -41,7 +40,6 @@ def test_load_beir_dataset_parses_and_filters(fake_beir):
     assert data.suite == "beir"
     assert data.dataset == "MiniCorpus"
     assert [doc.doc_id for doc in data.docs] == ["d1", "d2"]
-    # q2's only qrel is rel=0 -> filtered out -> q2 excluded from evaluation
     assert {query.query_id for query in data.queries} == {"q1", "q3"}
     assert data.qrels == {"q1": {"d1": 1}, "q3": {"d1": 1}}
     assert data.docs[0].indexed_text == "Alpha first document"
@@ -78,6 +76,5 @@ def test_suite_registry_lists_and_filters():
     with pytest.raises(KeyError, match="Known suites"):
         get_suite("does-not-exist")
 
-    # Filtering by display name without touching the network: unknown name -> loud error
     with pytest.raises(ValueError, match="Available"):
         load_suite_datasets(suite, only=("not-a-dataset",), offline=True)

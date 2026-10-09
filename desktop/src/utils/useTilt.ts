@@ -4,12 +4,6 @@ const MAX_TILT_DEG = 6
 const motionReduced = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/**
- * Pointer-follow 3D tilt (v2.1). Rotates the element up to ±6° around X/Y
- * based on cursor position, springing back flat on leave. No-op under
- * prefers-reduced-motion. Attach the returned ref to the tilting element and
- * render its parent with `perspective` (see `.perspective-3d` in globals.css).
- */
 export function useTilt<T extends HTMLElement>(): RefObject<T | null> {
   const ref = useRef<T>(null)
 

@@ -32,9 +32,6 @@ def _make_mixed_messages(count: int) -> list[dict]:
     return msgs
 
 
-# ── project_mild ──────────────────────────────────────────────
-
-
 class TestProjectMild:
     @pytest.mark.parametrize("count", [10, 50, 200])
     def test_project_mild_scaling(self, benchmark, count):
@@ -49,9 +46,6 @@ class TestProjectMild:
 
         result = benchmark(project_mild, messages)
         assert isinstance(result, list)
-
-
-# ── project_aggressive ────────────────────────────────────────
 
 
 class TestProjectAggressive:
@@ -81,9 +75,6 @@ class TestProjectAggressive:
         assert isinstance(result, list)
 
 
-# ── microcompact_messages ─────────────────────────────────────
-
-
 class TestMicrocompactMessages:
     def test_microcompact_100_messages(self, benchmark):
         messages = _make_mixed_messages(100)
@@ -108,9 +99,6 @@ class TestMicrocompactMessages:
         )
         _, cleaned = result
         assert cleaned is False
-
-
-# ── build_projection threshold routing ────────────────────────
 
 
 class TestBuildProjection:

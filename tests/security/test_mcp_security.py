@@ -33,9 +33,6 @@ def _make_descriptor(**overrides) -> MCPToolDescriptor:
     return MCPToolDescriptor(**defaults)
 
 
-# ── 1. Name sanitization — injection prevention ─────────────────
-
-
 class TestNameSanitizationSecurity:
     def test_shell_injection_escaped(self):
         """Shell metacharacters in server/tool names must be sanitized."""
@@ -69,10 +66,7 @@ class TestNameSanitizationSecurity:
         name = manager._build_local_tool_name(config, "search")
         assert name.startswith("mcp_")
         assert "__" in name
-        assert name.count("__") == 1  # exactly one double-underscore separator
-
-
-# ── 2. Access control — allowed_agents enforcement ───────────────
+        assert name.count("__") == 1
 
 
 class TestAgentAccessControl:
@@ -134,9 +128,6 @@ class TestAgentAccessControl:
             executor.invoke("mcp_api__secret", {}, caller="unauthorized_agent")
 
 
-# ── 3. Risk level propagation ────────────────────────────────────
-
-
 class TestRiskLevelPropagation:
     def test_high_risk_level_propagates(self):
         manager = MCPToolManager([])
@@ -161,9 +152,6 @@ class TestRiskLevelPropagation:
     def test_registry_rejects_unknown_risk_level_in_config(self):
         with pytest.raises(ValueError, match="风险等级"):
             MCPServerConfig(name="x", transport="stdio", command="python", risk_level="critical")
-
-
-# ── 4. HITL propagation ──────────────────────────────────────────
 
 
 class TestHITLPropagation:
@@ -203,9 +191,6 @@ class TestHITLPropagation:
         assert "blocked" in result
 
 
-# ── 5. Rate limiting ─────────────────────────────────────────────
-
-
 class TestRateLimitPropagation:
     def test_rate_limit_propagates_to_executor(self):
         manager = MCPToolManager([])
@@ -234,9 +219,6 @@ class TestRateLimitPropagation:
             executor.invoke("mcp_api__search", {}, caller="react_agent")
 
 
-# ── 6. Timeout propagation ───────────────────────────────────────
-
-
 class TestTimeoutPropagation:
     def test_timeout_propagates_to_executor(self):
         manager = MCPToolManager([])
@@ -248,9 +230,6 @@ class TestTimeoutPropagation:
         manager.register_tools(executor)
         meta = executor._tools["mcp_api__slow"][0]
         assert meta.timeout_sec == 5
-
-
-# ── 7. Include / exclude tool filtering ─────────────────────────
 
 
 class TestToolFilteringSecurity:
@@ -294,9 +273,6 @@ class TestToolFilteringSecurity:
         assert unique == "mcp_api__search_2"
 
 
-# ── 8. Transport validation security ─────────────────────────────
-
-
 class TestTransportSecurity:
     def test_http_transport_requires_url(self):
         with pytest.raises(ValueError, match="必须提供 url"):
@@ -323,9 +299,6 @@ class TestTransportSecurity:
         assert config.url == "https://mcp.example.com"
 
 
-# ── 9. Environment variable exposure risk ────────────────────────
-
-
 class TestEnvExposureSecurity:
     def test_env_dict_does_not_leak_to_tool_descriptor(self):
         """Env vars should stay in config, not leak to MCPToolDescriptor."""
@@ -336,14 +309,10 @@ class TestEnvExposureSecurity:
         tool = SimpleNamespace(name="search", description="Search", inputSchema={})
         manager = MCPToolManager([])
         descriptor = manager._build_descriptor(config, tool)
-        # Descriptor should not contain env information
         descriptor_dict = vars(descriptor)
         assert "env" not in descriptor_dict
         assert "API_KEY" not in str(descriptor_dict)
         assert "sk-123456" not in str(descriptor_dict)
-
-
-# ── 10. SDK availability enforcement ────────────────────────────
 
 
 class TestSdkAvailability:
@@ -360,9 +329,6 @@ class TestSdkAvailability:
         monkeypatch.setattr("builtins.__import__", mock_import)
         with pytest.raises(RuntimeError, match="MCP SDK"):
             MCPToolManager._ensure_sdk_available()
-
-
-# ── 11. Tool result content safety ───────────────────────────────
 
 
 class TestToolResultSafety:
@@ -420,9 +386,6 @@ class TestToolResultSafety:
         descriptor = _make_descriptor(server_name="api", remote_name="admin_op")
         with pytest.raises(RuntimeError, match="未返回文本内容"):
             asyncio.run(manager._call_tool_async(descriptor, {}))
-
-
-# ── 12. Disabled server isolation ────────────────────────────────
 
 
 class TestDisabledServerIsolation:

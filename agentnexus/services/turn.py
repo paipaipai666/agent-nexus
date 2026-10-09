@@ -14,8 +14,6 @@ logger = logging.getLogger(__name__)
 
 TurnStatus = Literal["running", "finished", "failed", "interrupted", "empty_answer"]
 
-# Bounded retries for durable commits — never spin forever; after this
-# many failures the caller must surface the error and stop the round.
 COMMIT_MAX_ATTEMPTS = 3
 COMMIT_RETRY_DELAY_S = 0.05
 
@@ -54,15 +52,8 @@ class TurnRuntime:
         self._record = TurnRecord(run_id=run_id, session_id=session_id, question=question, status="running")
         self._persisted = False
         self.last_commit_error: str = ""
-        # Snapshot STM boundary at turn start so we can journal new messages
-        # later. Identity-based (last message before this turn), NOT a count:
-        # journal row count and STM index only coincide when STM mirrors the
-        # journal, which fails after a restart (fresh STM) or with injected
-        # context rows — the count-based slice then silently drops the turn's
-        # assistant entries from the durable journal.
         self._stm_start_count = 0
         self._stm_boundary: dict | None = None
-        # Incremental per-round durable commits (crash loses only the in-flight round).
         self._committed_keys: set[tuple] = set()
         self._question_user_skipped = False
         if self._memory is not None:
@@ -70,7 +61,6 @@ class TurnRuntime:
                 existing = self._memory.short_term.get_all()
                 self._stm_start_count = len(existing)
                 self._stm_boundary = dict(existing[-1]) if existing else None
-                # Prior turns are already on disk — never re-commit them.
                 for m in existing:
                     self._committed_keys.add(self._msg_key(m))
             except Exception:
@@ -94,7 +84,6 @@ class TurnRuntime:
             key = self._msg_key(m)
             if key in self._committed_keys:
                 continue
-            # User question is committed at send_message start — don't duplicate.
             if (
                 not self._question_user_skipped
                 and m.get("role") == "user"
@@ -118,7 +107,7 @@ class TurnRuntime:
             return False
         new_msgs = self._collect_uncommitted()
         if not new_msgs:
-            return True  # nothing to write — treat as success so rounds proceed
+            return True
         last_err: Exception | None = None
         for attempt in range(1, COMMIT_MAX_ATTEMPTS + 1):
             try:
@@ -212,19 +201,9 @@ class TurnRuntime:
             return
         self._persisted = True
         record = self._record
-        # NOTE: Do NOT append the answer to memory here.
-        # The agent already stores it as "system" with "[最终答案]" prefix
-        # in re_act_agent.py:_on_emit_answer. Storing it again as "assistant"
-        # causes a duplicate that displays as thinking in history.
         if self._version is not None and self._memory is not None:
             try:
-                # Incremental rounds may have already flushed most rows —
-                # only append what is still uncommitted (never re-insert).
                 messages = self._collect_uncommitted()
-                # 决策 5: cancelled/failed turns leave an explicit marker in
-                # the message journal so a reopened session shows what
-                # happened — the answer itself is checkpoint metadata, not a
-                # history message.
                 if record.status == "interrupted":
                     messages.append({
                         "role": "assistant",
@@ -235,8 +214,6 @@ class TurnRuntime:
                         "role": "assistant",
                         "content": f"[执行失败] {record.reason}".rstrip(),
                     })
-                # Always leave a checkpoint carrying the turn answer so
-                # get_messages_with_answers() can backfill a missing [最终答案].
                 last_err: Exception | None = None
                 for attempt in range(1, COMMIT_MAX_ATTEMPTS + 1):
                     try:
@@ -262,10 +239,6 @@ class TurnRuntime:
                 logger.warning("Version commit failed: %s", e)
 
     def _build_interrupted_answer(self, *, status: TurnStatus, reason: str, detail: str = "") -> str:
-        # Compact, user-facing message. The full activity journal already
-        # lives in TurnRecord.journal (Timeline/logs) — dumping it here lands
-        # in the chat bubble via get_messages_with_answers() backfill and
-        # pollutes the rebuilt model context.
         suffix = f"（本轮已记录 {len(self._journal)} 项活动）" if self._journal else ""
         if status == "interrupted":
             return f"已中断（{reason}）{suffix}" if reason else f"已中断{suffix}"

@@ -53,7 +53,7 @@ class TestSubagentRegistryNaming:
         other = reg.register("s2", "r1", None, "explorer", "t")
         assert (e1.name, e2.name) == ("explorer-1", "explorer-2")
         assert ex.name == "executor-1"
-        assert other.name == "explorer-1"  # counter is per-session
+        assert other.name == "explorer-1"
 
     def test_name_hint_sanitize_and_dedup(self):
         reg = SubagentRegistry()
@@ -62,7 +62,7 @@ class TestSubagentRegistryNaming:
         e3 = reg.register("s1", "r1", "   ", "explorer", "t")
         assert e1.name == "我的 代理"
         assert e2.name == "我的 代理-2"
-        assert e3.name == "explorer-1"  # blank hint falls back to auto
+        assert e3.name == "explorer-1"
 
     def test_name_hint_capped_at_40_chars(self):
         reg = SubagentRegistry()
@@ -141,7 +141,7 @@ class TestSubagentVisibilityEvents:
         tool = self._tool_with_bridge(service, ctx_cls=_AutoCancelContext)
         payload = json.loads(tool(task="queued task"))
 
-        assert runs == []  # child never started
+        assert runs == []
         assert "打断" in payload["summary"]
         assert service.events[-1]["status"] == "interrupted"
         entry = service._subagents.get(payload["subagent_id"])
@@ -161,7 +161,7 @@ class TestSubagentVisibilityEvents:
         tool = self._tool_with_bridge(service)
         payload = json.loads(tool(task="slow task"))
 
-        assert len(runs) == 1  # no explorer fallback retry after cancel
+        assert len(runs) == 1
         assert payload["status"] == "error"
         assert "打断" in payload["summary"]
         assert service.events[-1]["kind"] == "finished"
@@ -210,7 +210,7 @@ class TestSubagentEventPersistence:
         service._subagent_emit(entry, "tool_call", status="tool_calling",
                                tool_name="file_read")
         persisted_types = [a[3] for a, _k in recorded]
-        assert persisted_types == ["subagent_event"]  # only the tool_call
+        assert persisted_types == ["subagent_event"]
 
     def test_events_reach_live_queues_with_seq(self, monkeypatch):
         import queue as _queue
@@ -221,4 +221,4 @@ class TestSubagentEventPersistence:
         event = q.get_nowait()
         assert event.type == "subagent_event"
         assert event.payload["kind"] == "token"
-        assert event.seq == 1  # seq still assigned for live ordering
+        assert event.seq == 1

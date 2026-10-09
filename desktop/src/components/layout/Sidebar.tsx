@@ -42,11 +42,6 @@ const formatTime = (dateStr: string) => {
   return new Date(dateStr + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-/**
- * Context sidebar for the Chat section (v2: 232px, luminance-step surfaces).
- * Projects group their sessions Codex-style; the New Chat button binds to the
- * currently selected project folder.
- */
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -70,7 +65,6 @@ export default function Sidebar() {
     if (isChatActive) loadRecentSessions()
   }, [location.pathname])
 
-  // Refresh sidebar when a session is updated (e.g., first message sent)
   useEffect(() => {
     const handleSessionUpdated = () => loadRecentSessions()
     window.addEventListener('session-updated', handleSessionUpdated)
@@ -81,8 +75,6 @@ export default function Sidebar() {
     setLoading(true)
     try {
       const { sessions } = await api.getRecentSessions(50)
-      // Filter out empty sessions (no preview = never had a user message).
-      // These are created eagerly on mount and clutter the sidebar.
       setRecentSessions(sessions.filter(s => s.preview && s.preview.trim()))
     } catch (error) {
       console.error('Failed to load recent sessions:', error)
@@ -91,9 +83,6 @@ export default function Sidebar() {
     }
   }
 
-  // Group sessions under their project folder (Codex-style). Explicit projects
-  // come first in stored order; sessions whose folder was never added render as
-  // implicit groups ordered by recency.
   const groups = useMemo<ProjectGroup[]>(() => {
     const byKey = new Map<string, RecentSession[]>()
     const q = query.trim().toLowerCase()
@@ -119,18 +108,10 @@ export default function Sidebar() {
   }, [recentSessions, projects, query])
 
   const handleNewChat = () => {
-    // Dispatch event so ChatPage can reset session state even when already on '/'.
-    // The new chat binds to the currently selected project folder.
     window.dispatchEvent(new Event('new-chat'))
     navigate('/')
   }
 
-  // Draft row (opencode-style): the in-progress chat is visible BEFORE the
-  // server row exists. Two draft states:
-  //   '/'          — New Chat screen, session not yet created (lazy creation)
-  //   /chat/:sid   — session created + first message sent, but the server
-  //                  row isn't visible yet (preview lands at run_started;
-  //                  local first user message bridges the gap)
   const draftSession = useMemo<{ id: string; preview: string; isNew: boolean } | null>(() => {
     if (location.pathname === '/') {
       return { id: '', preview: '', isNew: true }
@@ -172,7 +153,7 @@ export default function Sidebar() {
 
   return (
     <div className="w-[232px] flex flex-col h-full shrink-0" role="complementary" aria-label="Chat sessions">
-      {/* New Chat + search */}
+      {}
       <div className="px-3 pt-3 pb-2 shrink-0">
         <BorderBeam
           size="pulse-inner"
@@ -219,10 +200,10 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Projects */}
+      {}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
-        {/* Draft chat — pinned above project groups, visible before the
-            server-side session row exists (lazy creation / pre-run_started) */}
+        {
+}
         {draftSession && (
           <button
             onClick={() => (draftSession.isNew ? navigate('/') : handleSessionClick(draftSession.id))}
@@ -296,7 +277,7 @@ export default function Sidebar() {
               const isCollapsed = !!collapsed[group.key]
               return (
                 <div key={group.key}>
-                  {/* Project header */}
+                  {}
                   <div
                     className="group/proj flex items-center gap-1 px-1.5 py-1.5 rounded-lg transition-colors"
                     style={{ background: isSelected ? 'var(--surface-3)' : 'transparent', transitionDuration: '150ms' }}
@@ -346,7 +327,7 @@ export default function Sidebar() {
                     )}
                   </div>
 
-                  {/* Sessions under this project */}
+                  {}
                   {!isCollapsed && (
                     <div className="ml-4 space-y-1">
                       {group.sessions.length === 0 ? (
@@ -382,7 +363,7 @@ export default function Sidebar() {
                                   title="Running"
                                 />
                               )}
-                              {/* pending confirm badge — pulsing "!" */}
+                              {}
                               {sessions.get(session.session_id)?.pendingConfirm && (
                                 <span
                                   className="text-[12px] font-bold px-1.5 py-0.5 rounded-full shrink-0 animate-pulse"
@@ -392,7 +373,7 @@ export default function Sidebar() {
                                   !
                                 </span>
                               )}
-                              {/* Unread count badge */}
+                              {}
                             {sessions.get(session.session_id)?.unreadCount ? (
                               <span
                                 className="text-[12px] px-1 py-0.5 rounded-full shrink-0"
@@ -426,7 +407,7 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Settings — pinned to the bottom, styled like a session row */}
+      {}
       <div className="shrink-0 px-3 py-2.5" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <button
           onClick={() => navigate('/settings')}

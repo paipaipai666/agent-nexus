@@ -37,18 +37,17 @@ DIMENSIONS = (
     "retention", "control",
 )
 
-# All probes are deterministic invariants — every dimension must pass 100%.
 DEFAULT_THRESHOLDS: dict[str, float] = {d: 1.0 for d in DIMENSIONS}
 
 
 @dataclass
 class WriteOp:
     content: str
-    layer: str = "ltm"               # ltm | project
+    layer: str = "ltm"
     category: str = "fact"
     importance: float = 0.8
-    vec: list[float] | None = None   # synthetic embedding (cosine control)
-    workspace: str = "a"             # project layer only
+    vec: list[float] | None = None
+    workspace: str = "a"
     project_kind: str = "memo"
     backdate_days: int = 0
 
@@ -57,9 +56,9 @@ class WriteOp:
 class MemoryCase:
     name: str
     dimension: str
-    layer: str                       # ltm | project | stm | admission
+    layer: str
     writes: list[WriteOp] = field(default_factory=list)
-    supersede: list[tuple[int, int]] = field(default_factory=list)  # (old_idx, new_idx)
+    supersede: list[tuple[int, int]] = field(default_factory=list)
     query_vec: list[float] | None = None
     query_workspace: str = "a"
     min_similarity: float = 0.3
@@ -276,9 +275,6 @@ class MemoryEvaluator:
         result.detail = f"observed {len(observed)} item(s)"
 
 
-# ── STM / admission / TTL / eviction probes (procedural) ─────────────
-
-
 def _probe_stm_compact(sb: MemorySandbox, res: CaseResult) -> None:
     from agentnexus.memory.short_term import ShortTermMemory
     stm = ShortTermMemory()
@@ -303,7 +299,6 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.tools.history_search import history_search
 
-    # 构造归档文件（模拟引擎 _archive_history 的写入格式）
     hdir = sb.root / "history"
     hdir.mkdir(parents=True, exist_ok=True)
     records = [
@@ -321,7 +316,7 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
                    metadata={"memory_index": True,
                              "seg_start": i * 2, "seg_end": i * 2 + 2})
     stm.append("user", "最近的问题")
-    folded = stm.fold_index(50)  # 小预算强制折叠
+    folded = stm.fold_index(50)
     context = "\n".join(m["content"] for m in stm.get_all())
     if folded == 0:
         res.missing.append("fold did not trigger under tiny budget")
@@ -338,7 +333,6 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
 def _probe_stm_snip(sb: MemorySandbox, res: CaseResult) -> None:
     from agentnexus.memory.short_term import ShortTermMemory
     stm = ShortTermMemory()
-    # High-importance head: system role + keyword + long → score 0.66 ≥ 0.65
     stm.append("system", "重要约束：必须保留的上下文。" + "补" * 600)
     for i in range(5):
         stm.append("user", f"噪音{i}")
@@ -359,9 +353,9 @@ def _probe_stm_wal(sb: MemorySandbox, res: CaseResult) -> None:
     from agentnexus.memory.short_term import ShortTermMemory
     wal = str(sb.root / "stm.wal")
     stm = ShortTermMemory(wal_path=wal)
-    for i in range(5):  # flush triggers at every 5th append
+    for i in range(5):
         stm.append("user", f"WAL消息{i}")
-    stm2 = ShortTermMemory(wal_path=wal)  # simulates restart
+    stm2 = ShortTermMemory(wal_path=wal)
     recovered = [m["content"] for m in stm2.get_all()]
     for i in range(5):
         if f"WAL消息{i}" not in recovered:
@@ -404,12 +398,8 @@ def _probe_eviction(sb: MemorySandbox, res: CaseResult) -> None:
         sub.close()
 
 
-# ── Admission (write-side) evaluation ───────────────────────────────
-# Labeled write-decision set: (question, answer, expect_write, key_substring).
-# key_substring must appear in the stored memory when expect_write is True.
 ADMISSION_SET: list[tuple[str, str, bool, str]] = [
     ("记住我不吃香菜", "好的，已记住", True, "香菜"),
-    # 姓名是 PII，按设计会在提取时被剔除——校验的是非 PII 的持久部分
     ("我叫张伟，在北京做后端开发", "好的张伟，很高兴认识你", True, "后端"),
     ("以后回答都用英文", "Understood, will do", True, "英文"),
     ("我习惯用 Docker 部署服务", "了解", True, "Docker"),
@@ -457,14 +447,8 @@ def _probe_admission(sb: MemorySandbox, res: CaseResult) -> None:
             res.unexpected.append(f"不应写入但放行: {q}")
     p, r, f1 = _admission_stats(pairs)
     res.detail = f"write P={p:.2f} R={r:.2f} F1={f1:.2f} on {len(pairs)} labeled cases"
-    # Sanity floor from the gate-eval baseline: precision ≥0.8, recall ≥0.5
     if p < 0.8 or r < 0.5:
         res.unexpected.append(f"P/R below floor: P={p:.2f} R={r:.2f}")
-
-
-# ── GateCal: stratified gate benchmark (data/gate_bench.jsonl) ──────────
-# Eight classes × 25 labeled samples. Offline probe measures the rules layer;
-# the judge probe drives the full conclude() → gate → extraction → store path.
 
 
 def _probe_gatebench_rules(sb: MemorySandbox, res: CaseResult) -> None:
@@ -563,17 +547,12 @@ def _probe_gatebench_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
         res.detail += f"; F→note 类别命中 {cat_hits}/{cat_total}"
     if p < 0.8 or r < 0.5:
         res.unexpected.append(f"pipeline P/R below floor: P={p:.2f} R={r:.2f}")
-
-
-# ── LLM-judged quality probes (opt-in via --judge) ──────────────────
-
 _JUDGE_PRESERVED_PROMPT = """判断摘要中是否保留了给定的关键信息（语义等价即可，不要求字面一致）。
 
 关键信息: {fact}
 摘要: {summary}
 
 只回答 "保留" 或 "未保留"。"""
-
 _JUDGE_UTILIZATION_PROMPT = """判断回答是否正确利用了项目记忆中的信息，且没有编造与记忆冲突的内容。
 
 项目记忆: {memo}
@@ -581,7 +560,6 @@ _JUDGE_UTILIZATION_PROMPT = """判断回答是否正确利用了项目记忆中�
 模型回答: {answer}
 
 只回答 "正确" 或 "错误"。"""
-
 _JUDGE_EXTRACTION_PROMPT = """判断从对话中提取的记忆是否忠实于用户表达的原意、且是独立完整的陈述句。
 
 对话:
@@ -649,7 +627,7 @@ def _probe_judge_summary_faithfulness(sb: MemorySandbox, res: CaseResult) -> Non
         if "未保留" not in verdict and "保留" in verdict:
             preserved += 1
     res.detail = f"preserved {preserved}/{len(facts)}; summary: {summary[:120]}"
-    if preserved < len(facts) - 1:  # tolerate one miss (judge noise)
+    if preserved < len(facts) - 1:
         res.missing.append(f"summary preserved only {preserved}/{len(facts)} key facts")
 
 
@@ -667,7 +645,6 @@ def _probe_judge_project_utilization(sb: MemorySandbox, res: CaseResult) -> None
         silent=True,
     )
     res.detail = f"answer: {answer[:120]}"
-    # Fast path: unusual fabricated command appears verbatim → utilization proven
     if "nexus-build" in answer and "franz-kafka" in answer:
         return
     verdict = sb.judge.think(
@@ -732,9 +709,6 @@ def _probe_judge_admission_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
         elif expect_write and wrote and key and not any(key in c for c in new_rows):
             res.unexpected.append(f"写入内容丢失关键信息[{key}]: {sorted(new_rows)[:1]}")
     p, r, f1 = _admission_stats(pairs)
-    # Stochastic system: judge on P/R floors, keep per-case misses as detail.
-    # A single transient LLM failure must not fail the probe; systematic recall
-    # collapse must.
     res.detail = (
         f"pipeline write P={p:.2f} R={r:.2f} F1={f1:.2f} (n={len(pairs)})"
         + (f"; 未写入: {misses}" if misses else "")
@@ -758,7 +732,6 @@ def _probe_retention_constraint(sb: MemorySandbox, res: CaseResult) -> None:
     ]
     stm, summary = _run_real_compaction(sb, messages)
     res.detail = f"summary: {summary[:120]}"
-    # Deterministic fast path: constraint keyword literally present
     if "英文" in summary:
         return
     verdict = sb.judge.think(
@@ -795,7 +768,6 @@ def _probe_retention_error_detail(sb: MemorySandbox, res: CaseResult) -> None:
     stm.compact_indexed(entries, keep_recent=2)
     context = "\n".join(m["content"] for m in stm.get_all())
     res.detail = f"summary: {summary[:150]}"
-    # 错误码和行号是可精确验证的标识符，丢失即细节丢失
     for needle in ("F_IC_SERVICE_QUERY_020", "147"):
         if needle not in context:
             res.missing.append(f"精确细节丢失: {needle}")
@@ -931,15 +903,11 @@ def _probe_judge_extraction_faithfulness(sb: MemorySandbox, res: CaseResult) -> 
         res.unexpected.append(f"unfaithful extraction: {contents}")
 
 
-# ── Built-in suite ───────────────────────────────────────────────────
-
-
 def default_cases(include_judge: bool = False) -> list[MemoryCase]:
     near = [1.0, 0.0, 0.0]
     near_sibling = [0.99, 0.01, 0.0]
     far = [0.0, 1.0, 0.0]
     cases = [
-        # ── LTM recall ──
         MemoryCase(
             name="ltm_recall_exact", dimension="recall", layer="ltm",
             writes=[WriteOp("用户偏好简洁直接的回答", vec=near)],
@@ -955,7 +923,6 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
             must_include=["用户使用 pnpm 管理依赖"],
             must_exclude=["完全无关的烹饪笔记"],
         ),
-        # ── LTM freshness / update semantics ──
         MemoryCase(
             name="ltm_superseded_stays_hidden", dimension="forgetting", layer="ltm",
             writes=[
@@ -979,12 +946,10 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
             name="ltm_eviction_drops_lowest_value", dimension="write_integrity", layer="ltm",
             probe=_probe_eviction,
         ),
-        # ── write integrity: repeat mention boosts, dedup by content ──
         MemoryCase(
             name="ltm_repeat_mention_boosts", dimension="write_integrity", layer="ltm",
             probe=_probe_repeat_mention,
         ),
-        # ── project layer ──
         MemoryCase(
             name="project_entries_injected", dimension="recall", layer="project",
             writes=[WriteOp("构建命令是 just build", layer="project")],
@@ -1012,7 +977,6 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
             name="project_kind_routing", dimension="write_integrity", layer="project",
             probe=_probe_project_kind_routing,
         ),
-        # ── STM invariants ──
         MemoryCase(name="stm_compact_preserves_summary_and_tail", dimension="stm_invariant",
                    layer="stm", probe=_probe_stm_compact),
         MemoryCase(name="index_fold_archive_search_recovers_detail", dimension="retention",
@@ -1021,7 +985,6 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
                    layer="stm", probe=_probe_stm_snip),
         MemoryCase(name="stm_wal_recovers_after_crash", dimension="stm_invariant",
                    layer="stm", probe=_probe_stm_wal),
-        # ── admission ──
         MemoryCase(name="admission_whitelist", dimension="admission",
                    layer="admission", probe=_probe_admission),
         MemoryCase(name="admission_gatebench_rules", dimension="admission",
@@ -1031,10 +994,8 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
         cases += [
             MemoryCase(name="gatebench_pipeline", dimension="admission",
                        layer="ltm", probe=_probe_gatebench_pipeline),
-            # 写入侧：完整管线 P/R/F1（conclude → gate → 提取 → 入库核对）
             MemoryCase(name="judge_admission_pipeline", dimension="admission",
                        layer="ltm", probe=_probe_judge_admission_pipeline),
-            # 保留侧：压缩存活（COMPINT 式约束保留 + 摘要忠实 + 压缩后事实召回）
             MemoryCase(name="retention_summary_faithfulness", dimension="retention",
                        layer="stm", probe=_probe_judge_summary_faithfulness),
             MemoryCase(name="retention_constraint_survives", dimension="retention",
@@ -1043,14 +1004,12 @@ def default_cases(include_judge: bool = False) -> list[MemoryCase]:
                        layer="stm", probe=_probe_retention_fact_recall),
             MemoryCase(name="retention_error_detail_after_compaction", dimension="retention",
                        layer="stm", probe=_probe_retention_error_detail),
-            # 利用侧：项目记忆被正确使用 + 负向约束遵从
             MemoryCase(name="judge_project_utilization", dimension="quality",
                        layer="project", probe=_probe_judge_project_utilization),
             MemoryCase(name="quality_negative_constraint", dimension="quality",
                        layer="project", probe=_probe_quality_negative_constraint),
             MemoryCase(name="judge_extraction_faithfulness", dimension="quality",
                        layer="ltm", probe=_probe_judge_extraction_faithfulness),
-            # 对照组：无记忆基线不得出现编造的记忆内容
             MemoryCase(name="control_no_memo_baseline", dimension="control",
                        layer="project", probe=_probe_control_no_memo_baseline),
         ]
@@ -1076,10 +1035,6 @@ def _check_project_dedup(sb: MemorySandbox, res: CaseResult) -> None:
     if count != 1:
         res.unexpected.append(f"index contains {count} copies (expect 1)")
     res.detail = f"index copies: {count}"
-
-
-# Hybrid probes: the evaluator dispatches probe INSTEAD of the declarative
-# flow, so these probes perform their own writes before checking.
 
 
 def _probe_recency_outranks_stale(sb: MemorySandbox, res: CaseResult) -> None:

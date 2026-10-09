@@ -107,7 +107,6 @@ class TestBuildReactMessages:
             tools_desc="tool_b",
             question="question 2",
         )
-        # First message (system rules) must be identical
         assert msg1[0] == msg2[0]
 
     def test_memory_context_included(self):
@@ -117,7 +116,6 @@ class TestBuildReactMessages:
             question="q",
             memory_context="remember this fact",
         )
-        # Groups: system_rules, memory, tools, user
         assert len(messages) == 4
         assert messages[1]["content"] == "remember this fact"
 
@@ -128,7 +126,6 @@ class TestBuildReactMessages:
             question="q",
             conversation_context="recent chat history",
         )
-        # Groups: system_rules, conversation, tools, user
         assert len(messages) == 4
         assert messages[1]["content"] == "recent chat history"
 
@@ -141,7 +138,6 @@ class TestBuildReactMessages:
             memory_context="",
             conversation_context="",
         )
-        # Only: system_rules, tools, user
         assert len(messages) == 3
 
     def test_with_compiled_profile(self):
@@ -292,11 +288,9 @@ class TestSectionModel:
         assert contents[0] == "RULES"
         assert contents[1] == "MEMORY"
         assert contents[2] == "CONVERSATION"
-        # static group: one message, salience order skills < project < appendix
         static = contents[3]
         assert "SKILLS" in static and "PROJECT" in static and "APPENDIX" in static
         assert static.index("SKILLS") < static.index("PROJECT") < static.index("APPENDIX")
-        # tools between static and volatile; volatile env before todo
         assert contents[4] == "== 可用工具 ==\nTOOLS"
         volatile = contents[5]
         assert volatile.index("ENV") < volatile.index("TODO_V1")
@@ -317,8 +311,6 @@ class TestSectionModel:
         changed_indexes = {
             i for i, (a, b) in enumerate(zip(first, second)) if a["content"] != b["content"]
         }
-        # rules, memory, conversation, static, tools all byte-identical;
-        # only the volatile group (todo lives there) may change.
         assert changed_indexes == {5}
         assert first[5]["content"] == "ENV\n\nTODO_V1"
         assert second[5]["content"] == "ENV\n\nTODO_V2"
@@ -340,5 +332,5 @@ class TestSectionModel:
             system_rules="RULES", tools_desc="TOOLS", sections=v2, question="Q"
         )
         assert second[0]["content"] == first[0]["content"]
-        assert second[3]["content"] == first[3]["content"]  # static identical
-        assert second[4]["content"] == first[4]["content"]  # tools identical
+        assert second[3]["content"] == first[3]["content"]
+        assert second[4]["content"] == first[4]["content"]

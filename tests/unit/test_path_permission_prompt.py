@@ -97,7 +97,6 @@ class TestOutOfBoundsPrompt:
                 caller="agent",
                 hitl_approver=lambda s: True,
             )
-            # Approval is visible to the real guard: file_read now succeeds.
             assert "secret" in file_read(str(f))
 
             clear_approved_paths()
@@ -131,7 +130,6 @@ class TestOutOfBoundsPrompt:
             )
             assert "x" in file_read(str(f))
 
-            # A concurrent session bound to another workspace must NOT inherit.
             t2 = current_workspace.set(str(ws2))
             try:
                 with pytest.raises(ValueError, match="路径越界"):
@@ -166,7 +164,6 @@ class TestOutOfBoundsPrompt:
             assert isinstance(result, ToolError)
             assert result.error_code == ToolErrorCode.HITL_BLOCKED
             assert "拒绝" in result.message
-            # Denial leaves no lingering approval.
             with pytest.raises(ValueError, match="路径越界"):
                 file_read(str(outside))
         finally:
@@ -191,8 +188,6 @@ class TestOutOfBoundsPrompt:
                 caller="agent",
                 hitl_approver=None,
             )
-            # No channel: no prompt attempted, tool invoked and its own
-            # ValueError classification applies downstream as before.
             executor.invoke.assert_called_once()
             assert result == "ran"
         finally:
@@ -214,7 +209,7 @@ class TestOutOfBoundsPrompt:
 
             def approver(summary: str) -> bool:
                 calls.append(summary)
-                return len(calls) == 1  # path prompt approved; later asks denied
+                return len(calls) == 1
 
             execute_tool(
                 tool_executor=executor,
@@ -224,15 +219,11 @@ class TestOutOfBoundsPrompt:
                 caller="agent",
                 hitl_approver=approver,
             )
-            # Only the path prompt hit the user so far.
             assert len(calls) == 1
-            # file_write's registry HITL gate received the routed approver:
-            # the first ask is covered by the path approval (no new prompt)…
             _, kwargs = executor.invoke.call_args
             gate_approver = kwargs["hitl_approver"]
             assert gate_approver("registry gate summary") is True
-            assert len(calls) == 1  # consumed — user not re-asked
-            # …and only the NEXT ask falls through to the user.
+            assert len(calls) == 1
             assert gate_approver("registry gate summary") is False
             assert len(calls) == 2
         finally:

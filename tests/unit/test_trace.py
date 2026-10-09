@@ -1,4 +1,3 @@
-
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -19,7 +18,7 @@ class TestTraceContext:
         assert span.name == "test_op"
         assert span.input == {"key": "value"}
         assert span.span_id
-        assert len(span.span_id) == 8  # uuid[:8]
+        assert len(span.span_id) == 8
 
     def test_end_span_records_output(self):
         ctx = TraceContext()
@@ -34,7 +33,7 @@ class TestTraceContext:
     def test_span_hierarchy_parent_id(self):
         ctx = TraceContext()
         root = ctx.start_span("root")
-        ctx._span_stack.append(root)  # simulate parent on stack
+        ctx._span_stack.append(root)
         child = ctx.start_span("child")
         assert child.parent_span_id == root.span_id
 
@@ -82,7 +81,6 @@ class TestTraceManager:
         tm.end_trace()
         assert tm.active is None
 
-        # verify JSONL file written
         jsonl_files = list(tmp_path.glob("*.jsonl"))
         assert len(jsonl_files) == 1
 
@@ -92,10 +90,9 @@ class TestTraceManager:
 
     def test_end_trace_without_active_does_not_error(self):
         tm = TraceManager()
-        # reset local
         if hasattr(tm._local, "trace"):
             del tm._local.trace
-        tm.end_trace()  # should not raise
+        tm.end_trace()
 
     def test_span_context_manager(self, tmp_path):
         tm = TraceManager()
@@ -133,13 +130,11 @@ class TestTraceManager:
 
     def test_span_context_manager_outside_trace(self):
         tm = TraceManager()
-        # reset active trace
         if hasattr(tm._local, "trace"):
             del tm._local.trace
         assert tm.active is None
         with tm.span("orphan_op") as span:
             assert span.name == "orphan_op"
-        # should not raise
 
     def test_spans_recorded_in_order(self, tmp_path):
         tm = TraceManager()
@@ -166,10 +161,6 @@ class TestTraceManager:
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
 
         def fake_run(self, question, memory_manager=None):
-            # Child runs on a dedicated runner thread without an active
-            # TraceContext — spans must go through span() which handles
-            # orphan flushing (dispatcher stamps the parent trace id for
-            # joinability instead of sharing the context stack).
             with trace_manager.span("llm", {"messages_count": 1}) as llm_span:
                 llm_span.metadata = {"status": "ok"}
             return SimpleNamespace(answer="child answer", steps=[])

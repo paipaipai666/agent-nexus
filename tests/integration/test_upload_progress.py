@@ -60,7 +60,6 @@ class TestUploadReturnsImmediately:
     def test_upload_returns_processing_status(self, client):
         """Upload should return 'processing' status and run_id immediately."""
         with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
-            # Make ingestion slow to verify we don't wait for it
             def slow_ingest(*args, **kwargs):
                 time.sleep(5)
                 result = MagicMock()
@@ -86,7 +85,7 @@ class TestUploadReturnsImmediately:
         """Upload endpoint should return within 2 seconds even with slow ingestion."""
         with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
             def slow_ingest(*args, **kwargs):
-                time.sleep(10)  # Simulate very slow ingestion
+                time.sleep(10)
                 return MagicMock(), MagicMock()
 
             mock_ingest.side_effect = slow_ingest
@@ -113,17 +112,13 @@ class TestProgressEndpoint:
             mock_catalog_instance = MagicMock()
             mock_catalog.return_value = mock_catalog_instance
 
-            # Create a run directly
             run = start_ingestion_run("default", "test.txt", run_id="test_run_123")
 
-            # Verify run was created
             assert run.run_id == "test_run_123"
             assert run.status == "running"
 
-            # Update progress
             _update_run_progress(run, stage="loading", stage_pct=10, message="Loading")
 
-            # Verify progress was updated
             assert run.metadata["progress_stage"] == "loading"
             assert run.metadata["progress_pct"] == 10
 
@@ -148,11 +143,9 @@ class TestProgressTrackingInIngestion:
             source_uri="test.txt",
         )
 
-        # Mock the catalog
         with patch("agentnexus.rag.kb_service.get_knowledge_base_catalog") as mock_catalog:
             mock_catalog.return_value = MagicMock()
 
-            # Update progress
             _update_run_progress(run, stage="loading", stage_pct=10, message="Loading")
 
         assert run.metadata["progress_stage"] == "loading"
@@ -196,19 +189,17 @@ class TestEventLoopNotBlocked:
         """Other endpoints should respond while ingestion is running."""
         with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
             def slow_ingest(*args, **kwargs):
-                time.sleep(2)  # Simulate slow ingestion
+                time.sleep(2)
                 return MagicMock(), MagicMock()
 
             mock_ingest.side_effect = slow_ingest
 
-            # Start upload
             resp = client.post(
                 "/api/kb/documents",
                 files={"file": ("test.txt", b"hello world", "text/plain")},
             )
             assert resp.status_code == 200
 
-            # Try other endpoints while ingestion might be running
             health_resp = client.get("/health")
             assert health_resp.status_code == 200
 
@@ -249,10 +240,8 @@ class TestIngestionRunRecord:
                 metadata={"duration_ms": 1234.5},
             )
 
-        # Original progress keys should be preserved
         assert "progress_stage" in run.metadata
         assert "progress_pct" in run.metadata
-        # New metadata should be added
         assert "duration_ms" in run.metadata
 
     def test_start_ingestion_run_with_custom_run_id(self, temp_agentnexus_home):

@@ -38,16 +38,14 @@ class TestSessionRollbackFlow:
 
         assert mgr.status()["head"]["id"] == ids[2]
 
-        # Undo all the way back
         assert mgr.undo()["id"] == ids[1]
         assert mgr.undo()["id"] == ids[0]
 
-        # Redo all the way forward
         assert mgr.redo()["id"] == ids[1]
         assert mgr.redo()["id"] == ids[2]
 
         assert mgr.status()["head"]["id"] == ids[2]
-        assert mgr.status()["can_redo"] is False  # redo stack is empty after redoing all
+        assert mgr.status()["can_redo"] is False
         assert mgr.status()["can_undo"] is True
 
     def test_undo_preserves_stm_snapshot(self, mgr):
@@ -72,7 +70,6 @@ class TestSessionRollbackFlow:
 
         assert mgr.status()["can_redo"] is True
 
-        # New commit after undo
         mgr.commit(_make_stm([{"role": "user", "content": "q3"}]), question="q3", answer="a3")
         assert mgr.status()["can_redo"] is False
 
@@ -82,7 +79,7 @@ class TestSessionRollbackFlow:
         cp2 = mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2", answer="a2")
         mgr.commit(_make_stm([{"role": "user", "content": "q3"}]), question="q3", answer="a3")
 
-        mgr.undo()  # back to cp2
+        mgr.undo()
         entries = mgr.log()
         assert len(entries) == 2
         assert entries[0]["id"] == cp2

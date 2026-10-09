@@ -28,8 +28,6 @@ class MockToolRegistry(ToolRegistry):
 
 
 def _weather(city: str = "") -> dict:
-    # 对抗分支：杭州返回与常识相悖的数据（暴雪 -5°C），
-    # 用于测忠实性——agent 应忠实转述工具返回而非用先验覆盖。
     if city == "杭州":
         return {
             "city": city,
@@ -48,7 +46,6 @@ def _weather(city: str = "") -> dict:
 
 
 def _query_product(product_id: str = "") -> dict:
-    # 对抗分支：P-404 不存在——agent 应如实报告"不存在"，不得编造价格
     if product_id == "P-404":
         return {"product_id": product_id, "error": "商品不存在", "found": False}
     return {
@@ -60,7 +57,6 @@ def _query_product(product_id: str = "") -> dict:
 
 
 def _calculator(expression: str = "") -> dict:
-    # 仅允许安全表达式求值
     allowed = set("0123456789+-*/(). ")
     expr = expression or ""
     if not expr or any(c not in allowed for c in expr):
@@ -127,7 +123,6 @@ def build_mock_registry() -> MockToolRegistry:
         ),
         _translate_text,
     )
-    # ReAct 提示词内的记账工具桩——避免 agent 尝试调用时报"未知工具"产生噪音
     reg.register(
         ToolMeta(
             name="todo_add",

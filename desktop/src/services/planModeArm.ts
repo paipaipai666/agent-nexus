@@ -1,13 +1,5 @@
 import { createArm } from './arm'
 
-/** Plan-mode "armed" intent for the pre-session window.
- *
- * New chat defers session creation until the first message send, but users
- * must be able to arm plan mode BEFORE that — otherwise the agent starts
- * executing (with writes) before plan mode can be enabled. The toggle stores
- * the intent here; the session-creation path consumes it and applies the
- * server-side switch before the first message is sent.
- */
 const arm = createArm(false)
 
 export const planModeArm = { ...arm, setArmed: arm.set }

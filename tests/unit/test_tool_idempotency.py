@@ -31,7 +31,6 @@ class TestFileWriteIdempotency:
         with patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(tmp_path)):
             file_write("conflict.txt", "original", mode="create")
 
-            # Wrong hash should be rejected
             result = file_write("conflict.txt", "replaced",
                                 mode="overwrite", expected_version="wrong")
             assert isinstance(result, dict)
@@ -77,7 +76,7 @@ class TestToolRegistryIdempotency:
             name="dup_tool", description="test", param_schema={},
         )
         registry.register(meta, lambda: "ok")
-        registry.register(meta, lambda: "ok")  # should warn but not crash
+        registry.register(meta, lambda: "ok")
 
         tools = registry.get_available_tools("*")
         assert "dup_tool" in tools

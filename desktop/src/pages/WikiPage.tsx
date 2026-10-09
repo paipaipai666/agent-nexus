@@ -61,12 +61,10 @@ export default function WikiPage() {
   const [linting, setLinting] = useState(false)
   const [selectedPage, setSelectedPage] = useState<any>(null)
 
-  // Query state
   const [query, setQuery] = useState('')
   const [queryResult, setQueryResult] = useState<any>(null)
   const [isQuerying, setIsQuerying] = useState(false)
 
-  // Ingest state
   const [ingestText, setIngestText] = useState('')
   const [ingestUri, setIngestUri] = useState('')
   const [isIngesting, setIsIngesting] = useState(false)
@@ -204,7 +202,7 @@ export default function WikiPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
+      {}
       <div className="px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>Wiki</h1>
@@ -225,7 +223,7 @@ export default function WikiPage() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {}
       <div className="px-6 flex gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
         {tabs.map(t => (
           <button
@@ -248,7 +246,7 @@ export default function WikiPage() {
         ))}
       </div>
 
-      {/* Content */}
+      {}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading || linting ? (
           <div className="flex justify-center py-16">
@@ -256,12 +254,12 @@ export default function WikiPage() {
           </div>
         ) : (
           <>
-            {/* Pages Tab */}
+            {}
             {tab === 'pages' && (
               <div className="flex gap-4 h-full">
-                {/* Page List */}
+                {}
                 <div className={`${selectedPage ? 'w-1/3' : 'w-full'} space-y-1.5`}>
-                  {/* Inline Ingest */}
+                  {}
                   <div className="mb-4 p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                     <p className="text-xs font-medium mb-2" style={{ color: 'var(--fg-secondary)' }}>Quick Ingest</p>
                     <input
@@ -330,7 +328,7 @@ export default function WikiPage() {
                   )}
                 </div>
 
-                {/* Page Detail */}
+                {}
                 {selectedPage && (
                   <div className="flex-1 p-4 rounded-lg overflow-y-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
                     <div className="flex items-center justify-between mb-4">
@@ -343,7 +341,7 @@ export default function WikiPage() {
                       <button onClick={() => setSelectedPage(null)} className="text-xs" style={{ color: 'var(--fg-faint)' }}>Close</button>
                     </div>
 
-                    {/* Confidence */}
+                    {}
                     <div className="flex items-center gap-2 mb-4">
                       <Shield size={14} style={{ color: confidenceColor[selectedPage.confidence] }} />
                       <span className="text-sm" style={{ color: confidenceColor[selectedPage.confidence] }}>
@@ -351,12 +349,12 @@ export default function WikiPage() {
                       </span>
                     </div>
 
-                    {/* Content */}
+                    {}
                     <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: 'var(--surface-2)', color: 'var(--fg)', whiteSpace: 'pre-wrap' }}>
                       {selectedPage.content || 'No content'}
                     </div>
 
-                    {/* Statements */}
+                    {}
                     {selectedPage.statements?.length > 0 && (
                       <div className="mb-4">
                         <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--fg-secondary)' }}>Statements</h3>
@@ -380,7 +378,7 @@ export default function WikiPage() {
                       </div>
                     )}
 
-                    {/* Canonical Definitions */}
+                    {}
                     {selectedPage.canonical_definitions && Object.keys(selectedPage.canonical_definitions).length > 0 && (
                       <div>
                         <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--fg-secondary)' }}>Canonical Definitions</h3>
@@ -405,7 +403,7 @@ export default function WikiPage() {
               </div>
             )}
 
-            {/* Query Tab */}
+            {}
             {tab === 'query' && (
               <div className="max-w-2xl mx-auto space-y-4">
                 <div className="flex gap-2">
@@ -470,7 +468,7 @@ export default function WikiPage() {
               </div>
             )}
 
-            {/* Review Tab */}
+            {}
             {tab === 'review' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -513,7 +511,7 @@ export default function WikiPage() {
               </div>
             )}
 
-            {/* Stats Tab */}
+            {}
             {tab === 'stats' && stats && (
               <div className="max-w-xl mx-auto space-y-6">
                 <div className="grid grid-cols-2 gap-4">
@@ -537,7 +535,7 @@ export default function WikiPage() {
                   </div>
                 </div>
 
-                {/* Confidence Distribution */}
+                {}
                 {stats.confidence_distribution && Object.keys(stats.confidence_distribution).length > 0 && (
                   <div className="p-4 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card), var(--card-highlight)' }}>
                     <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--fg-secondary)' }}>Confidence Distribution</h3>

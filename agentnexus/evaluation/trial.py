@@ -9,9 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Grader Score
-# ---------------------------------------------------------------------------
 
 @dataclass
 class GraderScore:
@@ -73,10 +70,6 @@ class GraderScore:
             result["duration_ms"] = self.duration_ms
         return result
 
-
-# ---------------------------------------------------------------------------
-# Trial Result
-# ---------------------------------------------------------------------------
 
 @dataclass
 class TrialResult:
@@ -143,10 +136,6 @@ class TrialResult:
                 return span.get("output", {}).get("answer")
         return None
 
-
-# ---------------------------------------------------------------------------
-# Task Report (单个任务的多次 trial 聚合)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class TaskReport:
@@ -216,10 +205,6 @@ class TaskReport:
             return None
         return min(self.trials, key=lambda t: t.final_score)
 
-
-# ---------------------------------------------------------------------------
-# Aggregate Metrics (套件级别)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class AggregateMetrics:

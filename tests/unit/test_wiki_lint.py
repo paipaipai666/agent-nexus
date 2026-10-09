@@ -46,7 +46,6 @@ def _make_canonical_def(consensus: str, divergence: float = 0.0) -> CanonicalDef
 class TestUtcNow:
     def test_returns_iso_format_string(self):
         result = _utc_now()
-        # Should be parseable ISO format
         datetime.fromisoformat(result)
 
     def test_has_no_microseconds(self):
@@ -90,7 +89,7 @@ class TestConsistencyChecker:
         assert items == []
 
     def test_no_items_when_definitions_agree(self, mock_cosine):
-        mock_cosine.return_value = 0.9  # High similarity
+        mock_cosine.return_value = 0.9
         mock_store = MagicMock()
         mock_store.list_pages.return_value = [
             _make_page("p1", {"api": _make_canonical_def("REST interface")}),
@@ -101,7 +100,7 @@ class TestConsistencyChecker:
         assert items == []
 
     def test_detects_contradiction_when_low_similarity(self, mock_cosine):
-        mock_cosine.return_value = 0.1  # Low similarity
+        mock_cosine.return_value = 0.1
         mock_store = MagicMock()
         mock_store.list_pages.return_value = [
             _make_page("p1", {"api": _make_canonical_def("REST interface")}),

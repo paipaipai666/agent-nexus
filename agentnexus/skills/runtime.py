@@ -96,9 +96,6 @@ class WorkflowRunResult:
 
     @property
     def enhanced_question(self) -> str:
-        # Return the raw question — workflow context is injected as a separate
-        # system message by build_react_messages() so it doesn't bury the
-        # user's actual question inside the user role message.
         return self.question
 
 

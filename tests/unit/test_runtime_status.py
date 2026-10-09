@@ -9,7 +9,6 @@ import pytest
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-# ── fakes ────────────────────────────────────────────────────────────
 
 class _FakeAgent:
     """Simulates a per-session agent that has run queries and accumulated stats."""
@@ -53,8 +52,8 @@ class _FakeSettings:
 class _FakeRuntime:
     """Simulates AppRuntime with build-time agent (zero stats) and per-session agents."""
     def __init__(self, build_agent, memory_manager, chat):
-        self.agent = build_agent  # build-time agent, never runs queries
-        self.memory_manager = memory_manager  # build-time memory manager, empty STM
+        self.agent = build_agent
+        self.memory_manager = memory_manager
         self.chat = chat
         self.skill = None
         self.settings = _FakeSettings()
@@ -64,17 +63,13 @@ class _FakeRuntime:
         pass
 
 
-# ── fixtures ─────────────────────────────────────────────────────────
-
 @pytest.fixture
 def server_app(temp_agentnexus_home):
     from agentnexus.server.app import create_app, set_runtime
 
-    # Build-time agent: zero stats (this is the bug — endpoint reads from here)
     build_agent = _FakeAgent(input_tokens=0, output_tokens=0, step_count=0)
     build_mm = _FakeMemoryManager(stm_tokens=0)
 
-    # Per-session agents: have actual stats (endpoint should read from here)
     chat = _FakeChatService()
     chat.add_session(
         "session-1",
@@ -97,8 +92,6 @@ def server_app(temp_agentnexus_home):
 def client(server_app):
     return TestClient(server_app)
 
-
-# ── RED: these should FAIL before the fix ────────────────────────────
 
 def test_runtime_status_returns_per_session_token_usage(client):
     """Bug: input_tokens and output_tokens are always 0."""
@@ -153,7 +146,6 @@ def test_runtime_status_without_session_id_falls_back_to_build_agent(client):
     assert resp.status_code == 200
     data = resp.json()
 
-    # Should return zeros for unknown session (build-time fallback)
     assert data["total_usage"]["input_tokens"] == 0
     assert data["total_usage"]["output_tokens"] == 0
     assert data["step_count"] == 0

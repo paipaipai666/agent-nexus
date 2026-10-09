@@ -13,8 +13,7 @@ from agentnexus.core.config import get_settings
 
 _tavily_client: TavilyClient | None = None
 
-# --- Fetch result cache (TTL-based) ---
-_CACHE_TTL_SEC = 300  # 5 minutes
+_CACHE_TTL_SEC = 300
 _cache: dict[tuple, tuple[float, str]] = {}
 
 
@@ -42,7 +41,6 @@ def _cache_get(key: tuple) -> str | None:
 def _cache_set(key: tuple, result: str) -> None:
     """Store result in cache with current timestamp."""
     _cache[key] = (monotonic(), result)
-    # Evict oldest entries if cache grows too large
     if len(_cache) > 128:
         oldest_key = min(_cache, key=lambda k: _cache[k][0])
         del _cache[oldest_key]
@@ -116,7 +114,6 @@ def web_fetch_structured(
             "content": content,
         })
 
-    # Attach failed URLs info to the last result for downstream formatting
     if failed:
         failed_urls = [f.get("url", "unknown") for f in failed if isinstance(f, dict)]
         if not failed_urls and isinstance(failed[0], str):
@@ -149,7 +146,6 @@ def web_fetch(
     if extract_depth is not None and extract_depth not in valid_depths:
         extract_depth = None
 
-    # Check cache (single-URL only)
     url_list = [urls] if isinstance(urls, str) else list(urls)
     depth = extract_depth or "basic"
     if len(url_list) == 1:
@@ -174,7 +170,6 @@ def web_fetch(
     failed_urls: list[str] = []
 
     for r in results:
-        # Collect failed URLs from the last result
         if "_failed_urls" in r:
             failed_urls = r.pop("_failed_urls")
             continue
@@ -194,7 +189,6 @@ def web_fetch(
 
     result = "\n\n---\n\n".join(parts)
 
-    # Store in cache (single-URL fetch only, to avoid stale multi-URL cache)
     if len(url_list) == 1:
         cache_key = _make_cache_key(tuple(url_list), depth, format)
         _cache_set(cache_key, result)

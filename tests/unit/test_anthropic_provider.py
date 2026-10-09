@@ -52,7 +52,6 @@ def test_select_provider_routes_openai_compatible():
 
 
 def test_select_provider_anthropic_prefix_without_base_uses_openai_codec():
-    # No URL sniffing on model id — protocol follows base_url only.
     p = select_provider("anthropic/claude-sonnet-4-6", "")
     assert not isinstance(p, AnthropicMessagesProvider)
 
@@ -76,7 +75,7 @@ def test_to_anthropic_payload_maps_system_and_tools():
         tools=[{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}],
         max_tokens=128,
     )
-    assert body["model"] == "anthropic/claude-x"  # sent exactly as configured
+    assert body["model"] == "anthropic/claude-x"
     assert body["system"] == "Be brief."
     assert body["max_tokens"] == 128
     assert body["tools"][0]["name"] == "noop"

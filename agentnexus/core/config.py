@@ -80,7 +80,6 @@ class MCPServerConfig(BaseModel):
         return self
 
 
-
 class ModelOverride(BaseModel):
     """Per-model capability overrides. All-None = fully auto-detect."""
 
@@ -92,7 +91,6 @@ class ModelOverride(BaseModel):
     supports_json_schema: bool | None = None
     supports_thinking: bool | None = None
     supports_parallel_tool_calls: bool | None = None
-    # CNY per million tokens — optional cost estimate inputs
     input_price_cny_per_mtok: float | None = Field(default=None, ge=0)
     output_price_cny_per_mtok: float | None = Field(default=None, ge=0)
 
@@ -142,10 +140,6 @@ class ResolvedModel:
     entry: ModelEntry
 
 
-
-
-
-
 class CapabilitiesSettings(BaseModel):
     """Settings for capabilities section of config."""
 
@@ -178,9 +172,6 @@ class PersonaConfig(BaseModel):
     projects: list[PersonaProject] = Field(default_factory=list)
 
 
-
-
-
 class Settings(BaseSettings):
     """Application-wide settings loaded from config.yaml + environment variables.
 
@@ -198,65 +189,38 @@ class Settings(BaseSettings):
         self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
         self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
-    # ── LLM / Model Configuration ────────────────────────────────────────
-    # No vendor defaults — fill these (or llm_providers) before calling the model.
     llm_api_key: SecretStr = Field(default=SecretStr(""))
     llm_model_id: str = Field(default="")
     llm_base_url: str = Field(default="")
     llm_timeout: int = Field(default=60, ge=1)
-    # Model capability overrides (None = auto-detect)
     model_tool_calling: bool | None = Field(default=None)
     model_json_mode: bool | None = Field(default=None)
     model_thinking: bool | None = Field(default=None)
-    # Thinking depth: maps to OpenAI reasoning_effort / Anthropic budget / Gemini thinkingLevel.
-    # Vendor token budgets are derived internally — not user-facing.
     model_thinking_effort: str = Field(default="medium")
-    # Judge LLM (used by evaluators) — empty = follow the task model
     judge_model_id: str = Field(default="")
     judge_api_key: SecretStr = Field(default=SecretStr(""))
     judge_base_url: str = Field(default="")
-    # Switchable provider profiles. When active_model/active_provider matches
-    # an entry here, it overrides the flat llm_* fields (default/fallback).
     llm_providers: list[LLMProvider] = Field(default_factory=list)
-    active_provider: str = Field(default="")  # legacy provider-granularity selector
-    active_model: str = Field(default="")  # "provider/model"; "" = fall back
-    judge_model: str = Field(default="")  # "provider/model"; "" = legacy judge_* 或跟随任务模型
+    active_provider: str = Field(default="")
+    active_model: str = Field(default="")
+    judge_model: str = Field(default="")
 
-    # ── External Service Keys ─────────────────────────────────────────────
     tavily_api_key: SecretStr = Field(default=SecretStr(""))
 
-    # ── Agent Runtime ─────────────────────────────────────────────────────
     max_agent_steps: int = Field(default=50, ge=1, le=200)
     subagent_max_concurrent: int = Field(default=3, ge=1, le=8)
-    # Subagent wall-clock budget. The child agent is cancelled cooperatively
-    # at the next step boundary when this expires (see tools/subagent.py).
     subagent_timeout_sec: int = Field(default=1800, ge=1)
-    # 用户自定义追加指令：注入系统上下文末尾，优先级高于平台默认行为
-    # 准则，但不得覆盖安全约束。支持多行文本。
     append_system_prompt: str = Field(default="")
 
-    # ── Command Hooks ─────────────────────────────────────────────────────
-    # 声明式命令钩子（见 docs/Hooks.md）。config.yaml 内的 hooks 视为
-    # 用户级、默认信任；~/.agentnexus/hooks.yaml 同；项目级
-    # <workspace>/.agentnexus/hooks.yaml 需经 hash 信任审查。
     hooks: list[HookConfig] = Field(default_factory=list)
-    hook_trust: str = Field(default="strict")  # strict | bypass
+    hook_trust: str = Field(default="strict")
     hooks_enabled: bool = Field(default=True)
-    # 默认 false：permission_request 钩子只能 deny，不得自动放行 HITL。
-    # 显式开启后钩子决策仍写入 audit（hitl_decision=hook_allowed）。
     hitl_hooks_may_approve: bool = Field(default=False)
-    # fire() 按 PAYLOAD_SCHEMAS 校验 payload 键类型，发现 fire 点漂移即报错。
     hook_schema_check: bool = Field(default=True)
-    # 每次 fire 的逐钩子结果追加到 {traces_dir}/hooks.jsonl（审计/排障）。
     hooks_journal: bool = Field(default=True)
-    # 允许插件执行代码入口（plugin.yaml entrypoint: hooks.py）。默认 false：
-    # 声明式插件保持零代码；代码插件是显式 opt-in。
     plugins_allow_code: bool = Field(default=False)
 
-    # ── RAG / Retrieval ──────────────────────────────────────────────────
     enable_contextual_retrieval: bool = Field(default=False)
-    # express_reaction 工具（娱乐：模型自主决定是否对用户提问发表情反应）。
-    # 默认 false：不往工具列表里注入娱乐工具；开启后模型可选择调用。
     enable_user_reaction: bool = Field(default=True)
     enable_query_rewrite: bool = Field(default=True)
     enable_multi_query: bool = Field(default=True)
@@ -273,55 +237,37 @@ class Settings(BaseSettings):
     rag_default_namespace: str = Field(default="default")
     rag_collection_prefix: str = Field(default="kb_")
 
-    # ── Storage Paths ─────────────────────────────────────────────────────
     memory_db_path: str = Field(default="")
     traces_dir: str = Field(default="")
 
-    # ── Memory System ─────────────────────────────────────────────────────
     max_memories: int = Field(default=1000, ge=100, le=100000)
     memory_ttl_days: int = Field(default=90, ge=7, le=365)
-    # Whitelist gate: only strong-signal content is extracted. When False,
-    # borderline cases are dropped (0 token); when True, an LLM gate judges them.
     memory_llm_gate: bool = Field(default=False)
     trace_retention_days: int = Field(default=30, ge=1, le=365)
 
-    # ── MCP (Model Context Protocol) ──────────────────────────────────────
     mcp_enabled: bool = Field(default=False)
     mcp_startup_timeout: int = Field(default=15, ge=1, le=300)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
-    # Compaction tuning
     autocompact_buffer_tokens: int = Field(default=8000, ge=1000, le=100000)
-    # 分段索引压缩：每段消息数（越小索引越细，成本越高）
     memory_index_segment_size: int = Field(default=20, ge=5, le=100)
-    # 索引总 token 预算：超过后最老条目折叠为归档目录，细节靠 history_search 检索
     memory_index_max_tokens: int = Field(default=4000, ge=500, le=100000)
     large_result_threshold: int = Field(default=10240, ge=1024, le=1048576)
     offload_enabled: bool = Field(default=True)
-    # Snip & time-based microcompact
     snip_enabled: bool = Field(default=True)
     time_microcompact_interval: int = Field(default=300, ge=60, le=3600)
-    # Post-compact file recovery
     post_compact_max_files: int = Field(default=5, ge=1, le=100)
     post_compact_token_per_file: int = Field(default=5000, ge=500, le=50000)
     post_compact_token_budget: int = Field(default=50000, ge=1000, le=200000)
-    # Kairos transcript backup
     transcript_enabled: bool = Field(default=True)
-    # Shell execution
     shell_enabled: bool = Field(default=True)
     shell_confirm: bool = Field(default=True)
     shell_timeout: int = Field(default=30, ge=1, le=300)
     shell_execution_backend: str = Field(default="auto")
     shell_execution_memory_mb: int = Field(default=256, ge=64, le=8192)
     shell_execution_docker_image: str = Field(default="python:3.11-slim")
-    # File operations
     file_read_max_mb: float = Field(default=10.0, ge=1, le=100)
-    # Extra roots the file tools may access without a per-run prompt.
-    # Deliberately NOT in the config API's SETTABLE_KEYS — it widens the
-    # sandbox, same class as shell_blacklist, so it stays YAML-only.
     allowed_paths: list[str] = Field(default_factory=list)
-    # Shell blacklist (regex patterns, checked case-insensitive)
     shell_blacklist: list[str] = Field(default_factory=list)
-    # Declarative extensions and workflow defaults
     extensions_enabled: bool = Field(default=True)
     extensions_dirs: list[str] = Field(default_factory=list)
     plugins_auto_discover: bool = Field(default=True)
@@ -331,21 +277,13 @@ class Settings(BaseSettings):
     skill_auto_route_llm_fallback: bool = Field(default=True)
     skill_auto_route_min_score: float = Field(default=2.0, ge=0.1, le=100.0)
     skill_auto_route_margin: float = Field(default=0.75, ge=0.0, le=100.0)
-    # Skill catalog block budget. Dual bound from production/research:
-    # - ratio: soft share of the model context window (tool/skill static prefix
-    #   guidance is ~1-5% of window; larger windows should share a smaller slice)
-    # - max_tokens: hard ceiling (~Claude Code available_skills ~16k chars ≈ 4k
-    #   tokens, and ~100 tokens/skill metadata per Anthropic Agent Skills docs)
-    # budget = clamp(window * ratio, 160, max_tokens)
     skill_context_token_ratio: float = Field(default=0.02, ge=0.001, le=0.2)
     skill_context_max_tokens: int = Field(default=4000, ge=200, le=50000)
     runtime_profile: str = Field(default="default")
-    # 预算分层配置
     budget_simple_max_tokens: int = Field(default=5000, ge=1000, le=100000)
     budget_complex_max_tokens: int = Field(default=50000, ge=5000, le=500000)
     budget_high_value_max_tokens: int = Field(default=200000, ge=10000, le=2000000)
     budget_exceed_strategy: str = Field(default="compress")
-    # ── Wiki 系统 ─────────────────────────────────────────────────
     wiki_enabled: bool = Field(default=False, description="启用混合 Wiki + RAG 知识系统")
     wiki_namespace: str = Field(default="wiki", description="Wiki 页面的 ChromaDB 命名空间")
     wiki_review_sla_p1_days: int = Field(default=7, ge=1, le=90, description="P1 review 期限（天）")
@@ -353,7 +291,6 @@ class Settings(BaseSettings):
     wiki_review_sla_p3_days: int = Field(default=30, ge=1, le=180, description="P3 review 期限（天）")
     wiki_propagation_max_depth: int = Field(default=3, ge=1, le=10, description="置信度传播最大深度")
     wiki_calibration_retrigger_pct: float = Field(default=0.5, ge=0.1, le=2.0, description="wiki 规模增长多少比例后需要重新校准")
-    # 机械验证阈值（上线前通过校准调整）
     wiki_jaccard_direct_quote: float = Field(default=0.6, ge=0.0, le=1.0, description="Jaccard 相似度 > 此值判定为 direct_quote")
     wiki_jaccard_paraphrase: float = Field(default=0.4, ge=0.0, le=1.0, description="Jaccard 相似度 > 此值判定为 paraphrase")
     wiki_cosine_paraphrase: float = Field(default=0.7, ge=0.0, le=1.0, description="余弦相似度 > 此值确认 paraphrase")
@@ -467,8 +404,6 @@ class Settings(BaseSettings):
         Persists on the next settings save; never writes to disk itself.
         """
         providers = list(self.llm_providers)
-        # flat llm_* → seed a "default" provider so pickers have an entry and
-        # switching models becomes discoverable without touching config.yaml.
         if not providers and self.llm_model_id:
             providers = [LLMProvider(
                 name="default",
@@ -478,13 +413,11 @@ class Settings(BaseSettings):
                 timeout=self.llm_timeout,
             )]
             self.llm_providers = providers
-        # legacy provider-granularity selector → model-granularity
         if not self.active_model and self.active_provider:
             for p in providers:
                 if p.name == self.active_provider and p.models:
                     self.active_model = f"{p.name}/{p.models[0].model_id}"
                     break
-        # freshly seeded default provider becomes active immediately
         if not self.active_model and len(providers) == 1 \
                 and providers[0].name == "default" and providers[0].models:
             self.active_model = f"default/{providers[0].models[0].model_id}"
@@ -595,8 +528,6 @@ _settings_lock = threading.Lock()
 def get_settings() -> Settings:
     global _settings_cache
     if _settings_cache is None:
-        # Cold-start double-build race: two threads can both see None and
-        # construct separate instances. Serialize check+build.
         with _settings_lock:
             if _settings_cache is None:
                 data = _load_yaml()

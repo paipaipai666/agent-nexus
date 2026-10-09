@@ -28,8 +28,6 @@ class ReviewResolveRequest(BaseModel):
     item_id: str
 
 
-# ── Wiki Stats ──────────────────────────────────────────────────────
-
 @router.get("/stats")
 def wiki_stats(namespace: str = "default", service=Depends(get_wiki_service)):
     """Get wiki health statistics."""
@@ -38,8 +36,6 @@ def wiki_stats(namespace: str = "default", service=Depends(get_wiki_service)):
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 
-
-# ── Wiki Pages ──────────────────────────────────────────────────────
 
 @router.get("/pages")
 def list_wiki_pages(namespace: str = "default", limit: int = 100):
@@ -128,8 +124,6 @@ def delete_wiki_page(page_id: str):
         raise APIError(500, "internal_error", str(e))
 
 
-# ── Wiki Query ──────────────────────────────────────────────────────
-
 @router.post("/query")
 def wiki_query(req: WikiQueryRequest, service=Depends(get_wiki_service)):
     """Query the wiki with confidence-based routing."""
@@ -151,8 +145,6 @@ def wiki_query(req: WikiQueryRequest, service=Depends(get_wiki_service)):
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 
-
-# ── Wiki Ingest ─────────────────────────────────────────────────────
 
 @router.post("/ingest")
 def wiki_ingest_text(req: WikiIngestRequest, service=Depends(get_wiki_service)):
@@ -203,7 +195,6 @@ async def wiki_ingest_file(
         )
 
     try:
-        # Run sync ingestion in thread pool to avoid blocking the event loop
         page = await asyncio.to_thread(_sync_ingest)
         return {
             "status": "ok",
@@ -218,8 +209,6 @@ async def wiki_ingest_file(
         Path(tmp_path).unlink(missing_ok=True)
 
 
-# ── Wiki Lint ───────────────────────────────────────────────────────
-
 @router.post("/lint")
 def wiki_lint(namespace: str = "default", service=Depends(get_wiki_service)):
     """Run wiki health checks."""
@@ -229,8 +218,6 @@ def wiki_lint(namespace: str = "default", service=Depends(get_wiki_service)):
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 
-
-# ── Review Queue ────────────────────────────────────────────────────
 
 @router.get("/review")
 def list_review_items(status: str = "pending", limit: int = 50):
@@ -300,7 +287,6 @@ def wiki_backfill(namespace: str = "default", service=Depends(get_wiki_service))
     if not docs:
         return {"created": 0, "deleted": 0, "message": "No documents in RAG"}
 
-    # Delete all existing wiki pages for this namespace
     existing_pages = wiki_store.list_pages(source_namespace=namespace)
     for p in existing_pages:
         wiki_store.delete_page(p.page_id)
@@ -326,8 +312,6 @@ def wiki_backfill(namespace: str = "default", service=Depends(get_wiki_service))
 
     return {"created": created, "deleted": deleted, "errors": errors}
 
-
-# ── Calibration ─────────────────────────────────────────────────────
 
 @router.get("/calibration")
 def get_calibration_status():

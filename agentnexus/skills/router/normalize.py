@@ -95,9 +95,6 @@ def augment_tokens_with_known_phrases(
     return extras
 
 
-# ── Fuzzy Matching ──────────────────────────────────────────────────
-
-
 def levenshtein_distance(s: str, t: str) -> int:
     """Compute Levenshtein edit distance between two strings."""
     if s == t:
@@ -141,7 +138,6 @@ def fuzzy_match_term(
         if cand == term:
             return cand, 1.0
 
-        # Edit distance based match
         max_len = max(len(term), len(cand))
         if max_len == 0:
             continue
@@ -152,21 +148,18 @@ def fuzzy_match_term(
                 best_term = cand
                 best_ratio = ratio
 
-        # Prefix match (for abbreviations like doc→docx)
         if len(term) >= 2 and cand.startswith(term) and len(cand) <= len(term) + 4:
             ratio = len(term) / len(cand)
             if ratio > best_ratio:
                 best_term = cand
                 best_ratio = ratio
 
-        # Reverse prefix (term contains candidate)
         if len(cand) >= 3 and term.startswith(cand) and len(term) <= len(cand) + 4:
             ratio = len(cand) / len(term)
             if ratio > best_ratio:
                 best_term = cand
                 best_ratio = ratio
 
-    # Try abbreviation expansion
     if best_ratio < 0.8:
         expanded = _ABBREVIATION_MAP.get(term)
         if expanded:

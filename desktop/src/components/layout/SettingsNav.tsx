@@ -3,11 +3,6 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { SETTINGS_NAV } from './nav'
 
-/**
- * Context-sidebar content for the Settings section (v2.2): sub-navigation for
- * all non-chat pages. Rendered by AppShell when the active section is Settings.
- * Esc (outside form fields) returns to chat, matching the back-button hint.
- */
 export default function SettingsNav() {
   const navigate = useNavigate()
 
@@ -24,7 +19,7 @@ export default function SettingsNav() {
 
   return (
     <div className="w-[232px] flex flex-col h-full shrink-0 overflow-y-auto py-3 px-2.5">
-      {/* Back to chat — the only exit from the settings section */}
+      {}
       <button
         onClick={() => navigate('/')}
         className="flex items-center gap-2 px-2.5 mb-2 rounded-lg transition-all"

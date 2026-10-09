@@ -21,11 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 class DriftSignalType(str, Enum):
-    GOAL_DRIFT = "goal_drift"              # 当前动作与原始目标相关度下降
-    SUBTASK_OVERRUN = "subtask_overrun"    # 子任务耗时超过预算
-    REPEATED_STEPS = "repeated_steps"      # 重复步骤增多
-    GOAL_REWRITE = "goal_rewrite"          # 目标表述发生变化
-    UNUSED_EVIDENCE = "unused_evidence"    # 关键证据未被使用
+    GOAL_DRIFT = "goal_drift"
+    SUBTASK_OVERRUN = "subtask_overrun"
+    REPEATED_STEPS = "repeated_steps"
+    GOAL_REWRITE = "goal_rewrite"
+    UNUSED_EVIDENCE = "unused_evidence"
 
 
 class DriftSeverity(str, Enum):
@@ -94,20 +94,19 @@ class DriftDetector:
                 # 触发 re-planning 或降级
     """
 
-    # 阈值配置
-    RELEVANCE_THRESHOLD = 0.15       # 目标相关度低于此值触发 warning
-    RELEVANCE_CRITICAL = 0.05        # 目标相关度低于此值触发 critical
-    REPEATED_STEP_THRESHOLD = 3      # 连续相同工具调用次数阈值
-    SUBTASK_OVERRUN_RATIO = 0.5      # 子任务步骤占总步骤的比例阈值
-    GOAL_REWRITE_THRESHOLD = 0.3     # 目标改写相似度低于此值触发 warning
+    RELEVANCE_THRESHOLD = 0.15
+    RELEVANCE_CRITICAL = 0.05
+    REPEATED_STEP_THRESHOLD = 3
+    SUBTASK_OVERRUN_RATIO = 0.5
+    GOAL_REWRITE_THRESHOLD = 0.3
 
     def __init__(self, original_goal: str, max_steps: int = 10):
         self.original_goal = original_goal
         self.max_steps = max_steps
-        self._tool_call_history: list[tuple[str, str]] = []  # (tool_name, params_hash)
+        self._tool_call_history: list[tuple[str, str]] = []
         self._goal_history: list[str] = [original_goal]
-        self._step_tool_map: dict[int, str] = {}  # step_index -> tool_name
-        self._tool_results: list[tuple[str, str]] = []  # (tool_name, result_summary)
+        self._step_tool_map: dict[int, str] = {}
+        self._tool_results: list[tuple[str, str]] = []
         self._drift_report: DriftReport | None = None
 
     @property
@@ -140,19 +139,14 @@ class DriftDetector:
         """
         signals: list[DriftSignal] = []
 
-        # 1. 目标相关度检查
         signals.extend(self._check_goal_relevance(step_index, current_goal))
 
-        # 2. 重复步骤检查
         signals.extend(self._check_repeated_steps(step_index))
 
-        # 3. 子任务超支检查
         signals.extend(self._check_subtask_overrun(step_index))
 
-        # 4. 目标改写检查
         signals.extend(self._check_goal_rewrite(step_index, current_goal))
 
-        # 5. 未使用证据检查
         signals.extend(self._check_unused_evidence(step_index))
 
         return signals
@@ -198,7 +192,6 @@ class DriftDetector:
         if len(self._tool_call_history) < self.REPEATED_STEP_THRESHOLD:
             return []
 
-        # 检查最近 N 次调用是否完全相同
         recent = self._tool_call_history[-self.REPEATED_STEP_THRESHOLD:]
         if all(call == recent[0] for call in recent):
             return [DriftSignal(
@@ -212,7 +205,6 @@ class DriftDetector:
                 step_index=step_index,
             )]
 
-        # 检查工具调用频率（同一工具占比过高）
         tool_names = [t[0] for t in self._tool_call_history[-10:]]
         if tool_names:
             counter = Counter(tool_names)
@@ -285,14 +277,12 @@ class DriftDetector:
         if len(self._tool_results) < 2:
             return []
 
-        # 检查最近的工具返回
         recent_results = self._tool_results[-3:]
         anomaly_keywords = {"异常", "错误", "失败", "超时", "error", "timeout", "failure", "异常升高"}
 
         for tool_name, result in recent_results:
             found_keywords = [kw for kw in anomaly_keywords if kw in result.lower()]
             if found_keywords:
-                # 检查后续是否有引用（简单检查：后续工具调用的参数中是否包含这些关键词）
                 recent_params = [t[1] for t in self._tool_call_history[-2:]]
                 recent_params_text = " ".join(recent_params).lower()
                 if not any(kw in recent_params_text for kw in found_keywords):

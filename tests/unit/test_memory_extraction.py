@@ -11,7 +11,6 @@ from agentnexus.memory.extraction import (
 
 
 class TestExtractXmlTag:
-
     def test_found_tag(self):
         result = extract_xml_tag("<summary>hello world</summary>", "summary")
         assert result == "hello world"
@@ -30,7 +29,6 @@ class TestExtractXmlTag:
 
 
 class TestParseMemoryPayload:
-
     def test_valid_json(self):
         data = '{"user_preference": ["likes Python"]}'
         result = parse_memory_payload(data)
@@ -47,7 +45,6 @@ class TestParseMemoryPayload:
 
 
 class TestIterMemoryItems:
-
     def test_valid_data_with_multiple_categories(self):
         data = {
             "preference": ["likes Python"],
@@ -66,7 +63,6 @@ class TestIterMemoryItems:
         items = list(iter_memory_items(data))
         assert len(items) == 1
         assert items[0][2] == "some fact"
-        # dict item without context → empty context string
         assert items[0][3] == ""
 
     def test_dict_items_with_text(self):
@@ -107,7 +103,6 @@ class TestIterMemoryItems:
 
 
 class TestEmbedText:
-
     def test_content_only_when_context_empty(self):
         assert _embed_text("用户喜欢周杰伦", "") == "用户喜欢周杰伦"
 
@@ -120,10 +115,8 @@ class TestEmbedText:
 
 
 class TestCheckConflict:
-
     def test_same_scene_contradiction_is_conflict(self):
         llm = MagicMock()
-        # same scene, mutually exclusive → conflict
         llm.think.return_value = "矛盾"
         assert _check_conflict(
             llm,
@@ -135,7 +128,6 @@ class TestCheckConflict:
 
     def test_different_scene_is_not_conflict(self):
         llm = MagicMock()
-        # conclusions look contradictory but contexts are different scenes
         llm.think.return_value = "不矛盾"
         assert _check_conflict(
             llm,
@@ -154,7 +146,6 @@ class TestCheckConflict:
 
 
 class TestExtractAndSaveMemories:
-
     def test_mock_llm_returns_json_and_save_called(self):
         llm = MagicMock()
         llm.think.return_value = '{"preference": ["likes Python"]}'
@@ -177,9 +168,6 @@ class TestExtractAndSaveMemories:
         assert call_kwargs["session_id"] == "test-session"
         assert call_kwargs["content"] == "likes Python"
         assert call_kwargs["category"] == "preference"
-        # plain-string item → no context → metadata kwarg omitted entirely
-        # (preserves the historical save() call shape for callers/tests that
-        # assert against it).
         assert "metadata" not in call_kwargs
 
     def test_context_passed_through_to_save(self):
@@ -206,7 +194,6 @@ class TestExtractAndSaveMemories:
         call_kwargs = long_term.save.call_args[1]
         assert call_kwargs["content"] == "用户喜欢周杰伦"
         assert call_kwargs["metadata"] == {"context": "推荐歌曲时用户否定了莫文蔚、选择周杰伦"}
-        # D: embedding input should be content+context concatenated
         encode_arg = embed_model.encode.call_args[0][0]
         assert encode_arg == "用户喜欢周杰伦\n推荐歌曲时用户否定了莫文蔚、选择周杰伦"
 
@@ -225,5 +212,4 @@ class TestExtractAndSaveMemories:
 
         call_kwargs = long_term.save.call_args[1]
         assert "metadata" not in call_kwargs
-        # D: no context → embedding input is content only
         assert embed_model.encode.call_args[0][0] == "uses VSCode"

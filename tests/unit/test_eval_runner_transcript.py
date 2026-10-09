@@ -20,7 +20,6 @@ from agentnexus.observability.tracer import trace_manager
 def clean_trace():
     """确保每个测试后线程本地 trace 被清理。"""
     yield
-    # active 为 None 时 end_trace 是 no-op, 直接调用即可
     trace_manager.end_trace()
 
 
@@ -33,7 +32,7 @@ class _FakeAgent:
     def run(self, question: str):
         assert trace_manager.active is not None, "runner 必须为 trial 建立 trace 上下文"
         with trace_manager.span("plan_node", {"step_index": 0, "strategy": "NATIVE_TOOLS"}):
-            time.sleep(0.01)  # 真实耗时, 使 latency 可测
+            time.sleep(0.01)
         with trace_manager.span("tool", {"tool_name": "grep_search", "params": {"q": "x"}}):
             time.sleep(0.005)
         with trace_manager.span("final_answer", {}):
@@ -49,7 +48,6 @@ def _patch_agent_deps(monkeypatch):
     monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent", _FakeAgent)
     monkeypatch.setattr("agentnexus.core.llm.AgentLLM", lambda: object())
     monkeypatch.setattr("agentnexus.tools.registry.ToolRegistry", lambda: object())
-    # runner 内会 from agentnexus.tools import register_all_tools —— patch 源头模块
     monkeypatch.setattr("agentnexus.tools.register_all_tools", lambda *a, **kw: None)
     monkeypatch.setattr(
         "agentnexus.core.config.get_settings",
@@ -72,7 +70,6 @@ def test_transcript_uses_real_clock(monkeypatch, clean_trace):
         assert span["start_time"] > 0
         assert span["end_time"] >= span["start_time"]
         assert span["latency_ms"] >= 0
-    # 真实 sleep 至少 10ms, 编造的 1.0s 固定值不可能出现
     plan = next(s for s in result.transcript if s["name"] == "llm")
     assert plan["latency_ms"] >= 5, f"plan_node 应有真实耗时, 得到 {plan['latency_ms']}ms"
 
@@ -89,7 +86,7 @@ def test_span_names_match_grader_protocol(monkeypatch, clean_trace):
     assert "plan_node" not in names
     assert "tool" in names
     assert "final_answer" in names
-    assert "task" in names  # 根 span, failure_attribution 依赖
+    assert "task" in names
 
 
 def test_trace_id_recorded_in_metadata(monkeypatch, clean_trace):
@@ -113,7 +110,6 @@ def test_does_not_hijack_existing_trace(monkeypatch, clean_trace):
         assert runner._start_trace(_make_task()) is None
         assert trace_manager.active is upstream
 
-        # None 上下文不得触发 end_trace —— 上游 trace 结束后 active 才被清
         runner._end_trace(None)
         assert trace_manager.active is upstream
     finally:
@@ -143,7 +139,6 @@ def test_fallback_marks_reconstructed_without_fake_times(monkeypatch, clean_trac
     for span in spans:
         assert "start_time" not in span, "fallback 不允许编造时间戳"
         assert span["metadata"]["reconstructed"] is True
-    # 插入序即真实步骤顺序: llm 在前, tool 跟随, final_answer 收尾
     assert spans[0]["name"] == "llm"
     assert spans[1]["name"] == "tool"
     assert spans[-1]["name"] == "final_answer"

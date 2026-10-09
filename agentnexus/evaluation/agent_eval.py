@@ -27,9 +27,6 @@ def _cost(input_tokens: int, output_tokens: int, model: str) -> float:
     return estimate_cost(input_tokens, output_tokens, model)
 
 
-# ── Per-trace record ─────────────────────────────────────────────
-
-
 @dataclass
 class TraceRecord:
     """Metrics extracted from a single trace (one user input → agent execution)."""
@@ -49,11 +46,7 @@ class TraceRecord:
 
     @property
     def cost_cny(self) -> float:
-        # Default estimate — no vendor price table. Set ModelOverride prices for accuracy.
         return _cost(self.total_input_tokens, self.total_output_tokens, "")
-
-
-# ── Aggregate report ─────────────────────────────────────────────
 
 
 @dataclass
@@ -61,16 +54,13 @@ class AgentReport:
     """Aggregate evaluation report over multiple traces."""
     total_traces: int = 0
 
-    # Core metrics
     answer_rate: float = 0.0
     avg_steps: float = 0.0
     tool_success_rate: float = 0.0
 
-    # Reliability
     truncation_rate: float = 0.0
     error_rate: float = 0.0
 
-    # Token & cost
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     avg_input_tokens: float = 0.0
@@ -78,16 +68,13 @@ class AgentReport:
     avg_cost_cny: float = 0.0
     total_cost_cny: float = 0.0
 
-    # Latency
     latency_p50_ms: float = 0.0
     latency_p95_ms: float = 0.0
     latency_p99_ms: float = 0.0
     avg_trace_latency_ms: float = 0.0
 
-    # Tool breakdown
     tool_breakdown: dict[str, dict] = field(default_factory=dict)
 
-    # Per-trace details
     traces: list[TraceRecord] = field(default_factory=list)
     failed_traces: list[TraceRecord] = field(default_factory=list)
 
@@ -136,9 +123,6 @@ class AgentReport:
         return "\n".join(lines)
 
 
-# ── Evaluator ────────────────────────────────────────────────────
-
-
 class AgentEvaluator:
     """Read JSONL traces and produce per-trace + aggregate metrics."""
 
@@ -176,8 +160,6 @@ class AgentEvaluator:
             return self._evaluate_trace(trace_id, spans)
         return None
 
-    # ── per-trace logic ──────────────────────────────────────────
-
     @staticmethod
     def _evaluate_trace(trace_id: str, spans: list[dict]) -> TraceRecord:
         llm_spans = sorted(
@@ -189,7 +171,6 @@ class AgentEvaluator:
         task_input = (task_span or {}).get("input", {}) or {}
         task_preview = str(task_input.get("task", ""))[:200] if task_input.get("task") else ""
         if not task_preview:
-            # Fallback: use input_preview from first llm span
             first_llm = llm_spans[0] if llm_spans else {}
             inp = first_llm.get("input", {}) or {}
             task_preview = str(inp.get("input_preview", ""))[:200]
@@ -219,15 +200,11 @@ class AgentEvaluator:
                 if name not in rec.tool_calls_unique:
                     rec.tool_calls_unique.append(name)
 
-        # Determine if agent produced an answer:
-        # If the last llm span has no tool_calls → answer returned naturally
         last_meta = (llm_spans[-1].get("metadata", {}) or {})
         last_tool_calls: list = last_meta.get("tool_calls") or []
         rec.had_answer = len(last_tool_calls) == 0
 
         return rec
-
-    # ── aggregation ──────────────────────────────────────────────
 
     @staticmethod
     def _aggregate(records: list[TraceRecord]) -> AgentReport:
@@ -286,7 +263,6 @@ class AgentEvaluator:
         else:
             report.tool_success_rate = 1.0
 
-        # Latency percentiles (per-trace)
         sorted_lat = sorted(trace_latencies)
         if sorted_lat:
             report.avg_trace_latency_ms = sum(sorted_lat) / len(sorted_lat)
@@ -294,7 +270,6 @@ class AgentEvaluator:
             report.latency_p95_ms = _percentile(sorted_lat, 95)
             report.latency_p99_ms = _percentile(sorted_lat, 99)
 
-        # Tool breakdown
         for name in sorted(tool_calls_by_name):
             total = tool_calls_by_name[name]
             errs = tool_errors_by_name.get(name, 0)

@@ -7,7 +7,6 @@ across config loading, database operations, and vector store metadata.
 import pytest
 import yaml
 
-# ── YAML Deserialization Tests ─────────────────────────────────────
 
 class TestYamlSafeLoad:
     """YAML is loaded with safe_load, not unsafe yaml.load()."""
@@ -77,12 +76,12 @@ class TestYamlSafeLoad:
     def test_config_yaml_loads_with_safe_load(self, temp_agentnexus_home):
         """Config YAML is loaded with yaml.safe_load via load_config_yaml."""
         from agentnexus.core.config import load_config_yaml
-
         config_yaml = """
         llm_api_key: "sk-test-12345"
         llm_model_id: "test/model"
         shell_timeout: 60
         """
+
         config_path = temp_agentnexus_home / "config.yaml"
         config_path.write_text(config_yaml, encoding="utf-8")
 
@@ -91,8 +90,6 @@ class TestYamlSafeLoad:
         assert loaded["llm_model_id"] == "test/model"
         assert loaded["shell_timeout"] == 60
 
-
-# ── SQL Injection Tests ────────────────────────────────────────────
 
 class TestSQLInjectionLongTermMemory:
     """LongTermMemory handles SQL injection payloads via parameterized queries."""
@@ -230,8 +227,6 @@ class TestSQLInjectionVersioned:
         log = mgr.log()
         assert len(log) >= 1
 
-
-# ── ChromaDB Metadata Injection Tests ──────────────────────────────
 
 class TestChromaDBMetadataInjection:
     """ChromaDB handles special characters in stored content."""

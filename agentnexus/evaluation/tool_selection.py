@@ -19,8 +19,8 @@ class ToolSelectionReport:
     total_queries: int = 0
     correct: int = 0
     accuracy: float = 0.0
-    by_tool: dict[str, dict] = field(default_factory=dict)  # tool -> {total, correct}
-    mismatches: list[dict] = field(default_factory=list)     # {query, expected, actual}
+    by_tool: dict[str, dict] = field(default_factory=dict)
+    mismatches: list[dict] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -36,11 +36,7 @@ class ToolSelectionReport:
         return "\n".join(lines)
 
 
-# Labeled eval set for AgentNexus's built-in tools.
-# Format: {query_fragment: expected_tool_name}
-# Order matters: more specific keywords first (first-match wins).
 LABELED_EVAL_SET: dict[str, str] = {
-    # File operations (specific — before generic "搜索")
     "查看": "read",
     "内容": "read",
     "对比": "read",
@@ -51,18 +47,15 @@ LABELED_EVAL_SET: dict[str, str] = {
     "grep": "grep",
     "包含": "grep",
     "文档": "search",
-    # Code execution
     "代码": "shell_exec",
     "code": "shell_exec",
     "计算": "shell_exec",
     "运行": "shell_exec",
     "生成图表": "shell_exec",
-    # Memory
     "记忆": "memory_search",
     "偏好": "memory_search",
     "记住": "memory_search",
     "之前": "memory_search",
-    # Web search (generic — catch-all after more specific matches)
     "搜索": "web_search",
     "search": "web_search",
     "查询": "web_search",
@@ -81,7 +74,6 @@ class ToolSelectionEvaluator:
         """Extract tool selection pairs from traces and evaluate."""
         report = ToolSelectionReport()
 
-        # Collect (task_text, first_tool_name) pairs per trace
         trace_tasks: dict[str, str] = {}
         trace_tools: dict[str, str] = {}
 
@@ -103,7 +95,6 @@ class ToolSelectionEvaluator:
                 if tool_name and tid not in trace_tools:
                     trace_tools[tid] = tool_name
 
-        # Evaluate each trace that has both a task and a tool call
         for tid, task in trace_tasks.items():
             actual_tool = trace_tools.get(tid)
             if not actual_tool:
@@ -133,4 +124,4 @@ class ToolSelectionEvaluator:
         for keyword, tool in self.eval_set.items():
             if keyword.lower() in task_lower:
                 return tool
-        return "web_search"  # default
+        return "web_search"

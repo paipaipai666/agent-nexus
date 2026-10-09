@@ -62,39 +62,31 @@ from agentnexus.tools.mcp.schema import (
 )
 
 __all__ = [
-    # adapter
     "MCPToolManager",
     "create_mcp_manager_from_settings",
-    # call
     "call_descriptor",
     "run_with_limiter",
-    # capabilities
     "build_prompt_tool_descriptors",
     "build_resource_tool_descriptors",
     "import_prompts",
     "import_resources",
     "import_server_capabilities",
-    # connection
     "build_http_client_kwargs",
     "ensure_sdk_available",
-    # descriptors
     "build_local_tool_name",
     "build_tool_descriptor",
     "normalize_param_schema",
     "prompt_descriptor_from_sdk",
     "resource_descriptor_from_sdk",
     "should_import_tool",
-    # health
     "mark_runtime_failure",
     "mark_runtime_healthy",
     "schedule_reconnect",
     "should_attempt_reconnect",
-    # lifecycle
     "close_all",
     "connect_all",
     "connect_server",
     "disconnect_server",
-    # result
     "content_block_to_text",
     "dump_sdk_object",
     "get_sdk_attr",
@@ -103,13 +95,11 @@ __all__ = [
     "normalize_resource_result",
     "normalize_tool_result",
     "sanitize_name",
-    # schema
     "MCPPromptDescriptor",
     "MCPResourceDescriptor",
     "MCPServerState",
     "MCPToolDescriptor",
     "ServerRuntime",
-    # backward compat helpers (underscore-prefixed)
     "_apply_capability_mcp_enabled",
     "_content_block_to_text",
     "_dump_sdk_object",

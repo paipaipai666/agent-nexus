@@ -16,17 +16,8 @@ from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
 logger = logging.getLogger(__name__)
 
-# Watchdog for hung streams. Free-tier gateways are observed to accept the
-# request, return response headers, then hold the SSE connection open forever
-# (keep-alive traffic defeats httpx's read timeout, which only fires on *idle*
-# sockets). Without a guard, a single hung stream pins its worker thread
-# indefinitely and the whole eval batch deadlocks (observed twice in the
-# wild). We therefore bound both the gap between chunks and the total stream
-# duration; on violation the underlying connection is closed so the pump
-# thread unblocks and exits, and the caller gets a normal exception it can
-# retry.
 _CHUNK_GAP_S = 60
-_TOTAL_BUDGET_MULT = 10  # total cap = per-call timeout × this
+_TOTAL_BUDGET_MULT = 10
 
 _SENTINEL = object()
 
@@ -35,8 +26,6 @@ class OpenAIProvider(BaseLLMProvider):
     """Direct provider for any OpenAI-compatible API endpoint."""
 
     def __init__(self) -> None:
-        # The in-flight openai Stream; closed by abort_active_stream() when
-        # the run's cancel checker fires (产品决策: 取消 = 立刻停止).
         self._active_stream: Any = None
 
     def abort_active_stream(self) -> None:
@@ -137,9 +126,6 @@ class OpenAIProvider(BaseLLMProvider):
         if stream_options:
             kwargs["stream_options"] = stream_options
 
-        # Explicit thinking control. "none" must reach the wire — several
-        # OpenAI-compatible endpoints (DeepSeek family) think by default and
-        # only stop when told. Unknown params fall back to a bare retry below.
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
             if reasoning_effort == "none":
@@ -153,7 +139,6 @@ class OpenAIProvider(BaseLLMProvider):
             msg = str(exc).lower()
             if "reasoning_effort" not in msg and "thinking" not in msg:
                 raise
-            # Endpoint rejected thinking controls — retry without them.
             kwargs.pop("reasoning_effort", None)
             kwargs.pop("extra_body", None)
             response = client.chat.completions.create(**kwargs)
@@ -164,18 +149,15 @@ class OpenAIProvider(BaseLLMProvider):
 
         try:
             for chunk in self._guarded_iter(response, timeout=timeout):
-                # Capture usage from any chunk (may appear with empty choices)
                 if hasattr(chunk, "usage") and chunk.usage:
                     result.usage = {
                         "input_tokens": chunk.usage.prompt_tokens or 0,
                         "output_tokens": chunk.usage.completion_tokens or 0,
                         "total_tokens": chunk.usage.total_tokens or 0,
                     }
-                    # DeepSeek prompt cache hit/miss tokens
                     if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
                         result.usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
                         result.usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
-                    # OpenAI cached_tokens (prompt_tokens_details.cached_tokens)
                     elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
                         result.usage["cache_hit_tokens"] = getattr(
                             chunk.usage.prompt_tokens_details, "cached_tokens", 0
@@ -185,23 +167,18 @@ class OpenAIProvider(BaseLLMProvider):
                     continue
 
                 delta = chunk.choices[0].delta
-                # Some deployments (SiliconFlow DeepSeek-V4) leave thinking-tag
-                # residue in delta.content even while reasoning_content is
-                # streamed separately — strip it before accumulation.
                 content = (delta.content or "").replace("</think>", "").replace("<think>", "")
                 result.text += content
 
                 if on_token and content:
                     on_token(content)
 
-                # Reasoning / thinking content (DeepSeek, o-series)
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
                     result.reasoning_content += rc
                     if on_token:
                         on_token(rc, is_reasoning=True)
 
-                # Tool calls
                 tc_list = getattr(delta, "tool_calls", None) or []
                 for tc in tc_list:
                     idx = tc.get("index", 0) if isinstance(tc, dict) else getattr(tc, "index", 0)
@@ -229,7 +206,6 @@ class OpenAIProvider(BaseLLMProvider):
         finally:
             self._active_stream = None
 
-        # Parse accumulated tool calls
         for buf in tool_call_bufs.values():
             if buf["function"]["name"]:
                 try:

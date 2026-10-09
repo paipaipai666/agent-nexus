@@ -22,8 +22,6 @@ class ReactionToolProvider:
         from agentnexus.core.config import get_settings
         from agentnexus.tools.user_reaction import REACTION_EMOJI, express_reaction
 
-        # Off by default (like enable_contextual_retrieval): opt-in entertainment.
-        # The want() whitelist only narrows further; it must never force-enable.
         try:
             enabled = get_settings().enable_user_reaction
         except Exception:

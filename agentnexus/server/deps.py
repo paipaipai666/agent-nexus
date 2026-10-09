@@ -55,5 +55,5 @@ def get_wiki_service() -> "WikiService":
         try:
             runtime.wiki_service = service
         except Exception:
-            pass  # read-only runtime stub; keep the local instance
+            pass
     return service

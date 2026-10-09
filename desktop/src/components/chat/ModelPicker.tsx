@@ -21,15 +21,10 @@ interface ModelCapabilities {
 }
 
 interface ModelPickerProps {
-  /** Currently active model id (from runtime status) — displayed on the chip. */
   currentModel: string | null
-  /** Called after a successful switch, with the new active model id. */
   onSwitched: (modelId: string) => void
 }
 
-/** Model selector living in the chat input's HUD row. Lists every model of
- *  every configured provider, grouped by provider; switching is live (the
- *  backend hot-swaps the shared LLM client). */
 export default function ModelPicker({ currentModel, onSwitched }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -45,11 +40,8 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
   const refreshCaps = () => {
     api.getModelCapabilities().then(setCaps).catch(() => setCaps(null))
   }
-  // Anchored with position:fixed — the HUD row has overflow-x-auto, which
-  // would clip an absolutely-positioned dropdown.
   const anchorRect = open ? rootRef.current?.getBoundingClientRect() : undefined
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -128,7 +120,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
           </div>
 
           <div className="overflow-y-auto flex-1">
-            {/* Legacy flat-config default */}
+            {}
             {legacyModel && (
               <button
                 onClick={() => handleSelect('')}
@@ -146,7 +138,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
               </button>
             )}
 
-            {/* Providers grouped with their models */}
+            {}
             {providers.map((p) => (
               <div key={p.name}>
                 <div className="px-3 pt-1.5 pb-0.5 text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>
@@ -190,7 +182,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             <div className="px-3 py-1.5 text-[12px] shrink-0" style={{ color: 'var(--red)' }}>{error}</div>
           )}
 
-          {/* Capability detection results for the active model */}
+          {}
           <div className="px-3 pt-2 pb-2.5 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>能力检测</span>
@@ -205,9 +197,6 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
               <>
                 <div className="flex flex-wrap gap-1">
                   {(() => {
-                    // Mutually exclusive fallback ladder (backend decisions.py):
-                    // native tools → JSON Mode → JSON Schema. Show whichever
-                    // mechanism is active; all-red shows 原生工具 as failed.
                     const chain = [
                       { key: 'tool_calling', label: '原生工具' },
                       { key: 'json_mode', label: 'JSON Mode' },

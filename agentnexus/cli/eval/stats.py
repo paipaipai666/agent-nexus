@@ -85,7 +85,6 @@ def _spearman(x: list[float], y: list[float]) -> tuple[float, float]:
     except ImportError:
         pass
 
-    # Manual fallback
     def _rank(vals):
         sorted_vals = sorted(vals)
         return [sorted_vals.index(v) + 1 for v in vals]
@@ -93,7 +92,6 @@ def _spearman(x: list[float], y: list[float]) -> tuple[float, float]:
     rx, ry = _rank(x), _rank(y)
     d2 = sum((a - b) ** 2 for a, b in zip(rx, ry))
     rho = 1.0 - (6.0 * d2) / (n * (n * n - 1))
-    # Approximate p-value via t-distribution
     import math
     try:
         t_stat = rho * math.sqrt((n - 2) / (1 - rho * rho))

@@ -21,9 +21,9 @@ class CircuitOpenError(Exception):
 
 class CircuitState(Enum):
     """Three-state circuit breaker."""
-    CLOSED = "closed"       # normal operation
-    OPEN = "open"           # tripped — reject calls
-    HALF_OPEN = "half_open" # probe — allow one request to test recovery
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
 
 
 class CircuitBreaker:
@@ -104,7 +104,6 @@ class CircuitBreaker:
             return True
         if self._state is CircuitState.HALF_OPEN:
             return True
-        # OPEN — check if cooldown expired
         if self.backoff_remaining() <= 0:
             self._state = CircuitState.HALF_OPEN
             return True
@@ -118,7 +117,6 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         """Record a failed call. May trip to OPEN."""
         if self._state is CircuitState.HALF_OPEN:
-            # Half-open probe failed — back to OPEN
             self._state = CircuitState.OPEN
             self._opened_at = time.time()
             return

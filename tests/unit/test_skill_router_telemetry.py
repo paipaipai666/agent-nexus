@@ -7,8 +7,6 @@ from dataclasses import asdict
 
 from agentnexus.skills.router.telemetry import RouteEvent, RouteTelemetry
 
-# ── Tests for RouteEvent ───────────────────────────────────────────
-
 
 class TestRouteEvent:
     def test_default_values(self):
@@ -65,13 +63,9 @@ class TestRouteEvent:
         assert data["query"] == "test"
         assert data["query_terms"] == ("a", "b")
         assert data["selected_skill"] == "ns/skill"
-        # Verify it's JSON-serializable
         json_str = json.dumps(data)
         restored = json.loads(json_str)
         assert restored["query"] == "test"
-
-
-# ── Tests for RouteTelemetry ───────────────────────────────────────
 
 
 class TestRouteTelemetry:
@@ -97,7 +91,6 @@ class TestRouteTelemetry:
         t = RouteTelemetry(log_path=str(log_file))
         event = RouteEvent(query="will-fail-in-file")
         mocker.patch("builtins.open", side_effect=OSError("disk full"))
-        # Should not raise
         t.record(event)
         assert len(t.events) == 1
         assert t.events[0].query == "will-fail-in-file"
@@ -107,11 +100,9 @@ class TestRouteTelemetry:
         t.record(RouteEvent(query="q1"))
         t.record(RouteEvent(query="q1"))
         t.record_feedback("q1", accepted=True, actual_skill="ns/correct")
-        # Latest unconfirmed should be updated
         events = t.events
         assert events[1].accepted is True
         assert events[1].actual_skill == "ns/correct"
-        # First should remain unchanged
         assert events[0].accepted is None
 
     def test_record_feedback_no_matching_query_no_change(self):
@@ -125,10 +116,8 @@ class TestRouteTelemetry:
         t.record(RouteEvent(query="q1"))
         t.record(RouteEvent(query="q1"))
         t.record(RouteEvent(query="q1"))
-        # Confirm the middle one manually
         t.events[1].accepted = False
         t.record_feedback("q1", accepted=True)
-        # Should update the latest unconfirmed (index 2), not the already-confirmed one
         events = t.events
         assert events[0].accepted is None
         assert events[1].accepted is False
@@ -146,7 +135,6 @@ class TestRouteTelemetry:
         t.record(RouteEvent(query="q1"))
         events = t.events
         events.append(RouteEvent(query="injected"))
-        # Internal list should be unaffected
         assert len(t.events) == 1
 
     def test_get_hard_negatives_returns_ambiguous_mode_events(self):

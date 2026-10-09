@@ -83,8 +83,6 @@ class TestShellInjection:
             result = shell_exec("echo $(whoami)")
             assert "exit_code" in result
 
-    # ── Windows-specific patterns ──
-
     @patch("agentnexus.tools.shell._SYSTEM", "Windows")
     def test_win_format_blocked(self):
         """Windows 'format D:' caught by blacklist."""
@@ -126,8 +124,6 @@ class TestShellInjection:
         result = _check_blacklist("reg add /f HKLM\\Software")
         assert result is not None
         assert "blocked" in result
-
-    # ── Chain / env-var patterns ──
 
     @patch("agentnexus.tools.shell._SYSTEM", "Linux")
     def test_shell_and_chain_blocked(self):
@@ -210,8 +206,6 @@ class TestPathTraversal:
         result = file_read("nonexistent_file_xyz_123.txt")
         assert "文件不存在" in result
 
-    # ── Advanced traversal ──
-
     def test_dir_traversal_unicode_normalized(self):
         """Unicode dot (\\u2024) in path — implementation-dependent."""
         with patch("agentnexus.tools.file_ops.os.getcwd", return_value="D:\\code\\AgentNexus"):
@@ -219,7 +213,6 @@ class TestPathTraversal:
                 _resolve_safe("..\\u2024..\\u2024etc\\u2024passwd")
             except ValueError:
                 pass
-            # No crash is the main assertion
 
     @patch("agentnexus.tools.file_ops.os.getcwd", return_value=str(Path(__file__).resolve().parent.parent.parent))
     def test_file_list_symlink_appears(self, mock_getcwd):

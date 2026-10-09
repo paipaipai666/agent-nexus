@@ -101,10 +101,7 @@ class TestMultiTurnLTM:
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)
         mgr._embed_model = mock_embed
-        # Short answers like "你好！" (< 5 chars) are rejected by the rule filter
-        # before the gate runs, so bypass it to test the extraction path.
         mgr._should_extract = MagicMock(return_value=True)
-        # Extraction expects JSON (gate is bypassed by the mock above).
         mgr._llm.think.return_value = (
             '```json\n{"preference": [{"content": "用户喜欢简洁回答"}]}\n```'
         )

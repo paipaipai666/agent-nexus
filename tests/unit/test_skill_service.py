@@ -260,14 +260,12 @@ def test_available_skill_context_shortlist_when_many_skills():
         SkillRoute(entry=entries[3], score=3.0, matched_terms=("k8s",), reason="r"),
     ]
 
-    # Tight budget: header + recommended block + only the ranked hits
     context = service.available_skill_context(recommendations=picks, token_budget=200)
 
     assert "default/skill-07" in context
     assert "default/skill-03" in context
     assert "default/skill-00" not in context
     assert "more skills available" in context
-    # Ranked shortlist must not be registry-order truncation
     assert context.index("skill-07") < context.index("skill-03")
 
 
@@ -288,7 +286,7 @@ def test_available_skill_context_orders_recommended_first_when_few():
 
     assert context.index("default/gamma") < context.index("default/alpha")
     assert context.index("default/gamma") < context.index("default/beta")
-    assert context.count("default/gamma") >= 2  # recommended section + catalog
+    assert context.count("default/gamma") >= 2
 
 
 def test_skill_context_budget_scales_with_context_window():
@@ -300,10 +298,8 @@ def test_skill_context_budget_scales_with_context_window():
         context_window_tokens=256_000, budget_ratio=0.02, max_tokens=4000,
     )
     assert small == int(32_000 * 0.02)
-    # 256k * 2% = 5120 but hard-capped at 4k (Claude Code-style ceiling)
     assert large == 4000
     assert large > small
-    # explicit override wins
     assert service.skill_context_token_budget(token_budget=99) == 99
 
 
@@ -349,7 +345,6 @@ def test_synthesize_intent_queries_include_verb_object_templates():
     from agentnexus.skills.router.retrieve import synthesize_intent_queries
 
     entry = _skill_entry("docx", "DOCX", "Create and edit Word documents.")
-    # _skill_entry has no verbs/objects — infer from description
     intents = synthesize_intent_queries(entry)
     assert intents
     assert any("创建" in q or "编辑" in q or "写" in q or "DOCX" in q or "Word" in q for q in intents)
@@ -360,8 +355,6 @@ def test_auto_select_soft_recommends_without_locking_profile():
     registry = SkillRegistry([])
     registry._entries = [entry]
     service = SkillService(registry, agent=MagicMock())
-    # Force soft path: single candidate but score gate uses min_score only —
-    # single-candidate hard activate stays. Use two close scores instead.
     other = _skill_entry("only2", "Only2", "Write concise release notes too.")
     registry._entries = [entry, other]
     service = SkillService(registry, agent=MagicMock())
@@ -369,7 +362,6 @@ def test_auto_select_soft_recommends_without_locking_profile():
     llm.think.return_value = '{"skill_id": "default/only", "confidence": 0.6, "reason": "x"}'
     service.llm_client = llm
     route = service.maybe_auto_select("Write concise release notes.")
-    # LLM path hard-activates by design
     assert route is not None
     assert service.current is not None
 
@@ -418,11 +410,9 @@ def test_skill_auto_route_margin_gates_hard_activate():
     close = SkillRoute(entry=first, score=4.0, matched_terms=("write",), reason="r")
     far = SkillRoute(entry=second, score=2.5, matched_terms=("notes",), reason="r")
 
-    # gap = 1.5 ≥ margin 0.75 and score 4.0 ≥ 2.5 → hard activate
     assert service._should_hard_activate(close, [close, far]) is True
 
     service.router.margin = 2.0
-    # gap 1.5 < required margin 2.0 → soft only
     assert service._should_hard_activate(close, [close, far]) is False
 
 

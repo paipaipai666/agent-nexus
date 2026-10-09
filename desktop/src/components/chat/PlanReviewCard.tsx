@@ -5,15 +5,11 @@ import { useTheme } from '../theme/ThemeProvider'
 import { usePrefersReducedMotion } from '../../utils/effects'
 
 interface PlanReviewCardProps {
-  /** Full markdown plan document submitted via exit_plan_mode. */
   plan: string
   onApprove: () => void
   onDeny: () => void
 }
 
-/** Plan review surface: renders the agent's final plan document in full for
- *  user approval. Both actions must always be present (a review UI without an
- *  accept control strands the agent in plan mode). */
 export default function PlanReviewCard({ plan, onApprove, onDeny }: PlanReviewCardProps) {
   const { theme } = useTheme()
   const reducedMotion = usePrefersReducedMotion()

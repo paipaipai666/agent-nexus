@@ -22,9 +22,6 @@ def _ev(event_name: str, **payload):
 
 def _make_service() -> tuple[ChatService, MagicMock]:
     agent = MagicMock()
-    # Concrete serializable attributes — under a full-suite run an earlier test
-    # may leave the trace/exporter pipeline active, which JSON-serializes
-    # agent metadata (model/agent_id/...). MagicMock values would crash it.
     agent.llm_client.model = "mock-model"
     agent.llm_client.last_error = ""
     agent.agent_id = "mock-agent"
@@ -65,8 +62,7 @@ class TestTokenBufferSemantics:
             _ev("STREAM_REASONING", token="R1"),
             _ev("STREAM_TOKEN", token="T2"),
         ])
-        assert service._token_buffers.get(session.id) is None  # popped at run end
-        # Replay the same events against a live run to inspect the buffer:
+        assert service._token_buffers.get(session.id) is None
         service2, agent2 = _make_service()
         session2 = service2.start_session()
         captured = {}
@@ -77,7 +73,6 @@ class TestTokenBufferSemantics:
             on_event(_ev("STREAM_REASONING", token="R1"), None, None)
             on_event(_ev("STREAM_TOKEN", token="T2"), None, None)
             captured.update(service2.get_run_token_snapshot(session2.id))
-            # Mid-run: buffer holds content tokens only; reasoning excluded.
             assert captured == {"content": "T1T2", "cursor": 2}
             return "answer"
 
@@ -117,7 +112,6 @@ class TestTokSeq:
             _ev("STREAM_TOKEN", token="a"),
             _ev("STREAM_TOKEN", token="b"),
         ])
-        # Second run in the same session: tok_seq restarts at 1.
         agent.run.side_effect = None
         _, emitted = _run_with_events(service, agent, session.id, [
             _ev("STREAM_TOKEN", token="x"),
@@ -142,7 +136,6 @@ class TestStepScopedSnapshot:
 
         agent.run.side_effect = side_effect
         service.send_message(session.id, "hi")
-        # Snapshot carries only the CURRENT step's text ("BB"), not "AAAAAA…".
         assert captured == {"content": "BB", "cursor": 2}
 
     def test_snapshot_empty_at_step_boundary(self):

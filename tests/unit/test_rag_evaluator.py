@@ -139,7 +139,6 @@ class TestRAGEvaluatorScoreContextRelevancy:
         assert 0.0 < score < 1.0
 
 
-
 class TestRAGEvaluatorChunkAll:
     def test_returns_chunks(self):
         evaluator = RAGEvaluator(["doc one", "doc two"], [])
@@ -194,7 +193,6 @@ class TestCheckPassed:
 
     def test_zero_defaults_fail_safe(self):
         run = EvalRun(label="t", strategy=ChunkStrategy.FIXED, chunk_size=256, use_hybrid=False)
-        # All defaults are 0.0, thresholds are all > 0, so should fail
         assert run.check_passed() is False
 
 
@@ -259,7 +257,6 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["the answer is 42"],
         )
-        # Both chunks contain the reference substring
         precision, hit, mrr = evaluator._score_retrieval_ranked(
             sample, ["the answer is 42 and more", "the answer is 42 too"], top_k=2,
         )
@@ -273,7 +270,6 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["completely unrelated reference"],
         )
-        # Neither chunk contains the reference
         precision, hit, mrr = evaluator._score_retrieval_ranked(
             sample, ["chunk1", "chunk2"], top_k=2,
         )
@@ -287,13 +283,12 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["the answer is 42"],
         )
-        # chunk1 doesn't contain ref, chunk2 does
         precision, hit, mrr = evaluator._score_retrieval_ranked(
             sample, ["unrelated chunk", "the answer is 42 here"], top_k=2,
         )
         assert precision == 0.5
         assert hit == 1.0
-        assert mrr == 0.5  # 1/2
+        assert mrr == 0.5
 
     def test_respects_top_k_limit(self):
         evaluator = RAGEvaluator([], [])
@@ -301,10 +296,8 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["the answer is 42"],
         )
-        # Only last chunk is relevant, but top_k=5 means only first 5 are checked
         chunks = [f"unrelated{i}" for i in range(5)] + ["the answer is 42"]
         precision, hit, mrr = evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
-        # top_k=5 means only first 5 chunks checked, none contain ref
         assert precision == 0.0
         assert hit == 0.0
         assert mrr == 0.0
@@ -315,12 +308,11 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["the answer is 42"],
         )
-        # Relevant chunk is at position 2 (0-indexed), within top_k=5
         chunks = ["unrelated0", "the answer is 42 here", "unrelated2", "unrelated3", "unrelated4"]
         precision, hit, mrr = evaluator._score_retrieval_ranked(sample, chunks, top_k=5)
-        assert precision == 0.2  # 1 out of 5
+        assert precision == 0.2
         assert hit == 1.0
-        assert mrr == 0.5  # 1/2
+        assert mrr == 0.5
 
     def test_token_overlap_matching(self):
         """Test that token overlap works when reference is a substring of chunk."""
@@ -329,7 +321,6 @@ class TestScoreRetrievalRanked:
             question="q", ground_truth="gt",
             reference_contexts=["BM25 算法"],
         )
-        # Chunk contains the reference as a substring
         precision, hit, mrr = evaluator._score_retrieval_ranked(
             sample, ["BM25 算法是一种文本排名函数"], top_k=1,
         )

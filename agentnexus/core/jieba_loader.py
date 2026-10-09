@@ -25,7 +25,7 @@ def _patch_resource_loading(jieba) -> None:
     try:
         stream = jieba.get_module_res(jieba.DEFAULT_DICT_NAME)
         stream.close()
-        return  # stock path works — nothing to do
+        return
     except Exception:
         pass
 
@@ -34,7 +34,6 @@ def _patch_resource_loading(jieba) -> None:
     def _get_module_res(*res):
         return open(os.path.join(pkg_dir, *res), "rb")
 
-    # from-import* gave each submodule its own binding — patch them all
     targets = [jieba]
     try:
         import jieba._compat

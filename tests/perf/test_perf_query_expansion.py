@@ -16,8 +16,6 @@ from agentnexus.rag.retriever import (
     expand_queries,
 )
 
-# ── dedupe_preserve_order ─────────────────────────────────────
-
 
 class TestDedupePreserveOrder:
     def test_dedupe_1000_items_no_dupes(self, benchmark):
@@ -39,9 +37,6 @@ class TestDedupePreserveOrder:
         assert len(result) <= 100
 
 
-# ── looks_like_question ───────────────────────────────────────
-
-
 class TestLooksLikeQuestion:
     @pytest.mark.parametrize("query", [
         "什么是机器学习？",
@@ -59,9 +54,6 @@ class TestLooksLikeQuestion:
 
         result = benchmark(looks_like_question, query)
         assert result is True
-
-
-# ── expand_queries ────────────────────────────────────────────
 
 
 def _make_mock_llm(responses: list[str]) -> MagicMock:

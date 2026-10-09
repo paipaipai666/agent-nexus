@@ -24,7 +24,6 @@ import threading
 from typing import Any
 
 _lock = threading.Lock()
-# tid -> set of live Popen registered by that thread
 _tracked: dict[int, set[subprocess.Popen]] = {}
 
 
@@ -77,7 +76,6 @@ def kill_process_tree(pid: int) -> None:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except Exception:
-            # taskkill 失败（权限/竞态）时进程可能已退出；忽略。
             pass
     else:
         try:
@@ -117,7 +115,6 @@ def run_tracked(
         env=env,
     )
     if sys.platform != "win32":
-        # 独立进程组，保证 kill_process_tree 的 killpg 覆盖孙进程。
         kwargs["start_new_session"] = True
     proc = subprocess.Popen(cmd, **kwargs)
     track(proc)

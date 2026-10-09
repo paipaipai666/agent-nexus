@@ -28,7 +28,7 @@ def _make_llm():
     llm.last_usage = {"input_tokens": 0, "output_tokens": 0}
     llm.capabilities = MagicMock()
     llm.capabilities.supports_thinking = False
-    llm.capabilities.supports_tool_calling = True  # NATIVE
+    llm.capabilities.supports_tool_calling = True
     llm.capabilities.supports_json_mode = True
     llm.capabilities.supports_json_schema = False
     llm.capabilities.supports_parallel_tool_calls = False
@@ -88,7 +88,6 @@ class TestToolCallIdContract:
             round_no[0] += 1
             captured.append(list(kw.get("messages") or []))
             if round_no[0] == 1:
-                # 与 openai_provider / JSON 协议一致：id 可能缺失
                 llm.last_tool_calls = [{"name": "grep_search", "arguments": {"query": "hook"}}]
                 return "用户问的是 hook 层，先搜索。"
             llm.last_tool_calls = []
@@ -127,7 +126,6 @@ class TestToolCallIdContract:
     def test_json_protocol_tool_without_id_then_next_llm_call(self):
         """JSON 协议 tool_call 天生无 id——同样必须补全。"""
         agent, llm = _make_agent()
-        # 强制 JSON 档，走 interpret_json 路径
         from agentnexus.agents.react_types import CallingStrategy
 
         captured: list[list[dict]] = []
@@ -147,8 +145,6 @@ class TestToolCallIdContract:
 
         llm.think.side_effect = mock_think
 
-        # interpret_json 依赖策略非 NATIVE；probe 认为支持 tool_calling 时会走 NATIVE，
-        # 这里强制首轮降为 JSON 以覆盖协议 JSON 形状。
         original_select = agent._select_strategy
         agent._select_strategy = lambda caps: CallingStrategy.JSON_MODE  # type: ignore[method-assign]
 
@@ -180,7 +176,6 @@ class TestToolCallIdContract:
 
         assert len(captured) >= 2
         raw = json.dumps(captured[1], ensure_ascii=False)
-        # 与线上报错同构：body 里每个 tool 消息都必须带 tool_call_id 键
         for i, m in enumerate(captured[1]):
             if m.get("role") != "tool":
                 continue

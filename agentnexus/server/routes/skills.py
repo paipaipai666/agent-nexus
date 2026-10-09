@@ -150,7 +150,6 @@ def recommend_skill(req: RecommendRequest, runtime=Depends(get_runtime)):
     }
 
 
-# Path-based routes MUST come last — :path catches everything after the prefix
 @router.post("/{skill_id:path}/enable")
 def enable_skill(skill_id: str, runtime=Depends(get_runtime)):
     runtime.skill.set_enabled(skill_id, True)

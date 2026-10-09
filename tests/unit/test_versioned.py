@@ -56,17 +56,14 @@ class TestConversationVersionManager:
         cp2 = mgr.commit(_make_stm([{"role": "user", "content": "q1"},
                                      {"role": "user", "content": "q2"}]), question="q2", answer="a2")
 
-        # Undo back to cp1
         prev = mgr.undo()
         assert prev is not None
         assert prev["id"] == cp1
 
-        # Verify HEAD moved
         status = mgr.status()
         assert status["head"]["id"] == cp1
         assert status["can_redo"] is True
 
-        # Redo back to cp2
         restored = mgr.redo()
         assert restored is not None
         assert restored["id"] == cp2
@@ -78,17 +75,15 @@ class TestConversationVersionManager:
     def test_undo_at_root_returns_none(self, mgr):
         mgr.commit(_make_stm(), question="q1", answer="a1")
         mgr.undo()
-        # Second undo should fail (at root)
         result = mgr.undo()
         assert result is None
 
     def test_redo_stack_cleared_on_new_commit(self, mgr):
         mgr.commit(_make_stm([{"role": "user", "content": "q1"}]), question="q1", answer="a1")
         mgr.commit(_make_stm([{"role": "user", "content": "q2"}]), question="q2", answer="a2")
-        mgr.undo()  # back to cp1
+        mgr.undo()
         assert mgr.status()["can_redo"] is True
 
-        # New commit after undo
         mgr.commit(_make_stm([{"role": "user", "content": "q3"}]), question="q3", answer="a3")
         assert mgr.status()["can_redo"] is False
 
@@ -99,7 +94,6 @@ class TestConversationVersionManager:
 
         entries = mgr.log()
         assert len(entries) == 3
-        # Newest first
         assert entries[0]["question"] == "q3"
         assert entries[0]["is_head"] is True
         assert entries[2]["question"] == "q1"
@@ -110,7 +104,7 @@ class TestConversationVersionManager:
         st = mgr.status()
         assert st["session_id"] == "test-session"
         assert st["head"]["question"] == "q2"
-        assert st["can_undo"] is True  # has parent (q1)
+        assert st["can_undo"] is True
 
     def test_get_head_stm_roundtrip(self, mgr):
         stm1 = ShortTermMemory()
@@ -138,7 +132,6 @@ class TestConversationVersionManager:
         settings = get_settings()
         session_id = "fallback-test"
 
-        # Insert checkpoint directly without setting head_checkpoint_id
         import sqlite3
         conn = sqlite3.connect(settings.memory_db_path)
         conn.executescript("""
@@ -161,7 +154,6 @@ class TestConversationVersionManager:
             "VALUES (?, ?, ?, ?, ?)",
             ("cp1", session_id, stm_json, "test question", "test answer"),
         )
-        # Insert session without head_checkpoint_id
         conn.execute(
             "INSERT INTO conversation_sessions (session_id, workspace_path) VALUES (?, ?)",
             (session_id, "/tmp"),
@@ -169,11 +161,9 @@ class TestConversationVersionManager:
         conn.commit()
         conn.close()
 
-        # Now use ConversationVersionManager - head_checkpoint_id is null
         mgr = ConversationVersionManager(session_id, settings.memory_db_path)
         result = mgr.get_head_stm()
 
-        # Should fallback to the latest checkpoint
         assert result == stm_json
         mgr._conn.close()
 
@@ -183,15 +173,12 @@ class TestConversationVersionManager:
         settings = get_settings()
         workspace = "/tmp"
 
-        # Register the session
         mgr.register_session(workspace)
 
-        # Update preview
         ConversationVersionManager.update_session_preview(
             settings.memory_db_path, "test-session", "Hello, this is a test"
         )
 
-        # Read it back
         row = mgr._conn.execute(
             "SELECT preview FROM conversation_sessions WHERE session_id = ?",
             ("test-session",),
@@ -213,7 +200,7 @@ class TestConversationVersionManager:
             "SELECT preview FROM conversation_sessions WHERE session_id = ?",
             ("test-session",),
         ).fetchone()
-        assert len(row["preview"]) == 103  # 100 + "..."
+        assert len(row["preview"]) == 103
         assert row["preview"].endswith("...")
 
     def test_find_recent_sessions_no_checkpoint_required(self, temp_agentnexus_home):
@@ -222,7 +209,6 @@ class TestConversationVersionManager:
         settings = get_settings()
         workspace = "/tmp"
 
-        # Create a session with a preview but NO checkpoint
         mgr = ConversationVersionManager("preview-session", settings.memory_db_path, workspace_path=workspace)
         ConversationVersionManager.update_session_preview(
             settings.memory_db_path, "preview-session", "First message preview"
@@ -259,7 +245,6 @@ class TestConversationVersionManager:
         workspace = "/tmp"
 
         mgr = ConversationVersionManager("msg-session", settings.memory_db_path, workspace_path=workspace)
-        # Insert session and message directly (no checkpoint)
         mgr.register_session(workspace)
         mgr.append_message("user", "Show up in sidebar please")
 
@@ -340,9 +325,8 @@ class TestShortTermMemorySerialization:
         stm.append("user", "a")
         stm.append("user", "b")
         stm.append("user", "c")
-        stm.append("user", "d")  # pushes 'a' out due to maxlen=3
+        stm.append("user", "d")
         json_str = stm.to_json()
 
-        # Restore with larger max (should keep all 3 from json)
         restored = ShortTermMemory.from_json(json_str, max_messages=10)
         assert len(restored.get_all()) == 3

@@ -13,7 +13,6 @@ def _read_db_stats(runtime, session_id: str) -> dict | None:
     """Read persisted session stats from the database as a fallback."""
     try:
         from agentnexus.memory.versioned import ConversationVersionManager
-        # Try runtime first (testable), fall back to settings
         db_path = getattr(runtime, "_db_path", None)
         if not db_path:
             from agentnexus.core.config import get_settings
@@ -54,15 +53,12 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
 
     agent, mm = _resolve_session_refs(runtime, session_id)
 
-    # Model info
     model_id = getattr(agent, "model_id", None) or settings.get_active_llm_profile()[0]
 
-    # Token usage — prefer in-memory agent stats; fall back to DB for historical sessions
     usage = {}
     if agent and hasattr(agent, "total_usage"):
         usage = agent.total_usage
 
-    # Context window
     ctx_max = 128000
     resolved = getattr(mm, "ctx_max", None) if mm is not None else None
     if resolved:
@@ -70,7 +66,6 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
     elif hasattr(settings, "max_context_tokens"):
         ctx_max = settings.max_context_tokens
 
-    # Current STM tokens
     stm_tokens = 0
     if mm and hasattr(mm, "estimate_stm_tokens"):
         try:
@@ -78,19 +73,16 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
         except Exception:
             pass
 
-    # Agent step count — prefer in-memory; fall back to DB
     step_count = 0
     if agent and hasattr(agent, "_step_count"):
         step_count = agent._step_count
 
-    # DB fallback: when no per-session agent exists, read persisted stats
     if session_id and agent is runtime.agent:
         db_stats = _read_db_stats(runtime, session_id)
         if db_stats:
             usage = {"input_tokens": db_stats["input_tokens"], "output_tokens": db_stats["output_tokens"]}
             step_count = db_stats["step_count"]
 
-    # Skill info
     skill_id = None
     skill_service = runtime.skill
     if skill_service:

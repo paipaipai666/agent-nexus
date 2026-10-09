@@ -24,10 +24,8 @@ from datetime import datetime
 from typing import Callable
 
 EXIT_PLAN_MODE_TOOL = "exit_plan_mode"
-PLAN_REVIEW_MARKER = "[PLAN_REVIEW]"  # 前端据此渲染计划卡片，协议字面量勿改
+PLAN_REVIEW_MARKER = "[PLAN_REVIEW]"
 
-# 拒绝后的最终答案（用户可见气泡）：回合立即结束，等待用户给出修改意见，
-# 而不是让 agent 自行重新规划（重新提交应由用户的下一条消息驱动）。
 PLAN_REJECTED_ANSWER = (
     "[计划模式] 计划未获批准，已暂停执行。请直接告诉我需要如何调整"
     "（例如删减步骤、缩小范围、更换方案），我会修订计划后重新提交审批。"
@@ -79,7 +77,6 @@ class PlanModeBinding:
     def __init__(self, manager: PlanModeManager, session_id: str) -> None:
         self._manager = manager
         self._session_id = session_id
-        # 拒绝侧信道：agent 层在工具批执行完后取走并立即结束回合。
         self._rejection: str | None = None
 
     def active(self) -> bool:
@@ -105,14 +102,11 @@ class PlanModeBinding:
             )
             return "[exit_plan_mode] 计划审批通道异常，按拒绝处理，本轮已结束。"
         if not approved:
-            # 拒绝 = 停下来等用户指示：回合立即结束（侧信道通知 agent 层），
-            # 不自动重新规划；修订由用户的下一条消息驱动。
             self._rejection = PLAN_REJECTED_ANSWER
             return (
                 "[exit_plan_mode] 用户拒绝了该计划，本轮已结束，等待用户给出修改意见。"
                 "请勿立即自动重新提交；用户回复后，根据反馈修订计划并重新提交审批。"
             )
-        # 批准：先退出模式（落盘失败也不回滚），再 best-effort 落盘。
         self._manager.disable(self._session_id)
         save_note = self._persist_plan(plan)
         return (

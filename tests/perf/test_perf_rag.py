@@ -8,12 +8,12 @@ from agentnexus.rag.models import ChunkRecord
 from agentnexus.rag.ranking import BM25Index
 from agentnexus.rag.retriever import SearchResult
 
-BM25_BUILD_P95_MAX_MS = 100      # BM25Index.build(500 chunks) < 100ms
-CHROMA_SEARCH_P95_MAX_MS = 400   # ChromaDB search(500 chunks) < 400ms
-HYBRID_P95_MAX_MS = 1000         # HybridRetriever full search < 1000ms
-RERANK_PIPELINE_P95_MAX_MS = 50   # _rerank(100 candidates) < 50ms
-HYBRID_WITH_RERANK_P95_MAX_MS = 150  # hybrid.search with mock reranker < 150ms
-INGESTION_P95_MAX_MS = 3000          # build_knowledge_base(10 docs × ~2KB) < 3000ms
+BM25_BUILD_P95_MAX_MS = 100
+CHROMA_SEARCH_P95_MAX_MS = 400
+HYBRID_P95_MAX_MS = 1000
+RERANK_PIPELINE_P95_MAX_MS = 50
+HYBRID_WITH_RERANK_P95_MAX_MS = 150
+INGESTION_P95_MAX_MS = 3000
 
 
 @pytest.mark.parametrize("chunk_records", [100], indirect=True)
@@ -128,9 +128,6 @@ def test_hybrid_search(benchmark, perf_env):
     assert p95 < HYBRID_P95_MAX_MS, f"Hybrid search p95={p95:.0f}ms > {HYBRID_P95_MAX_MS}ms"
 
 
-# ── Reranker tests ──────────────────────────────────────────────────
-
-
 class _MockCrossEncoder:
     """Simulates CrossEncoder.predict with controlled ~1ms inference time."""
 
@@ -179,9 +176,6 @@ def test_hybrid_search_with_rerank(benchmark, perf_env, chunk_records: list[Chun
         assert isinstance(results[0], SearchResult)
 
 
-# ── Ingestion pipeline ────────────────────────────────────────────
-
-
 def test_ingestion_throughput(benchmark, perf_env):
     from agentnexus.rag.retriever import build_knowledge_base
 
@@ -193,8 +187,6 @@ def test_ingestion_throughput(benchmark, perf_env):
 
     benchmark(build_knowledge_base, docs, False, "perf_ingest")
 
-
-# ── ChromaDB at scale ─────────────────────────────────────────────
 
 CHROMA_INSERT_1000_P95_MAX_MS = 3000
 CHROMA_SEARCH_1000_P95_MAX_MS = 800
@@ -291,8 +283,6 @@ def test_chroma_upsert_1000(benchmark, perf_env):
     assert len(result) == 1000
 
 
-# ── BM25 at scale ─────────────────────────────────────────────────
-
 BM25_BUILD_5000_P95_MAX_MS = 200
 BM25_SEARCH_5000_P95_MAX_MS = 50
 
@@ -319,8 +309,6 @@ def test_bm25_search_5000(benchmark, chunk_records):
     results = benchmark(_search)
     assert isinstance(results, list)
 
-
-# ── Hybrid retrieval at scale ─────────────────────────────────────
 
 HYBRID_1000_P95_MAX_MS = 1200
 
@@ -352,8 +340,6 @@ def test_hybrid_search_1000(benchmark, perf_env, chunk_records):
     results = benchmark(_search)
     assert isinstance(results, list)
 
-
-# ── Rebuild from catalog ──────────────────────────────────────────
 
 REBUILD_CATALOG_1000_CHUNKS_P95_MAX_MS = 1500
 
@@ -413,8 +399,6 @@ def test_rebuild_from_catalog_1000_chunks(perf_env):
     assert len(hybrid._chunks) == 1000
 
 
-# ── RRF isolation ────────────────────────────────────────────────
-
 RRF_200_RESULTS_P95_MAX_MS = 10
 
 
@@ -429,8 +413,6 @@ def test_rrf_200_results(benchmark):
     assert isinstance(result, dict)
     assert len(result) > 0
 
-
-# ── Build knowledge base at scale ────────────────────────────────
 
 BUILD_KB_50_DOCS_P95_MAX_MS = 12000
 
@@ -457,8 +439,6 @@ def test_build_knowledge_base_50_docs(perf_env):
     assert p95 < BUILD_KB_50_DOCS_P95_MAX_MS, \
         f"build_knowledge_base 50 docs p95={p95:.0f}ms > {BUILD_KB_50_DOCS_P95_MAX_MS}ms"
 
-
-# ── Search knowledge base end-to-end ──────────────────────────────
 
 SEARCH_KB_10_QUERIES_P95_MAX_MS = 3000
 
@@ -503,8 +483,6 @@ def test_search_knowledge_base_10_queries(perf_env):
         f"search_kb 10 queries p95={p95*len(queries):.0f}ms > {SEARCH_KB_10_QUERIES_P95_MAX_MS}ms"
 
 
-# ── Dense vs hybrid comparison ───────────────────────────────────
-
 DENSE_VS_HYBRID_SCALE_P95_MAX_MS = 1000
 
 
@@ -545,14 +523,10 @@ def test_dense_vs_hybrid_latency(perf_env):
     avg_dense = (sum(dense_times) / len(dense_times)) * 1000
     avg_hybrid = (sum(hybrid_times) / len(hybrid_times)) * 1000
 
-    # Hybrid should add at most some overhead (BM25 search + RRF)
-    # The combined dense+hybrid path should not exceed threshold
     total_avg = avg_dense + avg_hybrid
     assert total_avg < DENSE_VS_HYBRID_SCALE_P95_MAX_MS, \
         f"Combined dense+hybrid avg={total_avg:.0f}ms > {DENSE_VS_HYBRID_SCALE_P95_MAX_MS}ms"
 
-
-# ── Tokenization (jieba) throughput ──────────────────────────────
 
 JIEBA_100KB_CJK_P95_MAX_MS = 500
 JIEBA_100KB_ASCII_P95_MAX_MS = 200

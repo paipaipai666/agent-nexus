@@ -42,7 +42,7 @@ def format_reason(entry: SkillEntry, matched: list[str], score: float) -> str:
 @dataclass
 class _QueryScoreContext:
     """Per-query inputs shared by all index scorers."""
-    terms: set[str]  # meaningful query terms
+    terms: set[str]
     idf: dict[str, float]
     intent: IntentSignals
     query_embedding: list[float] | None
@@ -51,7 +51,7 @@ class _QueryScoreContext:
 @dataclass
 class _ItemScoreState:
     """Per-candidate accumulator written by the scorer chain (reset per item)."""
-    base_score: float = 0.0  # keyword + meta + fuzzy + example
+    base_score: float = 0.0
     semantic_score: float = 0.0
     matched: list[str] = field(default_factory=list)
 
@@ -160,7 +160,6 @@ class SkillRecommender:
     def _rank_indexed(self, text: str) -> list[SkillRoute]:
         """Score all indexed skills and return top-K sorted by score."""
         query_terms = set(tokenize(text))
-        # Filter out single-char non-CJK tokens (punctuation noise)
         meaningful = {
             t for t in query_terms
             if len(t) >= 2 or ("一" <= t <= "鿿") or ("가" <= t <= "힯")
@@ -185,7 +184,6 @@ class SkillRecommender:
             for scorer in self._scorers:
                 scorer(ctx, item, state)
 
-            # ── Hybrid scoring ──
             base_score = state.base_score
             semantic_score = state.semantic_score
             has_signal = (
@@ -208,7 +206,6 @@ class SkillRecommender:
 
         scored.sort(key=lambda r: r.score, reverse=True)
 
-        # ── Rerank with intent signals ──
         if len(scored) > 1:
             scored = rerank_with_intent(scored, intent, self.index)
 
@@ -218,8 +215,6 @@ class SkillRecommender:
             max_k=self.max_candidates,
         )
         return [r for r in scored[:keep] if r.score >= self.min_score]
-
-    # ── Index scorers (run in list order per candidate) ──
 
     def _score_keyword_exact(
         self, ctx: _QueryScoreContext, item: IndexedSkillMetadata, state: _ItemScoreState,
@@ -348,8 +343,6 @@ class SkillRecommender:
             enhanced.append(f"semantic_match({semantic_score:.2f})")
         return enhanced
 
-    # ── Shared top-2 disambiguation predicates ──
-
     def _top2_gap(self, candidates: list[SkillRoute]) -> float | None:
         """Score gap between the top two candidates (None when fewer than two)."""
         if len(candidates) < 2:
@@ -365,8 +358,6 @@ class SkillRecommender:
         """Whether intent signals confidently favor `best` over a close runner-up."""
         return best_candidate_is_intent_confident(best, runner_up, intent, self.index)
 
-    # ── Backward-compatible methods (for tests and legacy callers) ──
-
     def decide(self, text: str, entries: list[SkillEntry]) -> SkillRouteDecision:
         """Backward-compat: return a SkillRouteDecision from ranking."""
         candidates = self.rank(text, entries)
@@ -375,8 +366,6 @@ class SkillRecommender:
         best = candidates[0]
         intent = extract_intent_signals(text, set(tokenize(text)))
         confidence = self._compute_confidence(candidates, intent)
-        # Multi-intent: parallel connector + ≥2 candidates with disjoint matched
-        # terms → user asked for several things; order by first mention in text.
         if intent.priority_mode == "parallel" and len(candidates) > 1:
             selected = _select_distinct_intent_candidates(text, candidates)
             if len(selected) > 1:
@@ -385,10 +374,8 @@ class SkillRecommender:
                     mode="multi_intent", confidence=confidence,
                     secondary_skills=tuple(c.entry.qualified_id for c in selected[1:]),
                 )
-        # Detect ambiguity: top candidates too close
         gap = self._top2_gap(candidates)
         if gap is not None and gap < self.min_score * 0.375:
-            # Use intent to disambiguate
             if self._intent_breaks_tie(best, candidates[1], intent):
                 return SkillRouteDecision(
                     best, tuple(candidates), False, best.reason,
@@ -422,22 +409,18 @@ class SkillRecommender:
         candidates = self.rank(text, entries)
         if not candidates:
             return None
-        # If only one candidate or clear winner, return directly
         if len(candidates) == 1:
             return candidates[0]
         gap = self._top2_gap(candidates)
         if gap is not None and gap >= self.margin:
             return candidates[0]
-        # Close scores — check if intent disambiguates
         intent = extract_intent_signals(text, set(tokenize(text)))
         if self._intent_breaks_tie(candidates[0], candidates[1], intent):
             return candidates[0]
-        # Ambiguous — use LLM if available, else return None
         if llm_client is None:
             return None
         from agentnexus.skills.router.llm_fallback import route_with_llm as _rwl
         return _rwl(text, tuple(candidates), "recommender top candidates", llm_client)
 
 
-# Backward-compatible alias
 SkillRouter = SkillRecommender

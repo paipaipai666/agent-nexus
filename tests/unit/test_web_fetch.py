@@ -20,7 +20,7 @@ class TestCacheHelpers:
     def test_cache_key_hashable(self):
         key = _make_cache_key(("https://example.com",), "basic", "markdown")
         assert isinstance(key, tuple)
-        d = {key: "value"}  # should not raise
+        d = {key: "value"}
 
     def test_cache_set_and_get(self):
         key = _make_cache_key(("https://example.com",), "basic", "markdown")
@@ -212,10 +212,8 @@ class TestWebFetch:
             ],
             "failed_results": [],
         }
-        # First call hits API
         r1 = web_fetch("https://cached.com")
         assert mock_client.extract.call_count == 1
-        # Second call should use cache
         r2 = web_fetch("https://cached.com")
         assert mock_client.extract.call_count == 1
         assert r1 == r2

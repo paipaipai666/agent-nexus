@@ -42,7 +42,7 @@ class _CountingRetriever:
     def __init__(self, namespace):
         type(self).constructions += 1
         self.namespace = namespace
-        self._chunks = {"chunk-1": object()}  # non-empty so search proceeds
+        self._chunks = {"chunk-1": object()}
         self._reranker = None
 
     def rebuild_from_catalog(self):
@@ -73,10 +73,7 @@ def counting_retriever(monkeypatch):
     _CountingRetriever.rebuilds = 0
     _CountingRetriever.reranker_loads = 0
     monkeypatch.setattr(kb_service, "chroma_search", lambda *a, **k: [{"id": "chunk-1"}])
-    # keep the test offline: no LLM query rewrite / multi-query expansion
     monkeypatch.setattr(kb_service, "expand_queries", lambda q: [q])
-    # the singleton lives in the retriever module — reset it and route its
-    # construction through the counting fake
     monkeypatch.setattr(retriever_mod, "HybridRetriever", _CountingRetriever)
     monkeypatch.setattr(retriever_mod, "_retriever", None)
     yield _CountingRetriever
@@ -110,7 +107,7 @@ def test_load_reranker_constructs_cross_encoder_once(monkeypatch):
     first = retriever._reranker
     retriever.load_reranker()
 
-    assert len(constructions) == 1  # was 2 before the fix
+    assert len(constructions) == 1
     assert retriever._reranker is first
 
 
@@ -137,11 +134,11 @@ def test_load_reranker_failure_cached_with_ttl(monkeypatch):
     r.load_reranker()
     r.load_reranker()
     r.load_reranker()
-    assert len(constructions) == 1  # failure cached, no churn
+    assert len(constructions) == 1
 
     reset_reranker_cache()
     r.load_reranker()
-    assert len(constructions) == 2  # explicit reset retries
+    assert len(constructions) == 2
 
 
 def test_tool_path_reuses_singleton_retriever(monkeypatch):
@@ -185,6 +182,6 @@ def test_embedding_model_loads_once_under_lock(monkeypatch):
             device_resolver=lambda: "cpu", runtime_configurer=lambda d: None
         )
         assert m1 is m2
-        assert len(constructions) == 1  # load-once, even across repeated calls
+        assert len(constructions) == 1
     finally:
         embeddings_mod.reset_embedding_model()

@@ -19,8 +19,6 @@ def _get_wiki_service():
     return WikiService()
 
 
-# ── wiki init ───────────────────────────────────────────────────────
-
 @wiki_app.command("init")
 def wiki_init(
     namespace: str = typer.Argument(..., help="wiki 绑定的 RAG 命名空间"),
@@ -41,8 +39,6 @@ def wiki_init(
     console.print(f"  Existing pages: {stats['page_count']}")
     console.print(f"  Existing statements: {stats['statement_count']}")
 
-
-# ── wiki ingest ─────────────────────────────────────────────────────
 
 @wiki_app.command("ingest")
 def wiki_ingest(
@@ -75,8 +71,6 @@ def wiki_ingest(
     if page.canonical_definitions:
         console.print(f"  Canonical definitions: {len(page.canonical_definitions)}")
 
-
-# ── wiki query ──────────────────────────────────────────────────────
 
 @wiki_app.command("query")
 def wiki_query(
@@ -113,8 +107,6 @@ def wiki_query(
             console.print("No results found.")
 
 
-# ── wiki lint ───────────────────────────────────────────────────────
-
 @wiki_app.command("lint")
 def wiki_lint(
     namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
@@ -137,8 +129,6 @@ def wiki_lint(
     if enqueue:
         console.print("\n[dim]Items added to review queue.[/dim]")
 
-
-# ── wiki review ─────────────────────────────────────────────────────
 
 @review_app.command("list")
 def review_list(
@@ -203,8 +193,6 @@ def review_process():
         console.print(f"  {action['action']}: {action.get('item_id', '?')}")
 
 
-# ── wiki stats ──────────────────────────────────────────────────────
-
 @wiki_app.command("stats")
 def wiki_stats(
     namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
@@ -225,8 +213,6 @@ def wiki_stats(
             color = {"high": "green", "medium": "yellow", "low": "red", "untrusted": "red bold"}.get(level, "white")
             console.print(f"    [{color}]{level}[/{color}]: {count}")
 
-
-# ── wiki calibrate ──────────────────────────────────────────────────
 
 @wiki_app.command("calibrate")
 def wiki_calibrate(
@@ -276,8 +262,6 @@ def wiki_calibrate(
     console.print(f"  Rounds: {result['rounds']}")
 
 
-# ── wiki backfill ───────────────────────────────────────────────────
-
 @wiki_app.command("backfill")
 def wiki_backfill(
     namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
@@ -299,7 +283,6 @@ def wiki_backfill(
         console.print("[yellow]No documents in RAG to backfill.[/yellow]")
         return
 
-    # Delete all existing wiki pages for this namespace
     existing_pages = wiki_store.list_pages(source_namespace=namespace)
     for p in existing_pages:
         wiki_store.delete_page(p.page_id)
@@ -328,8 +311,6 @@ def wiki_backfill(
 
     console.print(f"\n[green]Done![/green] Created {created} wiki pages.")
 
-
-# ── wiki full-check ─────────────────────────────────────────────────
 
 @wiki_app.command("full-check")
 def wiki_full_check(

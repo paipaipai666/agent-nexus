@@ -10,8 +10,6 @@ from agentnexus.skills.router.llm_decider import _parse_decision, decide_with_ll
 from agentnexus.skills.router.types import SkillRoute
 from agentnexus.skills.workflow import Workflow
 
-# ── Helpers ─────────────────────────────────────────────────────────
-
 
 def _make_entry(
     workflow_id: str = "test-skill",
@@ -57,9 +55,6 @@ def _make_route(
         reason=reason,
         source=source,
     )
-
-
-# ── Tests for decide_with_llm ──────────────────────────────────────
 
 
 class TestDecideWithLLM:
@@ -154,7 +149,6 @@ class TestDecideWithLLM:
             user_preferences="Never use code-review skill.",
         )
         assert result.action == "skip_skill"
-        # Verify the prompt includes context and preferences
         call_args = llm.think.call_args
         prompt = call_args[0][0][0]["content"]
         assert "User asked about code earlier" in prompt
@@ -170,9 +164,6 @@ class TestDecideWithLLM:
         prompt = call_args[0][0][0]["content"]
         assert "Conversation context:\n" not in prompt
         assert "User preferences (MUST respect):\n" not in prompt
-
-
-# ── Tests for _parse_decision ──────────────────────────────────────
 
 
 class TestParseDecision:
@@ -220,21 +211,14 @@ class TestParseDecision:
         assert "invalid json" in result.reason.lower()
 
     def test_non_dict_json_returns_skip(self):
-        # A JSON array won't match _JSON_OBJECT_RE, so the parser
-        # reports "no JSON" rather than "non-dict".  Use a dict-like
-        # string that parses to something the regex *does* capture
-        # but which is still not a dict, or accept the "no json" path.
         raw = '["action", "skip_skill"]'
         result = _parse_decision(raw, self._by_id())
         assert result.action == "skip_skill"
-        # The {.*} regex does not match a JSON array, so we get
-        # "no json in llm response" rather than "non-dict".
         assert "json" in result.reason.lower()
 
     def test_skill_id_whitespace_only_becomes_none(self):
         raw = '{"action": "use_skill", "skill_id": "   ", "reason": "x"}'
         result = _parse_decision(raw, self._by_id("test/some-skill"))
-        # whitespace-only skill_id becomes None, so use_skill without id → skip
         assert result.action == "skip_skill"
         assert result.skill_id is None
 

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-// Mock the SessionProvider
 vi.mock('../components/session/SessionProvider', () => ({
   useSession: () => ({
     isSessionRunning: () => false,
@@ -11,7 +10,6 @@ vi.mock('../components/session/SessionProvider', () => ({
   }),
 }))
 
-// Mock the API
 vi.mock('../services/api', () => ({
   api: {
     getRecentSessions: vi.fn().mockResolvedValue({ sessions: [] }),
@@ -30,7 +28,6 @@ function renderSidebar(path = '/') {
   )
 }
 
-// Flush the mocked-fetch promise chain + React state updates (microtasks only).
 async function flush() {
   await act(async () => {
     for (let i = 0; i < 5; i++) await Promise.resolve()
@@ -91,7 +88,6 @@ describe('Sidebar', () => {
     renderSidebar()
     await flush()
 
-    // Orphan workspaces (never added as projects) still get their own group.
     expect(screen.getByText('alpha')).toBeInTheDocument()
     expect(screen.getByText('beta')).toBeInTheDocument()
     expect(screen.getByText('Alpha chat')).toBeInTheDocument()

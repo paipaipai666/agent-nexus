@@ -35,9 +35,6 @@ def _reaction_event(payload: dict, run_id, seq: int) -> dict:
     }
 
 
-# Tools whose GUI presentation is specialized: their tool_start is rewritten by
-# the mapped function and their tool_done is skipped entirely. Add entries here
-# instead of scattering name checks across _map_to_gui_event.
 _GUI_EVENT_OVERRIDES = {
     "express_reaction": _reaction_event,
 }
@@ -70,7 +67,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
     payload = getattr(event, "payload", {})
     run_id = getattr(event, "run_id", None)
 
-    # Direct tool events — payload carries structured data, no journal parsing needed
     if event_type == "tool_start":
         override = _GUI_EVENT_OVERRIDES.get(payload.get("name", ""))
         if override is not None:
@@ -86,7 +82,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
 
     if event_type == "tool_done":
         if payload.get("name", "") in _GUI_EVENT_OVERRIDES:
-            # Already presented by the rewritten tool_start event.
             return None
         return {
             "type": "tool_result",
@@ -104,8 +99,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         agent_event_name = payload.get("event", "")
 
         if agent_event_name in ("TOOLS_REQUESTED", "ANSWER_THOUGHT"):
-            # Prefer the event payload (exact thought for THIS event); journal
-            # reverse-scan is only a fallback for older bridges that dropped it.
             thought = (payload.get("thought") or "").strip()
             if not thought:
                 turn = chat_service._turns.get(run_id)
@@ -115,8 +108,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
                         if parsed["kind"] == "thought":
                             thought = (parsed["content"] or "").strip()
                             break
-            # Empty thought (decision 1: tools without visible Thought) must not
-            # paint a "Thinking..." placeholder card on the desktop.
             if not thought:
                 return None
             return {"type": "thinking", "content": thought, "run_id": run_id, "seq": seq}
@@ -131,7 +122,6 @@ def _map_to_gui_event(event, chat_service, seq: int) -> dict | None:
         return {"type": "reasoning", "content": payload.get("token", ""), "run_id": run_id, "seq": seq}
 
     elif event_type == "message_delta":
-        # Skip — run_finished already provides the complete answer
         return None
 
     elif event_type == "run_finished":
@@ -158,7 +148,7 @@ router = APIRouter(tags=["chat"])
 class CreateSessionRequest(BaseModel):
     skill: str | None = None
     profile: str | None = None
-    workspace: str | None = None  # per-session workspace folder; default = server cwd
+    workspace: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -280,7 +270,6 @@ def list_recent_sessions(limit: int = 5):
     from agentnexus.memory.versioned import ConversationVersionManager
 
     settings = get_settings()
-    # Sessions carry their own workspace folders — list across all of them.
     sessions = ConversationVersionManager.find_recent_sessions(
         settings.memory_db_path, None, limit=limit
     )
@@ -310,11 +299,10 @@ def delete_sessions(req: DeleteSessionsRequest, runtime=Depends(get_runtime)):
     for sid in req.session_ids:
         known = sid in chat._sessions or ConversationVersionManager.session_exists(db_path, sid)
         if not known:
-            continue  # no such session — nothing to delete
+            continue
         if chat.is_session_processing(sid):
             skipped.append(sid)
             continue
-        # In-memory: agent/memory/token state + handle + version manager + run artifacts
         chat.delete_session(sid)
         chat._sessions.pop(sid, None)
         chat._version_managers.pop(sid, None)
@@ -323,7 +311,6 @@ def delete_sessions(req: DeleteSessionsRequest, runtime=Depends(get_runtime)):
             for attr in ("_run_events", "_async_run_events", "_turns",
                          "_run_event_seq", "_run_token_seq", "_run_snapshots"):
                 getattr(chat, attr).pop(last_run, None)
-        # Database: cascade every per-session table
         ConversationVersionManager.delete_session(db_path, sid)
         deleted.append(sid)
     return {"deleted": deleted, "skipped": skipped, "count": len(deleted)}
@@ -336,9 +323,7 @@ def restore_session(req: CreateSessionRequest, runtime=Depends(get_runtime)):
 
     settings = get_settings()
 
-    # Find the latest session if no session_id provided (across all workspaces —
-    # sessions carry their own workspace folders)
-    session_id = req.skill  # Reuse skill field for session_id
+    session_id = req.skill
     if not session_id:
         session_id = ConversationVersionManager.find_latest_session(
             settings.memory_db_path, None
@@ -346,12 +331,9 @@ def restore_session(req: CreateSessionRequest, runtime=Depends(get_runtime)):
 
     chat = runtime.chat
 
-    # If session already exists in memory, still ensure its STM is restored —
-    # startup-adopted sessions have handles but no injected STM.
     if session_id and chat.ensure_session_restored(session_id):
         return {"session_id": session_id, "restored": True}
 
-    # Session not found in DB either — create a new one instead of 404
     handle = chat.start_session(profile=req.profile)
     return {"session_id": handle.id, "restored": False}
 
@@ -458,7 +440,6 @@ def set_plan_mode(session_id: str, req: PlanModeRequest, runtime=Depends(get_run
 
 
 class ThinkingEffortRequest(BaseModel):
-    # null = follow Settings default; otherwise none|low|medium|high
     effort: str | None = None
 
 
@@ -480,7 +461,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
     from agentnexus.server.app import _get_runtime
     from agentnexus.server.auth import get_token
 
-    # Authenticate via query param (WebSocket cannot use headers)
     token = get_token()
     if token is not None:
         if api_key is None or not secrets.compare_digest(api_key, token):
@@ -491,9 +471,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
     runtime = _get_runtime()
     chat = runtime.chat
 
-    # Always ensure (idempotent, STM-guarded): sessions adopted at startup or
-    # by a previous connect never went through the old restore-only-when-unknown
-    # branch, so their agent context was empty after a service restart.
     try:
         chat.ensure_session_restored(session_id)
     except Exception:
@@ -503,7 +480,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         await ws.close()
         return
 
-    # R8: On reconnect with resumeFrom, send snapshot so client can catch up
     token_cursor_offset = 0
     seq_cursor_offset = 0
     if resumeEventsFrom is not None and resumeEventsFrom > 0:
@@ -519,13 +495,10 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
 
     current_run_id: str | None = None
 
-    # Set up HITL confirm bridge for this WebSocket connection
     confirm_bridge = runtime.subagent_confirm
 
-    # Capture the main event loop for use in ws_confirm (which runs in a thread)
     main_loop = asyncio.get_running_loop()
 
-    # Use threading.Event for blocking wait in the tool execution thread
     confirm_event = threading.Event()
     confirm_approved = [False]
 
@@ -534,9 +507,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         if closed.is_set():
             return False
         confirm_event.clear()
-        # Re-check after clear: a disconnect that set confirm_event just
-        # before this clear would otherwise lose the wake and park in
-        # wait() for the full timeout.
         if closed.is_set():
             return False
         confirm_approved[0] = False
@@ -545,18 +515,13 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
             main_loop,
         )
         try:
-            # Use a short timeout — the event loop may be blocked by a sync
-            # call in receive_json (e.g. threading.Event.wait). If the timeout
-            # fires, fall through to confirm_event.wait which fails closed.
             future.result(timeout=2)
         except TimeoutError:
             logger.debug("Timed out sending websocket confirm request")
         except Exception as e:
             logger.debug("Failed to send websocket confirm request: %s", e)
             return False
-        # Fail closed if the client disconnects or never answers.
         if not confirm_event.wait(timeout=300):
-            # R5: notify frontend that confirm timed out and was auto-denied
             try:
                 asyncio.run_coroutine_threadsafe(
                     ws.send_json({
@@ -566,7 +531,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                     main_loop,
                 ).result(timeout=2)
             except Exception:
-                pass  # Best-effort notification
+                pass
             return False
         return confirm_approved[0]
 
@@ -601,15 +566,11 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         seq = seq_cursor_offset
         try:
             async for event in chat.astream_events(run_id):
-                # Reconnect resume: skip events the client already received.
                 if seq and getattr(event, "seq", 0) and event.seq <= seq:
                     continue
                 gui_event = _map_to_gui_event(event, chat, seq)
                 if gui_event is not None:
                     gui_event["seq"] = getattr(event, "seq", 0)
-                    # R8: Skip content tokens the client already has
-                    # (tok_seq is absolute within the run — no queue-position
-                    # dependence, so partial consumption can't misalign it).
                     if gui_event.get("type") == "token":
                         tok_seq = getattr(event, "tok_seq", 0)
                         if tok_seq and tok_seq <= token_cursor_offset:
@@ -624,11 +585,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
         except Exception as e:
             await send_stream_error(run_id, seq, e)
 
-    # Reconnect resume: if the client presents an event cursor, re-attach to
-    # the session's most recent run so post-disconnect events (thinking /
-    # tool / answer / done) are delivered instead of dropped. A fresh
-    # connection (no cursor) opens via REST history instead — attaching
-    # there would replay the entire last run.
     if resumeEventsFrom is not None:
         last_run_id = getattr(chat, "_session_last_run", {}).get(session_id)
         if last_run_id and chat._async_run_events.get(last_run_id) is not None:
@@ -660,7 +616,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                         await ws.send_json({"type": "error", "message": "Invalid attachments"})
                         continue
 
-                # Store user message as session preview for sidebar display
                 try:
                     from agentnexus.core.config import get_settings
                     from agentnexus.memory.versioned import ConversationVersionManager
@@ -695,8 +650,6 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                             ),
                         )
                     except ValueError as e:
-                        # Attachment validation failed (missing/oversize) —
-                        # nothing was committed or started; tell the user why.
                         try:
                             asyncio.run_coroutine_threadsafe(
                                 ws.send_json({"type": "error", "message": str(e)}),
@@ -705,12 +658,9 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                         except Exception:
                             pass
                     except Exception as e:
-                        # 用户取消是正常流程：send_message 已发出 run_interrupted
-                        # 事件，这里只需安静退出，不得报错误。
                         if isinstance(e, AgentCancelled):
                             return
                         logger.error("WebSocket agent run failed for session %s: %s", session_id, e, exc_info=True)
-                        # Report sanitized error to frontend via WebSocket
                         try:
                             asyncio.run_coroutine_threadsafe(
                                 ws.send_json({"type": "error", "message": "Agent encountered an error. Check server logs for details."}),
@@ -723,12 +673,10 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                         active_thread_ids.discard(thread_id)
                         main_loop.call_soon_threadsafe(run_started_event.set)
 
-                # Run agent in background thread
                 agent_task = asyncio.create_task(asyncio.to_thread(run_agent))
                 agent_tasks.add(agent_task)
                 agent_task.add_done_callback(agent_tasks.discard)
 
-                # Wait for begin_turn to create this session's run.
                 try:
                     await asyncio.wait_for(run_started_event.wait(), timeout=5)
                 except TimeoutError:
@@ -740,10 +688,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                     stream_task = asyncio.create_task(stream_events(new_run_id))
                     stream_tasks.add(stream_task)
                     stream_task.add_done_callback(stream_tasks.discard)
-                    # 发送 run_id 给 GUI，用于取消操作
                     await ws.send_json({"type": "run_started", "run_id": new_run_id, "seq": 0})
-                # Don't await task — let agent run in background so
-                # the handler can continue receiving messages (confirm, cancel)
 
             elif msg_type == "cancel":
                 run_id = data.get("run_id", current_run_id)
@@ -776,22 +721,11 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
     finally:
         closed.set()
         confirm_approved[0] = False
-        # 产品决策：断连/界面关闭 = 立刻停止。Cancel the run this socket
-        # owns while it is still active; cancel_run persists results and
-        # emits run_interrupted/run_persisted, so a reconnecting client sees
-        # the cancelled tail via resume replay. Completed runs are left
-        # untouched — re-cancelling would duplicate terminal events.
-        # Cancel forwarding consumers BEFORE settling the run: cancel_run's
-        # terminal events must stay in the per-run queue so a reconnecting
-        # client can replay the cancelled tail (R8). Cancelling after
-        # dequeueing loses exactly those events (seen on slow runners).
         if current_run_id and chat.is_run_active(current_run_id):
             try:
                 chat.cancel_run(current_run_id, reason="client_disconnected")
             except Exception:
                 logger.exception("Failed to cancel run %s on disconnect", current_run_id)
-        # Wake parked confirms only after the turn is cancelled: a woken
-        # run would otherwise settle first and skip cancellation.
         confirm_event.set()
         if stream_tasks:
             for task in stream_tasks:

@@ -46,11 +46,6 @@ def _make_runtime(**overrides):
     return SimpleNamespace(**attrs)
 
 
-# ---------------------------------------------------------------------------
-# call_descriptor tests
-# ---------------------------------------------------------------------------
-
-
 class TestCallDescriptorTool:
     """call_descriptor with capability='tool'."""
 
@@ -267,11 +262,6 @@ class TestCallDescriptorUnsupported:
 
         with pytest.raises(RuntimeError, match="Unsupported MCP capability"):
             asyncio.run(run())
-
-
-# ---------------------------------------------------------------------------
-# run_with_limiter tests
-# ---------------------------------------------------------------------------
 
 
 class TestRunWithLimiter:

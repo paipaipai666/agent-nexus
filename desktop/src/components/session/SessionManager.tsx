@@ -9,31 +9,21 @@ export interface Message {
   toolName?: string
   toolCallId?: string
   toolStatus?: 'running' | 'done' | 'error'
-  /** Structured tool arguments — powers the collapsed-row arg summary. */
   toolArgs?: Record<string, unknown>
-  /** Result body (no `tool_name:` prefix). Falls back to `content`. */
   toolResult?: string
-  /** Wall-clock duration reported by TOOL_DONE. */
   toolDurationMs?: number
-  /** Risk level from Tool Gateway metadata (empty when low/unknown). */
   toolRisk?: string
-  /** Files attached to a user message — rendered as chips on the bubble. */
   attachments?: AttachmentRef[]
-  /** Optional emoji reaction the agent attached under this user message. */
   reaction?: { emoji: string; comment: string }
   timestamp: Date
 }
 
-// ── Per-session stable state (R4: NOT token buffers) ────────────
 
-/** Queued while the agent is running — attachments ride along and are
- *  re-validated by the backend at dequeue time. */
 interface QueuedMessage {
   text: string
   attachments?: AttachmentRef[]
 }
 
-/** Live sidebar metadata for one subagent (trajectory lives on SubagentPage). */
 export interface SubagentMeta {
   id: string
   name: string
@@ -46,18 +36,13 @@ export interface SubagentMeta {
 interface SessionState {
   sessionId: string
   messages: Message[]
-  /** In-flight LLM step: process cards (reasoning/thinking) always render
-   *  before the answer draft. commitStep() is the ONLY path that moves step
-   *  content into `messages`, in canonical [...process, answer] order — new
-   *  event types therefore cannot break display order by construction. */
   step: { process: Message[]; answer: Message | null } | null
   isRunning: boolean
   currentRunId: string | null
-  confirmRequest: { summary: string; status: 'awaiting' | 'timed-out' } | null  // R5
+  confirmRequest: { summary: string; status: 'awaiting' | 'timed-out' } | null
   msgCounter: number
   currentAssistantId: string | null
   currentReasoningId: string | null
-  // Metadata
   modelName: string | null
   contextUsed: number | null
   stmTokens: number | null
@@ -68,23 +53,13 @@ interface SessionState {
   cwd: string | null
   toolCount: number
   todoCount: number
-  // Sidebar indicators (Phase 4)
   unreadCount: number
   pendingConfirm: boolean
-  // Subagent visibility — live metadata by subagent_id (Sidebar/InfoPanel)
   subagents: Map<string, SubagentMeta>
-  // Animation tracking
   animatedIds: Set<string>
-  // Message queue
   messageQueue: QueuedMessage[]
 }
 
-/** Flush the in-flight step into committed messages in canonical order:
- *  process cards (reasoning/thinking) always land BEFORE the answer draft.
- *  This is the single choke point for step → history transitions — streaming
- *  handlers never reorder `messages` themselves, so display order cannot
- *  depend on event arrival interleaving (provider deltas may deliver content
- *  before reasoning; see reasoning-order tests). */
 function commitStep(
   prev: SessionState,
   opts: { answerContent?: string; discardAnswer?: boolean } = {},
@@ -126,10 +101,8 @@ function createEmptySession(sessionId: string): SessionState {
   }
 }
 
-// ── Context type (backward-compatible with SessionProvider) ─────
 
 export interface SessionManagerContextType {
-  // Session metadata
   sessionId: string | null
   modelName: string | null
   contextUsed: number | null
@@ -149,7 +122,6 @@ export interface SessionManagerContextType {
   setToolCount: (count: number) => void
   setTodoCount: (count: number) => void
 
-  // Message state
   messages: Message[]
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   isRunning: boolean
@@ -158,7 +130,6 @@ export interface SessionManagerContextType {
   msgCounter: number
   incrementMsgCounter: () => number
 
-  // Actions
   sendMessage: (text: string, attachments?: AttachmentRef[]) => void
   cancelRun: () => void
   confirmToolCall: (approved: boolean) => void
@@ -168,15 +139,11 @@ export interface SessionManagerContextType {
   getCachedMessages: (sessionId: string) => Message[] | null
   clearCachedMessages: (sessionId: string) => void
 
-  // Animation tracking
   animatedIds: Set<string>
 
-  // Multi-session operations (new)
   activateSession: (sessionId: string) => void
   getSessionState: (sessionId: string) => SessionState | null
   getLiveSessionState: (sessionId: string) => SessionState | null
-  /** Committed messages + in-flight step, flattened in display order
-   *  (process cards before the answer draft). Read-only view. */
   getLiveDisplayMessages: (sessionId: string) => Message[] | null
   isSessionRunning: (sessionId: string) => boolean
   sessions: Map<string, SessionState>
@@ -233,38 +200,23 @@ export function useSession() {
   return useContext(SessionContext)
 }
 
-// ── SessionManager (replaces SessionProvider) ───────────────────
 
 export default function SessionManager({ children }: { children: ReactNode }) {
-  // ── Multi-session state (R4: Map for stable state only) ─────
   const [sessions, setSessions] = useState<Map<string, SessionState>>(new Map())
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
 
-  // Ref mirror of activeSessionId — for stable callbacks that read current value
-  // without depending on the state (avoids stale closures in async operations)
   const activeSessionIdRef = useRef<string | null>(null)
   activeSessionIdRef.current = activeSessionId
 
-  // ── Ref mirror of sessions — for stable callbacks ────────────
-  // This ref is updated synchronously on every render, so callbacks
-  // that read from it always see the latest state without needing
-  // `sessions` in their dependency arrays.
   const sessionsRef = useRef<Map<string, SessionState>>(new Map())
   sessionsRef.current = sessions
 
-  // ── Streaming refs (R4: NOT in the Map — no re-render per token) ──
   const tokenBuffers = useRef<Map<string, string>>(new Map())
   const tokenFlushRefs = useRef<Map<string, number>>(new Map())
-  // Synchronous presence/id of the active step's answer draft. Handler
-  // BRANCHING must never read `sessionsRef` — it lags one render behind;
-  // state decisions need this ref (same role as the old currentAssistantIds).
   const stepAnswerIds = useRef<Map<string, string | null>>(new Map())
-  // Append-target id for reasoning deltas within the active step's process list
   const currentReasoningIds = useRef<Map<string, string | null>>(new Map())
   const msgCounters = useRef<Map<string, number>>(new Map())
 
-  // ── Update session state immutably (R4) ──────────────────────
-  // This is stable — no deps, reads nothing from closure.
 
   const updateSession = useCallback((sessionId: string, updater: (prev: SessionState) => SessionState) => {
     setSessions(prev => {
@@ -275,7 +227,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  // ── Get current session counter ──────────────────────────────
 
   const getSessionCounter = useCallback((sessionId: string): number => {
     const current = msgCounters.current.get(sessionId) ?? 0
@@ -284,12 +235,8 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return next
   }, [])
 
-  // ── Activate session (Phase 2, Step 14) ──────────────────────
-  // Reads from sessionsRef — stable, no `sessions` dependency.
 
   const activateSession = useCallback((sessionId: string) => {
-    // Flush any pending token buffer into the in-flight step's answer draft
-    // (the step is transient and lives outside `messages`).
     const buf = tokenBuffers.current.get(sessionId)
     if (buf) {
       tokenBuffers.current.delete(sessionId)
@@ -299,38 +246,27 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           ? { ...prev, step: { ...prev.step, answer: { ...prev.step.answer, content: prev.step.answer.content + buf } } }
           : prev)
       }
-      // Not running (or no draft): stale buffer — drop it, as before.
     }
 
-    // Don't connect WS here — the effect will connect + subscribe atomically.
-    // Connecting here causes a race: events arrive before the effect subscribes.
 
-    // Ensure session exists in the Map (via ref for immediate access)
     if (!sessionsRef.current.has(sessionId)) {
       setSessions(prev => new Map(prev).set(sessionId, createEmptySession(sessionId)))
     }
 
-    // Clear unread count when activating a session
     updateSession(sessionId, prev => ({ ...prev, unreadCount: 0, pendingConfirm: false }))
 
     setActiveSessionId(sessionId)
   }, [updateSession])
 
-  // ── Multi-session queries ────────────────────────────────────
 
   const getSessionState = useCallback((sessionId: string): SessionState | null => {
     return sessions.get(sessionId) ?? null
   }, [sessions])
 
-  // Always reads from the latest Map ref — safe to use in stale closures
-  // (e.g., loadAndDisplayMessages with empty deps).
   const getLiveSessionState = useCallback((sessionId: string): SessionState | null => {
     return sessionsRef.current.get(sessionId) ?? null
   }, [])
 
-  /** Flatten a session's committed messages + in-flight step into display
-   *  order. Pure read — the canonical [...process, answer] ordering lives in
-   *  commitStep; this mirrors it for the transient step. */
   const flattenState = (state: SessionState): Message[] => {
     if (!state.step) return state.messages
     return [...state.messages, ...state.step.process, ...(state.step.answer ? [state.step.answer] : [])]
@@ -345,7 +281,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return sessions.get(sessionId)?.isRunning ?? false
   }, [sessions])
 
-  // ── Actions (backward-compatible with SessionProvider) ───────
 
   const sendMessageInternal = useCallback((text: string, attachments?: AttachmentRef[]) => {
     if (!activeSessionId) return
@@ -361,11 +296,9 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       isRunning: true,
     }))
 
-    // Ensure WS is connected before sending. If not yet open, queue and retry.
     if (wsPool.isConnected(sid)) {
       wsPool.sendMessage(sid, text, attachments)
     } else {
-      // WS might be connecting — wait for open, then send
       const checkAndSend = () => {
         if (wsPool.isConnected(sid)) {
           wsPool.sendMessage(sid, text, attachments)
@@ -423,22 +356,17 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return getSessionCounter(activeSessionId)
   }, [activeSessionId, getSessionCounter])
 
-  // ── Cache operations (backward-compatible) ───────────────────
 
   const getCachedMessages = useCallback((sid: string): Message[] | null => {
     return sessions.get(sid)?.messages ?? null
   }, [sessions])
 
   const clearCachedMessages = useCallback((_sid: string) => {
-    // With multi-session, messages persist in the Map — no need to clear
   }, [])
 
   const resetForSessionSwitch = useCallback(() => {
-    // With multi-session, sessions persist in the Map — this is a no-op
-    // Kept for backward compatibility
   }, [])
 
-  // ── Token buffer flush for active session (R4) ───────────────
 
   const flushTokenBuffer = useCallback((sessionId: string) => {
     const buf = tokenBuffers.current.get(sessionId)
@@ -450,31 +378,20 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       : prev)
   }, [updateSession])
 
-  // ── Per-session WS event handlers ─────────────────────────────
-  // Handlers are subscribed for EVERY session in the Map — not only the
-  // active one — so background runs keep streaming while the user looks
-  // at another conversation. Subscriptions live for the session's
-  // lifetime (no unsubscription on switch); ws.ts keeps handlers at pool
-  // level so reconnects don't wipe them either.
 
   const subscribedSessionsRef = useRef(new Set<string>())
   const processQueueRef = useRef(processQueue)
   processQueueRef.current = processQueue
 
   const subscribeSession = useCallback((sid: string) => {
-    // Connect WS + subscribe handlers atomically — no event loss window.
     if (!wsPool.hasConnection(sid)) {
       wsPool.connect(sid)
     }
 
     const unsubs = [
       wsPool.on(sid, 'thinking', (data) => {
-        // Empty thought (tools without visible Thought) must not paint a
-        // "Thinking..." placeholder — align with TUI / decision 1.
         const thought = (data.content || '').trim()
         if (!thought) return
-        // One thinking card per event; reasoning deltas after it start a new
-        // process card (same semantics as the old currentReasoningIds reset).
         currentReasoningIds.current.set(sid, null)
         updateSession(sid, prev => ({
           ...prev,
@@ -485,8 +402,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }))
       }),
       wsPool.on(sid, 'user_reaction', (data) => {
-        // express_reaction tool rewritten by the server — attach the emoji to
-        // the last user message bubble instead of showing a tool card.
         if (!data?.emoji) return
         updateSession(sid, prev => {
           let idx = -1
@@ -545,14 +460,11 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }))
       }),
       wsPool.on(sid, 'tool_call', (data) => {
-        // 本轮可见文本已经作为思考卡展示（thinking 事件先于 tool_call 到达），
-        // 流式累积的原文 answer 草稿（通常带 "Thought:" 前缀）是重复内容，丢弃。
-        // step 的 process 卡片提交到历史，答案草稿不提交。
         tokenBuffers.current.delete(sid)
         const flushRef = tokenFlushRefs.current.get(sid)
         if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
-        currentReasoningIds.current.set(sid, null)  // Next LLM call gets its own reasoning message
-        stepAnswerIds.current.set(sid, null)        // Draft discarded with the committed step
+        currentReasoningIds.current.set(sid, null)
+        stepAnswerIds.current.set(sid, null)
         updateSession(sid, prev => {
           const next = commitStep(prev, { discardAnswer: true })
           return {
@@ -571,9 +483,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         })
       }),
       wsPool.on(sid, 'tool_result', (data) => {
-        // Parallel tools share the same tool_name — match by tool_call_id and
-        // update exactly ONE card. Fallback (old servers without id): the
-        // FIRST running card with that name, never all of them.
         updateSession(sid, prev => {
           const idx = prev.messages.findIndex(m =>
             data.tool_call_id
@@ -595,24 +504,17 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         })
       }),
       wsPool.on(sid, 'token', (data) => {
-        // R8: Track cursor on connection for reconnect
         const conn = wsPool.getConnection(sid)
         if (conn) {
-          // Tokens at or below the snapshot cursor are already in the draft
-          // (reconnect_snapshot is authoritative for the current step) — the
-          // server replays everything past the client's event-seq cursor, so
-          // the snapshot-covered range would double-append without this guard.
           if (typeof data.tok_seq === 'number' && data.tok_seq > 0 && data.tok_seq <= conn.lastCursor) return
           conn.lastCursor++
         }
 
         const draftId = stepAnswerIds.current.get(sid)
         if (draftId) {
-          // Append to token buffer (R4: no re-render per token)
           const buf = tokenBuffers.current.get(sid) ?? ''
           tokenBuffers.current.set(sid, buf + data.content)
 
-          // Schedule RAF flush for active session only
           if (!tokenFlushRefs.current.has(sid)) {
             tokenFlushRefs.current.set(sid, requestAnimationFrame(() => {
               tokenFlushRefs.current.delete(sid)
@@ -620,11 +522,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             }))
           }
         } else {
-          // First token of the step: create the answer draft. It lives in the
-          // step, so process cards always render before it regardless of
-          // arrival order (see commitStep). The id goes into a synchronous
-          // ref — branching on sessionsRef here would read stale state and
-          // recreate (lose) the draft on the next token.
           const nid = `a-${getSessionCounter(sid)}`
           stepAnswerIds.current.set(sid, nid)
           updateSession(sid, prev => ({
@@ -637,11 +534,8 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }
       }),
       wsPool.on(sid, 'reasoning', (data) => {
-        // rid is kept valid by resets at every step commit (tool_call /
-        // answer / error / done / new run) — never branch on sessionsRef here.
         const rid = currentReasoningIds.current.get(sid)
         if (rid) {
-          // Append in a functional update; a stale rid simply matches nothing.
           updateSession(sid, prev => prev.step
             ? {
                 ...prev,
@@ -651,9 +545,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         } else {
           const nid = `r-${getSessionCounter(sid)}`
           currentReasoningIds.current.set(sid, nid)
-          // Reasoning belongs to the process bucket of the current step: it
-          // renders above the answer draft no matter whether the provider
-          // delivered it before or after content deltas (interleaved models).
           updateSession(sid, prev => ({
             ...prev,
             step: {
@@ -664,17 +555,14 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }
       }),
       wsPool.on(sid, 'answer', (data) => {
-        // Flush remaining token buffer
         const flushRef = tokenFlushRefs.current.get(sid)
         if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
         tokenBuffers.current.delete(sid)
         currentReasoningIds.current.set(sid, null)
         stepAnswerIds.current.set(sid, null)
 
-        // 空答案但带错误（模型限流/配额耗尽等）：显示错误而非留空消息
         if (data.error && !(data.content || '').trim()) {
           updateSession(sid, prev => {
-            // Keep whatever the step already streamed (partial draft + thinking cards).
             const next = commitStep(prev)
             return {
               ...next,
@@ -685,9 +573,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             }
           })
         } else {
-        // Commit the step with the final answer content replacing the draft.
-        // If the step is gone (e.g. history reload landed mid-run), append the
-        // final answer so it is never lost.
         const finalContent = data.content || (data.error ? `⚠️ ${data.error}` : data.content)
         updateSession(sid, prev => {
           let messages: Message[]
@@ -717,15 +602,11 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }
       }),
       wsPool.on(sid, 'error', (data) => {
-        // 仅明确的消息为 cancelled 才算取消；带 run_id 的普通错误
-        // （如内部服务器错误）必须显示真实错误信息。
         const isCancelled = data.message === 'cancelled'
         const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
         currentReasoningIds.current.set(sid, null)
         stepAnswerIds.current.set(sid, null)
         updateSession(sid, prev => {
-          // Flush the in-flight step first so partial thinking/answer render
-          // before the error card.
           const next = commitStep(prev)
           return {
             ...next,
@@ -759,17 +640,8 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         if (data.run_id) {
           updateSession(sid, prev => ({ ...prev, currentRunId: data.run_id }))
         }
-        // Server-confirmed turn start: the backend persists the session
-        // preview BEFORE sending run_started (update_session_preview runs
-        // first in the send_message branch), so refetching now makes a new
-        // session visible in the sidebar immediately. The send-time
-        // session-updated races that write and usually sees nothing —
-        // this is the confirmation point (codex/opencode refresh here).
         window.dispatchEvent(new Event('session-updated'))
       }),
-      // Subagent visibility: keep sidebar metadata (name/status/current tool)
-      // fresh. token/reasoning kinds are trajectory-only — the detail page
-      // subscribes to those; sidebar meta never changes on them.
       wsPool.on(sid, 'subagent_event', (data) => {
         const id = data?.subagent_id
         if (!id) return
@@ -799,7 +671,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           pendingConfirm: true,
         }))
       }),
-      // R5: confirm timeout — backend auto-denied after 5 minutes
       wsPool.on(sid, 'confirm_timeout', (data) => {
         updateSession(sid, prev => ({
           ...prev,
@@ -813,21 +684,12 @@ export default function SessionManager({ children }: { children: ReactNode }) {
           }],
         }))
       }),
-      // R8: reconnect snapshot — backend sends current state on WS reconnect
       wsPool.on(sid, 'reconnect_snapshot', (data) => {
-        // Clear stale token buffer and use snapshot as authoritative source
-        // for the CURRENT step's answer draft. The snapshot cursor counts
-        // content tokens of the run — it must NOT touch msgCounters (message
-        // id sequence): overwriting it with a smaller value creates
-        // duplicate message ids (React key collisions).
         tokenBuffers.current.delete(sid)
         if (data.cursor != null) {
-          // Store cursor on connection for future reconnects
           const conn = wsPool.getConnection(sid)
           if (conn) conn.lastCursor = data.cursor
         }
-        // If snapshot has content, update the in-flight answer draft, else the
-        // last committed assistant message.
         if (data.content) {
           const hasDraft = sessionsRef.current.get(sid)?.step?.answer
           updateSession(sid, prev => {
@@ -850,10 +712,8 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return () => {
       unsubs.forEach(u => u())
     }
-  }, [updateSession, getSessionCounter]) // processQueue/activeSessionId read via refs
+  }, [updateSession, getSessionCounter])
 
-  // Subscribe every session in the Map — background sessions must keep
-  // receiving events while the user views another conversation.
   useEffect(() => {
     for (const sid of sessions.keys()) {
       if (subscribedSessionsRef.current.has(sid)) continue
@@ -862,13 +722,11 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     }
   }, [sessions, subscribeSession])
 
-  // ── Memoized setters ─────────────────────────────────────────
 
   const handleSetSessionId = useCallback((id: string | null) => {
     if (id) {
       activateSession(id)
     } else {
-      // Clear active session (e.g., "New Chat" click before user sends first message)
       setActiveSessionId(null)
     }
   }, [activateSession])
@@ -911,7 +769,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     if (sid) updateSession(sid, prev => ({ ...prev, todoCount: count }))
   }, [updateSession])
 
-  // ── setMessages for active session (backward-compatible) ──────
 
   const handleSetMessages = useCallback((value: React.SetStateAction<Message[]>) => {
     const sid = activeSessionIdRef.current
@@ -919,21 +776,17 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     updateSession(sid, prev => {
       const newMessages = typeof value === 'function' ? value(prev.messages) : value
       console.log('[setMessages] Session:', sid, 'msgs:', newMessages.length)
-      // History replace invalidates any in-flight step — its content either
-      // matches the loaded history or would duplicate it.
       currentReasoningIds.current.set(sid, null)
       stepAnswerIds.current.set(sid, null)
       return { ...prev, messages: newMessages, step: null }
     })
   }, [updateSession])
 
-  // ── Get active session state for context ─────────────────────
 
   const activeState = activeSessionId ? sessions.get(activeSessionId) : null
 
   return (
     <SessionContext.Provider value={{
-      // Session metadata (from active session)
       sessionId: activeSessionId,
       modelName: activeState?.modelName ?? null,
       contextUsed: activeState?.contextUsed ?? null,
@@ -952,8 +805,6 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       setCwd: handleSetCwd,
       setToolCount: handleSetToolCount,
       setTodoCount: handleSetTodoCount,
-      // Message state (from active session) — flattened display view:
-      // committed messages + in-flight step (process cards before answer draft)
       messages: activeState ? flattenState(activeState) : [],
       setMessages: handleSetMessages,
       isRunning: activeState?.isRunning ?? false,
@@ -961,12 +812,9 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       confirmRequest: activeState?.confirmRequest ? { summary: activeState.confirmRequest.summary } : null,
       msgCounter: activeState?.msgCounter ?? 0,
       incrementMsgCounter,
-      // Actions
       sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage,
       resetForSessionSwitch, getCachedMessages, clearCachedMessages,
-      // Animation tracking
       animatedIds: activeState?.animatedIds ?? new Set(),
-      // Multi-session operations
       activateSession, getSessionState, getLiveSessionState, getLiveDisplayMessages, isSessionRunning, sessions,
     }}>
       {children}

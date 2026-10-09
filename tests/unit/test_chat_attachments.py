@@ -52,9 +52,7 @@ class TestSendMessageAttachments:
         f.write_text("hi", encoding="utf-8")
         chat.send_message(session.id, "看看这个", attachments=[_att(str(f))])
 
-        # User message stays clean — no manifest in bubbles/history.
         assert _committed_texts(chat, session.id) == ["看看这个"]
-        # The agent gets the manifest through the note channel.
         note = agent.run.call_args.kwargs["attachment_note"]
         assert "[附件]" in note and str(f) in note and "file_read" in note
 
@@ -71,7 +69,6 @@ class TestSendMessageAttachments:
             chat.send_message(session.id, "hi", attachments=[_att(missing1), _att(missing2)])
         msg = str(exc.value)
         assert missing1 in msg and missing2 in msg
-        # All-or-nothing: nothing committed, no run started.
         assert _committed_texts(chat, session.id) == []
         agent.run.assert_not_called()
 
@@ -87,7 +84,7 @@ class TestSendMessageAttachments:
         img = tmp_path / "big.png"
         img.write_bytes(b"\x89PNG" + b"0" * (_MAX_IMAGE_BYTES - 4))
         chat.send_message(session.id, "图", attachments=[_att(str(img), "image/png")])
-        agent.run.assert_called_once()  # exactly 5MB passes
+        agent.run.assert_called_once()
 
         agent.reset_mock()
         img.write_bytes(b"\x89PNG" + b"0" * _MAX_IMAGE_BYTES)
@@ -108,7 +105,6 @@ class TestSendMessageAttachments:
         assert agent.run.call_args.kwargs.get("images") is None
         note = agent.run.call_args.kwargs["attachment_note"]
         assert "未启用视觉" in note
-        # User text still clean.
         assert _committed_texts(chat, session.id) == ["看图"]
 
     def test_vision_on_sends_image_blocks(self, chat, session, agent, tmp_path, monkeypatch):

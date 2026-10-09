@@ -30,9 +30,6 @@ def _noop_tool(msg: str = "") -> str:
     return f"echo: {msg}"
 
 
-# ── ToolRegistry creation ─────────────────────────────────────
-
-
 def test_tool_executor_creation(benchmark):
     from agentnexus.tools import register_all_tools
 
@@ -43,9 +40,6 @@ def test_tool_executor_creation(benchmark):
 
     executor = benchmark(_create)
     assert executor is not None
-
-
-# ── Agent single step ─────────────────────────────────────────
 
 
 @pytest.mark.parametrize("mock_llm_latency", ["fast"], indirect=True)
@@ -70,9 +64,6 @@ def test_agent_single_step_mock(benchmark, mock_llm_latency, perf_env):
     result = benchmark(_run_step)
     assert result is not None
     assert mock_llm_latency.call_count >= 1
-
-
-# ── Agent multi-step ──────────────────────────────────────────
 
 
 class _StatefulMock:
@@ -257,9 +248,6 @@ def test_agent_multi_tool_steps(benchmark, perf_env, steps):
     )
 
 
-# ── ToolRegistry invoke overhead ──────────────────────────────
-
-
 def test_tool_executor_invoke_overhead(benchmark):
     ex = ToolRegistry()
     ex.register(
@@ -277,9 +265,6 @@ def test_tool_executor_invoke_overhead(benchmark):
     )
 
     benchmark(ex.registry.invoke, "echo", {"msg": "hello"}, "test_agent")
-
-
-# ── Registry audit overhead ───────────────────────────────────
 
 
 def test_registry_audit_overhead(benchmark, perf_env):

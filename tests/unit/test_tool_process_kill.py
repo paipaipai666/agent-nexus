@@ -25,10 +25,6 @@ class _SleepyExecutor:
         self.proc: subprocess.Popen | None = None
 
     def invoke(self, *, name, params, caller, hitl_approver, tool_policy=None):
-        # 等价于 run_tracked 的登记语义，但把 Popen 句柄暴露出来：
-        # cancel 触发点需要等「进程已 spawn 且已 track」这一时刻可见，
-        # 否则 cancel 会先于登记命中，execute_tool 直接返回 CANCELLED，
-        # 进程从未被 track、也就从未被杀死。
         proc = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(30)"],
             stdout=subprocess.PIPE,
@@ -51,9 +47,6 @@ def test_cancel_kills_tool_process_tree_immediately():
     cancel = threading.Event()
 
     def trigger_cancel():
-        # 高负载 runner 上 worker 线程拿到调度前 cancel 就可能触发——
-        # execute_tool 直接返回 CANCELLED 而 run_tracked 还没登记进程。
-        # 必须等 proc 真正赋值（进程已被 track，cancel 才能杀掉它）。
         deadline = time.time() + 10
         while executor.proc is None and time.time() < deadline:
             time.sleep(0.05)
@@ -86,12 +79,9 @@ def test_cancel_kills_tool_process_tree_immediately():
     assert isinstance(result, ToolError)
     assert result.error_code == ToolErrorCode.CANCELLED
     assert executor.proc is not None
-    # tool_runner 的 cancel 路径刻意不 join 工具线程——被杀进程的回收
-    # （wait() 返回、returncode 落定）发生在 worker 线程里，给短暂窗口。
     deadline = time.time() + 5
     while executor.proc.returncode is None and time.time() < deadline:
         time.sleep(0.05)
-    # 未被杀时 sleep(30) 不可能已结束——returncode 落定即证明进程被杀死。
     assert executor.proc.returncode is not None
 
 
@@ -127,7 +117,6 @@ def test_kill_process_tree_kills_descendants_posix():
     """POSIX：子进程自成进程组，killpg 能带走孙进程。"""
     import os
 
-    # sh 派生一个 sleep 孙进程；只杀直接子进程的话 sleep 会变孤儿。
     proc = subprocess.Popen(
         ["/bin/sh", "-c", "sleep 30"],
         start_new_session=True,
@@ -135,7 +124,6 @@ def test_kill_process_tree_kills_descendants_posix():
     try:
         process_tracker.kill_process_tree(proc.pid)
         proc.wait(timeout=5)
-        # 进程组应已不存在
         with pytest.raises(ProcessLookupError):
             os.killpg(os.getpgid(proc.pid), 0)
     finally:

@@ -102,7 +102,7 @@ class TestHighConcurrencyStress:
             try:
                 for i in range(20):
                     stm.append("user", f"Batch {batch} Message {i}")
-                    time.sleep(0.001)  # Small delay to simulate real load
+                    time.sleep(0.001)
             except Exception as e:
                 with lock:
                     errors.append(e)
@@ -113,7 +113,7 @@ class TestHighConcurrencyStress:
 
         assert len(errors) == 0, f"Concurrent errors: {errors}"
         all_msgs = stm.get_all()
-        assert len(all_msgs) == 100  # 5 batches × 20 messages
+        assert len(all_msgs) == 100
 
     @patch("agentnexus.memory.manager.MemoryManager.maybe_compact")
     def test_mixed_operations_high_concurrency(self, mock_compact):
@@ -150,5 +150,4 @@ class TestHighConcurrencyStress:
 
         assert len(errors) == 0, f"Concurrent errors: {errors}"
         all_msgs = mm.short_term.get_all()
-        # Due to deque maxlen racing under high concurrency, messages may be dropped
         assert len(all_msgs) >= 50

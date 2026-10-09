@@ -30,15 +30,12 @@ def pass_at_k(n: int, c: int, k: int) -> float:
         k = n
     if c >= n:
         return 1.0
-    # 1 - C(n-c, k) / C(n, k)
-    # 使用 log 避免大数溢出
     try:
         log_num = _log_combination(n - c, k)
         log_den = _log_combination(n, k)
         ratio = math.exp(log_num - log_den)
         return 1.0 - ratio
     except (ValueError, OverflowError):
-        # 回退到近似计算
         return _pass_at_k_approximate(n, c, k)
 
 
@@ -48,7 +45,6 @@ def _log_combination(n: int, k: int) -> float:
         return float('-inf')
     if k == 0 or k == n:
         return 0.0
-    # log(n!) - log(k!) - log((n-k)!)
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
 
@@ -57,7 +53,6 @@ def _pass_at_k_approximate(n: int, c: int, k: int) -> float:
     trials = 10000
     success = 0
     for _ in range(trials):
-        # 随机选 k 个 (不放回)
         sample = random.sample(range(n), min(k, n))
         if any(i < c for i in sample):
             success += 1
@@ -101,14 +96,12 @@ def compute_pass_metrics(n_trials: int, n_success: int) -> dict[str, Any]:
         "success_rate": success_rate,
     }
 
-    # pass@k for common k values
     for k in [1, 3, 5, 10]:
         if k <= n_trials:
             result[f"pass_at_{k}"] = pass_at_k(n_trials, n_success, k)
         else:
             result[f"pass_at_{k}"] = None
 
-    # pass^k for common k values
     for k in [1, 3, 5, 10]:
         result[f"pass_hat_{k}"] = pass_hat_k(success_rate, k)
 

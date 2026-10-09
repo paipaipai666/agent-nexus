@@ -10,8 +10,6 @@ from agentnexus.skills.router.llm_fallback import parse_llm_skill_id, route_with
 from agentnexus.skills.router.types import SkillRoute
 from agentnexus.skills.workflow import Workflow
 
-# ── Helpers ─────────────────────────────────────────────────────────
-
 
 def _make_entry(
     workflow_id: str = "test-skill",
@@ -57,9 +55,6 @@ def _make_route(
         reason=reason,
         source=source,
     )
-
-
-# ── Tests for route_with_llm ───────────────────────────────────────
 
 
 class TestRouteWithLLM:
@@ -116,9 +111,6 @@ class TestRouteWithLLM:
         llm.think.return_value = '{"skill_id": 123, "confidence": 0.5, "reason": "numeric"}'
         result = route_with_llm("hello", (route,), "uncertain", llm)
         assert result is None
-
-
-# ── Tests for parse_llm_skill_id ───────────────────────────────────
 
 
 class TestParseLLMSkillId:

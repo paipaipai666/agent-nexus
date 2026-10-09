@@ -1,11 +1,3 @@
-/**
- * Tests for the session-switch-during-streaming behavior.
- *
- * The pool-based architecture maintains independent connections per session.
- * When connect() is called for a new session, the old session's connection
- * remains alive in the pool. Operations via agentWs route to the active session.
- * disconnect() removes the connection from the pool.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 class MockWebSocket {
@@ -65,7 +57,6 @@ describe('Session switch during streaming — fix verification', () => {
       agentWs.connect('session-b')
       const wsB = MockWebSocket.instances[1]
 
-      // Both connections exist in the pool
       expect((wsPool as any).connections.has('session-a')).toBe(true)
       expect((wsPool as any).connections.has('session-b')).toBe(true)
       expect(wsB).not.toBe(wsA)
@@ -78,7 +69,6 @@ describe('Session switch during streaming — fix verification', () => {
       agentWs.connect('session-b')
       const wsB = MockWebSocket.instances[1]
 
-      // send goes to session-b (active)
       agentWs.send({ type: 'test' })
       expect(wsB.send).toHaveBeenCalled()
       expect(wsA.send).not.toHaveBeenCalled()
@@ -87,15 +77,13 @@ describe('Session switch during streaming — fix verification', () => {
     it('clears reconnect timer on the old session when connect() is called again', () => {
       agentWs.connect('session-a')
       const wsA = MockWebSocket.instances[0]
-      wsA._close() // triggers scheduleReconnect
+      wsA._close()
 
       const connA = (wsPool as any).connections.get('session-a')
       expect(connA.reconnectTimer).not.toBeNull()
 
       agentWs.connect('session-b')
 
-      // Old session still has its reconnect timer (pool keeps it)
-      // But the compat wrapper now routes to session-b
       expect(agentWs.sessionId).toBe('session-b')
     })
   })
@@ -114,22 +102,17 @@ describe('Session switch during streaming — fix verification', () => {
       agentWs.connect('session-a')
       const wsA = MockWebSocket.instances[0]
 
-      // Register handler AFTER connect (pool architecture)
       const answerHandler = vi.fn()
       agentWs.on('answer', answerHandler)
 
-      // Disconnect removes session-a from pool
       agentWs.disconnect()
 
-      // Old WebSocket events don't fire (session removed from pool map)
       wsA._receive({ type: 'answer', content: 'stale answer' })
       expect(answerHandler).not.toHaveBeenCalled()
 
-      // Connect to new session and register handler there
       agentWs.connect('session-b')
       agentWs.on('answer', answerHandler)
 
-      // New WebSocket works normally
       const wsB = MockWebSocket.instances[1]
       wsB._receive({ type: 'answer', content: 'fresh answer' })
       expect(answerHandler).toHaveBeenCalledWith({ type: 'answer', content: 'fresh answer' })
@@ -140,11 +123,9 @@ describe('Session switch during streaming — fix verification', () => {
     it('no orphaned active session when connect() is called twice in rapid succession', () => {
       agentWs.connect('session-a')
 
-      // Rapid switch without disconnect
       agentWs.connect('session-b')
       const wsB = MockWebSocket.instances[1]
 
-      // wsB works normally — send goes to session-b
       const answerHandler = vi.fn()
       agentWs.on('answer', answerHandler)
       wsB._receive({ type: 'answer', content: 'new session answer' })
@@ -154,15 +135,12 @@ describe('Session switch during streaming — fix verification', () => {
     it('answer event on new session works after rapid connect()', () => {
       agentWs.connect('session-a')
 
-      // Rapid switch without disconnect
       agentWs.connect('session-b')
       const wsB = MockWebSocket.instances[1]
 
-      // Register handler on session-b
       const answerHandler = vi.fn()
       agentWs.on('answer', answerHandler)
 
-      // New session works
       wsB._receive({ type: 'answer', content: 'new response' })
       expect(answerHandler).toHaveBeenCalledWith({ type: 'answer', content: 'new response' })
     })
@@ -197,33 +175,26 @@ describe('Session switch during streaming — fix verification', () => {
     it('new session works correctly after switching during streaming', () => {
       const events: string[] = []
 
-      // Step 1: User is on session A, agent is streaming
       agentWs.connect('session-a')
       const wsA = MockWebSocket.instances[0]
 
-      // Register handler AFTER connect
       agentWs.on('token', () => events.push('token'))
       agentWs.on('answer', () => events.push('answer'))
 
-      // Step 2: Agent sends some tokens
       wsA._receive({ type: 'token', content: 'Hello ' })
       expect(events).toEqual(['token'])
 
-      // Step 3: User navigates to New Chat (connect creates new session)
       agentWs.connect('session-b')
       const wsB = MockWebSocket.instances[1]
 
-      // Re-register handlers for session-b
       agentWs.on('token', () => events.push('token-b'))
       agentWs.on('answer', () => events.push('answer-b'))
 
-      // Step 4: User sends message on new session — goes to session-b
       agentWs.sendMessage('new question')
       expect(wsB.send).toHaveBeenCalledWith(
         JSON.stringify({ type: 'send_message', content: 'new question' })
       )
 
-      // Step 5: New session receives response normally
       wsB._receive({ type: 'answer', content: 'new response' })
       expect(events).toContain('answer-b')
     })

@@ -1,14 +1,3 @@
-/**
- * Tests for the history message transform (desktop ChatPage history view).
- *
- * Locks the three defects reported against restored sessions:
- * 1. Assistant entries missing from the journal after restart-boundary turns
- *    (backend fix) — transform must map [思考过程]/[最终答案]/assistant rows
- *    to the same bubbles the live WS path produces.
- * 2. Empty assistant journal rows rendered as blank thinking cards.
- * 3. express_reaction tool rows rendered as tool cards — live path rewrites
- *    them to user_reaction (emoji under the user message); history must match.
- */
 import { describe, it, expect } from 'vitest'
 import { transformHistoryMessages } from '../utils/historyTransform'
 
@@ -64,7 +53,6 @@ describe('transformHistoryMessages', () => {
     expect(out.map(m => m.role)).toEqual(['user', 'system', 'tool', 'assistant'])
     expect(out[2].toolName).toBe('web_search')
     expect(out[2].toolStatus).toBe('done')
-    // structured fields for the ToolCard arg summary / typed body
     expect(out[2].toolArgs).toEqual({ q: '天气' })
     expect(out[2].toolResult).toBe('晴')
     expect(out[2].content).toBe('晴')

@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Statuses exposed to the UI (also carried on every subagent_event).
 TERMINAL_STATUSES = frozenset({"interrupted", "completed", "failed"})
 
 _NAME_MAX_LEN = 40
@@ -54,9 +53,7 @@ class SubagentRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._by_id: dict[str, SubagentEntry] = {}
-        # (session_id, base) -> last used counter, for auto-generated names.
         self._auto_counts: dict[tuple[str, str], int] = {}
-        # session_id -> set of used display names.
         self._names: dict[str, set[str]] = {}
 
     def register(self, session_id: str, run_id: str, name_hint: object,

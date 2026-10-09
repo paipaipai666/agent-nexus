@@ -74,7 +74,7 @@ class TestReActFsmRoundLoop:
         def round_handler(ctx, event):
             rounds.append(1)
             if len(rounds) < 3:
-                return []  # auto-advance 循环
+                return []
             ctx.last_answer = "done"
             return [ReActEvent(ReActEventType.ANSWER_READY)]
 
@@ -232,7 +232,6 @@ class TestReActAgentHardening:
         ctx = ExecutionContext(question="q", strategy=CallingStrategy.JSON_MODE)
         ctx.steps.append(AgentStep(step_id=1))
         ctx.run_state.json_retries = 0
-        # _on_init 被 stub，这里手动补它在真实流程中做的事
         ctx.memory_state.session_caps = agent.llm_client.session_tracker
 
         handlers = {t.handler: MagicMock(return_value=[]) for t in TRANSFER_TABLE}
@@ -253,6 +252,6 @@ class TestReActAgentHardening:
         fsm = StateMachine(TRANSFER_TABLE)
         answer, _ = fsm.run_loop(ReActEvent(ReActEventType.START), ctx, handlers)
 
-        assert fsm.current_state == ReActState.DONE       # ANSWER_READY → ANSWER →(auto) DONE
+        assert fsm.current_state == ReActState.DONE
         assert answer == "recovered"
         assert ctx.json_retries == 1

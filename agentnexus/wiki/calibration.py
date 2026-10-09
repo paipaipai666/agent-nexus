@@ -17,8 +17,6 @@ from .verifier import DEFAULT_VERIFY_THRESHOLDS, MechanicalVerifier
 
 logger = logging.getLogger(__name__)
 
-# Default thresholds before calibration — derived from the verifier's
-# VerifyThresholds defaults so the two never drift apart.
 DEFAULT_THRESHOLDS: dict[str, float] = asdict(DEFAULT_VERIFY_THRESHOLDS)
 
 
@@ -30,7 +28,7 @@ class CalibrationSample:
     text: str
     source_chunk_ids: list[str]
     source_texts: list[str]
-    human_label: str  # ground truth synthesis_level
+    human_label: str
 
 
 @dataclass
@@ -58,7 +56,6 @@ class ConfusionMatrix:
         total = sum(self.matrix[a][p] for a in self.matrix for p in self.matrix[a])
         if total == 0:
             return 0.0
-        # Degradation: actual is higher trust than predicted
         degraded = 0
         for actual in self.labels:
             for predicted in self.labels:
@@ -99,7 +96,7 @@ def evaluate_thresholds(
         stmt = WikiStatement(
             statement_id=sample.statement_id,
             text=sample.text,
-            synthesis_level=sample.human_label,  # start from human-assigned
+            synthesis_level=sample.human_label,
             source_chunk_ids=sample.source_chunk_ids,
         )
         predicted = verifier.verify_statement(stmt, chunk_texts)
@@ -120,7 +117,6 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
     adjusted = dict(current)
     matrix = cm.matrix
 
-    # Check direct_quote miss rate
     dq_actual = matrix.get(SynthesisLevel.DIRECT_QUOTE.value, {})
     dq_missed_as_para = dq_actual.get(SynthesisLevel.PARAPHRASE.value, 0)
     dq_total = sum(dq_actual.values())
@@ -128,7 +124,6 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
         adjusted["jaccard_direct_quote"] = max(0.3, current["jaccard_direct_quote"] - 0.1)
         logger.info("Lowering jaccard_direct_quote to %s", adjusted['jaccard_direct_quote'])
 
-    # Check paraphrase degradation rate
     para_actual = matrix.get(SynthesisLevel.PARAPHRASE.value, {})
     para_degraded = para_actual.get(SynthesisLevel.CROSS_REFERENCE.value, 0) + para_actual.get(SynthesisLevel.SYNTHESIS.value, 0)
     para_total = sum(para_actual.values())
@@ -136,7 +131,6 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
         adjusted["cosine_paraphrase"] = max(0.3, current["cosine_paraphrase"] - 0.1)
         logger.info("Lowering cosine_paraphrase to %s", adjusted['cosine_paraphrase'])
 
-    # Check cross_reference degradation
     cr_actual = matrix.get(SynthesisLevel.CROSS_REFERENCE.value, {})
     cr_degraded = cr_actual.get(SynthesisLevel.SYNTHESIS.value, 0)
     cr_total = sum(cr_actual.values())
@@ -144,7 +138,6 @@ def suggest_threshold_adjustments(cm: ConfusionMatrix, current: dict[str, float]
         adjusted["cosine_source"] = max(0.15, current["cosine_source"] - 0.05)
         logger.info("Lowering cosine_source to %s", adjusted['cosine_source'])
 
-    # Check false positive rate in direct_quote
     false_dq = sum(
         matrix.get(lvl, {}).get(SynthesisLevel.DIRECT_QUOTE.value, 0)
         for lvl in [SynthesisLevel.PARAPHRASE.value, SynthesisLevel.CROSS_REFERENCE.value, SynthesisLevel.SYNTHESIS.value]
@@ -187,15 +180,12 @@ def run_calibration(
             best_cm = cm
             best_thresholds = dict(thresholds)
 
-        # If score is good enough, stop
         if score < 0.1:
             logger.info("Calibration converged — score below 0.1")
             break
 
-        # Suggest adjustments for next round
         thresholds = suggest_threshold_adjustments(cm, thresholds)
 
-    # Save to store
     store.save_calibration(best_thresholds, best_cm.to_dict(), len(samples))
 
     return {

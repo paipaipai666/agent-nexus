@@ -70,7 +70,6 @@ def history_search(query: str, max_results: int = 5) -> str:
     if not rows:
         return "[history_search] 暂无归档历史（本会话还没有折叠过早期内容）"
 
-    # 打分：命中不同词数多的优先
     scored = []
     for pos, rec in enumerate(rows):
         content = str(rec.get("content", "")).lower()
@@ -81,7 +80,6 @@ def history_search(query: str, max_results: int = 5) -> str:
         return f"[history_search] 归档历史中未找到: {' '.join(terms)}"
     scored.sort(key=lambda x: (-x[0], x[1]))
 
-    # 取 top N 并扩展 ±1 相邻消息（同会话内）
     picked: dict[int, None] = {}
     for _, pos, _ in scored[:max(1, min(max_results, 20))]:
         for p in (pos - 1, pos, pos + 1):

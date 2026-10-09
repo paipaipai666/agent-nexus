@@ -5,14 +5,11 @@ from __future__ import annotations
 from agentnexus.tools.dispatcher import ToolCallResult, ToolDispatcher
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
-# ── helpers ──────────────────────────────────────────────────────
-
 
 def _make_registry_with_tools() -> ToolRegistry:
     """Create a registry with a mix of concurrent-safe and unsafe tools."""
     reg = ToolRegistry()
 
-    # Read-only tools (concurrency_safe=True)
     reg.register(
         ToolMeta(
             name="grep_search",
@@ -32,7 +29,6 @@ def _make_registry_with_tools() -> ToolRegistry:
         lambda path="": f"file content of {path}",
     )
 
-    # Write tools (concurrency_safe=False, default)
     reg.register(
         ToolMeta(
             name="file_write",
@@ -51,9 +47,6 @@ def _make_registry_with_tools() -> ToolRegistry:
     )
 
     return reg
-
-
-# ── ToolCallResult ───────────────────────────────────────────────
 
 
 class TestToolCallResult:
@@ -80,9 +73,6 @@ class TestToolCallResult:
         )
         assert r.error == "timeout"
         assert r.result is None
-
-
-# ── ToolDispatcher partitioning ──────────────────────────────────
 
 
 class TestToolDispatcherPartitioning:
@@ -129,7 +119,6 @@ class TestToolDispatcherPartitioning:
         )
         assert len(results) == 3
         assert all(r.error is None for r in results)
-        # Results in original order
         assert results[0].name == "grep_search"
         assert results[1].name == "file_read"
         assert results[2].name == "grep_search"
@@ -166,7 +155,6 @@ class TestToolDispatcherPartitioning:
             execute_fn=lambda name, args: reg.invoke(name, args),
         )
         assert len(results) == 4
-        # Original order preserved
         assert [r.name for r in results] == ["grep_search", "file_write", "file_read", "shell_exec"]
         assert all(r.error is None for r in results)
 
@@ -190,10 +178,8 @@ class TestToolDispatcherPartitioning:
 
         results = dispatcher.execute(calls, execute_fn=failing_execute)
         assert len(results) == 2
-        # First tool failed
         assert results[0].error is not None
         assert "search failed" in results[0].error
-        # Second tool succeeded
         assert results[1].error is None
         assert results[1].result == "file content of ok.txt"
 
@@ -213,9 +199,6 @@ class TestToolDispatcherPartitioning:
         for i, r in enumerate(results):
             assert r.name == "file_read"
             assert f"f{i}.txt" in r.result
-
-
-# ── concurrency_safe on ToolMeta ─────────────────────────────────
 
 
 class TestConcurrencySafeField:

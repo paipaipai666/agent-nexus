@@ -86,9 +86,7 @@ def test_tracer_concurrent(perf_env):
     )
 
 
-# ── compute_stats aggregation ───────────────────────────────────────────────
-
-STATS_COMPUTE_THROUGHPUT_MIN = 200   # 200 spans/s minimum (on clean data)
+STATS_COMPUTE_THROUGHPUT_MIN = 200
 
 
 def test_compute_stats_small(benchmark, generate_spans):

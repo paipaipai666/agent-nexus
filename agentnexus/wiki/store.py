@@ -22,7 +22,6 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-
 WIKI_SCHEMA = """
 CREATE TABLE IF NOT EXISTS wiki_pages (
     page_id TEXT PRIMARY KEY,
@@ -98,6 +97,7 @@ CREATE TABLE IF NOT EXISTS wiki_calibration (
     calibrated_at TEXT NOT NULL
 );
 """
+
 
 _catalog_instances: dict[str, "WikiStore"] = {}
 
@@ -193,8 +193,6 @@ class WikiStore:
             self._conn.close()
             self._conn = None
 
-    # ── Wiki Pages ──────────────────────────────────────────────────
-
     def upsert_page(self, page: WikiPage):
         conn = self._get_conn()
         now = _utc_now()
@@ -275,8 +273,6 @@ class WikiStore:
                 )
             conn.commit()
 
-    # ── Wiki Statements ─────────────────────────────────────────────
-
     def upsert_statement(self, stmt: WikiStatement):
         conn = self._get_conn()
         now = _utc_now()
@@ -333,8 +329,6 @@ class WikiStore:
         if not chunk_ids:
             return []
         conn = self._get_conn()
-        # SQLite JSON: check if any source_chunk_ids element matches
-        # We fetch all and filter in Python for portability
         rows = conn.execute("SELECT * FROM wiki_statements").fetchall()
         results = []
         chunk_set = set(chunk_ids)
@@ -352,8 +346,6 @@ class WikiStore:
                 (verified_level, _utc_now(), statement_id),
             )
             conn.commit()
-
-    # ── Canonical Definitions ───────────────────────────────────────
 
     def upsert_canonical_definition(self, page_id: str, term: str, definition: CanonicalDefinition):
         conn = self._get_conn()
@@ -392,8 +384,6 @@ class WikiStore:
                 last_recalculated=row["last_recalculated"],
             )
         return result
-
-    # ── Dependency Graph ────────────────────────────────────────────
 
     def add_dependency(self, source_page_id: str, dependent_page_id: str, relation_type: str = "references"):
         conn = self._get_conn()
@@ -434,8 +424,6 @@ class WikiStore:
                 (page_id, page_id),
             )
             conn.commit()
-
-    # ── Review Queue ────────────────────────────────────────────────
 
     def add_review_item(self, item: ReviewItem):
         conn = self._get_conn()
@@ -515,8 +503,6 @@ class WikiStore:
             for row in rows
         ]
 
-    # ── Calibration ─────────────────────────────────────────────────
-
     def save_calibration(self, thresholds: dict[str, float], confusion_matrix: dict, sample_size: int):
         conn = self._get_conn()
         with self._lock:
@@ -539,8 +525,6 @@ class WikiStore:
             "sample_size": row["sample_size"],
             "calibrated_at": row["calibrated_at"],
         }
-
-    # ── Stats ───────────────────────────────────────────────────────
 
     def get_stats(self, source_namespace: str = "") -> dict[str, Any]:
         conn = self._get_conn()

@@ -21,7 +21,6 @@ from agentnexus.services.chat import (
 
 
 def _make_service(monkeypatch) -> ChatService:
-    # keep the test hermetic: no timeline sqlite writes
     monkeypatch.setattr(
         chat_mod, "get_timeline_store",
         lambda: SimpleNamespace(record_event=lambda *a, **k: None),
@@ -38,9 +37,8 @@ def test_async_queue_bounded_without_consumer(monkeypatch):
         svc._put_event("r1", AgentEvent("token", {"text": "x"}, run_id="r1", session_id="s1"))
 
     q = svc._async_run_events["r1"]
-    assert q.qsize() == _EVENT_QUEUE_MAX          # bounded, no unbounded growth
-    assert svc._dropped_events["r1"] == 500        # evictions counted
-    # newest event survived (drop-oldest policy)
+    assert q.qsize() == _EVENT_QUEUE_MAX
+    assert svc._dropped_events["r1"] == 500
     last = None
     while not q.empty():
         last = q.get_nowait()
@@ -50,7 +48,7 @@ def test_async_queue_bounded_without_consumer(monkeypatch):
 def test_sync_queue_put_does_not_block_when_full():
     q: queue_mod.Queue = queue_mod.Queue(maxsize=3)
     for i in range(10):
-        _enqueue_bounded(q, AgentEvent("e", run_id="r"))   # must not block
+        _enqueue_bounded(q, AgentEvent("e", run_id="r"))
     assert q.qsize() == 3
 
 
@@ -65,11 +63,11 @@ def test_terminator_lands_when_full_without_wiping_queue():
     for i in range(3):
         _enqueue_bounded(q, AgentEvent("e", run_id="r"))
     ok = _enqueue_bounded(q, None)
-    assert not ok                 # an eviction happened
-    assert q.qsize() == 3         # queue intact, not wiped
-    assert q.get_nowait() is not None   # oldest evicted, others survive
+    assert not ok
+    assert q.qsize() == 3
     assert q.get_nowait() is not None
-    assert q.get_nowait() is None       # terminator landed last
+    assert q.get_nowait() is not None
+    assert q.get_nowait() is None
 
 
 def test_async_terminator_lands_when_full():

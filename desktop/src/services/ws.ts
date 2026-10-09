@@ -2,35 +2,26 @@ import type { AttachmentRef } from './api'
 
 type EventHandler = (data: any) => void
 
-// ── Per-session connection ──────────────────────────────────────
 
 class SessionConnection {
   ws: WebSocket | null = null
   reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  lastCursor: number = 0  // R8: track token cursor for reconnect
-  lastEventSeq: number = 0  // structural-event cursor for reconnect resume
+  lastCursor: number = 0
+  lastEventSeq: number = 0
 }
 
-// ── WebSocket Pool (Phase 3: multi-session) ─────────────────────
 
 class WebSocketPool {
   private connections = new Map<string, SessionConnection>()
-  // Handlers live at pool level (not on the connection) so they survive
-  // reconnects — connect() swaps the SessionConnection but must never
-  // drop subscribers.
   private handlers = new Map<string, Map<string, Set<EventHandler>>>()
   private baseUrl = 'ws://127.0.0.1:18765'
 
   connect(sessionId: string, options?: { resumeFrom?: number }): void {
-    // Don't reconnect if already connected
     const existing = this.connections.get(sessionId)
     if (existing?.ws?.readyState === WebSocket.OPEN) return
 
-    // Carry the event cursor across reconnect so the server can resume the
-    // run's event stream where it left off (thinking/tool/answer/done).
     const prevEventSeq = existing?.lastEventSeq ?? 0
 
-    // Clean up stale connection
     if (existing) {
       this.cleanupConnection(existing)
     }
@@ -39,7 +30,6 @@ class WebSocketPool {
     conn.lastEventSeq = prevEventSeq
     this.connections.set(sessionId, conn)
 
-    // R8: Pass resume cursors as query parameters for reconnect
     let url = `${this.baseUrl}/api/ws/agent/${sessionId}`
     const params: string[] = []
     if (options?.resumeFrom != null && options.resumeFrom > 0) {
@@ -86,8 +76,6 @@ class WebSocketPool {
       this.cleanupConnection(conn)
       this.connections.delete(sessionId)
     }
-    // Full cleanup: explicit disconnect drops subscribers too. (A passive
-    // reconnect keeps them — handlers are only cleared here.)
     this.handlers.delete(sessionId)
   }
 
@@ -107,8 +95,6 @@ class WebSocketPool {
   }
 
   sendMessage(sessionId: string, content: string, attachments?: AttachmentRef[]): void {
-    // Attachments ride along only when non-empty so the wire payload for
-    // plain messages stays byte-identical to before.
     if (attachments && attachments.length > 0) {
       this.send(sessionId, { type: 'send_message', content, attachments })
     } else {
@@ -176,20 +162,15 @@ class WebSocketPool {
     if (!conn) return
     conn.reconnectTimer = setTimeout(() => {
       if (this.connections.has(sessionId)) {
-        // R8: Reconnect with resumeFrom cursor to skip already-received tokens
         this.connect(sessionId, { resumeFrom: conn.lastCursor })
       }
     }, 3000)
   }
 }
 
-// ── Shared pool instance ────────────────────────────────────────
 
 export const wsPool = new WebSocketPool()
 
-// ── Backward-compatible singleton wrapper ────────────────────────
-// Delegates to the pool's ACTIVE session. Existing code that imports
-// `agentWs` continues to work without changes.
 
 class AgentWebSocketCompat {
   private _activeSessionId: string | null = null
@@ -200,7 +181,6 @@ class AgentWebSocketCompat {
   connect(sessionId: string, _apiKey?: string) {
     this._activeSessionId = sessionId
     wsPool.connect(sessionId)
-    // Flush handlers registered before connect()
     for (const [event, handlers] of this._pendingHandlers) {
       for (const handler of handlers) {
         wsPool.on(sessionId, event, handler)
@@ -234,7 +214,6 @@ class AgentWebSocketCompat {
 
   on(event: string, handler: EventHandler) {
     if (this._activeSessionId) return wsPool.on(this._activeSessionId, event, handler)
-    // Buffer handlers registered before connect()
     if (!this._pendingHandlers.has(event)) this._pendingHandlers.set(event, new Set())
     this._pendingHandlers.get(event)!.add(handler)
     return () => {

@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS session_events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +42,7 @@ CREATE TABLE IF NOT EXISTS context_snapshots (
 );
 """
 
-# 流式 token 量太大且对时间线无意义 —— 逐 token 事件不落盘。
+
 _SKIP_TYPES = frozenset({"stream_token", "stream_reasoning"})
 
 
@@ -68,8 +67,6 @@ class TimelineStore:
             except Exception as e:
                 logger.warning("TimelineStore init failed (observability disabled): %s", e)
                 self._conn = None
-
-    # ── writes (never raise) ─────────────────────────────────────
 
     def record_event(
         self,
@@ -117,8 +114,6 @@ class TimelineStore:
                 self._conn.commit()
         except Exception as e:
             logger.debug("Context snapshot persist failed: %s", e)
-
-    # ── reads ────────────────────────────────────────────────────
 
     def list_events(
         self, session_id: str, after_id: int = 0, limit: int = 2000

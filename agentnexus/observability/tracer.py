@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# ── Span ────────────────────────────────────────────────────────────
 
 @dataclass
 class TraceSpan:
@@ -31,7 +30,7 @@ class TraceSpan:
     input: dict[str, Any] = field(default_factory=dict)
     output: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
-    _flushed: bool = False  # True if already written to disk (crash-safe)
+    _flushed: bool = False
 
     @property
     def latency_ms(self) -> float:
@@ -41,8 +40,6 @@ class TraceSpan:
     def status(self) -> str:
         return self.metadata.get("status", "ok")
 
-
-# ── TraceContext ─────────────────────────────────────────────────────
 
 class TraceContext:
     """鍗曟浠诲姟鐨勫畬鏁?trace锛屽寘鍚墍鏈?span"""
@@ -87,7 +84,6 @@ class TraceContext:
             self.spans.append(span)
             should_flush = True
 
-            # 浠庢爤涓Щ闄わ紙淇濇寔 LIFO 寮瑰嚭锛?
             if self._span_stack and self._span_stack[-1].span_id == span.span_id:
                 self._span_stack.pop()
             else:
@@ -95,8 +91,6 @@ class TraceContext:
         if should_flush and self._on_span_end:
             self._on_span_end(self, span)
 
-
-# ── TraceManager (Singleton, Thread-Safe) ────────────────────────────
 
 class TraceManager:
     """管理 trace 上下文的单例管理器"""
@@ -141,7 +135,6 @@ class TraceManager:
         root_span = ctx.start_span("task", {"task": _truncate(task)})
         if metadata:
             root_span.metadata = metadata
-        # 根 span 不入栈，作为隐式上下文
         ctx._span_stack.clear()
         ctx._span_stack.append(root_span)
         self._local.trace = ctx
@@ -152,7 +145,6 @@ class TraceManager:
         ctx = self.active
         if ctx is None:
             return
-        # 结束根 span
         if ctx._span_stack:
             root = ctx._span_stack[-1]
             ctx.end_span(root)
@@ -176,7 +168,7 @@ class TraceManager:
                 with open(file_path, "a", encoding="utf-8") as f:
                     for span in ctx.spans:
                         if span._flushed:
-                            continue  # already written by _flush_span
+                            continue
                         record = self._span_record(ctx.trace_id, span)
                         f.write(json.dumps(record, ensure_ascii=False) + "\n")
                         span._flushed = True
@@ -232,7 +224,7 @@ class TraceManager:
             "metadata": span.metadata,
         }
 
-    _MAX_TRACE_FILE_SIZE = 100 * 1024 * 1024  # 100MB per daily file
+    _MAX_TRACE_FILE_SIZE = 100 * 1024 * 1024
 
     def _cleanup_old_traces(self):
         """Remove JSONL files older than the configured retention period."""
@@ -257,7 +249,6 @@ class TraceManager:
         base_path = traces_path / f"{date_str}.jsonl"
         if not base_path.exists() or base_path.stat().st_size < self._MAX_TRACE_FILE_SIZE:
             return base_path
-        # Rotate: find next available sequence number
         seq = 1
         while True:
             rotated = traces_path / f"{date_str}_{seq}.jsonl"
@@ -265,8 +256,6 @@ class TraceManager:
                 return rotated
             seq += 1
 
-
-# ── Span Context Manager ─────────────────────────────────────────────
 
 class _SpanContext:
     """用 with 语句管理 span 生命周期"""
@@ -280,7 +269,6 @@ class _SpanContext:
     def __enter__(self) -> TraceSpan:
         ctx = self._manager.active
         if ctx is None:
-            # 无 trace 时仍然创建 span（但不关联 trace）
             span_id = str(uuid.uuid4())[:8]
             self.span = TraceSpan(span_id=span_id, name=self._name,
                                   start_time=time.time(), input=self._input or {})
@@ -291,7 +279,6 @@ class _SpanContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.span is None:
             return
-        # 合并调用方已设置的 metadata 与自动生成的 status/error
         md = dict(self.span.metadata) if self.span.metadata else {}
         md["status"] = "error" if exc_type else "ok"
         if exc_type:
@@ -303,17 +290,14 @@ class _SpanContext:
             self._manager._flush_orphan_span(self.span)
             return
         ctx.end_span(self.span, metadata=md)
-        return False  # 不吞掉异常
+        return False
 
-
-# ── Decorator ───────────────────────────────────────────────────────
 
 def trace_span(name: str, attrs: dict | Callable[..., dict] | None = None):
     """Decorator: wrap call in trace_manager.span(name, input_data).
     attrs 为静态 dict 或 callable(*args, **kwargs) -> dict。同步/异步函数都支持。异常正常传播（span.__exit__ 原有失败记录语义不变）。"""
     def decorator(fn):
         if asyncio.iscoroutinefunction(fn):
-
             @functools.wraps(fn)
             async def async_wrapper(*args, **kwargs):
                 input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
@@ -333,8 +317,6 @@ def trace_span(name: str, attrs: dict | Callable[..., dict] | None = None):
     return decorator
 
 
-# ── Helpers ──────────────────────────────────────────────────────────
-
 def _truncate(text: str, max_len: int = 5000) -> str:
     if len(text) <= max_len:
         return text
@@ -344,8 +326,6 @@ def _truncate(text: str, max_len: int = 5000) -> str:
 def _truncate_dict(d: dict[str, Any], max_len: int = 5000) -> dict[str, Any]:
     return {k: _truncate(str(v), max_len) for k, v in d.items()}
 
-
-# ── 全局实例 ─────────────────────────────────────────────────────────
 
 trace_manager = TraceManager()
 

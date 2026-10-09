@@ -20,7 +20,7 @@ class TestSTMResourceLimits:
     def test_very_long_content_does_not_crash(self):
         """STM with very long message content does not crash."""
         stm = ShortTermMemory(max_messages=50)
-        long_content = "x" * 100_000  # reduced from 1M to avoid tiktoken timeout
+        long_content = "x" * 100_000
         stm.append("user", long_content)
         messages = stm.get_all()
         assert len(messages) == 1

@@ -44,7 +44,6 @@ _ERROR_CLASSIFIERS: list[tuple[
         "Retry if cancellation was unintended",
     ),
     (
-        # Registry-enforced ToolMeta.timeout_sec expiry.
         lambda exc: isinstance(exc, TimeoutError),
         ToolErrorCode.TIMEOUT,
         lambda name, exc: str(exc),
@@ -79,7 +78,6 @@ _ERROR_CLASSIFIERS: list[tuple[
         False,
         "Check that the requested resource exists",
     ),
-    # default fallback
     (
         lambda exc: True,
         ToolErrorCode.EXECUTION_FAILED,
@@ -100,7 +98,6 @@ def execute_tool(
     tool_policy: Any = None,
     cancel_checker: Callable[[], bool] | None = None,
 ) -> str | dict | ToolError:
-    # ── before hook (can modify params or abort) ───────────────
     hook_ctx = fire_hook(HookType.BEFORE_TOOL_CALL, {
         "name": name,
         "params": arguments,
@@ -119,19 +116,10 @@ def execute_tool(
     try:
         if cancel_checker is not None and cancel_checker():
             raise AgentCancelled("cancelled")
-        # Capture the tool worker's tid so the cancel path can kill the
-        # processes spawned by the currently running tool (产品决策: cancel
-        # = 立刻停止，参考 pi killProcessTree / codex process_group)。
         worker_tid: list[int] = []
 
-        # The registry (incl. the HITL gate) runs on the pool worker below,
-        # but thread-affine approvers (ConfirmBridge) register their target
-        # under the submitting thread — route the confirm by caller tid.
         caller_tid = threading.get_ident()
         confirm_as = getattr(hitl_approver, "confirm_as", None)
-        # Set when the out-of-bounds prompt below already covered this call's
-        # risk — the registry HITL gate (file_write) then auto-allows once
-        # instead of asking the user a second time.
         hitl_preapproved = [False]
         if hitl_approver is None and confirm_as is None:
             _hitl_approver = None
@@ -144,11 +132,6 @@ def execute_tool(
                     return confirm_as(caller_tid, summary)
                 return hitl_approver(summary)
 
-        # Out-of-bounds path: ask the user to allow it instead of letting the
-        # tool hard-fail after the fact. Approval lasts for this process
-        # session, scoped to the current workspace; permanent access belongs
-        # in config allowed_paths (YAML-only, same trust class as
-        # shell_blacklist — deliberately not API-settable).
         if _hitl_approver is not None:
             from agentnexus.tools.file_ops import path_guard_violation
             violation = path_guard_violation(name, arguments)
@@ -165,7 +148,7 @@ def execute_tool(
                 if _hitl_approver(summary):
                     from agentnexus.tools.workspace import approve_extra_path
                     approve_extra_path(violation.resolved)
-                    hitl_preapproved[0] = True  # file_write's HITL gate covered
+                    hitl_preapproved[0] = True
                 else:
                     return ToolError(
                         error_code=ToolErrorCode.HITL_BLOCKED,
@@ -188,18 +171,12 @@ def execute_tool(
             tool_policy=tool_policy,
         )
         try:
-            # Poll with periodic cancel checks — future.result() without a
-            # timeout would make cancel signals invisible during tool
-            # execution. The actual timeout cap is the registry's
-            # ToolMeta.timeout_sec, enforced inside invoke().
             while True:
                 if cancel_checker is not None and cancel_checker():
-                    # Kill the in-flight tool's process tree immediately
-                    # instead of waiting for it to finish.
                     if worker_tid:
                         from agentnexus.tools import process_tracker
                         process_tracker.kill_processes_for_thread(worker_tid[0])
-                    future.cancel()  # no-op once running; pending only
+                    future.cancel()
                     raise AgentCancelled("cancelled")
                 try:
                     result = future.result(timeout=0.2)
@@ -207,14 +184,8 @@ def execute_tool(
                 except concurrent.futures.TimeoutError:
                     continue
         finally:
-            # Do NOT wait for the tool thread: after a cancel-kill it exits
-            # promptly, but non-killable tools (MCP remote calls) may keep
-            # running until their own timeout — the agent must not block on
-            # them. This replaces the old `with ThreadPoolExecutor` block,
-            # which waited for the tool to complete even after cancel.
             executor.shutdown(wait=False)
 
-        # ── after hook (observer) ──────────────────────────────
         fire_hook(HookType.AFTER_TOOL_CALL, {
             "name": name,
             "params": arguments,
@@ -225,14 +196,12 @@ def execute_tool(
             return result
         return str(result)
     except Exception as exc:
-        # ── error hook (observer) ──────────────────────────────
         fire_hook(HookType.ON_TOOL_ERROR, {
             "name": name,
             "params": arguments,
             "error": exc,
         })
         _log_tool_error(name, exc)
-        # LOW-02: Include message for safe domain exceptions, strip for generic ones
         for predicate, error_code, message_fn, recoverable, suggested_action in _ERROR_CLASSIFIERS:
             if predicate(exc):
                 return ToolError(

@@ -108,7 +108,7 @@ class TestPipelineProbeWiring:
 
             def _think(msgs, silent=True):
                 content = msgs[0]["content"]
-                if "只回答" in content:  # gate prompt → admit
+                if "只回答" in content:
                     return "yes"
                 return '{"fact": [{"content": "用户不吃香菜", "context": ""}]}'
 

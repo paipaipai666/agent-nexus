@@ -38,7 +38,6 @@ def _mark_stale_ingestion_runs() -> None:
         stale_count = 0
         for run in runs:
             if run.status == "running":
-                # This run was interrupted by a server restart
                 run.status = "failed"
                 run.error_message = "Interrupted by server restart"
                 run.metadata = {
@@ -69,11 +68,9 @@ def create_app(runtime: Any | None = None) -> FastAPI:
         else:
             set_runtime(AppRuntime.build(profile="server"))
 
-        # Mark any interrupted ingestion runs as failed on startup
         _mark_stale_ingestion_runs()
 
         yield
-        # 决策 1/6: 关闭前取消所有活跃 run（落盘 + 终态事件），再释放 runtime。
         try:
             rt = _get_runtime()
             chat = getattr(rt, "chat", None)

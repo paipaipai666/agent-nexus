@@ -39,7 +39,7 @@ class AppRuntime:
     skill: SkillService
     subagent_confirm: "ConfirmBridge"
     session_id: str
-    wiki_service: "WikiService | None" = None  # lazily built by server/deps.get_wiki_service
+    wiki_service: "WikiService | None" = None
 
     @classmethod
     def build(
@@ -76,7 +76,6 @@ class AppRuntime:
         subagent_confirm = ConfirmBridge()
         mcp_manager = create_mcp_manager_from_settings(settings)
 
-        # Resolve session_id early so TodoList can persist to SQLite
         prefix = profile or "runtime"
         session_id = session_id or f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -116,17 +115,13 @@ class AppRuntime:
         if profile == "server":
             llm.silent = True
 
-        # Capture MCP context once for all per-session agents
         mcp_ctx = mcp_manager.auto_context() if mcp_manager is not None else None
-
-        # ── Per-session factories (Phase 1: multi-session) ──
 
         def agent_factory(session_id: str | None = None) -> ReActAgent:
             """Create a lightweight agent per session. Shares LLM, tools, etc."""
             a = ReActAgent(llm, executor, conversation_mode=True, output=agent_output, confirm_fn=subagent_confirm)
             if mcp_ctx is not None and hasattr(a, "set_mcp_context"):
                 a.set_mcp_context(mcp_ctx)
-            # Each agent needs its own todo_list for persistence
             if session_id:
                 from agentnexus.memory.todo import SessionTodoList
                 a._todo_list = SessionTodoList(session_id=session_id, db_path=settings.memory_db_path)
@@ -154,8 +149,6 @@ class AppRuntime:
                 return mm
             return factory
 
-        # Create a build-time agent for SkillService and CapabilityRuntime
-        # (they need a reference agent at build time)
         build_agent = agent_factory()
         build_agent._todo_list = todo_list
         skill_registry = SkillRegistry.from_settings(settings)
@@ -189,7 +182,6 @@ class AppRuntime:
         )
         trace_manager.configure(settings.traces_dir)
 
-        # 初始化告警管道
         try:
             from agentnexus.observability.alerting import setup_default_alerts
             setup_default_alerts(settings.traces_dir)
@@ -218,8 +210,6 @@ class AppRuntime:
             capability_runtime=capability_runtime,
         )
 
-        # Restore existing sessions from database into chat._sessions
-        # so the frontend can access them without needing restoreSession first.
         try:
             from agentnexus.memory.versioned import ConversationVersionManager
             from agentnexus.services.chat import SessionHandle

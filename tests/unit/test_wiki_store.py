@@ -233,7 +233,7 @@ class TestWikiStoreReviewQueue:
             page_id="p1",
             description="Overdue",
             status=ReviewStatus.PENDING.value,
-            deadline="2020-01-01T00:00:00",  # Past deadline
+            deadline="2020-01-01T00:00:00",
             created_at="2024-01-01T00:00:00",
         )
         wiki_store.add_review_item(item)

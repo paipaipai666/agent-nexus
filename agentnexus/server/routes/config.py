@@ -30,50 +30,36 @@ class PersonaUpdateRequest(BaseModel):
 
 
 SETTABLE_KEYS = {
-    # LLM
     "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
     "active_model", "judge_model",
     "model_tool_calling", "model_json_mode", "model_thinking", "model_thinking_effort",
-    # Judge LLM
     "judge_api_key", "judge_model_id", "judge_base_url",
-    # Agent
     "max_agent_steps",
-    # External Services
     "tavily_api_key",
-    # RAG
     "enable_contextual_retrieval", "enable_query_rewrite", "enable_multi_query",
     "enable_hyde", "hyde_question_only", "enable_context_expansion",
     "rag_multi_query_count", "rag_context_window", "rag_context_max_chunks",
     "embedding_model", "reranker_model", "rag_default_namespace", "rag_collection_prefix",
-    # Memory
     "max_memories", "memory_ttl_days", "memory_llm_gate",
     "autocompact_buffer_tokens", "large_result_threshold",
     "offload_enabled", "snip_enabled", "time_microcompact_interval",
     "post_compact_max_files", "post_compact_token_per_file", "post_compact_token_budget",
     "transcript_enabled",
-    # MCP
     "mcp_enabled", "mcp_startup_timeout",
-    # Shell Execution
     "shell_enabled", "shell_confirm", "shell_timeout",
     "shell_execution_backend", "shell_execution_memory_mb",
     "shell_execution_docker_image",
-    # File Operations
     "file_read_max_mb",
-    # Skills
     "skills_default_namespace", "default_skill",
     "skill_auto_route", "skill_auto_route_llm_fallback",
     "skill_auto_route_min_score", "skill_auto_route_margin",
     "skill_context_token_ratio", "skill_context_max_tokens",
-    # Runtime
     "runtime_profile",
     "trace_retention_days",
-    # Budget
     "budget_simple_max_tokens", "budget_complex_max_tokens",
     "budget_high_value_max_tokens", "budget_exceed_strategy",
 }
 
-# Security-sensitive keys that cannot be modified via the API.
-# These can weaken sandboxing, bypass safety checks, or alter audit behavior.
 _SECURITY_BLOCKED_KEYS = {
     "shell_blacklist",
 }
@@ -90,7 +76,6 @@ def get_config():
         if hasattr(value, "get_secret_value"):
             value = "****"
         config[name] = value
-    # Include persona as nested object (not a model_field, loaded from raw yaml)
     persona = settings.persona
     config["persona"] = {
         "agent_name": persona.agent_name,
@@ -98,13 +83,8 @@ def get_config():
         "tone": persona.tone,
         "projects": [{"name": p.name, "focus": p.focus} for p in persona.projects],
     }
-    # Workspace is the process cwd, not a Settings field — expose it so the
-    # desktop status bar can display the real value. Sessions carry their own
-    # workspace folders (Codex-style) — there is no global workspace switch.
     from pathlib import Path
     config["cwd"] = str(Path.cwd())
-    # Provider api keys need explicit masking (the loop above only masks
-    # top-level SecretStr fields).
     config["llm_providers"] = [_mask_provider(p) for p in settings.llm_providers]
     return config
 
@@ -128,9 +108,9 @@ class ModelEntryInput(BaseModel):
 class ProviderInput(BaseModel):
     name: str
     models: list[ModelEntryInput] = []
-    model_id: str | None = None  # legacy single-model field → seeds models
+    model_id: str | None = None
     base_url: str
-    api_key: str | None = None  # None or "****" = keep the stored key
+    api_key: str | None = None
     timeout: int = 60
 
 
@@ -139,13 +119,13 @@ class ProvidersUpdateRequest(BaseModel):
 
 
 class ActiveProviderRequest(BaseModel):
-    name: str  # "provider/model", bare provider name (first model), or "" = flat llm_*
+    name: str
 
 
 class DiscoverRequest(BaseModel):
     base_url: str
     api_key: str | None = None
-    provider: str | None = None  # fallback key source: stored provider with this name
+    provider: str | None = None
 
 
 def _mask_provider(p: Any) -> dict[str, Any]:
@@ -260,13 +240,12 @@ def update_llm_providers(req: ProvidersUpdateRequest):
     data = load_config_yaml()
     stored = {p.get("name"): p for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
     for entry in validated:
-        if not entry["api_key"] or entry["api_key"] == "****":  # unset/masked = keep stored key
+        if not entry["api_key"] or entry["api_key"] == "****":
             entry["api_key"] = (stored.get(entry["name"]) or {}).get("api_key", "")
     data["llm_providers"] = validated
     write_config_yaml(data)
     _reset_settings_cache()
 
-    # Active provider may have been edited or removed — re-resolve live.
     _apply_active_llm(_get_runtime(), get_settings())
     return {"status": "updated", "count": len(validated)}
 
@@ -337,7 +316,7 @@ def get_llm_capabilities(runtime=Depends(get_runtime)):
     or ``unknown`` (conservative defaults, not yet probed).
     """
     llm = runtime.llm
-    caps = llm.capabilities  # detect (+ live probe when still unknown)
+    caps = llm.capabilities
     settings = runtime.settings
     overridden = settings.model_tool_calling is not None or settings.model_json_mode is not None
     if overridden:
@@ -377,14 +356,10 @@ def update_config(req: ConfigUpdateRequest):
 
     _reset_settings_cache()
 
-    # LLM-facing keys must reach the live shared client immediately —
-    # without this, edits "succeed" but the running agent keeps the old config.
     if req.key in ("llm_model_id", "llm_base_url", "llm_api_key", "llm_timeout", "active_model"):
         from agentnexus.server.app import _get_runtime
         _apply_active_llm(_get_runtime(), get_settings())
     elif req.key in ("model_thinking", "model_thinking_effort"):
-        # Thinking flags live on the cached ModelCapabilities; drop the cache
-        # so the next LLM call re-detects from the fresh settings.
         from agentnexus.server.app import _get_runtime
         llm = getattr(_get_runtime(), "llm", None)
         if llm is not None and hasattr(llm, "_capabilities"):

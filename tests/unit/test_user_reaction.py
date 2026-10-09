@@ -48,7 +48,6 @@ class TestExpressReactionTool:
         assert "a b c" in result
 
     def test_no_side_effects(self):
-        # Pure function: same input, same output, no state touched.
         a = express_reaction("like", comment="x")
         b = express_reaction("like", comment="x")
         assert a == b

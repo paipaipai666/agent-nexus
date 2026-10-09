@@ -15,9 +15,6 @@ from agentnexus.tools.mcp.result import (
     sanitize_name,
 )
 
-# ---------------------------------------------------------------------------
-# get_sdk_attr
-# ---------------------------------------------------------------------------
 
 class TestGetSdkAttr:
     """Tests for the get_sdk_attr helper."""
@@ -46,10 +43,6 @@ class TestGetSdkAttr:
         obj = SimpleNamespace()
         assert get_sdk_attr(obj, "missing") is None
 
-
-# ---------------------------------------------------------------------------
-# sanitize_name
-# ---------------------------------------------------------------------------
 
 class TestSanitizeName:
     """Tests for the sanitize_name helper."""
@@ -84,10 +77,6 @@ class TestSanitizeName:
         assert sanitize_name("tool_123") == "tool_123"
 
 
-# ---------------------------------------------------------------------------
-# json_text
-# ---------------------------------------------------------------------------
-
 class TestJsonText:
     """Tests for the json_text helper."""
 
@@ -106,10 +95,6 @@ class TestJsonText:
         assert "你好世界" in result
         assert json.loads(result) == data
 
-
-# ---------------------------------------------------------------------------
-# dump_sdk_object
-# ---------------------------------------------------------------------------
 
 class TestDumpSdkObject:
     """Tests for the dump_sdk_object helper."""
@@ -156,10 +141,6 @@ class TestDumpSdkObject:
         result = dump_sdk_object(obj)
         assert result["arguments"] == [{"name": "x"}]
 
-
-# ---------------------------------------------------------------------------
-# content_block_to_text
-# ---------------------------------------------------------------------------
 
 class TestContentBlockToText:
     """Tests for the content_block_to_text helper."""
@@ -220,10 +201,6 @@ class TestContentBlockToText:
         assert "namespace" in result
 
 
-# ---------------------------------------------------------------------------
-# normalize_tool_result
-# ---------------------------------------------------------------------------
-
 class TestNormalizeToolResult:
     """Tests for the normalize_tool_result helper."""
 
@@ -249,10 +226,6 @@ class TestNormalizeToolResult:
         result_obj = SimpleNamespace()
         assert normalize_tool_result(result_obj) == "[mcp] 工具未返回文本内容"
 
-
-# ---------------------------------------------------------------------------
-# normalize_resource_result
-# ---------------------------------------------------------------------------
 
 class TestNormalizeResourceResult:
     """Tests for the normalize_resource_result helper."""
@@ -280,10 +253,6 @@ class TestNormalizeResourceResult:
         assert normalize_resource_result(result_obj) == "[mcp] 资源未返回文本内容"
 
 
-# ---------------------------------------------------------------------------
-# normalize_prompt_result
-# ---------------------------------------------------------------------------
-
 class TestNormalizePromptResult:
     """Tests for the normalize_prompt_result helper."""
 
@@ -294,8 +263,6 @@ class TestNormalizePromptResult:
         result = normalize_prompt_result(result_obj)
         parsed = json.loads(result)
         assert len(parsed) == 2
-        # SimpleNamespace has no recognized attrs for dump_sdk_object,
-        # so each message is dumped as {"value": str(msg)}
         assert "value" in parsed[0]
 
     def test_no_messages_has_model_dump(self):

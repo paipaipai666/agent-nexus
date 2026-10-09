@@ -9,9 +9,7 @@ Run with: python -m pytest tests/eval/memory_gate_eval.py -v
 import json
 from pathlib import Path
 
-# ── Labeled samples ────────────────────────────────────────────────
 SAMPLES: list[tuple[str, str, str]] = [
-    # === Should extract (yes) ===
     ("我叫张伟", "好的，记住了", "yes"),
     ("我喜欢用 Neovim 写代码", "了解", "yes"),
     ("我不吃香菜", "记住了", "yes"),
@@ -33,7 +31,6 @@ SAMPLES: list[tuple[str, str, str]] = [
     ("记住我是一个前端工程师", "好的", "yes"),
     ("我用 Mac 开发", "了解", "yes"),
 
-    # === Should NOT extract (no) ===
     ("帮我把文件移一下", "好的，已移动", "no"),
     ("怎么用 grep", "grep -r 'pattern' .", "no"),
     ("Python 列表排序怎么做", "用 sorted() 或 list.sort()", "no"),
@@ -55,7 +52,6 @@ SAMPLES: list[tuple[str, str, str]] = [
     ("删掉第 10 行", "已删除", "no"),
     ("格式化这个 JSON 文件", "已格式化", "no"),
 
-    # === Borderline (excluded from metrics) ===
     ("我在写一个排序算法", "用快速排序比较好", "borderline"),
     ("这个项目用的是 React", "了解", "borderline"),
     ("我觉得这个方案不太好", "那我们换一个方案", "borderline"),
@@ -80,7 +76,6 @@ def _run_gate_dry_run() -> dict[str, str]:
     from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
     from agentnexus.memory.manager import MemoryManager
 
-    # Create a minimal instance just for rule testing
     class _FakeLLM:
         def think(self, *a, **kw):
             return "no"
@@ -89,7 +84,7 @@ def _run_gate_dry_run() -> dict[str, str]:
     mgr._engine = CompactionEngine(mgr)
     mgr._pipeline = MemoryExtractionPipeline(mgr)
     mgr._llm = _FakeLLM()
-    mgr._gate_state = None  # won't be used in rules-only path
+    mgr._gate_state = None
 
     predictions = {}
     for q, a, _ in SAMPLES:
@@ -141,7 +136,6 @@ def _compute_metrics(predictions: dict[str, str]) -> dict:
         if label == "borderline":
             continue
         pred = predictions.get(q + "|" + a, "uncertain")
-        # Map uncertain to "no" for metric computation (conservative)
         pred_label = pred if pred != "uncertain" else "no"
 
         if label == "yes" and pred_label == "yes":
@@ -180,6 +174,5 @@ def test_save_baseline():
     }
     baseline_path.write_text(json.dumps(baseline, indent=2, ensure_ascii=False))
 
-    # Sanity checks
     assert metrics["precision"] >= 0.8, f"Precision too low: {metrics['precision']}"
     assert metrics["recall"] >= 0.5, f"Recall too low: {metrics['recall']} (rules are conservative)"

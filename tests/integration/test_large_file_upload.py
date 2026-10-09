@@ -10,9 +10,6 @@ import pytest
 pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi.testclient import TestClient
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 class _FakeChatService:
     class _Handle:
@@ -79,10 +76,6 @@ def _make_large_markdown(size_mb: float) -> bytes:
     return (content * (target_bytes // len(content) + 1)).encode("utf-8")[:target_bytes]
 
 
-# ---------------------------------------------------------------------------
-# Large File End-to-End Tests
-# ---------------------------------------------------------------------------
-
 class TestLargeFileIngestion:
     """End-to-end tests for large file uploads."""
 
@@ -140,17 +133,14 @@ class TestLargeFileIngestion:
 
         content = b"test content for filepath verification"
 
-        # Create a temp file directly and verify the ingestion function can be called
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
         try:
-            # Verify the temp file has correct content
             with open(tmp_path, "rb") as f:
                 assert f.read() == content
 
-            # Verify the file exists and is accessible
             assert os.path.exists(tmp_path)
             assert os.path.getsize(tmp_path) == len(content)
         finally:
@@ -162,18 +152,14 @@ class TestLargeFileIngestion:
 
         content = b"test content for cleanup verification"
 
-        # Create and verify temp file cleanup
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Verify file exists
         assert os.path.exists(tmp_path)
 
-        # Clean up
         os.unlink(tmp_path)
 
-        # Verify file is deleted
         assert not os.path.exists(tmp_path)
 
     def test_temp_file_cleanup_on_ingestion_failure(self, temp_agentnexus_home):
@@ -182,28 +168,19 @@ class TestLargeFileIngestion:
 
         content = b"test content for failure cleanup"
 
-        # Create temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Verify file exists
         assert os.path.exists(tmp_path)
 
-        # Simulate failure and cleanup
         try:
             raise RuntimeError("Simulated ingestion failure")
         except RuntimeError:
-            # Cleanup should happen in finally block
             os.unlink(tmp_path)
 
-        # Verify file is deleted even after failure
         assert not os.path.exists(tmp_path)
 
-
-# ---------------------------------------------------------------------------
-# Memory Tests
-# ---------------------------------------------------------------------------
 
 class TestMemoryUsage:
     """Verify memory usage is reasonable for large files."""
@@ -225,19 +202,15 @@ class TestMemoryUsage:
                 files={"file": ("large.txt", large_content, "text/plain")},
             )
 
-            # Wait for file read to complete
             time.sleep(0.5)
             snapshot_after = tracemalloc.take_snapshot()
             tracemalloc.stop()
 
         assert resp.status_code == 200
 
-        # Calculate memory increase
         stats = snapshot_after.compare_to(snapshot_before, "lineno")
         total_increase = sum(stat.size_diff for stat in stats if stat.size_diff > 0)
 
-        # Memory increase should be less than 3x the file size
-        # (allowing for overhead but catching obvious leaks)
         max_expected = len(large_content) * 3
         assert total_increase < max_expected, (
             f"Memory increased by {total_increase / 1024 / 1024:.1f}MB "
@@ -254,35 +227,27 @@ class TestMemoryUsage:
             tracemalloc.start()
             snapshot_before = tracemalloc.take_snapshot()
 
-            # Upload 5 files
             for i in range(5):
-                content = _make_large_text(2)  # 2MB each
+                content = _make_large_text(2)
                 resp = client.post(
                     "/api/kb/documents",
                     files={"file": (f"file_{i}.txt", content, "text/plain")},
                 )
                 assert resp.status_code == 200
 
-            # Force garbage collection
             gc.collect()
             time.sleep(1.0)
 
             snapshot_after = tracemalloc.take_snapshot()
             tracemalloc.stop()
 
-        # Memory should not grow linearly with number of uploads
         stats = snapshot_after.compare_to(snapshot_before, "lineno")
         total_increase = sum(stat.size_diff for stat in stats if stat.size_diff > 0)
 
-        # Should be much less than 5 * 10MB = 50MB
         assert total_increase < 50 * 1024 * 1024, (
             f"Memory increased by {total_increase / 1024 / 1024:.1f}MB after 5 uploads"
         )
 
-
-# ---------------------------------------------------------------------------
-# File Size Limit Tests
-# ---------------------------------------------------------------------------
 
 class TestFileSizeLimits:
     """Verify file size limits and edge cases."""
@@ -357,13 +322,8 @@ class TestFileSizeLimits:
                 files={"file": (None, content, "text/plain")},
             )
 
-        # FastAPI may return 422 for missing filename, which is acceptable
         assert resp.status_code in [200, 422]
 
-
-# ---------------------------------------------------------------------------
-# Progress Percentage Tests
-# ---------------------------------------------------------------------------
 
 class TestProgressPercentage:
     """Verify progress percentage increments correctly."""
@@ -399,13 +359,11 @@ class TestProgressPercentage:
                 _update_run_progress(run, stage=stage, stage_pct=pct, message=f"{stage} {pct}%")
                 progress_values.append(pct)
 
-        # Verify monotonic increase
         for i in range(1, len(progress_values)):
             assert progress_values[i] >= progress_values[i - 1], (
                 f"Progress decreased: {progress_values[i - 1]} -> {progress_values[i]}"
             )
 
-        # Verify starts near 0 and ends at 100
         assert progress_values[0] >= 5
         assert progress_values[-1] == 100
 
@@ -424,7 +382,6 @@ class TestProgressPercentage:
         with patch("agentnexus.rag.kb_service.get_knowledge_base_catalog") as mock_catalog:
             mock_catalog.return_value = MagicMock()
 
-            # Simulate enrichment of 10 chunks
             total_chunks = 10
             for i in range(total_chunks):
                 pct = 30 + int(40 * (i + 1) / total_chunks)
@@ -435,7 +392,6 @@ class TestProgressPercentage:
                     message=f"Enriching chunks ({i + 1}/{total_chunks})",
                 )
 
-        # Final percentage should be 70% (30 + 40)
         assert run.metadata["progress_pct"] == 70
 
     def test_progress_metadata_preserved_across_updates(self, temp_agentnexus_home):
@@ -456,15 +412,10 @@ class TestProgressPercentage:
             _update_run_progress(run, stage="loading", stage_pct=10, message="Loading")
             _update_run_progress(run, stage="embedding", stage_pct=80, message="Embedding")
 
-        # Should reflect latest values
         assert run.metadata["progress_stage"] == "embedding"
         assert run.metadata["progress_pct"] == 80
         assert run.metadata["progress_message"] == "Embedding"
 
-
-# ---------------------------------------------------------------------------
-# Concurrent Upload Tests
-# ---------------------------------------------------------------------------
 
 class TestConcurrentUploads:
     """Verify multiple concurrent uploads work correctly."""
@@ -486,12 +437,10 @@ class TestConcurrentUploads:
                 )
                 return resp
 
-            # Upload concurrently
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [executor.submit(upload_file, i) for i in range(3)]
                 responses = [f.result() for f in futures]
 
-        # All should succeed
         run_ids = set()
         for resp in responses:
             assert resp.status_code == 200
@@ -499,7 +448,6 @@ class TestConcurrentUploads:
             assert data["status"] == "processing"
             run_ids.add(data["run_id"])
 
-        # All run_ids should be unique
         assert len(run_ids) == 3
 
     def test_concurrent_uploads_dont_block_each_other(self, client):
@@ -515,7 +463,6 @@ class TestConcurrentUploads:
 
             start = time.monotonic()
 
-            # Upload 3 files concurrently
             def upload_file(i):
                 content = _make_large_text(1)
                 return client.post(
@@ -529,9 +476,7 @@ class TestConcurrentUploads:
 
             elapsed = time.monotonic() - start
 
-        # All should succeed
         for resp in responses:
             assert resp.status_code == 200
 
-        # Should complete in roughly 2 seconds (parallel), not 6 seconds (sequential)
         assert elapsed < 5.0, f"Concurrent uploads took {elapsed:.2f}s, should be < 5s"

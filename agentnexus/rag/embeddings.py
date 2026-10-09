@@ -10,8 +10,6 @@ from collections.abc import Callable
 from hashlib import blake2b
 from typing import Any
 
-# Default to offline mode — use local HuggingFace cache, skip network checks.
-# Set HF_HUB_OFFLINE=0 to re-enable online mode for model updates.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 logger = logging.getLogger(__name__)
@@ -41,9 +39,6 @@ _EMBED_TORCH_THREADS_CAP = 12
 _model = None
 _model_name: str | None = None
 _model_device: str | None = None
-# Serializes model loading — MemoryManager's preload thread and the skill
-# router's background rebuild both call get_embedding_model() at startup;
-# without the lock both see _model is None and load the model twice.
 _model_lock = threading.Lock()
 
 
@@ -147,17 +142,12 @@ def get_embedding_model(
     if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
         return _model
     with _model_lock:
-        # Re-check under the lock — a concurrent loader may have finished by now.
         if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
             return _model
         (runtime_configurer or _configure_embedding_runtime)(resolved_device)
         try:
             from sentence_transformers import SentenceTransformer
 
-            # Prefer local cache to avoid network timeouts (e.g. behind GFW).
-            # snapshot_download(local_files_only=True) returns the cached path
-            # without making ANY HTTP requests.  Passing a local path to
-            # SentenceTransformer also bypasses its own hub fetch for modules.json.
             local_path = _resolve_local_model_path(settings.embedding_model)
             if local_path is not None:
                 logger.info("Embedding model '%s' found in local cache, loading offline.", settings.embedding_model)
@@ -166,7 +156,6 @@ def get_embedding_model(
                 logger.info("Embedding model '%s' not cached, will download from HuggingFace Hub.", settings.embedding_model)
                 model_source = settings.embedding_model
 
-            # Load to CPU first then move to target device to avoid meta tensor issues
             _model = SentenceTransformer(model_source, device="cpu")
             if resolved_device != "cpu":
                 try:

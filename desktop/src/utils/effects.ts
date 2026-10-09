@@ -7,8 +7,6 @@ function prefersReducedMotion(): boolean {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** Mirror the user's motion preference; beams/orbs that ship without
- *  reduced-motion handling get gated off through this. */
 export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(prefersReducedMotion)
   useEffect(() => {
@@ -21,7 +19,6 @@ export function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
-/** Tool name → ThinkingOrb state. One animation per activity kind. */
 export function toolOrbState(name: string | undefined | null): OrbState {
   const n = name ?? ''
   if (/search|grep|kb_search|web_fetch|history_search|snapshot/.test(n)) {

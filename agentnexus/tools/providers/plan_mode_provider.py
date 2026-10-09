@@ -15,8 +15,6 @@ class PlanModeToolProvider:
 
         if context.want("exit_plan_mode"):
             def _exit_plan_mode(plan: str) -> str:
-                # 真实逻辑由 ReActAgent._execute_tool 的计划模式门禁拦截；
-                # 走到这里说明不在计划模式（或其它绕过 agent 层的调用路径）。
                 return "[exit_plan_mode] 当前不在计划模式，未提交任何计划供审批。"
 
             executor.register(

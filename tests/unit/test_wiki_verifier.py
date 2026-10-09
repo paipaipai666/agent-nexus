@@ -96,7 +96,7 @@ class TestMechanicalVerifierInit:
         )
         v = MechanicalVerifier(thresholds={"jaccard_direct_quote": 0.8})
         assert v.jaccard_direct_quote == 0.8
-        assert v.jaccard_paraphrase == 0.4  # Unchanged
+        assert v.jaccard_paraphrase == 0.4
 
 
 @patch("agentnexus.wiki.verifier.get_settings")
@@ -140,7 +140,6 @@ class TestVerifyStatement:
     @patch("agentnexus.wiki.verifier.cosine_similarity")
     def test_high_jaccard_returns_direct_quote(self, mock_cosine, mock_settings):
         v = self._make_verifier(mock_settings)
-        # Use identical texts for high Jaccard
         text = "the quick brown fox jumps"
         stmt = WikiStatement(
             statement_id="s1", page_id="p1", text=text,
@@ -152,7 +151,7 @@ class TestVerifyStatement:
 
     @patch("agentnexus.wiki.verifier.cosine_similarity")
     def test_cross_reference_with_valid_multi_source(self, mock_cosine, mock_settings):
-        mock_cosine.return_value = 0.5  # Above cosine_source threshold
+        mock_cosine.return_value = 0.5
         v = self._make_verifier(mock_settings)
         stmt = WikiStatement(
             statement_id="s1", page_id="p1", text="combined insight",
@@ -164,7 +163,7 @@ class TestVerifyStatement:
 
     @patch("agentnexus.wiki.verifier.cosine_similarity")
     def test_cross_reference_with_no_valid_sources_returns_synthesis(self, mock_cosine, mock_settings):
-        mock_cosine.return_value = 0.1  # Below cosine_source threshold
+        mock_cosine.return_value = 0.1
         v = self._make_verifier(mock_settings)
         stmt = WikiStatement(
             statement_id="s1", page_id="p1", text="unrelated",

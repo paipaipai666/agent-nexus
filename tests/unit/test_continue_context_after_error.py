@@ -63,7 +63,6 @@ class TestContextSurvivesFailedTurn:
 
         agent._build_conversation_context = spy_build  # type: ignore
 
-        # ── 第一轮：调用工具，然后 LLM 在下一次 think 时 400 ──
         rounds = [0]
 
         def think_round1(**kw):
@@ -79,15 +78,13 @@ class TestContextSurvivesFailedTurn:
         try:
             agent.run("详细说说 hook 层", memory_manager=mm)
         except Exception:
-            pass  # 400 可能以空答案/异常结束
+            pass
 
-        # 工具观测应已进 STM
         stm_all = mm.short_term.get_all()
         stm_dump = [(m.get("role"), (m.get("content") or "")) for m in stm_all]
         assert any(r == "user" and "hook" in c for r, c in stm_dump), [(r, c[:60]) for r, c in stm_dump]
         assert any(r == "tool" and "路径越界" in c for r, c in stm_dump), [(r, c[:80]) for r, c in stm_dump]
 
-        # ── 第二轮：用户只说「继续」──
         llm2 = _make_llm()
         agent2 = ReActAgent(llm2, ToolRegistry(), max_steps=5, conversation_mode=True)
         agent2._output = lambda _m: None
@@ -120,7 +117,6 @@ class TestContextSurvivesFailedTurn:
         mm = MemoryManager(session_id="s-conv", enable_long_term=False)
         mm.append("user", "详细说说 hook 层")
         mm.append("tool", "Action: file_list[{\"path\": \"x\"}]\nObservation: [ToolErrorCode.VALIDATION_FAILED] 路径越界")
-        # 无最终答案（失败轮）
 
         conv = agent._build_conversation_context(mm)
         assert "hook" in conv

@@ -67,7 +67,7 @@ export default function MCPPage() {
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {error && <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>{error}</div>}
 
-        {/* Summary Cards */}
+        {}
         <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.08 }) }} className="grid grid-cols-4 gap-3">
           {[
             { label: 'Servers', value: `${connected}/${servers.length}`, icon: Server, color: 'var(--green)' },
@@ -87,7 +87,7 @@ export default function MCPPage() {
           ))}
         </div>
 
-        {/* Server List */}
+        {}
         <div className="space-y-2">
           {servers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">

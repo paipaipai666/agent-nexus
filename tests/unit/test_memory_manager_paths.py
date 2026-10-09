@@ -18,7 +18,6 @@ def _append_msgs(mm, role, content):
 
 
 class TestMemoryManagerInit:
-
     def test_creates_stm(self, temp_agentnexus_home):
         mock_llm = MagicMock()
         mock_llm.think.return_value = "摘要"
@@ -37,7 +36,6 @@ class TestMemoryManagerInit:
 
 
 class TestEstimateStmTokens:
-
     def test_returns_int(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         tokens = mm.estimate_stm_tokens()
@@ -53,7 +51,6 @@ class TestEstimateStmTokens:
 
 
 class TestAppend:
-
     def test_append_adds_to_stm(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         _append_msgs(mm, "user", "hello")
@@ -65,7 +62,6 @@ class TestAppend:
 
 
 class TestSnip:
-
     def test_snip_returns_zero_when_few_messages(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         for i in range(5):
@@ -80,11 +76,10 @@ class TestSnip:
         removed = mm.snip(keep_recent=5)
         assert removed > 0
         msgs = mm.short_term.get_all()
-        assert len(msgs) <= 6 + 1  # boundary marker + keep_recent
+        assert len(msgs) <= 6 + 1
 
 
 class TestMicrocompactTimeBased:
-
     def test_returns_false_when_interval_not_elapsed(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         mm._engine.last_api_call_ts = time.time()
@@ -99,7 +94,6 @@ class TestMicrocompactTimeBased:
 
 
 class TestHasNewMemories:
-
     def test_false_initially(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         assert mm.has_new_memories() is False
@@ -119,7 +113,6 @@ class TestHasNewMemories:
 
 
 class TestBridgeRead:
-
     def test_tracks_files(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         mm.bridge_read("/path/to/file.py", "print('hello')")
@@ -135,7 +128,6 @@ class TestBridgeRead:
 
 
 class TestWriteTranscript:
-
     def test_creates_jsonl_file(self, temp_agentnexus_home):
         mm = _make_manager(temp_agentnexus_home)
         mm.short_term.append("user", "hello")
@@ -146,7 +138,7 @@ class TestWriteTranscript:
         transcript_dir = Path(mm._engine.transcript_dir)
         jsonl_files = list(transcript_dir.glob("*.jsonl"))
         assert len(jsonl_files) == 1
-        assert "test_session" not in jsonl_files[0].name  # session_id is "s1"
+        assert "test_session" not in jsonl_files[0].name
         assert "s1" in jsonl_files[0].name
 
         raw = jsonl_files[0].read_text(encoding="utf-8").strip()

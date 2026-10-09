@@ -76,8 +76,6 @@ class ToolDispatcher:
         if not tool_calls:
             return []
 
-        # Capture the dispatching thread's trace id so worker threads can link
-        # their (orphan) spans back to the originating trace.
         try:
             from agentnexus.observability.tracer import trace_manager
             active = trace_manager.active
@@ -85,10 +83,6 @@ class ToolDispatcher:
         except Exception:
             parent_trace_id = None
 
-        # Partition into named lanes, concurrent-safe, and sequential groups.
-        # Lane membership (e.g. "subagent") takes precedence over the generic
-        # read/write split: lane tools run on session-scoped pools whose size
-        # caps their concurrency.
         lane_groups: dict[str, list[_IndexedCall]] = {}
         concurrent_group: list[_IndexedCall] = []
         sequential_group: list[_IndexedCall] = []
@@ -101,8 +95,6 @@ class ToolDispatcher:
                 call_id=tc.get("id", ""),
             )
             meta = self._registry.get_meta(tc["name"])
-            # Guard against mock registries in tests: lane must be a real
-            # non-empty string, not a truthy MagicMock attribute.
             lane = getattr(meta, "lane", "") if meta is not None else ""
             if isinstance(lane, str) and lane:
                 lane_groups.setdefault(lane, []).append(indexed)
@@ -111,25 +103,20 @@ class ToolDispatcher:
             else:
                 sequential_group.append(indexed)
 
-        # Pre-allocate results array to preserve order
         results: list[ToolCallResult | None] = [None] * len(tool_calls)
 
-        # Execute lane groups on their session-scoped pools (capped concurrency)
         for lane, calls_in_lane in lane_groups.items():
             self._execute_on_pool(
                 self._registry.get_lane_pool(lane), calls_in_lane, execute_fn,
                 results, parent_trace_id, on_done,
             )
 
-        # Execute concurrent group in parallel
         if concurrent_group:
             self._execute_concurrent(concurrent_group, execute_fn, results, parent_trace_id, on_done)
 
-        # Execute sequential group one by one
         if sequential_group:
             self._execute_sequential(sequential_group, execute_fn, results, on_done)
 
-        # All slots should be filled
         return [r for r in results if r is not None]
 
     def _execute_concurrent(
@@ -164,7 +151,6 @@ class ToolDispatcher:
             try:
                 results[call.index] = future.result()
             except Exception as exc:
-                # Should not happen — _run_single catches everything
                 results[call.index] = ToolCallResult(
                     name=call.name,
                     arguments=call.arguments,
@@ -219,5 +205,4 @@ class ToolDispatcher:
             )
         finally:
             if parent_trace_id:
-                # Lane-pool threads are reused — never leak the link across tasks.
                 trace_manager.set_inherited_trace(None)

@@ -7,7 +7,6 @@ import { useSession } from '../components/session/SessionManager'
 
 type SubagentStatus = 'thinking' | 'tool_calling' | 'interrupted' | 'completed' | 'failed'
 
-/** Wire shape of a subagent_event payload (mirrors the backend contract). */
 interface SubagentEventPayload {
   subagent_id?: string
   name?: string
@@ -57,9 +56,6 @@ type TrajEntry =
   | { kind: 'text'; id: string; content: string }
   | { kind: 'summary'; id: string; status: string; content: string }
 
-/** Fold one subagent_event into trajectory state. Shared by timeline
- *  backfill and the live WS subscription so ordering semantics stay
- *  identical for both. */
 function foldEvent(
   data: SubagentEventPayload,
   entries: TrajEntry[],
@@ -142,8 +138,6 @@ export default function SubagentPage() {
   const nextId = () => `se-${++idCounter.current}`
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Activate the session so the WS connects and SessionManager subscribes
-  // (same entry point ChatPage uses: setSessionId → activateSession).
   useEffect(() => {
     if (!sessionId) return
     api.restoreSession(sessionId).catch(() => {})
@@ -151,8 +145,6 @@ export default function SubagentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
-  // Backfill from timeline + REST (covers reload mid-run and older entries),
-  // then attach the live subscription.
   useEffect(() => {
     if (!sessionId || !subagentId) return
     let cancelled = false
@@ -214,7 +206,6 @@ export default function SubagentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, subagentId])
 
-  // Live meta from the store when available (fresher than REST).
   const storeMeta = sessionId ? getLiveSessionState(sessionId)?.subagents.get(subagentId) : undefined
   const name = storeMeta?.name || meta?.name || subagentId
   const task = storeMeta?.task || meta?.task || ''
@@ -233,7 +224,7 @@ export default function SubagentPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--surface-0)' }}>
-      {/* Header */}
+      {}
       <div
         className="flex items-center gap-3 px-5 py-3 shrink-0"
         style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-1)' }}
@@ -272,7 +263,7 @@ export default function SubagentPage() {
         )}
       </div>
 
-      {/* Trajectory */}
+      {}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <div className="max-w-[720px] mx-auto space-y-2">
           {!found && loaded && (
@@ -337,7 +328,6 @@ function TrajCard({ entry }: { entry: TrajEntry }) {
       </div>
     )
   }
-  // summary
   return (
     <div className="px-3.5 py-2.5 rounded-lg text-[12.5px] whitespace-pre-wrap break-words" style={{ border: '1px solid var(--border)', color: 'var(--fg-muted)' }}>
       {entry.content}

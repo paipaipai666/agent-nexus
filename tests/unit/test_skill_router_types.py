@@ -42,8 +42,6 @@ class TestTokenRegex:
         assert _TOKEN_RE.search("!@#$%") is None
 
     def test_matches_mixed_script(self):
-        # \w in Python 3 matches Unicode word chars including CJK,
-        # so contiguous mixed-script text is one token
         matches = _TOKEN_RE.findall("Python 编程 test123")
         assert len(matches) >= 2
 
@@ -161,7 +159,6 @@ class TestSkillRoute:
         route = SkillRoute(entry=entry, score=1.5, matched_terms=("test",), reason="match")
         assert route.score == 1.5
         assert route.source == "deterministic"
-        # Frozen — cannot modify
         try:
             route.score = 2.0
             assert False, "Should have raised"

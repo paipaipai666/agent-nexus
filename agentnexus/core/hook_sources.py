@@ -40,7 +40,7 @@ _warned_untrusted: set[str] = set()
 @dataclass(frozen=True)
 class LoadedHook:
     config: HookConfig
-    source: str  # "config" | "user" | "project"
+    source: str
     source_path: Path
     fingerprint: str
     trusted: bool
@@ -58,9 +58,6 @@ def fingerprint_for(source_path: Path, config: HookConfig) -> str:
     digest.update(b"\0")
     digest.update(config.command.encode("utf-8"))
     return digest.hexdigest()
-
-
-# ── trust store ────────────────────────────────────────────────────
 
 
 def trust_file_path() -> Path:
@@ -110,9 +107,6 @@ def revoke_fingerprint(fingerprint: str) -> None:
     trusted = load_trusted_fingerprints()
     trusted.discard(fingerprint)
     save_trusted_fingerprints(trusted)
-
-
-# ── discovery ──────────────────────────────────────────────────────
 
 
 def _parse_hook_file(path: Path, source: str, errors: list[str]) -> list[HookConfig]:

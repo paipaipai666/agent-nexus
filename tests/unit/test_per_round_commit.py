@@ -19,7 +19,7 @@ class TestPerRoundCommit:
             run_id="r1", session_id="round-1", question="介绍项目",
             memory_manager=mm, version_manager=version,
         )
-        mm.append("user", "介绍项目")  # early-committed at send_message
+        mm.append("user", "介绍项目")
         mm.append("system", "[思考过程] 先搜代码")
         mm.append("tool", "Action: read[{}]\nObservation: 文件列表")
 
@@ -29,7 +29,6 @@ class TestPerRoundCommit:
             version.commit_with_messages.call_args.args[0]
         roles = [m.get("role") for m in sent]
         assert "tool" in roles
-        # user 问题已在 send_message 提前提交，本轮不得重复
         assert roles.count("user") == 0
         assert any("文件列表" in str(m.get("content", "")) for m in sent)
 
@@ -72,13 +71,11 @@ class TestPerRoundCommit:
         assert turn.commit_round() is True
         turn.finish("完整答案")
 
-        # finish → persist_snapshot 仍会 commit 一次（带 answer checkpoint）
         assert version.commit_with_messages.call_count == 2
         final = version.commit_with_messages.call_args_list[-1]
         msgs = final.kwargs.get("messages")
         if msgs is None and final.args:
             msgs = final.args[0]
-        # 不得把已 commit 的行再塞回去
         assert _keys(msgs or []) == []
         answer = final.kwargs.get("answer")
         if answer is None and len(final.args) >= 3:
@@ -94,7 +91,6 @@ class TestPerRoundCommit:
             memory_manager=mm, version_manager=version,
         )
         mm.append("tool", "half-written")
-        # 崩溃：无 commit_round、无 finish
         assert version.commit_with_messages.call_count == 0
 
     def test_commit_retries_then_fails_after_bound(self):

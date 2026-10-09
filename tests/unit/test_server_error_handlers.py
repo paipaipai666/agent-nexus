@@ -104,7 +104,6 @@ class TestAPIErrorHandler:
         assert resp.status_code == 500
         body = resp.json()
         assert body["error"]["code"] == "internal_error"
-        # Must not leak internal exception details to the client
         assert body["error"]["message"] == "Internal server error"
 
     def test_generic_type_error_returns_500(self, client):
@@ -117,11 +116,10 @@ class TestAPIErrorHandler:
         assert resp.status_code == 500
         body = resp.json()
         assert body["error"]["code"] == "internal_error"
-        # Must not leak internal exception details to the client
         assert body["error"]["message"] == "Internal server error"
 
 
 class TestRegisterErrorHandlers:
     def test_register_on_fastapi_app(self):
         app = FastAPI()
-        register_error_handlers(app)  # should not raise
+        register_error_handlers(app)

@@ -18,13 +18,6 @@ current_workspace: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     default=None,
 )
 
-# Per-run user attachment paths. ChatService registers them around each run
-# so file_read can reach attachments outside the session workspace.
-# Plain module state, NOT a ContextVar: tool calls execute on dispatcher
-# lane threads that never inherit context — a ContextVar set in send_message
-# is invisible there (verified by REST smoke: agent's file_read got 路径越界).
-# Counted so concurrent runs sharing a file stay correct; paths are revoked
-# when the last registering run ends.
 _ATTACHMENT_PATH_COUNTS: dict[str, int] = {}
 
 
@@ -49,12 +42,7 @@ def get_registered_attachment_paths() -> tuple[str, ...]:
     return tuple(_ATTACHMENT_PATH_COUNTS)
 
 
-# Paths approved by the user mid-run via the out-of-bounds HITL prompt.
-# Process-global but scoped by workspace: a path approved in one project must
-# not leak into a concurrent session bound to another folder. Cleared never
-# (process lifetime = "本次会话放行"); restart re-locks. Permanent access
-# belongs in config allowed_paths.
-_APPROVED_PATHS: set[tuple[str, str]] = set()  # (workspace, resolved_path)
+_APPROVED_PATHS: set[tuple[str, str]] = set()
 
 
 def approve_extra_path(path: str | Path) -> None:

@@ -333,17 +333,17 @@ class TestMCPScheduleReconnect:
         with patch("time.time", return_value=1000):
             asyncio.run(manager._schedule_reconnect(config, runtime))
         assert runtime.reconnect_attempts == 1
-        assert runtime.next_reconnect_at == 1002  # 1000 + 2
+        assert runtime.next_reconnect_at == 1002
 
         with patch("time.time", return_value=2000):
             asyncio.run(manager._schedule_reconnect(config, runtime))
         assert runtime.reconnect_attempts == 2
-        assert runtime.next_reconnect_at == 2004  # 2000 + 4
+        assert runtime.next_reconnect_at == 2004
 
         with patch("time.time", return_value=3000):
             asyncio.run(manager._schedule_reconnect(config, runtime))
         assert runtime.reconnect_attempts == 3
-        assert runtime.next_reconnect_at == 3008  # 3000 + 8
+        assert runtime.next_reconnect_at == 3008
 
     def test_max_attempts_stops_reconnect(self):
         config = MCPServerConfig(

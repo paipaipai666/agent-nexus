@@ -114,7 +114,7 @@ class TestIntermediateStateAssertions:
 
         result = agent.run("Search and read")
         assert call_count[0] >= 2
-        assert result.steps[0].tool_outputs  # tool outputs recorded in step
+        assert result.steps[0].tool_outputs
 
     def test_execution_context_strategy_tracking(self):
         agent, llm = self._make_agent()

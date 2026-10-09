@@ -34,15 +34,11 @@ def score_indexed_entry(
     score = sum(idf.get(term, 1.0) for term in matched)
     score += 1.5 * sum(idf.get(term, 1.0) for term in query_terms & item.id_terms)
     score += 1.0 * sum(idf.get(term, 1.0) for term in query_terms & item.name_terms)
-    # Body (steps / criteria / resource names) is weaker than title/description
-    # but critical for same-topic skills with near-identical short descriptions.
     score += 0.5 * sum(idf.get(term, 1.0) for term in query_terms & item.body_terms)
-    # Synthetic intent phrasings (verb×object templates / examples)
     if item.intent_terms:
         intent_hits = query_terms & item.intent_terms
         if intent_hits:
             score += 0.8 * sum(idf.get(term, 1.0) for term in intent_hits)
-    # Negative-hint veto: domain word without domain verb → not this skill
     neg_hits = query_terms & item.negative_hint_terms
     if neg_hits:
         score -= 5.0 * len(neg_hits)
@@ -69,28 +65,22 @@ def score_metadata_alignment(
     bonus = 0.0
     q_lower = {t.lower() for t in query_terms}
 
-    # Verb alignment (high signal — verbs are the strongest intent indicator)
     verb_hits = q_lower & item.verb_terms
     if verb_hits:
         bonus += 2.0 * sum(idf.get(t, 1.0) for t in verb_hits)
 
-    # Object alignment
     obj_hits = q_lower & item.object_terms
     if obj_hits:
         bonus += 2.0 * sum(idf.get(t, 1.0) for t in obj_hits)
 
-    # Verb+Object combo bonus: when both verb and object match the same skill,
-    # that skill is a much stronger candidate than one matching only the object.
     if verb_hits and obj_hits:
         combo_bonus = min(len(verb_hits), len(obj_hits)) * 2.0
         bonus += combo_bonus
 
-    # Alias alignment
     alias_hits = q_lower & item.alias_terms
     if alias_hits:
         bonus += 1.5 * sum(idf.get(t, 1.0) for t in alias_hits)
 
-    # Product name aliases (word→docx, etc.)
     for term in q_lower:
         if term in _PRODUCT_ALIASES:
             product_tokens = _PRODUCT_ALIASES[term]
@@ -98,23 +88,19 @@ def score_metadata_alignment(
                 if pt.lower() in item.terms or pt.lower() in item.alias_terms:
                     bonus += 1.5 * idf.get(pt.lower(), 1.0)
 
-    # Intent-aware alignment (generic — uses skill metadata, not hardcoded rules)
     if intent is not None:
         bonus += _score_intent_alignment(q_lower, item, idf, intent)
 
-    # Domain alignment
     domain_hits = q_lower & item.domain_terms
     if domain_hits:
         bonus += 1.5 * sum(idf.get(t, 1.0) for t in domain_hits)
 
-    # Example-based matching (includes synthesized intent texts)
     example_term_pool = item.example_terms | item.intent_terms
     if example_term_pool:
         example_hits = q_lower & example_term_pool
         if example_hits:
             bonus += 2.5 * sum(idf.get(t, 1.0) for t in example_hits)
 
-    # Negative hint penalty (hard: domain word without domain verb)
     if item.negative_hint_terms:
         neg_hits = q_lower & item.negative_hint_terms
         if neg_hits:
@@ -139,11 +125,9 @@ def _score_intent_alignment(
     """
     bonus = 0.0
 
-    # Primary action matches skill's declared verbs
     if intent.primary_action and intent.primary_action.lower() in item.verb_terms:
         bonus += 2.0
 
-    # Primary object matches skill's declared objects/aliases/terms
     if intent.primary_object:
         object_lower = intent.primary_object.lower()
         if object_lower in item.object_terms:
@@ -151,8 +135,6 @@ def _score_intent_alignment(
         if object_lower in item.alias_terms or object_lower in item.terms:
             bonus += 1.5
 
-    # Verb+Object combo: when both primary action and object match this skill,
-    # it's a strong signal that this skill handles the full intent.
     if (
         intent.primary_action
         and intent.primary_object
@@ -164,7 +146,6 @@ def _score_intent_alignment(
     ):
         bonus += 3.0
 
-    # Multiple verbs matching (composite intent)
     action_set = {action for action, _ in intent.action_verbs}
     verb_overlap = {a.lower() for a in action_set} & item.verb_terms
     if len(verb_overlap) > 1:
@@ -201,7 +182,6 @@ def score_fuzzy_match(
                 multiplier += 0.2
             fuzzy_score += idf.get(best_term, 1.0) * best_ratio * multiplier
 
-    # Also try product aliases
     for term in query_terms:
         if term in _PRODUCT_ALIASES:
             for alias in _PRODUCT_ALIASES[term]:
@@ -212,7 +192,6 @@ def score_fuzzy_match(
                         fuzzy_score += idf.get(alias.lower(), 1.0) * 0.75
                         break
 
-    # Fuzzy-match against known verb lexicon
     for term in query_terms:
         if term in canonical_set:
             continue
@@ -246,13 +225,11 @@ def rerank_with_intent(
         adjustment = 0.0
         item = metadata_map.get(route.entry.qualified_id)
         if item is not None:
-            # Primary action alignment
             if intent.primary_action:
                 action_lower = intent.primary_action.lower()
                 if action_lower in item.verb_terms:
                     adjustment += 2.0
 
-            # Primary object alignment
             if intent.primary_object:
                 object_lower = intent.primary_object.lower()
                 object_weight = 1.0 if intent.priority_mode == "parallel" else 3.0
@@ -262,7 +239,6 @@ def rerank_with_intent(
                 if object_lower in item.alias_terms or object_lower in item.terms:
                     adjustment += alias_weight
 
-            # Verb+Object combo: strong signal when both match
             if (
                 intent.primary_action
                 and intent.primary_object
@@ -274,7 +250,6 @@ def rerank_with_intent(
             ):
                 adjustment += 4.0
 
-            # Alias hits from matched terms
             query_in_route = set()
             for matched_term in route.matched_terms:
                 clean = matched_term.replace("fuzzy(", "").split("→")[0]
@@ -317,7 +292,6 @@ def best_candidate_is_intent_confident(
     best_hits = 0
     runner_hits = 0
 
-    # Primary object alignment
     if intent.primary_object:
         object_lower = intent.primary_object.lower()
         if (
@@ -333,7 +307,6 @@ def best_candidate_is_intent_confident(
         ):
             runner_hits += 2
 
-    # Primary action alignment
     if intent.primary_action:
         action_lower = intent.primary_action.lower()
         if action_lower in best_item.verb_terms:
@@ -341,7 +314,6 @@ def best_candidate_is_intent_confident(
         if runner_item is not None and action_lower in runner_item.verb_terms:
             runner_hits += 2
 
-    # Verb+Object combo on best
     if (
         intent.primary_action
         and intent.primary_object
@@ -386,7 +358,6 @@ def score_example_similarity(
         if not overlap:
             continue
         score = sum(idf.get(t, 1.0) for t in overlap)
-        # Bonus for high overlap ratio (query closely matches an example)
         overlap_ratio = len(overlap) / max(len(query_terms), 1)
         score *= 1.0 + overlap_ratio
         if score > best_score:

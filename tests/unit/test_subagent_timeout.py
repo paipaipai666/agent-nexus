@@ -29,7 +29,7 @@ def tool_then_answer(monkeypatch):
 
     def _think(self, messages, **kw):
         calls["n"] += 1
-        time.sleep(8)  # exceeds the 2s deadline, finishes inside the 120s grace
+        time.sleep(8)
         if calls["n"] == 1:
             return '{"thought": "probe", "tool": "file_list", "params": {"path": "."}}'
         return '{"answer": "done"}'
@@ -50,10 +50,7 @@ def test_deadline_cancels_child_without_orphan(tiny_deadline, tool_then_answer):
 
     assert payload is None
     assert isinstance(err, AgentCancelled), f"expected AgentCancelled, got {err!r}"
-    # cancel lands at the first FSM boundary after the in-flight think returns:
-    # well under the 120s grace
     assert elapsed < 60, f"cancel took too long: {elapsed:.1f}s"
-    # child thread must actually exit — no orphan holding allocator memory
     for _ in range(50):
         if not _runner_threads():
             break

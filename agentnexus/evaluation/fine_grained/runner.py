@@ -52,7 +52,7 @@ def _collect_run_metrics(agent: Any, result: Any, wall_ms: float,
     rm.steps = len(steps)
     for s in steps:
         tcs = getattr(s, "tool_calls", None) or []
-        tos = getattr(s, "tool_outputs", None) or []  # 与 tool_calls 按序对应
+        tos = getattr(s, "tool_outputs", None) or []
         for i, tc in enumerate(tcs):
             result_preview = str(tos[i].get("output", ""))[:300] if i < len(tos) else ""
             rm.tool_calls.append({
@@ -65,7 +65,7 @@ def _collect_run_metrics(agent: Any, result: Any, wall_ms: float,
     usage = getattr(agent.llm_client, "total_usage", None) or {}
     rm.input_tokens = int(usage.get("input_tokens", 0)) - usage_before[0]
     rm.output_tokens = int(usage.get("output_tokens", 0)) - usage_before[1]
-    rm.llm_calls = rm.steps  # 每个 ReAct 步至少一次 LLM 调用
+    rm.llm_calls = rm.steps
     return rm
 
 
@@ -79,8 +79,6 @@ class FineGrainedRunner:
         self.judges = Judges(judge_llm) if judge_llm is not None else None
         self.max_steps = max_steps
         self.run_memory = run_memory
-
-    # ── 主入口 ──
 
     def run(self, scope: str = "full") -> FineGrainedReport:
         start = time.monotonic()
@@ -124,14 +122,11 @@ class FineGrainedRunner:
             return self._run_abnormal(case)
         raise ValueError(f"no executor for dataset {case.dataset!r}")
 
-    # ── 感知模块：技能路由（确定性，离线） ──
-
     def _run_perception(self, case: EvalCase) -> CaseOutcome:
         router, _entries = _build_eval_router()
         decision = router.decide(case.user_input, _entries)
         predicted = decision.route.entry.workflow_id if decision.route else None
         hit = 1.0 if predicted == case.expected_skill else 0.0
-        # expected_mode：除命中外还要求路由模式正确（如 multi_intent）
         if case.expected_mode and hit:
             hit = 1.0 if decision.mode == case.expected_mode else 0.0
         out = CaseOutcome(
@@ -142,8 +137,6 @@ class FineGrainedRunner:
                       f"(mode={decision.mode}, confidence={decision.confidence:.2f})",
         )
         return out
-
-    # ── 规划 / 工具 / 端到端：真实 agent + mock 工具 ──
 
     def _make_agent(self, registry: Any) -> Any:
         from agentnexus.agents.re_act_agent import ReActAgent
@@ -168,7 +161,6 @@ class FineGrainedRunner:
         out = CaseOutcome(case_id=case.id, dataset=case.dataset, run=rm)
         called = rm.real_tool_names
 
-        # 规划：工具决策（含"不该调用"负例）
         if case.dataset in ("planning_tool_choice", "e2e_task") and (
             case.expected_tool or case.expected_any_tools or case.expected_tool is None
             and case.dataset == "planning_tool_choice"
@@ -183,13 +175,11 @@ class FineGrainedRunner:
                 correct = 1.0 if any(w in called for w in wanted) else 0.0
                 out.metric_values["tool_decision_accuracy"] = correct
                 out.reasoning = f"期望={wanted} 实际={called}"
-                # 多实体：期望工具至少被调用 N 次
                 if correct and case.expected_min_calls:
                     n = called.count(case.expected_tool)
                     out.metric_values["multi_call_correct"] = 1.0 if n >= case.expected_min_calls else 0.0
                     out.reasoning += f"；{case.expected_tool} 调用 {n} 次（期望≥{case.expected_min_calls}）"
 
-        # 工具：参数映射（§5.4 下游跳过——期望工具未被调用时 skip）
         if case.dataset == "tool_param_mapping":
             if case.expected_tool not in called:
                 out.verdict = "skip"
@@ -198,7 +188,6 @@ class FineGrainedRunner:
             call = next(c for c in rm.tool_calls if c["name"] == case.expected_tool)
 
             def _param_ok(expected: Any, actual: Any) -> bool:
-                # 期望值可为可接受值列表（语义归一的等价写法）
                 accepted = expected if isinstance(expected, list) else [expected]
                 return str(actual).strip() in [str(a).strip() for a in accepted]
 
@@ -214,7 +203,6 @@ class FineGrainedRunner:
             out.reasoning = f"实收参数={call['params']}" + (f" 不匹配={mismatched}" if mismatched else "")
             return out
 
-        # 确定性断言
         det_hits = []
         for kw in case.expected_contains:
             det_hits.append(1.0 if kw in answer else 0.0)
@@ -223,7 +211,6 @@ class FineGrainedRunner:
         if det_hits:
             out.metric_values["keyword_hit_rate"] = sum(det_hits) / len(det_hits)
 
-        # Judge 指标
         out.answer_preview = answer[:300]
         if self.judges is not None:
             tc = self.judges.task_completion(case.user_input, answer, case.reference_output)
@@ -233,7 +220,6 @@ class FineGrainedRunner:
             out.metric_values["instruction_following"] = 1.0 if inf.get("verdict") == "pass" else 0.0
             if inf.get("verdict") != "pass":
                 out.reasoning += f" [指令遵循] {inf.get('reasoning', '')}"
-            # 忠实性：需要工具返回作参照系；无工具上下文则跳过（§5.4）
             tool_context = "\n".join(
                 f"{c['name']}({c['params']}) => {c.get('result_preview', '')}" for c in rm.tool_calls
             ) if rm.tool_calls else ""
@@ -250,8 +236,6 @@ class FineGrainedRunner:
                 out.verdict = "pass" if primary_ok >= 1.0 else "fail"
         return out
 
-    # ── 多轮对话（§6.4：共享会话、逐轮执行、整体评判） ──
-
     def _run_multi_turn(self, case: EvalCase) -> CaseOutcome:
         from agentnexus.memory.manager import MemoryManager
         from agentnexus.memory.short_term import ShortTermMemory
@@ -266,7 +250,7 @@ class FineGrainedRunner:
         mgr._settings = SimpleNamespace(
             offload_enabled=False, time_microcompact_interval=0, transcript_enabled=False,
         )
-        mgr.compact_threshold = 10**9  # 多轮评测不触发压缩
+        mgr.compact_threshold = 10**9
 
         turns_out: list[str] = []
         turn_keyword_rates: list[float] = []
@@ -286,15 +270,13 @@ class FineGrainedRunner:
         out = CaseOutcome(case_id=case.id, dataset=case.dataset)
         out.run = RunMetrics(
             wall_ms=(time.monotonic() - t0) * 1000,
-            llm_calls=len(case.chain),  # 每轮至少一次 LLM 调用；成本逐轮累计（§6.4）
+            llm_calls=len(case.chain),
             input_tokens=total_in, output_tokens=total_out,
         )
         if turn_keyword_rates:
-            # 短期记忆保留率的确定性近似：各轮期望关键词命中率
             out.metric_values["stm_retention_rate"] = (
                 sum(turn_keyword_rates) / len(turn_keyword_rates)
             )
-        # 纠正链：最终一次目标工具调用的参数必须等于纠正后的值
         if case.expected_final_tool_params:
             ok_all = True
             for tool_name, expected in case.expected_final_tool_params.items():
@@ -319,10 +301,6 @@ class FineGrainedRunner:
             out.verdict = "skip"
             out.reasoning = "judge 未启用"
         return out
-
-    # ── 异常输入 ──
-
-    # ── 规划（真实注册表）：40 个真实工具描述 + 桩执行 ──
 
     def _run_real_registry_case(self, case: EvalCase) -> CaseOutcome:
         registry = self._build_stubbed_real_registry()
@@ -394,8 +372,6 @@ class FineGrainedRunner:
             out.reasoning = "judge 未启用"
         return out
 
-    # ── Judge 校准：已知判定输入直接喂裁判，量化裁判可靠率 ──
-
     def _run_judge_calibration(self) -> list[CaseOutcome]:
         if self.judges is None:
             return [CaseOutcome(case_id="CAL-000", dataset="judge_calibration",
@@ -415,8 +391,6 @@ class FineGrainedRunner:
             ))
         return outcomes
 
-    # ── 记忆模块：委托离线探针套件 ──
-
     def _run_memory_probes(self) -> tuple[dict[str, float], list[dict]]:
         from agentnexus.evaluation.memory_eval import DIMENSIONS, MemoryEvaluator
         report = MemoryEvaluator(enable_judge=self.judges is not None).run()
@@ -428,9 +402,6 @@ class FineGrainedRunner:
             for r in report.results
         ]
         return dimensions, rows
-
-
-# ── 感知评测的虚拟技能集 ─────────────────────────────────────────────
 
 
 def _make_skill(workflow_id: str, name: str, desc: str,
@@ -465,7 +436,6 @@ def _build_eval_router():
         _make_skill("weather_query", "天气查询", "查询城市天气、温度、出行建议",
                     ("查询", "查", "看看"), ("天气", "温度", "气温"),
                     ("北京今天天气怎么样", "上海明天会下雨吗")),
-        # negative_hints：领域词出现在非领域意图（翻译/释义问句）时压分
         _make_skill("stock_analysis", "股票分析", "分析股票走势、行情和投资价值",
                     ("分析", "看看", "查"), ("股票", "股价", "行情"),
                     ("分析一下贵州茅台", "平安银行股价走势"),
@@ -473,7 +443,6 @@ def _build_eval_router():
         _make_skill("code_review", "代码审查", "审查已有代码的质量、安全性和并发问题",
                     ("审查", "review", "检查"), ("代码", "函数", "bug"),
                     ("帮我审查这段代码", "review 这个函数")),
-        # 与 code_review 词汇重叠的写作技能——测试路由器能否区分"写"和"审"
         _make_skill("code_generation", "代码生成", "根据需求编写新的代码实现",
                     ("写", "实现", "生成", "编写"), ("代码", "函数", "脚本", "程序"),
                     ("帮我写一段快速排序", "实现一个登录接口")),

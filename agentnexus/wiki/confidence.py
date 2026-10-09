@@ -19,7 +19,6 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-# High-trust statement ratio thresholds for page confidence
 _HIGH_RATIO = 0.8
 _MEDIUM_RATIO = 0.5
 
@@ -57,7 +56,6 @@ class ConfidenceRouter:
         if not levels:
             return ConfidenceLevel.HIGH.value
 
-        # Rules evaluated in order, first match wins (see class docstring)
         high_count = sum(
             1 for lv in levels
             if lv in (SynthesisLevel.DIRECT_QUOTE.value, SynthesisLevel.PARAPHRASE.value)
@@ -65,14 +63,10 @@ class ConfidenceRouter:
         ratio = high_count / len(levels)
 
         rules = [
-            # Rule 1: Any untrusted → page is untrusted
             (any(lv == ConfidenceLevel.UNTRUSTED.value for lv in levels),
              ConfidenceLevel.UNTRUSTED.value),
-            # Rule 2: 80%+ high-trust → high confidence
             (ratio >= _HIGH_RATIO, ConfidenceLevel.HIGH.value),
-            # Rule 3: 50%+ high-trust → medium
             (ratio >= _MEDIUM_RATIO, ConfidenceLevel.MEDIUM.value),
-            # Rule 4: Has synthesis statements → low
             (any(lv == SynthesisLevel.SYNTHESIS.value for lv in levels),
              ConfidenceLevel.LOW.value),
         ]
@@ -80,26 +74,21 @@ class ConfidenceRouter:
             if applies:
                 return level
 
-        # Rule 5: Default
         return ConfidenceLevel.MEDIUM.value
 
     def route(self, page: WikiPage) -> QueryDecision:
         """Decide how to handle a query based on page confidence."""
         confidence = page.confidence
 
-        # Rule 1: untrusted → force RAG
         if confidence == ConfidenceLevel.UNTRUSTED.value:
             return QueryDecision.FALLBACK_TO_RAG
 
-        # Rule 2: high → use wiki directly
         if confidence == ConfidenceLevel.HIGH.value:
             return QueryDecision.USE_WIKI
 
-        # Rule 3: medium → wiki with source chunks
         if confidence == ConfidenceLevel.MEDIUM.value:
             return QueryDecision.USE_WIKI_WITH_SOURCES
 
-        # Rule 4: low → wiki with disclaimer
         return QueryDecision.USE_WIKI_WITH_DISCLAIMER
 
     def get_source_chunks(self, page: WikiPage) -> list[str]:

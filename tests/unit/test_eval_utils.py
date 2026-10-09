@@ -131,7 +131,6 @@ class TestFindTrace:
         result = find_trace(tmp_path, "t1")
 
         assert result is not None
-        # glob sorted reverse means "b_newer" comes first
         assert result[0]["source"] == "new"
 
     def test_returns_none_when_not_found(self, tmp_path):

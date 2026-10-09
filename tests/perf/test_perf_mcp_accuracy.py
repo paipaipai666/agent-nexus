@@ -17,11 +17,9 @@ import pytest
 from agentnexus.core.config import MCPServerConfig
 from agentnexus.tools.mcp.adapter import MCPToolDescriptor
 
-# ── Thresholds ──────────────────────────────────────────────────────
-
-MCP_ACCURACY_MIN = 0.70  # 70% minimum accuracy
-MCP_ACCURACY_P95_MAX_MS = 50  # P95 latency for MCP calls
-MCP_SIMILAR_ACCURACY_MIN = 0.75  # 75% accuracy with similar tools
+MCP_ACCURACY_MIN = 0.70
+MCP_ACCURACY_P95_MAX_MS = 50
+MCP_SIMILAR_ACCURACY_MIN = 0.75
 
 
 def _percentile(data: list[float], p: int) -> float:
@@ -129,7 +127,6 @@ class MockMCPCallRouter:
         if random.random() < self.accuracy_rate:
             selected_server = expected_server
         else:
-            # Select a random wrong server
             wrong_servers = [s for s in self._server_tool_map.keys() if s != expected_server]
             selected_server = random.choice(wrong_servers) if wrong_servers else expected_server
 
@@ -154,9 +151,6 @@ class MockMCPCallRouter:
         return _p95_ms(self._call_latencies) if self._call_latencies else 0.0
 
 
-# ── MCP-Acc-1: Accuracy with multiple servers ─────────────────────
-
-
 class TestMCPAccuracyMultipleServers:
     """Test MCP tool routing accuracy with multiple servers."""
 
@@ -165,16 +159,14 @@ class TestMCPAccuracyMultipleServers:
         """Verify routing accuracy with multiple MCP servers."""
         router = MockMCPCallRouter(accuracy_rate=0.95)
 
-        # Register servers with tools
         for i in range(server_count):
             server_name = f"server_{i:02d}"
             tool_names = [f"tool_{i:02d}_{j:02d}" for j in range(10)]
             router.register_server_tools(server_name, tool_names)
 
-        # Test routing accuracy
         test_cases = []
         for server_name, tools in router._server_tool_map.items():
-            for tool in tools[:3]:  # Test 3 tools per server
+            for tool in tools[:3]:
                 test_cases.append((tool, server_name))
 
         start = time.perf_counter()
@@ -201,7 +193,6 @@ class TestMCPAccuracyMultipleServers:
                 tool_names = [f"tool_{i:02d}_{j:02d}" for j in range(5)]
                 router.register_server_tools(server_name, tool_names)
 
-            # Test with fixed number of cases
             test_cases = []
             for server_name, tools in list(router._server_tool_map.items())[:3]:
                 for tool in tools[:2]:
@@ -212,16 +203,11 @@ class TestMCPAccuracyMultipleServers:
 
             accuracies.append((server_count, router.accuracy))
 
-        # Verify accuracy doesn't drop significantly
-        # Allow for significant variance due to randomization
         base_accuracy = accuracies[0][1]
         for count, accuracy in accuracies[1:]:
             assert accuracy >= base_accuracy - 0.40, (
                 f"Accuracy dropped from {base_accuracy:.2%} to {accuracy:.2%} at {count} servers"
             )
-
-
-# ── MCP-Acc-2: Accuracy with similar tool names ──────────────────
 
 
 class TestMCPAccuracySimilarTools:
@@ -231,14 +217,12 @@ class TestMCPAccuracySimilarTools:
         """Verify router can discriminate between similarly named tools across servers."""
         router = MockMCPCallRouter(accuracy_rate=0.92)
 
-        # Create servers with similar tool names
         categories = ["search", "read", "write", "execute", "analyze"]
         for i, category in enumerate(categories):
             server_name = f"{category}_server"
             tool_names = [f"{category}_tool_{j:02d}" for j in range(10)]
             router.register_server_tools(server_name, tool_names)
 
-        # Test with tools from same category
         test_cases = []
         for category in categories:
             server_name = f"{category}_server"
@@ -256,16 +240,13 @@ class TestMCPAccuracySimilarTools:
         """Verify accuracy across different tool categories."""
         router = MockMCPCallRouter(accuracy_rate=0.93)
 
-        # Create servers with overlapping tool names
         for i in range(5):
             server_name = f"server_{i:02d}"
-            # Each server has tools from different categories
             tool_names = []
             for category in ["search", "read", "write"]:
                 tool_names.append(f"{category}_tool_{i:02d}")
             router.register_server_tools(server_name, tool_names)
 
-        # Test routing
         test_cases = []
         for server_name, tools in router._server_tool_map.items():
             for tool in tools:
@@ -278,9 +259,6 @@ class TestMCPAccuracySimilarTools:
             f"Accuracy {router.accuracy:.2%} < {MCP_SIMILAR_ACCURACY_MIN:.2%} across categories"
 
 
-# ── MCP-Acc-3: Latency under accuracy testing ────────────────────
-
-
 class TestMCPAccuracyLatency:
     """Test latency characteristics during MCP accuracy testing."""
 
@@ -288,13 +266,11 @@ class TestMCPAccuracyLatency:
         """Verify latency remains acceptable during accuracy testing."""
         router = MockMCPCallRouter(accuracy_rate=0.95)
 
-        # Register multiple servers
         for i in range(8):
             server_name = f"server_{i:02d}"
             tool_names = [f"tool_{i:02d}_{j:02d}" for j in range(10)]
             router.register_server_tools(server_name, tool_names)
 
-        # Test latency
         test_cases = []
         for server_name, tools in router._server_tool_map.items():
             for tool in tools[:5]:
@@ -334,7 +310,6 @@ class TestMCPAccuracyLatency:
             avg_latency_ms = (elapsed / len(test_cases)) * 1000
             latencies.append((server_count, avg_latency_ms))
 
-        # Verify latency doesn't increase dramatically
         for i in range(1, len(latencies)):
             prev_count, prev_latency = latencies[i-1]
             curr_count, curr_latency = latencies[i]
@@ -344,9 +319,6 @@ class TestMCPAccuracyLatency:
                 f"Latency increased {ratio:.2f}x when server count went from {prev_count} to {curr_count}"
 
 
-# ── Integration tests ────────────────────────────────────────────
-
-
 class TestMCPAccuracyIntegration:
     """Integration tests with MCP manager operations."""
 
@@ -354,18 +326,14 @@ class TestMCPAccuracyIntegration:
         """Verify accuracy works with MCP manager operations."""
         router = MockMCPCallRouter(accuracy_rate=0.95)
 
-        # Register servers
         for i in range(5):
             server_name = f"server_{i:02d}"
             tool_names = [f"tool_{i:02d}_{j:02d}" for j in range(8)]
             router.register_server_tools(server_name, tool_names)
 
-        # Simulate server disconnection and reconnection
-        # Remove a server's tools
         disconnected_server = "server_02"
         original_tools = router._server_tool_map.pop(disconnected_server)
 
-        # Test routing without the disconnected server
         test_cases = []
         for server_name, tools in router._server_tool_map.items():
             for tool in tools[:2]:
@@ -377,10 +345,8 @@ class TestMCPAccuracyIntegration:
         assert router.accuracy >= MCP_ACCURACY_MIN, \
             f"Accuracy {router.accuracy:.2%} < {MCP_ACCURACY_MIN:.2%} after server disconnection"
 
-        # Reconnect server
         router.register_server_tools(disconnected_server, original_tools)
 
-        # Test routing with reconnected server
         test_cases = []
         for tool in original_tools[:3]:
             test_cases.append((tool, disconnected_server))
@@ -395,18 +361,15 @@ class TestMCPAccuracyIntegration:
         """Verify accuracy works when tools are updated."""
         router = MockMCPCallRouter(accuracy_rate=0.95)
 
-        # Register initial tools
         for i in range(4):
             server_name = f"server_{i:02d}"
             tool_names = [f"tool_{i:02d}_{j:02d}" for j in range(6)]
             router.register_server_tools(server_name, tool_names)
 
-        # Update tools for a server
         updated_server = "server_01"
         new_tools = [f"new_tool_{i:02d}" for i in range(6)]
         router.register_server_tools(updated_server, new_tools)
 
-        # Test routing with updated tools
         test_cases = []
         for tool in new_tools[:3]:
             test_cases.append((tool, updated_server))
@@ -414,7 +377,6 @@ class TestMCPAccuracyIntegration:
         for tool_name, expected_server in test_cases:
             router.route_call(tool_name, expected_server)
 
-        # Allow for lower accuracy due to small sample size and randomization
         assert router.accuracy >= MCP_ACCURACY_MIN - 0.3, (
             f"Accuracy {router.accuracy:.2%} < {MCP_ACCURACY_MIN - 0.3:.2%} after tool updates"
         )

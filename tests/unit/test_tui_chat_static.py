@@ -162,7 +162,6 @@ class TestFormatSubagentResult:
             "summary": "",
         }, ensure_ascii=False)
         result = format_subagent_result(text)
-        # 400 chars of 'a' followed by nothing extra
         assert len(result.split("answer: ")[1]) == 400
 
     def test_missing_keys_default(self):
