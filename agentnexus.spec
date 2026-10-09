@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 def collect_data_globs(*patterns):
@@ -19,7 +19,7 @@ datas = collect_data_globs(
     ('agentnexus/skills/builtin/*/workflow.yaml', 'agentnexus/skills/builtin'),
     ('agentnexus/builtin_extensions/*/plugin.yaml', 'agentnexus/builtin_extensions'),
     ('agentnexus/builtin_extensions/*/workflow.yaml', 'agentnexus/builtin_extensions'),
-)
+) + copy_metadata('agentnexus')
 
 
 a = Analysis(
@@ -35,6 +35,7 @@ a = Analysis(
         'sentence_transformers',
         'jieba',
         'pymupdf',
+        'rank_bm25',
         'mcp',
         'mcp.client.stdio',
         'mcp.client.streamable_http',

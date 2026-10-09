@@ -34,7 +34,7 @@ jobs:
           fi
           echo "✓ Versions match: $TAG_VERSION"
       - name: Install deps
-        run: pip install pyinstaller .
+        run: pip install pyinstaller .[all]
       - name: Build backend binary
         run: pyinstaller agentnexus.spec --noconfirm
       - name: List dist contents

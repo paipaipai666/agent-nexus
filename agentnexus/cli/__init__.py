@@ -112,4 +112,10 @@ def main(argv: list[str] | None = None) -> None:
 @app.command()
 def version():
     """显示版本。"""
-    console.print("[bold]AgentNexus[/bold] v0.1.0")
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+    try:
+        ver = _pkg_version("agentnexus")
+    except PackageNotFoundError:
+        ver = "unknown"
+    console.print(f"[bold]AgentNexus[/bold] v{ver}")
