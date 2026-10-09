@@ -242,7 +242,10 @@ class ChatService:
         self._subagents = SubagentRegistry()
         # _put_event is now called from dispatcher lane-pool threads too
         # (subagent child events) — serialize seq assignment + queue puts.
-        self._put_event_lock = threading.Lock()
+        # RLock: settlement paths (cancel_run, send_message except ->
+        # teardown) hold it across multiple _put_event calls to keep
+        # terminal events and the stream sentinel ordered atomically.
+        self._put_event_lock = threading.RLock()
         # Per-session thinking-effort override: "none"|"low"|"medium"|"high" or
         # None = follow Settings default (model_thinking_effort).
         self._thinking_effort: dict[str, str | None] = {}
@@ -486,6 +489,10 @@ class ChatService:
         setup = self._prepare_run(session_id, text, attachments, on_run_started)
         agent, memory = setup.agent, setup.memory
         run, turn = setup.run, setup.turn
+        # True once THIS invocation emitted terminal events; the teardown
+        # sentinel is enqueued only then. If another path settled the
+        # turn first (e.g. cancel_run), that path owns events + sentinel.
+        wrapper_settled = False
         try:
             agent_text, todo_list = self._wire_agent_for_run(setup, text)
             # 启动 trace，记录任务级元数据
@@ -550,6 +557,7 @@ class ChatService:
                 "run_persisted", {"status": record.status},
                 run_id=run.id, session_id=session_id,
             ))
+            wrapper_settled = True
         except Exception as exc:
             # If the turn was already settled externally (cancel_run from the
             # WS lifecycle / cancel endpoint), its terminal events were
@@ -577,9 +585,10 @@ class ChatService:
                     "run_persisted", {"status": record.status},
                     run_id=run.id, session_id=session_id,
                 ))
+            wrapper_settled = not already_settled
             raise
         finally:
-            self._teardown_run(setup)
+            self._teardown_run(setup, put_sentinel=wrapper_settled)
         return run
 
     def _prepare_run(
@@ -710,7 +719,7 @@ class ChatService:
             logger.debug("Failed to suppress agent output: %s", e)
         return agent_text, todo_list
 
-    def _teardown_run(self, setup: _RunSetup) -> None:
+    def _teardown_run(self, setup: _RunSetup, put_sentinel: bool = True) -> None:
         """Restore everything prepare/wire touched — runs on every exit path
         (success, failure, cancel) via send_message's finally."""
         from agentnexus.tools.workspace import (
@@ -743,7 +752,8 @@ class ChatService:
             self._token_buffers.pop(session_id, None)
             self._token_cursors.pop(session_id, None)
             self._token_step_base.pop(session_id, None)
-        self._put_event(run.id, None)
+        if put_sentinel:
+            self._put_event(run.id, None)
 
     def _get_version_manager(self, session_id: str):
         """Return a per-session ConversationVersionManager, creating one if needed."""
@@ -1163,6 +1173,14 @@ class ChatService:
                 logger.exception("Failed to cancel run %s during shutdown", run_id)
 
     def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
+        # Settlement must be atomic w.r.t. queue puts: the run wrapper
+        # teardown can enqueue its stream sentinel concurrently, and a
+        # sentinel landing before these terminal events makes consumers
+        # see an empty tail (run_interrupted never delivered).
+        with self._put_event_lock:
+            self._cancel_run_locked(run_id, reason)
+
+    def _cancel_run_locked(self, run_id: str, reason: str = "cancelled") -> None:
         turn = self._turns.get(run_id)
         if turn is not None:
             record = turn.cancel(reason)
