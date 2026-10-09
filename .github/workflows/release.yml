@@ -38,6 +38,12 @@ jobs:
         # NullProvider); PyInstaller pyi_rth_pkgres hook crashes at
         # startup against newer setuptools (seen on macOS).
         run: pip install pyinstaller .[all] "setuptools<81"
+      - name: Use CPU-only torch (Linux)
+        if: runner.os == 'Linux'
+        # PyPI Linux torch wheels are CUDA builds (7.6GB of nvidia libs
+        # land in the onedir, pushing installers over GitHub 2GB asset
+        # cap); CPU inference is all the app needs.
+        run: pip install --force-reinstall --no-deps torch --index-url https://download.pytorch.org/whl/cpu
       - name: Build backend binary
         run: pyinstaller agentnexus.spec --noconfirm
       - name: List dist contents
@@ -209,7 +215,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            backend-*/*
             desktop-*/*
             SHA256SUMS.txt
           generate_release_notes: true
