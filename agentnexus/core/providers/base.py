@@ -26,6 +26,12 @@ class StreamResult:
 class BaseLLMProvider(ABC):
     """Abstract base for direct LLM API providers."""
 
+    def abort_active_stream(self, thread_id: int | None = None) -> None:
+        """Abort the stream owned by a caller thread, if supported."""
+
+    def close(self) -> None:
+        """Release provider resources during application shutdown."""
+
     @abstractmethod
     def stream_chat(
         self,

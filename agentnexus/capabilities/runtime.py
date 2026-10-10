@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,57 +47,63 @@ class CapabilityRuntime:
         self.register_tools = register_tools
         self.llm_client = llm_client
         self.subagent_confirm = subagent_confirm
+        self._lock = threading.RLock()
         self.states = self._load_states()
 
     def snapshot(self) -> CapabilitySnapshot:
-        cfg = self._capability_config()
-        return CapabilitySnapshot(
-            states={key: CapabilityState(**vars(value)) for key, value in self.states.items()},
-            skill_enabled=dict(cfg.get("skills", {})),
-            mcp_enabled=dict(cfg.get("mcp_servers", {})),
-        )
+        with self._lock:
+            cfg = self._capability_config()
+            return CapabilitySnapshot(
+                states={key: CapabilityState(**vars(value)) for key, value in self.states.items()},
+                skill_enabled=dict(cfg.get("skills", {})),
+                mcp_enabled=dict(cfg.get("mcp_servers", {})),
+            )
 
     def refresh_if_stale(self) -> dict[str, str]:
-        results: dict[str, str] = {}
-        for kind in CAPABILITY_KINDS:
-            state = self.states[kind]
-            if state.enabled and state.generation != state.loaded_generation:
-                results[kind] = self._reload_kind(kind)
-            elif not state.enabled and state.loaded_generation != -1:
-                results[kind] = self._unload_kind(kind)
-        return results
+        with self._lock:
+            results: dict[str, str] = {}
+            for kind in CAPABILITY_KINDS:
+                state = self.states[kind]
+                if state.enabled and state.generation != state.loaded_generation:
+                    results[kind] = self._reload_kind(kind)
+                elif not state.enabled and state.loaded_generation != -1:
+                    results[kind] = self._unload_kind(kind)
+            return results
 
     def reload(self, kind: str | None = None) -> dict[str, str]:
-        kinds = CAPABILITY_KINDS if kind is None else (self._normalize_kind(kind),)
-        results = {}
-        for item in kinds:
-            self.states[item].generation += 1
-            results[item] = self._reload_kind(item)
-        self._persist_states()
-        return results
+        with self._lock:
+            kinds = CAPABILITY_KINDS if kind is None else (self._normalize_kind(kind),)
+            results = {}
+            for item in kinds:
+                self.states[item].generation += 1
+                results[item] = self._reload_kind(item)
+            self._persist_states()
+            return results
 
     def enable(self, kind: str, name: str | None = None) -> dict[str, str]:
-        kind = self._normalize_kind(kind)
-        if name:
-            self._set_named_enabled(kind, name, True)
-        state = self.states[kind]
-        state.enabled = True
-        state.generation += 1
-        self._persist_states()
-        return {kind: self._reload_kind(kind)}
-
-    def disable(self, kind: str, name: str | None = None) -> dict[str, str]:
-        kind = self._normalize_kind(kind)
-        if name:
-            self._set_named_enabled(kind, name, False)
-            self.states[kind].generation += 1
+        with self._lock:
+            kind = self._normalize_kind(kind)
+            if name:
+                self._set_named_enabled(kind, name, True)
+            state = self.states[kind]
+            state.enabled = True
+            state.generation += 1
             self._persist_states()
             return {kind: self._reload_kind(kind)}
-        state = self.states[kind]
-        state.enabled = False
-        state.generation += 1
-        self._persist_states()
-        return {kind: self._unload_kind(kind)}
+
+    def disable(self, kind: str, name: str | None = None) -> dict[str, str]:
+        with self._lock:
+            kind = self._normalize_kind(kind)
+            if name:
+                self._set_named_enabled(kind, name, False)
+                self.states[kind].generation += 1
+                self._persist_states()
+                return {kind: self._reload_kind(kind)}
+            state = self.states[kind]
+            state.enabled = False
+            state.generation += 1
+            self._persist_states()
+            return {kind: self._unload_kind(kind)}
 
     def _reload_kind(self, kind: str) -> str:
         try:
@@ -134,13 +141,14 @@ class CapabilityRuntime:
     def reload_tools(self) -> str:
         if self.register_tools is None:
             return "no register_tools hook"
-        self.executor.registry.unregister_source_type("builtin")
+        self.executor.unregister_source_type("builtin")
         self.register_tools(
             self.executor,
             llm_client=self.llm_client,
             subagent_confirm=self.subagent_confirm,
             mcp_manager=self.mcp_manager,
             extra_providers=[],
+            todo_list=getattr(self.agent, "_todo_list", None),
         )
         return "reloaded"
 
@@ -165,7 +173,7 @@ class CapabilityRuntime:
                 self.mcp_manager.enable_server(server)
             else:
                 self.mcp_manager.disable_server(server)
-        self.executor.registry.unregister_source_prefix("mcp:", source_type="mcp")
+        self.executor.unregister_source_prefix("mcp:", source_type="mcp")
         self.mcp_manager.register_tools(self.executor)
         self._refresh_mcp_context()
         return "reloaded"

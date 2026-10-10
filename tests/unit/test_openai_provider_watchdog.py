@@ -72,7 +72,6 @@ def _fast_watchdog(monkeypatch):
 def test_hung_stream_aborted_after_chunk_gap():
     provider = OpenAIProvider()
     stream = _HangingStream()
-    provider._active_stream = stream
 
     items = []
     with pytest.raises(TimeoutError, match="no stream chunk"):
@@ -86,7 +85,6 @@ def test_hung_stream_aborted_after_chunk_gap():
 def test_slow_stream_chunks_below_gap_pass_through():
     provider = OpenAIProvider()
     stream = _SlowStream(gap_s=0.01, n=3)
-    provider._active_stream = stream
 
     texts = [c.choices[0].delta.content for c in provider._guarded_iter(stream, timeout=30)]
     assert texts == ["c1", "c2", "c3"]
@@ -96,7 +94,6 @@ def test_slow_stream_chunks_below_gap_pass_through():
 def test_total_budget_blows_long_running_stream():
     provider = OpenAIProvider()
     stream = _SlowStream(gap_s=0.4, n=10)
-    provider._active_stream = stream
 
     with pytest.raises(TimeoutError, match="total budget"):
         for _ in provider._guarded_iter(stream, timeout=1):

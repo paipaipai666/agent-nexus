@@ -108,14 +108,14 @@ _PRODUCT_ALIASES: dict[str, list[str]] = {
     "情報": ["search"],
 }
 
-_CONNECTOR_PATTERNS: list[tuple[str, str, str]] = [
-    (r"先(.+?)然后", "first_action", "sequential"),
-    (r"先(.+?)再", "first_action", "sequential"),
-    (r"(.+?)之后", "first_action", "sequential"),
-    (r"第一步(.+?)第二步", "first_action", "sequential"),
-    (r"如果有(.+?)就", "conditional", "conditional"),
-    (r"如果(.+?)就", "conditional", "conditional"),
-    (r"(.+?)的话就", "conditional", "conditional"),
+_CONNECTOR_RULES: list[tuple[str, str, str, str]] = [
+    ("先", "然后", "first_action", "sequential"),
+    ("先", "再", "first_action", "sequential"),
+    ("", "之后", "first_action", "sequential"),
+    ("第一步", "第二步", "first_action", "sequential"),
+    ("如果有", "就", "conditional", "conditional"),
+    ("如果", "就", "conditional", "conditional"),
+    ("", "的话就", "conditional", "conditional"),
 ]
 
 _COMPOSITE_ACTION_OVERRIDES: dict[tuple[str, ...], str] = {

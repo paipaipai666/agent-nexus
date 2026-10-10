@@ -1,15 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+
+project_root = Path(SPECPATH)
 
 
 def collect_data_globs(*patterns):
     datas = []
     for pattern, target in patterns:
-        for path in Path().glob(pattern):
+        for path in project_root.glob(pattern):
             if path.is_file():
-                datas.append((str(path), target))
+                destination = str(Path(target) / path.parent.name) if '*' in Path(pattern).parent.parts else target
+                datas.append((str(path), destination))
     return datas
 
 
@@ -23,8 +28,8 @@ datas = collect_data_globs(
 
 
 a = Analysis(
-    ['agentnexus/__main__.py'],
-    pathex=[],
+    [str(project_root / 'agentnexus/__main__.py')],
+    pathex=[str(project_root)],
     binaries=[],
     datas=datas,
     # collect_submodules('chromadb'): chromadb resolves several implementations
@@ -41,6 +46,8 @@ a = Analysis(
         'mcp.client.streamable_http',
         'openai',
         'tiktoken',
+        'tiktoken_ext',
+        'tiktoken_ext.openai_public',
         'rich',
         'typer',
         'yaml',
@@ -96,10 +103,43 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Chroma receives our SentenceTransformer embeddings for add and query.
+    # Its optional default ONNX embedding runtime is not used by the app.
+    excludes=['onnxruntime'],
     noarchive=False,
     optimize=0,
 )
+
+if sys.platform == 'win32':
+    # PATH may contain older copies shipped with Java or other SDKs. Use a
+    # consistent system C++ runtime for Torch and the Python bootloader.
+    import pefile
+
+    runtime_names = {'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'}
+    system_dir = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+    collected_names = {name.lower() for name, _, _ in a.binaries}
+    if not runtime_names <= collected_names:
+        raise RuntimeError(f'Missing collected C++ runtime DLLs: {sorted(runtime_names - collected_names)}')
+
+    for name in sorted(runtime_names):
+        source = system_dir / name
+        if not source.is_file():
+            raise RuntimeError(f'Missing C++ runtime in System32: {source}')
+        image = pefile.PE(str(source), fast_load=True)
+        try:
+            image.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
+            fixed_info = image.VS_FIXEDFILEINFO[0]
+            version = (fixed_info.FileVersionMS >> 16, fixed_info.FileVersionMS & 0xFFFF)
+        finally:
+            image.close()
+        if version < (14, 51):
+            raise RuntimeError(f'{source} is version {version}; this package requires the tested 14.51+ C++ runtime')
+
+    a.binaries = [
+        (name, str(system_dir / name), kind) if name.lower() in runtime_names else (name, source, kind)
+        for name, source, kind in a.binaries
+    ]
+
 pyz = PYZ(a.pure)
 # Onedir, not onefile: a single-file build forces the bootloader to extract
 # ~2GB (torch DLLs etc.) into %TEMP%\_MEI on EVERY launch — measured ~11.5s

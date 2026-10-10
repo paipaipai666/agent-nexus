@@ -467,32 +467,33 @@ def _set_restrictive_permissions(path: Path) -> None:
 
 
 def _write_yaml_config(data: dict) -> Path:
-    config_path = _config_dir() / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with _settings_lock:
+        config_path = _config_dir() / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if config_path.exists():
-        try:
-            os.chmod(config_path, 0o600)
-        except OSError:
-            pass
+        if config_path.exists():
+            try:
+                os.chmod(config_path, 0o600)
+            except OSError:
+                pass
 
-    fd, tmp_name = tempfile.mkstemp(dir=config_path.parent, prefix="config.", suffix=".tmp")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, Dumper=AgentNexusDumper, allow_unicode=True, sort_keys=True)
-        _set_restrictive_permissions(tmp_path)
-        tmp_path.replace(config_path)
-        _set_restrictive_permissions(config_path)
-        global _settings_cache
-        _settings_cache = None
-        return config_path
-    except Exception:
+        fd, tmp_name = tempfile.mkstemp(dir=config_path.parent, prefix="config.", suffix=".tmp")
+        tmp_path = Path(tmp_name)
         try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, Dumper=AgentNexusDumper, allow_unicode=True, sort_keys=True)
+            _set_restrictive_permissions(tmp_path)
+            tmp_path.replace(config_path)
+            _set_restrictive_permissions(config_path)
+            global _settings_cache
+            _settings_cache = None
+            return config_path
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
 
 def write_config_yaml(data: dict) -> Path:
@@ -510,11 +511,12 @@ def _default_paths() -> dict:
 
 
 def _load_yaml() -> dict:
-    yaml_path = _config_dir() / "config.yaml"
-    if yaml_path.exists():
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {}
+    with _settings_lock:
+        yaml_path = _config_dir() / "config.yaml"
+        if yaml_path.exists():
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        return {}
 
 
 def load_config_yaml() -> dict:
@@ -522,14 +524,13 @@ def load_config_yaml() -> dict:
 
 
 _settings_cache: Settings | None = None
-_settings_lock = threading.Lock()
+_settings_lock = threading.RLock()
 
 
 def get_settings() -> Settings:
     global _settings_cache
-    if _settings_cache is None:
-        with _settings_lock:
-            if _settings_cache is None:
-                data = _load_yaml()
-                _settings_cache = Settings(**data, **_default_paths())
-    return _settings_cache
+    with _settings_lock:
+        if _settings_cache is None:
+            data = _load_yaml()
+            _settings_cache = Settings(**data, **_default_paths())
+        return _settings_cache

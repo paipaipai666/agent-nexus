@@ -177,6 +177,26 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
     return _get_embedding_service().embed_texts(texts)
 
 
+def _write_document_batches(collection, operation: str, texts: list[str], ids: list[str],
+                            metadatas: list[dict] | None, embed_texts_provider) -> None:
+    with chroma_operation_lock():
+        batch_size = collection._client.get_max_batch_size()
+    if batch_size <= 0:
+        raise ValueError("Chroma batch size must be positive")
+    if len(set(ids)) != len(ids):
+        raise ValueError("Document ids must be unique")
+    write = getattr(collection, operation)
+    for start in range(0, len(texts), batch_size):
+        end = start + batch_size
+        batch = texts[start:end]
+        write(
+            ids=ids[start:end],
+            embeddings=embed_texts_provider(batch),
+            documents=batch,
+            metadatas=metadatas[start:end] if metadatas is not None else None,
+        )
+
+
 def insert_documents(
     texts: list[str],
     metadatas: list[dict] | None = None,
@@ -198,12 +218,7 @@ def insert_documents(
         else None
     )
     collection = collection_provider(name=name, namespace=namespace, metadata=metadata)
-    collection.add(
-        ids=resolved_ids,
-        embeddings=embed_texts_provider(texts),
-        documents=texts,
-        metadatas=resolved_metadatas,
-    )
+    _write_document_batches(collection, "add", texts, resolved_ids, resolved_metadatas, embed_texts_provider)
     return resolved_ids
 
 
@@ -228,12 +243,7 @@ def upsert_documents(
         else None
     )
     collection = collection_provider(name=name, namespace=namespace, metadata=metadata)
-    collection.upsert(
-        ids=resolved_ids,
-        embeddings=embed_texts_provider(texts),
-        documents=texts,
-        metadatas=resolved_metadatas,
-    )
+    _write_document_batches(collection, "upsert", texts, resolved_ids, resolved_metadatas, embed_texts_provider)
     return resolved_ids
 
 

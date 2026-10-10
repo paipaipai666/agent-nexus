@@ -261,8 +261,13 @@ class AppRuntime:
         memory.short_term._summary = restored._summary
 
     def close(self) -> None:
-        if self.mcp_manager is not None:
-            self.mcp_manager.close()
+        from agentnexus.core.providers.router import close_providers
+
+        try:
+            if self.mcp_manager is not None:
+                self.mcp_manager.close()
+        finally:
+            close_providers()
 
     def __enter__(self):
         return self

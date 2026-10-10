@@ -1,12 +1,11 @@
 """Tests for agentnexus.skills.router.types — router data structures and constants."""
 
-import re
 from unittest.mock import patch
 
 from agentnexus.skills.router.types import (
     _ABBREVIATION_MAP,
     _COMPOSITE_ACTION_OVERRIDES,
-    _CONNECTOR_PATTERNS,
+    _CONNECTOR_RULES,
     _JSON_OBJECT_RE,
     _OBJECT_LEXICON,
     _PRODUCT_ALIASES,
@@ -115,18 +114,17 @@ class TestProductAliases:
         assert "xlsx" in _PRODUCT_ALIASES["excel"]
 
 
-class TestConnectorPatterns:
-    def test_sequential_pattern_count(self):
-        sequential = [p for p in _CONNECTOR_PATTERNS if p[2] == "sequential"]
+class TestConnectorRules:
+    def test_sequential_rule_count(self):
+        sequential = [p for p in _CONNECTOR_RULES if p[3] == "sequential"]
         assert len(sequential) >= 3
 
-    def test_conditional_pattern_count(self):
-        conditional = [p for p in _CONNECTOR_PATTERNS if p[2] == "conditional"]
+    def test_conditional_rule_count(self):
+        conditional = [p for p in _CONNECTOR_RULES if p[3] == "conditional"]
         assert len(conditional) >= 2
 
-    def test_sequential_patterns_compile(self):
-        for pattern, _, _ in _CONNECTOR_PATTERNS:
-            re.compile(pattern)
+    def test_connector_rules_have_literal_suffixes(self):
+        assert all(suffix for _, suffix, _, _ in _CONNECTOR_RULES)
 
 
 class TestCompositeActionOverrides:

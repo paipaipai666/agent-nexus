@@ -3,7 +3,8 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Dict, List
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
     from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
@@ -67,6 +68,13 @@ _PROBE_NOOP_TOOL = {
 _default_llm: "AgentLLM | None" = None
 
 
+@dataclass
+class _ActiveCall:
+    thread_id: int
+    checker: Callable[[], bool] | None
+    provider: "BaseLLMProvider | None" = None
+
+
 def get_default_llm() -> "AgentLLM":
     global _default_llm
     if _default_llm is None:
@@ -95,31 +103,33 @@ class AgentLLM:
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
         self._capabilities: ModelCapabilities | None = None
         self._session_tracker: SessionCapabilityTracker | None = None
-        self._cancel_checker: Callable[[], bool] | None = None
-        self._active_provider: Any = None
+        self._default_cancel_checker: Callable[[], bool] | None = None
 
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
-        """Install a cooperative cancellation callback for the current run."""
-        self._cancel_checker = checker
+        """Install a callback for this thread's runs.
 
-    def _cancel_watcher(self, stop: threading.Event) -> None:
+        A callback installed on the main thread is also the default for
+        workers that have not installed their own callback.
+        """
+        self._cs().cancel_checker = checker
+        if threading.current_thread() is threading.main_thread():
+            self._default_cancel_checker = checker
+
+    def _cancel_watcher(self, stop: threading.Event, call: _ActiveCall) -> None:
         """Poll the cancel checker; on fire, close the active provider stream.
 
         Without this, a stalled network read hides the cancel signal until
         the next token arrives (token-boundary polling only).
         """
-        checker = self._cancel_checker
+        checker = call.checker
         while not stop.wait(0.05):
             if checker is not None and checker():
-                provider = self._active_provider
+                provider = call.provider
                 if provider is not None:
                     try:
-                        abort = getattr(provider, "abort_active_stream", None)
-                        if abort is not None:
-                            abort()
+                        provider.abort_active_stream(thread_id=call.thread_id)
                     except Exception:
                         pass
-                return
 
     def _cs(self):
         """Per-thread scratch space for the in-flight call's side-channel results."""
@@ -134,6 +144,7 @@ class AgentLLM:
             s.usage = {}
             s.reasoning_content = ""
             s.reasoning_buf = ""
+            s.active_call = None
         return s
 
     @property
@@ -312,6 +323,7 @@ class AgentLLM:
             return ""
 
         self.last_tool_calls = []
+        self.last_error = ""
         self._cs().tool_call_mode = tools is not None and len(tools) > 0
         self._cs().non_transient = False
 
@@ -327,10 +339,12 @@ class AgentLLM:
         effective_messages = projection_fn(messages) if projection_fn else messages
 
         stop_watcher = threading.Event()
+        call = _ActiveCall(threading.get_ident(), getattr(self._cs(), "cancel_checker", self._default_cancel_checker))
+        self._cs().active_call = call
         watcher = None
-        if self._cancel_checker is not None:
+        if call.checker is not None:
             watcher = threading.Thread(
-                target=self._cancel_watcher, args=(stop_watcher,),
+                target=self._cancel_watcher, args=(stop_watcher, call),
                 name="llm-cancel-watcher", daemon=True,
             )
             watcher.start()
@@ -344,7 +358,7 @@ class AgentLLM:
                     tools, response_format, thinking, on_token=on_token,
                     effort=effort,
                 ) or ""
-                if result:
+                if result or self.last_tool_calls:
                     break
                 if self._cs().non_transient:
                     break
@@ -354,6 +368,7 @@ class AgentLLM:
                     time.sleep(delay)
         finally:
             stop_watcher.set()
+            self._cs().active_call = None
 
         fire_hook(HookType.AFTER_LLM_CALL, {
             "messages": messages,
@@ -408,6 +423,7 @@ class AgentLLM:
                     response_format, thinking, on_token, effort=effort,
                 )
                 self.last_tool_calls = result.tool_calls
+                self.last_error = ""
                 self.last_truncated = result.truncated
                 self.last_reasoning_content = result.reasoning_content
                 self.last_usage = result.usage or self._estimate_usage(model, messages, result.text)
@@ -439,7 +455,8 @@ class AgentLLM:
         except Exception as e:
             if isinstance(e, AgentCancelled):
                 raise
-            if self._cancel_checker is not None and self._cancel_checker():
+            call = self._cs().active_call
+            if call is not None and call.checker is not None and call.checker():
                 raise AgentCancelled("cancelled") from e
 
             error_msg = str(e)
@@ -516,7 +533,9 @@ class AgentLLM:
 
         stream_opts = {"include_usage": True}
 
-        self._active_provider = provider
+        call = self._cs().active_call
+        if call is not None:
+            call.provider = provider
         try:
             return provider.stream_chat(
                 messages=messages,
@@ -534,7 +553,8 @@ class AgentLLM:
                 on_token=on_token,
             )
         finally:
-            self._active_provider = None
+            if call is not None:
+                call.provider = None
 
     def _estimate_usage(self, model, messages, result) -> dict:
         """Estimate token usage via tiktoken when not reported by the API."""

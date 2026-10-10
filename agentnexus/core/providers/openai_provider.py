@@ -26,16 +26,44 @@ class OpenAIProvider(BaseLLMProvider):
     """Direct provider for any OpenAI-compatible API endpoint."""
 
     def __init__(self) -> None:
-        self._active_stream: Any = None
+        self._lock = threading.RLock()
+        self._clients: dict[tuple[str, str, int], OpenAI] = {}
+        self._active_streams: dict[int, Any] = {}
 
-    def abort_active_stream(self) -> None:
-        """Close the in-flight stream's HTTP connection, unblocking readers."""
-        stream = self._active_stream
-        if stream is not None:
+    def _get_client(self, api_key: str, base_url: str, timeout: int) -> OpenAI:
+        key = (base_url.rstrip("/"), api_key, timeout)
+        with self._lock:
+            if key not in self._clients:
+                self._clients[key] = OpenAI(api_key=api_key, base_url=key[0], timeout=timeout)
+            return self._clients[key]
+
+    @staticmethod
+    def _close_stream(stream: Any) -> None:
+        close = getattr(stream, "close", None)
+        if close is not None:
             try:
-                stream.close()
+                close()
             except Exception:
-                pass
+                logger.debug("Failed to close OpenAI stream", exc_info=True)
+
+    def abort_active_stream(self, thread_id: int | None = None) -> None:
+        """Close the in-flight stream's HTTP connection, unblocking readers."""
+        with self._lock:
+            stream = self._active_streams.get(thread_id if thread_id is not None else threading.get_ident())
+        if stream is not None:
+            self._close_stream(stream)
+
+    def close(self) -> None:
+        """Release cached connections when the application shuts down."""
+        with self._lock:
+            streams = list(self._active_streams.values())
+            clients = list(self._clients.values())
+            self._active_streams.clear()
+            self._clients.clear()
+        for stream in streams:
+            self._close_stream(stream)
+        for client in clients:
+            client.close()
 
     def _guarded_iter(self, response: Any, *, timeout: int) -> Iterator[Any]:
         """Yield stream chunks with hung-connection watchdogs.
@@ -63,14 +91,14 @@ class OpenAIProvider(BaseLLMProvider):
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                self.abort_active_stream()
+                self._close_stream(response)
                 raise TimeoutError(
                     f"stream exceeded total budget {total_budget:.0f}s — treating as hung"
                 )
             try:
                 item = q.get(timeout=min(_CHUNK_GAP_S, remaining))
             except queue.Empty:
-                self.abort_active_stream()
+                self._close_stream(response)
                 if deadline - time.monotonic() <= 0:
                     raise TimeoutError(
                         f"stream exceeded total budget {total_budget:.0f}s — treating as hung"
@@ -98,11 +126,7 @@ class OpenAIProvider(BaseLLMProvider):
         reasoning_effort: str | None = None,
         on_token: Callable[[str], None] | None = None,
     ) -> StreamResult:
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-        )
+        client = self._get_client(api_key, base_url, timeout)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -142,7 +166,9 @@ class OpenAIProvider(BaseLLMProvider):
             kwargs.pop("reasoning_effort", None)
             kwargs.pop("extra_body", None)
             response = client.chat.completions.create(**kwargs)
-        self._active_stream = response
+        thread_id = threading.get_ident()
+        with self._lock:
+            self._active_streams[thread_id] = response
 
         result = StreamResult()
         tool_call_bufs: dict[int, dict[str, Any]] = {}
@@ -204,7 +230,9 @@ class OpenAIProvider(BaseLLMProvider):
                 if fr:
                     result.finish_reason = fr
         finally:
-            self._active_stream = None
+            with self._lock:
+                self._active_streams.pop(thread_id, None)
+            self._close_stream(response)
 
         for buf in tool_call_bufs.values():
             if buf["function"]["name"]:

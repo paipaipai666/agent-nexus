@@ -33,24 +33,14 @@ def check_mcp_health(runtime: Any) -> dict[str, Any]:
         if mcp is None:
             return {"status": "ok", "detail": "MCP not enabled"}
 
-        servers = getattr(mcp, "_servers", {})
+        servers = mcp.status_snapshot()["servers"]
         if not servers:
             return {"status": "ok", "detail": "No MCP servers configured"}
 
-        healthy = 0
-        degraded = 0
-        failed = 0
-        for name, server in servers.items():
-            state = getattr(server, "state", None)
-            state_str = str(state).lower() if state else "unknown"
-            if "healthy" in state_str:
-                healthy += 1
-            elif "degraded" in state_str:
-                degraded += 1
-            else:
-                failed += 1
-
-        total = healthy + degraded + failed
+        total = len(servers)
+        healthy = sum(server["state"] == "healthy" for server in servers)
+        degraded = sum(server["state"] == "degraded" for server in servers)
+        failed = total - healthy - degraded
         if failed == total and total > 0:
             status = "error"
         elif degraded > 0 or failed > 0:

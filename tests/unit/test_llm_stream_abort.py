@@ -54,7 +54,7 @@ class _StalledStreamProvider(BaseLLMProvider):
             pass
         raise RuntimeError("stream closed by abort")
 
-    def abort_active_stream(self) -> None:
+    def abort_active_stream(self, thread_id=None) -> None:
         self.abort_calls += 1
         self.aborted.set()
 

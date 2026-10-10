@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import re
-
 from agentnexus.skills.router.types import (
     _COMPOSITE_ACTION_OVERRIDES,
-    _CONNECTOR_PATTERNS,
+    _CONNECTOR_RULES,
     _OBJECT_LEXICON,
     _VERB_LEXICON,
     IntentSignals,
@@ -21,11 +19,20 @@ def extract_intent_signals(
     connectors: list[tuple[str, int]] = []
     priority_mode = "default"
 
-    for pattern, mode, _kind in _CONNECTOR_PATTERNS:
-        match = re.search(pattern, text_lower)
-        if match:
-            connectors.append((match.group(0), match.start()))
-            priority_mode = mode
+    lines = text_lower.split("\n")
+    for prefix, suffix, mode, _kind in _CONNECTOR_RULES:
+        offset = 0
+        for line in lines:
+            start = line.find(prefix)
+            # The original patterns require at least one character between
+            # the literals, and never span a newline.
+            end = line.find(suffix, start + len(prefix) + 1) if start >= 0 else -1
+            if end >= 0:
+                connectors.append((line[start:end + len(suffix)], offset + start))
+                priority_mode = mode
+                break
+            offset += len(line) + 1
+        if connectors:
             break
 
     if not connectors:

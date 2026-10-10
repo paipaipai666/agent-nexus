@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -155,10 +156,12 @@ class AnthropicMessagesProvider(BaseLLMProvider):
     """Direct provider for Anthropic's /v1/messages API."""
 
     def __init__(self) -> None:
-        self._active_response: Any = None
+        self._lock = threading.Lock()
+        self._active_responses: dict[int, Any] = {}
 
-    def abort_active_stream(self) -> None:
-        stream = self._active_response
+    def abort_active_stream(self, thread_id: int | None = None) -> None:
+        with self._lock:
+            stream = self._active_responses.get(thread_id if thread_id is not None else threading.get_ident())
         if stream is not None:
             try:
                 stream.close()
@@ -208,11 +211,13 @@ class AnthropicMessagesProvider(BaseLLMProvider):
 
         with httpx.Client(timeout=httpx.Timeout(timeout, read=timeout * 10)) as client:
             with client.stream("POST", url, headers=headers, json=body) as response:
-                self._active_response = response
-                if response.status_code >= 400:
-                    raw = response.read().decode("utf-8", errors="replace")
-                    raise RuntimeError(f"Anthropic HTTP {response.status_code}: {raw[:400]}")
+                thread_id = threading.get_ident()
+                with self._lock:
+                    self._active_responses[thread_id] = response
                 try:
+                    if response.status_code >= 400:
+                        raw = response.read().decode("utf-8", errors="replace")
+                        raise RuntimeError(f"Anthropic HTTP {response.status_code}: {raw[:400]}")
                     for line in response.iter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -284,7 +289,8 @@ class AnthropicMessagesProvider(BaseLLMProvider):
                             err = event.get("error") or {}
                             raise RuntimeError(f"Anthropic stream error: {err}")
                 finally:
-                    self._active_response = None
+                    with self._lock:
+                        self._active_responses.pop(thread_id, None)
 
         for buf in tool_bufs.values():
             if not buf.get("name"):
