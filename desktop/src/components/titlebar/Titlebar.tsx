@@ -30,10 +30,10 @@ export default function Titlebar() {
           onClick={toggleSidebar}
           className="window-no-drag w-8 h-8 grid place-items-center rounded-md transition-colors hover:bg-[var(--surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ color: 'var(--fg-secondary)' }}
-          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-label={sidebarCollapsed ? '显示侧栏' : '隐藏侧栏'}
           aria-expanded={!sidebarCollapsed}
           aria-controls="navigation-sidebar"
-          title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (Ctrl+B)`}
+          title={`${sidebarCollapsed ? '显示' : '隐藏'}侧栏（Ctrl+B）`}
         >
           {sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
         </button>
@@ -44,7 +44,7 @@ export default function Titlebar() {
         className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-[13px]"
         style={{ color: 'var(--fg-muted)' }}
       >
-        <span>{current?.label ?? 'Chat'}</span>
+        <span>{current?.label ?? '聊天'}</span>
         {(() => {
           const sub = settingsItemForPath(location.pathname)
           return sub && sub.path !== '/settings' ? (
@@ -79,7 +79,7 @@ export default function Titlebar() {
           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--fg-muted)' }}
         >
           <Search size={13} />
-          <span>Search</span>
+          <span>搜索</span>
           <span className="ml-auto" style={{ color: 'var(--fg-faint)' }}>Ctrl K</span>
         </button>
         <button
@@ -88,12 +88,15 @@ export default function Titlebar() {
           style={{ color: 'var(--fg-muted)' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-muted)' }}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}
+          aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}
         >
           {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         <button
           onClick={() => window.electronAPI?.minimize()}
+          aria-label="最小化窗口"
+          title="最小化窗口"
           className="w-10 h-full grid place-items-center transition-colors"
           style={{ color: 'var(--fg-muted)' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
@@ -103,6 +106,8 @@ export default function Titlebar() {
         </button>
         <button
           onClick={() => window.electronAPI?.maximize()}
+          aria-label="最大化或还原窗口"
+          title="最大化或还原窗口"
           className="w-10 h-full grid place-items-center transition-colors"
           style={{ color: 'var(--fg-muted)' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
@@ -112,6 +117,8 @@ export default function Titlebar() {
         </button>
         <button
           onClick={() => window.electronAPI?.close()}
+          aria-label="关闭窗口"
+          title="关闭窗口"
           className="w-10 h-full grid place-items-center transition-colors"
           style={{ color: 'var(--fg-muted)' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--red)'; e.currentTarget.style.color = 'white' }}

@@ -23,7 +23,7 @@ const ToolGroupHeader = React.memo(function ToolGroupHeader({
       style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}
     >
       <span className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: 'var(--fg-muted)' }}>
-        {n} tool call{n === 1 ? '' : 's'}
+        {n} 次工具调用
         <span className="inline-flex items-center gap-1">
           {msgs.slice(0, 3).map((m, i) => (
             <span
@@ -38,7 +38,7 @@ const ToolGroupHeader = React.memo(function ToolGroupHeader({
           ))}
         </span>
         {runningCount > 0 && (
-          <span style={{ color: 'var(--amber)' }}>· running</span>
+          <span style={{ color: 'var(--amber)' }}>· 执行中</span>
         )}
       </span>
       <div className="ml-auto flex items-center gap-2">
@@ -47,7 +47,7 @@ const ToolGroupHeader = React.memo(function ToolGroupHeader({
             className="text-[10.5px] px-2 py-px rounded-full"
             style={{ color: 'var(--red)', background: 'var(--red-muted)' }}
           >
-            {errorCount} error{errorCount === 1 ? '' : 's'}
+            {errorCount} 次失败
           </span>
         )}
         {totalLabel && (

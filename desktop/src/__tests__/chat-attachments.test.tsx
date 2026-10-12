@@ -30,6 +30,12 @@ class MockWebSocket {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+function messageInput() {
+  const element = screen.getByRole('textbox', { name: '消息输入' })
+  if (!(element instanceof HTMLTextAreaElement)) throw new Error('消息输入必须是文本框')
+  return element
+}
+
 const apiOverrides: Record<string, (...args: any[]) => Promise<any>> = {}
 
 vi.mock('../services/api', () => {
@@ -121,6 +127,38 @@ afterEach(() => {
 })
 
 describe('ChatPage attachments', () => {
+  it('keeps edits made while attachment validation is pending', async () => {
+    mockBridge()
+    apiOverrides.restoreSession = vi.fn().mockResolvedValue({ session_id: 'validation-draft', restored: true })
+    const file = { path: 'C:\\docs\\pending.txt', name: 'pending.txt', size: 12 }
+    const stat = { path: file.path, ok: true, size: 12 }
+    const statFiles = vi.fn().mockResolvedValue([stat])
+    window.electronAPI!.statFiles = statFiles
+    window.electronAPI!.pickFiles = vi.fn().mockResolvedValue([file])
+    const probe: ProbeState = { messages: [], isRunning: false }
+    await renderChat('/chat/validation-draft', probe)
+    await userEvent.click(await screen.findByRole('button', { name: '添加附件' }))
+    await screen.findByText(file.name)
+    const input = messageInput()
+    await userEvent.clear(input)
+    await userEvent.type(input, 'initial request')
+    let release: (stats: typeof stat[]) => void = () => { throw new Error('Validation has not started') }
+    const validation = new Promise<typeof stat[]>(resolve => { release = resolve })
+    statFiles.mockReturnValueOnce(validation)
+    await userEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await userEvent.type(input, ' with more details')
+    await act(async () => { release([stat]); await validation })
+    await waitFor(() => expect(input.value).toBe('initial request with more details'))
+    expect(sentPayloads().filter(payload => payload.type === 'send_message')).toHaveLength(0)
+    expect(screen.getByText(file.name)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(sentPayloads().filter(payload => payload.type === 'send_message')).toEqual([
+      expect.objectContaining({ content: 'initial request with more details', attachments: [
+        { ...file, mime: 'application/octet-stream' },
+      ] }),
+    ]))
+  })
+
   it('blocks send when an attached file was deleted, then recovers', async () => {
     mockBridge()
     apiOverrides.restoreSession = vi.fn().mockResolvedValue({ session_id: 's1', restored: true })
@@ -134,7 +172,7 @@ describe('ChatPage attachments', () => {
     await userEvent.click(await screen.findByTitle('添加附件（本地文件，按路径引用）'))
     await waitFor(() => expect(screen.getByText('a.txt')).toBeInTheDocument())
 
-    const ta = screen.getByPlaceholderText('Message Nexus...') as HTMLTextAreaElement
+    const ta = messageInput()
     await userEvent.type(ta, 'hello agent')
 
     statFiles.mockResolvedValue([{ path: 'C:\\docs\\a.txt', ok: false, size: 0 }])
@@ -178,7 +216,7 @@ describe('ChatPage attachments', () => {
 
     await userEvent.click(await screen.findByTitle('添加附件（本地文件，按路径引用）'))
     await waitFor(() => expect(screen.getByText('c.png')).toBeInTheDocument())
-    const ta = screen.getByPlaceholderText('Message Nexus...') as HTMLTextAreaElement
+    const ta = messageInput()
     await userEvent.type(ta, 'first q{Enter}')
 
     await waitFor(() => expect(apiOverrides.createSession).toHaveBeenCalled())
@@ -194,7 +232,7 @@ describe('ChatPage attachments', () => {
   it('hides the paperclip without the Electron bridge', async () => {
     const probe: ProbeState = { messages: [], isRunning: false }
     await renderChat('/', probe)
-    await screen.findByPlaceholderText('Message Nexus...')
+    await screen.findByRole('textbox', { name: '消息输入' })
     expect(screen.queryByTitle('添加附件（本地文件，按路径引用）')).not.toBeInTheDocument()
   })
 
@@ -207,14 +245,14 @@ describe('ChatPage attachments', () => {
 
     const probe: ProbeState = { messages: [], isRunning: false }
     await renderChat('/chat/s1', probe)
-    await screen.findByPlaceholderText('Message Nexus...')
+    await screen.findByRole('textbox', { name: '消息输入' })
 
     await userEvent.click(screen.getByTestId('send-warmup'))
     await waitFor(() => expect(probe.isRunning).toBe(true))
 
     await userEvent.click(await screen.findByTitle('添加附件（本地文件，按路径引用）'))
     await waitFor(() => expect(screen.getByText('b.png')).toBeInTheDocument())
-    const ta = screen.getByPlaceholderText('Agent running... messages will be queued') as HTMLTextAreaElement
+    const ta = messageInput()
     await userEvent.type(ta, 'queued q{Enter}')
 
     await sleep(150)

@@ -8,7 +8,7 @@ import secrets
 import threading
 from typing import Literal
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from agentnexus.server.deps import get_runtime
@@ -266,15 +266,21 @@ def list_sessions(runtime=Depends(get_runtime)):
 
 
 @router.get("/sessions/recent")
-def list_recent_sessions(limit: int = 5):
+def list_recent_sessions(
+    limit: int = Query(default=5, ge=1, le=500),
+    query: str = Query(default="", max_length=200),
+    offset: int = Query(default=0, ge=0),
+):
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
 
     settings = get_settings()
     sessions = ConversationVersionManager.find_recent_sessions(
-        settings.memory_db_path, None, limit=limit
+        settings.memory_db_path, None, limit=limit + 1, query=query, offset=offset
     )
-    return {"sessions": sessions, "count": len(sessions)}
+    has_more = len(sessions) > limit
+    sessions = sessions[:limit]
+    return {"sessions": sessions, "count": len(sessions), "has_more": has_more}
 
 
 class DeleteSessionsRequest(BaseModel):

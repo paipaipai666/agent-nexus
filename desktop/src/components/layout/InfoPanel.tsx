@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, CheckCircle, Circle, Clock, Wrench, Server, Zap, ListTodo, PanelRightOpen, PanelRightClose, Bot, Square } from 'lucide-react'
 import { api, type SubagentInfo } from '../../services/api'
@@ -102,7 +102,7 @@ export default function InfoPanel() {
       {}
       {mergedSubagents.size > 0 && (
         <Section
-          title={`Subagents (${mergedSubagents.size})`}
+        title={`子任务 (${mergedSubagents.size})`}
           icon={<Bot size={14} />}
           expanded={expandedSections.subagents}
           onToggle={() => toggleSection('subagents')}
@@ -184,7 +184,7 @@ export default function InfoPanel() {
 
       {}
       <Section
-        title={`Available Tools (${totalTools})`}
+        title={`可用工具与技能 (${totalTools})`}
         icon={<Wrench size={14} />}
         expanded={expandedSections.tools}
         onToggle={() => toggleSection('tools')}
@@ -214,7 +214,7 @@ export default function InfoPanel() {
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
                 <Zap size={12} style={{ color: 'var(--accent)' }} />
-                <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)' }}>Skills</span>
+                <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)' }}>技能</span>
               </div>
               <div className="space-y-1">
                 {enabledSkills.map(skill => (
@@ -228,7 +228,7 @@ export default function InfoPanel() {
           )}
 
           {connectedServers.length === 0 && enabledSkills.length === 0 && (
-            <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>No tools available</p>
+            <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>暂无可用的 MCP 工具或技能</p>
           )}
         </div>
       </Section>
@@ -242,11 +242,28 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
   collapsed: boolean
   onToggleCollapse: () => void
 }) {
-  if (collapsed) {
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 1280)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const resize = () => setNarrow(window.innerWidth < 1280)
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
+  useEffect(() => {
+    const panel = dialog.current
+    if (!panel) return
+    if (dialogOpen && narrow && !panel.open) panel.showModal()
+    else if ((!dialogOpen || !narrow) && panel.open) panel.close()
+  }, [dialogOpen, narrow])
+  if (collapsed || narrow) {
     return (
+      <>
       <button
-        onClick={onToggleCollapse}
-        title="Show session panel"
+        onClick={() => narrow ? setDialogOpen(true) : onToggleCollapse()}
+        title="查看任务信息"
+        aria-label="查看任务信息"
+        aria-haspopup={narrow ? 'dialog' : undefined}
         className="absolute right-4 top-3 z-20 flex items-center gap-2 h-8 px-3 rounded-full transition-all"
         style={{
           background: 'color-mix(in srgb, var(--surface-2) 88%, transparent)',
@@ -259,7 +276,7 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
         }}
       >
         <PanelRightOpen size={13} />
-        <span className="text-[12.5px] font-medium">Tools</span>
+        <span className="text-[12.5px] font-medium">任务信息</span>
         <span
           className="text-[11.5px] font-mono px-1.5 py-px rounded-full"
           style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
@@ -267,12 +284,21 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
           {totalTools}
         </span>
       </button>
+      {narrow && <dialog ref={dialog} aria-label="任务信息" onCancel={() => setDialogOpen(false)}
+        className="rounded-xl p-4" style={{ width: 'min(360px, calc(100vw - 32px))', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface-1)', color: 'var(--fg)' }}>
+        <div className="flex items-center justify-between mb-3"><h2 className="text-base font-semibold">任务信息</h2>
+          <button type="button" className="btn-ghost text-sm" aria-label="关闭任务信息" onClick={() => setDialogOpen(false)}>关闭</button>
+        </div>
+        <div className="space-y-3">{children}</div>
+      </dialog>}
+      </>
     )
   }
 
   return (
     <div
-      className="absolute right-4 top-3 bottom-3 w-[300px] z-20 flex flex-col overflow-hidden rounded-2xl"
+      className="w-[300px] shrink-0 my-3 mr-3 flex flex-col overflow-hidden rounded-xl"
+      aria-label="任务信息面板"
       style={{
         background: 'color-mix(in srgb, var(--surface-2) 92%, transparent)',
         backdropFilter: 'blur(20px) saturate(1.3)',
@@ -291,11 +317,12 @@ function InfoPanelCard({ children, totalTools, collapsed, onToggleCollapse }: {
           className="text-[12.5px] font-medium"
           style={{ color: 'var(--fg-muted)' }}
         >
-          Session
+          任务信息
         </span>
         <button
           onClick={onToggleCollapse}
-          title="Hide session panel"
+          title="收起任务信息"
+          aria-label="收起任务信息"
           className="ml-auto p-1 rounded-md transition-colors"
           style={{ color: 'var(--fg-muted)' }}
         >

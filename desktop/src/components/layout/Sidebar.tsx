@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquare, Search, Plus, FolderOpen, FolderPlus, X, ChevronDown, ChevronRight, Settings } from 'lucide-react'
 import { BorderBeam } from 'border-beam'
@@ -7,6 +7,7 @@ import { useSession } from '../session/SessionProvider'
 import { useProjects, selectProject, addProject, removeProject, pickAndAddProject, workspaceKey } from '../../services/projects'
 import { useTheme } from '../theme/ThemeProvider'
 import { usePrefersReducedMotion } from '../../utils/effects'
+import InlineNotice from '../InlineNotice'
 
 interface RecentSession {
   session_id: string
@@ -24,6 +25,7 @@ interface ProjectGroup {
   explicit: boolean
   sessions: RecentSession[]
 }
+type SidebarError = { kind: 'load'; message: string } | { kind: 'delete'; message: string; sessionId: string }
 const parseTime = (dateStr: string) => new Date(dateStr + 'Z').getTime()
 
 function sortByRecency(list: RecentSession[]) {
@@ -35,7 +37,7 @@ const formatTime = (dateStr: string) => {
   const diffMins = Math.floor(diffMs / 60000)
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
-  if (diffMins < 1) return 'now'
+  if (diffMins < 1) return '刚刚'
   if (diffMins < 60) return `${diffMins}m`
   if (diffHours < 24) return `${diffHours}h`
   if (diffDays < 7) return `${diffDays}d`
@@ -51,6 +53,13 @@ export default function Sidebar() {
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
+  const queryRef = useRef(query)
+  queryRef.current = query
+  const requestId = useRef(0)
+  const loadedCount = useRef(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [error, setError] = useState<SidebarError | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const { projects, selected } = useProjects()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
@@ -58,8 +67,10 @@ export default function Sidebar() {
   const isSettingsActive = location.pathname === '/settings' || location.pathname.startsWith('/settings/')
 
   useEffect(() => {
-    loadRecentSessions()
-  }, [])
+    requestId.current++
+    const timer = window.setTimeout(() => void loadRecentSessions(), query ? 200 : 0)
+    return () => { window.clearTimeout(timer); requestId.current++ }
+  }, [query])
 
   useEffect(() => {
     if (isChatActive) loadRecentSessions()
@@ -71,15 +82,22 @@ export default function Sidebar() {
     return () => window.removeEventListener('session-updated', handleSessionUpdated)
   }, [])
 
-  const loadRecentSessions = async () => {
+  const loadRecentSessions = async (append = false) => {
+    const id = ++requestId.current
+    const offset = append ? loadedCount.current : 0
     setLoading(true)
+    setError(previous => previous?.kind === 'delete' ? previous : null)
     try {
-      const { sessions } = await api.getRecentSessions(50)
-      setRecentSessions(sessions.filter(s => s.preview && s.preview.trim()))
+      const response = await api.getRecentSessions(50, queryRef.current, offset)
+      if (id !== requestId.current) return
+      const incoming = response.sessions.filter(s => s.preview && s.preview.trim())
+      loadedCount.current = offset + response.sessions.length
+      setRecentSessions(previous => append ? [...new Map([...previous, ...incoming].map(s => [s.session_id, s])).values()] : incoming)
+      setHasMore(response.has_more === true)
     } catch (error) {
-      console.error('Failed to load recent sessions:', error)
+      if (id === requestId.current) setError({ kind: 'load', message: `会话加载失败：${error instanceof Error ? error.message : '请重试'}` })
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
   }
 
@@ -88,7 +106,6 @@ export default function Sidebar() {
     const q = query.trim().toLowerCase()
     for (const s of recentSessions) {
       if (!s.workspace_path) continue
-      if (q && !s.preview.toLowerCase().includes(q)) continue
       const key = workspaceKey(s.workspace_path)
       const list = byKey.get(key)
       if (list) list.push(s)
@@ -99,7 +116,7 @@ export default function Sidebar() {
       const key = workspaceKey(p)
       claimed.add(key)
       return { key, path: p, explicit: true, sessions: sortByRecency(byKey.get(key) ?? []) }
-    })
+    }).filter(group => !q || group.sessions.length > 0)
     const orphans: ProjectGroup[] = [...byKey.entries()]
       .filter(([key]) => !claimed.has(key))
       .map(([key, list]) => ({ key, path: list[0].workspace_path, explicit: false, sessions: sortByRecency(list) }))
@@ -132,9 +149,10 @@ export default function Sidebar() {
     navigate(`/chat/${sessionId}`)
   }
 
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string, preview: string) => {
-    e.stopPropagation()
-    if (!window.confirm(`删除会话「${preview.slice(0, 40)}」？\n该会话的消息历史将被永久删除，不可恢复。`)) return
+  const deleteSession = async (sessionId: string) => {
+    if (deleting) return
+    setDeleting(sessionId)
+    setError(null)
     try {
       const res = await api.deleteSessions([sessionId])
       if (res.skipped.includes(sessionId)) {
@@ -144,8 +162,14 @@ export default function Sidebar() {
       setRecentSessions(prev => prev.filter(s => s.session_id !== sessionId))
       if (location.pathname === `/chat/${sessionId}`) navigate('/')
     } catch (err) {
-      console.error('Failed to delete session:', err)
+      setError({ kind: 'delete', sessionId, message: `删除会话失败：${err instanceof Error ? err.message : '请重试'}` })
     }
+    finally { setDeleting(null) }
+  }
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string, preview: string) => {
+    e.stopPropagation()
+    if (!window.confirm(`删除会话「${preview.slice(0, 40)}」？\n该会话的消息历史将被永久删除，不可恢复。`)) return
+    await deleteSession(sessionId)
   }
 
   const isActiveSession = (sid: string) => location.pathname === `/chat/${sid}`
@@ -169,7 +193,7 @@ export default function Sidebar() {
             style={{ height: 36 }}
           >
             <Plus size={13} />
-            New Chat
+            新建聊天
           </button>
         </BorderBeam>
         <div
@@ -193,7 +217,9 @@ export default function Sidebar() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search sessions…"
+            placeholder="搜索会话内容…"
+            aria-label="搜索会话内容"
+            maxLength={200}
             className="flex-1 min-w-0 bg-transparent outline-none text-[13px]"
             style={{ color: 'var(--fg)' }}
           />
@@ -202,6 +228,8 @@ export default function Sidebar() {
 
       {}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
+        <InlineNotice message={error?.message ?? null} onDismiss={() => setError(null)} onRetry={() => error?.kind === 'delete' ? void deleteSession(error.sessionId) : void loadRecentSessions()} />
+        {loading && <p role="status" className="px-3 py-2 text-xs" style={{ color: 'var(--fg-secondary)' }}>{query ? '正在搜索…' : '正在加载会话…'}</p>}
         {
 }
         {draftSession && (
@@ -220,8 +248,8 @@ export default function Sidebar() {
               style={{ background: 'var(--accent)' }}
             />
             <MessageSquare size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-            <span className="text-[13.5px] truncate flex-1" title={draftSession.preview || 'New session'}>
-              {draftSession.preview || 'New session'}
+            <span className="text-[13.5px] truncate flex-1" title={draftSession.preview || '新会话'}>
+              {draftSession.preview || '新会话'}
             </span>
             {!draftSession.isNew && isSessionRunning(draftSession.id) && (
               <span
@@ -231,7 +259,7 @@ export default function Sidebar() {
               />
             )}
             <span className="text-[12px] shrink-0" style={{ color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>
-              now
+              刚刚
             </span>
           </button>
         )}
@@ -240,7 +268,7 @@ export default function Sidebar() {
             className="px-1 text-[12px] font-medium"
             style={{ color: 'var(--fg-muted)' }}
           >
-            Projects
+            项目
           </span>
           <button
             onClick={handleAddProject}
@@ -248,18 +276,19 @@ export default function Sidebar() {
             style={{ color: 'var(--fg-faint)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-3)'; e.currentTarget.style.color = 'var(--fg)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)' }}
-            title="Add project folder"
-            aria-label="Add project folder"
+            title="添加项目文件夹"
+            aria-label="添加项目文件夹"
           >
             <FolderPlus size={12} />
           </button>
         </div>
 
-        {loading ? (
+        {loading && recentSessions.length === 0 ? (
           <div className="px-3 py-3 flex justify-center">
             <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--fg-faint)', borderTopColor: 'transparent' }} />
           </div>
         ) : groups.length === 0 ? (
+          query.trim() ? <p role="status" className="px-3 py-3 text-sm" style={{ color: 'var(--fg-secondary)' }}>没有匹配的会话，请尝试其他关键词。</p> :
           <button
             onClick={handleAddProject}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-[9px] transition-colors text-left"
@@ -268,7 +297,7 @@ export default function Sidebar() {
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
             <FolderPlus size={13} style={{ flexShrink: 0 }} />
-            <span className="text-[13.5px]">Add a project folder…</span>
+            <span className="text-[13.5px]">添加项目文件夹…</span>
           </button>
         ) : (
           <div className="space-y-1.5">
@@ -286,15 +315,15 @@ export default function Sidebar() {
                       onClick={() => setCollapsed(c => ({ ...c, [group.key]: !c[group.key] }))}
                       className="w-7 h-7 grid place-items-center shrink-0 transition-opacity -my-2"
                       style={{ color: 'var(--fg-faint)' }}
-                      title={isCollapsed ? 'Expand' : 'Collapse'}
-                      aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+                      title={isCollapsed ? '展开项目' : '折叠项目'}
+                      aria-label={isCollapsed ? '展开项目' : '折叠项目'}
                     >
                       {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     </button>
                     <button
                       onClick={() => selectProject(group.path)}
                       className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                      title={`${group.path}\nNew chats are created in this folder`}
+                      title={`${group.path}\n新聊天将在此文件夹中创建`}
                     >
                       <FolderOpen size={12} style={{ color: isSelected ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
                       <span
@@ -309,8 +338,8 @@ export default function Sidebar() {
                         onClick={() => removeProject(group.path)}
                         className="w-7 h-7 grid place-items-center shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity -my-2"
                         style={{ color: 'var(--fg-faint)' }}
-                        title="Remove from projects (sessions are kept)"
-                        aria-label="Remove from projects"
+                        title="移除项目，会话仍会保留"
+                        aria-label="移除项目"
                       >
                         <X size={11} />
                       </button>
@@ -319,8 +348,8 @@ export default function Sidebar() {
                         onClick={() => addProject(group.path)}
                         className="w-7 h-7 grid place-items-center shrink-0 rounded opacity-0 group-hover/proj:opacity-100 transition-opacity -my-2"
                         style={{ color: 'var(--fg-faint)' }}
-                        title="Add as project"
-                        aria-label="Add as project"
+                        title="添加为项目"
+                        aria-label="添加为项目"
                       >
                         <Plus size={11} />
                       </button>
@@ -331,7 +360,7 @@ export default function Sidebar() {
                   {!isCollapsed && (
                     <div className="ml-4 space-y-1">
                       {group.sessions.length === 0 ? (
-                        <div className="px-3 py-1 text-[12px]" style={{ color: 'var(--fg-faint)' }}>No chats yet</div>
+                        <div className="px-3 py-1 text-[12px]" style={{ color: 'var(--fg-faint)' }}>{query.trim() ? '该项目没有匹配的会话' : '暂无会话'}</div>
                       ) : group.sessions.map((session) => {
                         const active = isActiveSession(session.session_id)
                         return (
@@ -353,8 +382,8 @@ export default function Sidebar() {
                                 />
                               )}
                               <MessageSquare size={12} style={{ color: active ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
-                              <span className="text-[13.5px] truncate flex-1" title={session.preview || 'New session'}>
-                                {session.preview || 'New session'}
+                              <span className="text-[13.5px] truncate flex-1" title={session.preview || '新会话'}>
+                                {session.preview || '新会话'}
                               </span>
                               {isSessionRunning(session.session_id) && (
                                 <span
@@ -388,10 +417,11 @@ export default function Sidebar() {
                             </button>
                             <button
                               onClick={(e) => handleDeleteSession(e, session.session_id, session.preview || '')}
+                              disabled={deleting !== null}
                               className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center rounded-md opacity-0 group-hover/session:opacity-100 transition-opacity"
                               style={{ color: 'var(--fg-faint)', background: 'var(--surface-3)' }}
-                              title="Delete session (history is permanently removed)"
-                              aria-label="Delete session"
+                              title="删除会话，消息历史将永久移除"
+                              aria-label="删除会话"
                             >
                               <X size={11} />
                             </button>
@@ -405,6 +435,7 @@ export default function Sidebar() {
             })}
           </div>
         )}
+        {hasMore && <button type="button" className="btn-ghost w-full text-sm mt-3" disabled={loading} onClick={() => void loadRecentSessions(true)}>加载更多会话</button>}
       </div>
 
       {}
@@ -426,7 +457,7 @@ export default function Sidebar() {
             />
           )}
           <Settings size={14} style={{ color: isSettingsActive ? 'var(--accent)' : 'var(--fg-faint)', flexShrink: 0 }} />
-          <span className="text-[13.5px] font-medium flex-1">Settings</span>
+          <span className="text-[13.5px] font-medium flex-1">设置</span>
           <kbd
             className="font-mono text-[12px] px-1 rounded"
             style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}

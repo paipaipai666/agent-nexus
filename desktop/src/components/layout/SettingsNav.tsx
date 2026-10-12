@@ -33,7 +33,7 @@ export default function SettingsNav() {
         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-secondary)' }}
       >
         <ArrowLeft size={14} style={{ flexShrink: 0 }} />
-        <span className="text-[12px] font-medium">Back to Chat</span>
+        <span className="text-[12px] font-medium">返回聊天</span>
         <kbd
           className="ml-auto font-mono text-[10px] px-1 rounded"
           style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}
@@ -45,7 +45,7 @@ export default function SettingsNav() {
         className="px-2.5 pb-2 text-[11px] font-medium uppercase"
         style={{ color: 'var(--fg-muted)', letterSpacing: '0.06em' }}
       >
-        Settings
+        设置
       </div>
       <div className="flex flex-col" style={{ gap: 2 }}>
         {SETTINGS_NAV.map((item) => {

@@ -144,7 +144,7 @@ describe('草稿态会话行（New Chat 立即可见，opencode 风格）', () =
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
     })
-    expect(screen.getByText('New session')).toBeTruthy()
+    expect(screen.getByText('新会话')).toBeInTheDocument()
   })
 
   it('已发送但服务端行未可见时，用本地首条用户消息做预览', async () => {

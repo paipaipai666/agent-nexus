@@ -224,9 +224,9 @@ export const api = {
   getSessions: () =>
     request<{ sessions: Array<{ session_id: string; skill: string | null }> }>('/api/sessions'),
 
-  getRecentSessions: (limit = 5) =>
-    request<{ sessions: Array<{ session_id: string; created_at: string; updated_at: string; last_message_at: string; preview: string; profile: string | null; workspace_path: string }>; count: number }>(
-      `/api/sessions/recent?limit=${limit}`
+  getRecentSessions: (limit = 5, query = '', offset = 0) =>
+    request<{ sessions: Array<{ session_id: string; created_at: string; updated_at: string; last_message_at: string; preview: string; profile: string | null; workspace_path: string }>; count: number; has_more?: boolean }>(
+      `/api/sessions/recent?limit=${limit}${query.trim() ? `&query=${encodeURIComponent(query.trim())}` : ''}${offset ? `&offset=${offset}` : ''}`
     ),
 
   restoreSession: (sessionId: string) =>

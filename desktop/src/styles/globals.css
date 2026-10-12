@@ -13,6 +13,25 @@
 @tailwind components;
 @tailwind utilities;
 
+.settings-field {
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 1fr);
+}
+
+.provider-fields {
+  grid-template-columns: minmax(100px, 0.7fr) minmax(180px, 1.5fr) minmax(120px, 1fr);
+}
+
+dialog::backdrop {
+  background: var(--scrim);
+}
+
+@media (max-width: 1100px) {
+  .settings-field,
+  .provider-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .window-no-drag {
   -webkit-app-region: no-drag;
 }

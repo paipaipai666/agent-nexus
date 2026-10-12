@@ -375,7 +375,8 @@ class ConversationVersionManager:
 
     @classmethod
     def find_recent_sessions(
-        cls, db_path: str, workspace_path: str | None, limit: int = 5
+        cls, db_path: str, workspace_path: str | None, limit: int = 5,
+        query: str = "", offset: int = 0,
     ) -> list[dict]:
         """Return recent sessions with preview info.
 
@@ -397,17 +398,32 @@ class ConversationVersionManager:
                 "  SELECT 1 FROM conversation_messages m WHERE m.session_id = s.session_id"
                 ") OR (s.preview IS NOT NULL AND s.preview != ''))"
             )
+            conditions = [content_filter]
+            params: list[object] = []
             if workspace_path is not None:
-                where_sql = "WHERE s.workspace_path = ? AND " + content_filter
-                params: tuple = (cls.normalize_workspace_path(workspace_path), limit)
-            else:
-                where_sql = "WHERE " + content_filter
-                params = (limit,)
+                conditions.append("s.workspace_path = ?")
+                params.append(cls.normalize_workspace_path(workspace_path))
+            needle = query.strip()
+            if needle:
+                conditions.append(
+                    "(instr(lower(COALESCE(s.preview, '')), lower(?)) > 0 "
+                    "OR instr(lower(s.workspace_path), lower(?)) > 0 "
+                    "OR EXISTS (SELECT 1 FROM conversation_messages m "
+                    "WHERE m.session_id = s.session_id "
+                    "AND instr(lower(m.content), lower(?)) > 0) "
+                    "OR EXISTS (SELECT 1 FROM conversation_checkpoints c "
+                    "WHERE c.session_id = s.session_id "
+                    "AND (instr(lower(c.question), lower(?)) > 0 "
+                    "OR instr(lower(c.answer), lower(?)) > 0)))"
+                )
+                params.extend([needle] * 5)
+            where_sql = "WHERE " + " AND ".join(conditions)
+            params.extend([limit, offset])
             rows = conn.execute(
                 "SELECT s.session_id, s.created_at, s.updated_at, s.profile, s.preview, s.workspace_path "
                 "FROM conversation_sessions s " + where_sql + " "
                 "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
-                "LIMIT ?",
+                "LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
 

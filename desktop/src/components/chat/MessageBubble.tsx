@@ -50,7 +50,7 @@ const MessageBubble = React.memo(function MessageBubble({ msg, animatedIds }: { 
         {msg.role === 'user' && (
           <div className="flex items-center justify-end gap-2 mb-1.5">
             <span className="text-[12px] font-medium" style={{ color: 'var(--fg-muted)', letterSpacing: '0.02em' }}>
-              You
+              你
             </span>
           </div>
         )}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('../services/api', () => ({
@@ -9,6 +9,7 @@ vi.mock('../services/api', () => ({
     updateLlmProviders: vi.fn().mockResolvedValue({ status: 'updated', count: 0 }),
     discoverLlmModels: vi.fn().mockResolvedValue({ models: [] }),
     updateConfig: vi.fn().mockResolvedValue({ status: 'updated' }),
+    updatePersona: vi.fn().mockResolvedValue({ status: 'updated' }),
   },
 }))
 vi.mock('../services/accent', () => ({
@@ -18,6 +19,7 @@ vi.mock('../services/accent', () => ({
 
 import { api } from '../services/api'
 import SettingsPage from '../pages/SettingsPage'
+import { useSettingsDraft } from '../services/settingsDraft'
 
 const baseProvider = {
   name: 'openai',
@@ -33,13 +35,14 @@ const baseProvider = {
 async function renderSettings() {
   render(<SettingsPage />)
   await waitFor(() => {
-    expect(screen.getByText('Model Providers')).toBeInTheDocument()
+    expect(screen.getByText('模型提供商')).toBeInTheDocument()
   })
 }
 
 describe('SettingsPage · Model Providers (simplified)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useSettingsDraft.getState().reset()
     vi.mocked(api.getConfig).mockResolvedValue({ model_thinking_effort: 'high' })
     vi.mocked(api.getLlmProviders).mockResolvedValue({
       providers: [baseProvider],
@@ -50,17 +53,61 @@ describe('SettingsPage · Model Providers (simplified)', () => {
     })
   })
 
+  it('keeps provider edits made after returning while an earlier save is pending', async () => {
+    let complete: (value: { status: string; count: number }) => void = () => { throw new Error('Save has not started') }
+    const pending = new Promise<{ status: string; count: number }>(resolve => { complete = resolve })
+    vi.mocked(api.updateLlmProviders).mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<SettingsPage />)
+    const address = await screen.findByRole('textbox', { name: '提供商 1 服务地址' })
+    await user.clear(address)
+    await user.type(address, 'https://first.example/v1')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    await waitFor(() => expect(api.updateLlmProviders).toHaveBeenCalledTimes(1))
+    view.unmount()
+    await renderSettings()
+    const later = screen.getByRole('textbox', { name: '提供商 1 服务地址' })
+    await user.clear(later)
+    await user.type(later, 'https://second.example/v1')
+    await act(async () => { complete({ status: 'updated', count: 1 }); await pending })
+    expect(later).toHaveValue('https://second.example/v1')
+    expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled()
+  })
+
+  it('keeps persona edits made after returning while an earlier save is pending', async () => {
+    let complete: (value: { status: string }) => void = () => { throw new Error('Save has not started') }
+    const pending = new Promise<{ status: string }>(resolve => { complete = resolve })
+    vi.mocked(api.updatePersona).mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<SettingsPage />)
+    const name = await screen.findByRole('textbox', { name: 'Agent 名称' })
+    await user.type(name, 'First')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    await waitFor(() => expect(api.updatePersona).toHaveBeenCalledTimes(1))
+    view.unmount()
+    await renderSettings()
+    const later = screen.getByRole('textbox', { name: 'Agent 名称' })
+    await user.clear(later)
+    await user.type(later, 'Second')
+    await act(async () => { complete({ status: 'updated' }); await pending })
+    expect(later).toHaveValue('Second')
+    expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled()
+  })
+
   it('exposes a unified thinking mode select and maps it to model_thinking + effort', async () => {
     const user = userEvent.setup()
     await renderSettings()
 
-    const select = screen.getByTitle(/关闭=不请求模型推理/)
+    const select = screen.getByRole('combobox', { name: '新会话默认思考强度' })
     expect(select).toHaveValue('off')
     await user.selectOptions(select, 'high')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith('model_thinking', 'true')
       expect(api.updateConfig).toHaveBeenCalledWith('model_thinking_effort', 'high')
     })
+    expect(select).toHaveValue('high')
+    expect(await screen.findByText('更改已保存。')).toBeInTheDocument()
   })
 
   it('selecting off disables thinking and sets effort to none', async () => {
@@ -68,13 +115,15 @@ describe('SettingsPage · Model Providers (simplified)', () => {
     vi.mocked(api.getConfig).mockResolvedValue({ model_thinking: true, model_thinking_effort: 'medium' })
     await renderSettings()
 
-    const select = screen.getByTitle(/关闭=不请求模型推理/)
+    const select = screen.getByRole('combobox', { name: '新会话默认思考强度' })
     expect(select).toHaveValue('medium')
     await user.selectOptions(select, 'off')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith('model_thinking', 'false')
       expect(api.updateConfig).toHaveBeenCalledWith('model_thinking_effort', 'none')
     })
+    expect(select).toHaveValue('off')
   })
 
   it('does not expose capability overrides, timeout, or Use buttons', async () => {
@@ -92,7 +141,7 @@ describe('SettingsPage · Model Providers (simplified)', () => {
   it('shows a YAML badge when a model has a config override, without editing it', async () => {
     await renderSettings()
 
-    expect(screen.getByText('YAML')).toBeInTheDocument()
+    expect(screen.getByText('自定义能力')).toBeInTheDocument()
     expect(screen.getByDisplayValue('gpt-4o')).toBeInTheDocument()
     expect(screen.getByDisplayValue('o3-mini')).toBeInTheDocument()
   })
@@ -117,7 +166,7 @@ describe('SettingsPage · Model Providers (simplified)', () => {
       expect(screen.getByDisplayValue('gpt-4.1-mini')).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: /Save Providers/ }))
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => {
       expect(api.updateLlmProviders).toHaveBeenCalled()

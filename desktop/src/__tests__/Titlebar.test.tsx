@@ -24,15 +24,15 @@ describe('Titlebar sidebar control', () => {
     )
 
     expect(screen.queryByText('AgentNexus')).not.toBeInTheDocument()
-    const hide = screen.getByRole('button', { name: 'Hide sidebar' })
+    const hide = screen.getByRole('button', { name: '隐藏侧栏' })
     expect(hide).toHaveAttribute('aria-expanded', 'true')
     await user.click(hide)
 
-    const show = screen.getByRole('button', { name: 'Show sidebar' })
+    const show = screen.getByRole('button', { name: '显示侧栏' })
     expect(show).toHaveAttribute('aria-expanded', 'false')
     expect(localStorage.getItem('agentnexus-sidebar')).toBe('collapsed')
     await user.click(show)
-    expect(screen.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '隐藏侧栏' })).toHaveAttribute('aria-expanded', 'true')
     expect(localStorage.getItem('agentnexus-sidebar')).toBe('expanded')
   })
 })

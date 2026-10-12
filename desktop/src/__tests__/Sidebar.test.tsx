@@ -54,19 +54,19 @@ describe('Sidebar', () => {
   it('renders New Chat button', () => {
     renderSidebar()
 
-    expect(screen.getByText('New Chat')).toBeInTheDocument()
+    expect(screen.getByText('新建聊天')).toBeInTheDocument()
   })
 
   it('renders Projects section label', () => {
     renderSidebar()
 
-    expect(screen.getByText('Projects')).toBeInTheDocument()
+    expect(screen.getByText('项目')).toBeInTheDocument()
   })
 
   it('renders session search field', () => {
     renderSidebar()
 
-    expect(screen.getByPlaceholderText('Search sessions…')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '搜索会话内容' })).toBeInTheDocument()
   })
 
   it('renders as a complementary region', () => {
@@ -98,6 +98,6 @@ describe('Sidebar', () => {
     renderSidebar()
     await flush()
 
-    expect(screen.getByText('Add a project folder…')).toBeInTheDocument()
+    expect(await screen.findByText('添加项目文件夹…')).toBeInTheDocument()
   })
 })

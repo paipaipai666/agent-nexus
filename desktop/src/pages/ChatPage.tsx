@@ -1,12 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { Send, Square, Undo2, Redo2, History, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Paperclip, X } from 'lucide-react'
+import { Send, Square, Undo2, Redo2, History, FolderOpen, BookOpen, Bug, FlaskConical, Wrench, ArrowRight, GitBranch, Paperclip, X, Loader2 } from 'lucide-react'
 import { BorderBeam } from 'border-beam'
 import { api, type AttachmentRef, mimeForPath, humanSize } from '../services/api'
 import { planModeArm } from '../services/planModeArm'
 import { thinkingEffortArm } from '../services/thinkingEffortArm'
 import ThinkEffortControl from '../components/chat/ThinkEffortControl'
-import { useProjects, pickAndAddProject } from '../services/projects'
+import { useProjects, pickAndAddProject, workspaceKey } from '../services/projects'
+import { useChatDraft, clearChatDraft, getChatDraft, saveChatDraft } from '../services/chatDrafts'
+import InlineNotice from '../components/InlineNotice'
 import { transformHistoryMessages } from '../utils/historyTransform'
 import { usePrefersReducedMotion } from '../utils/effects'
 import { useSession, type Message } from '../components/session/SessionProvider'
@@ -33,9 +35,9 @@ interface SlashCtx {
   addSys: (c: string) => void
   skills: SkillInfo[]
   setSkills: React.Dispatch<React.SetStateAction<SkillInfo[]>>
-  handleSendMessage: (text: string, atts?: AttachmentRef[]) => void
   refresh: () => Promise<void>
   clearView: () => void
+  switchSession: (id: string) => void
 }
 
 interface CommandDef {
@@ -55,12 +57,12 @@ function errMsg(e: unknown): string | undefined {
 function buildCommandDefs(): CommandDef[] {
   return [
     {
-      cmd: '/help', desc: 'Show command help', category: 'system',
+      cmd: '/help', desc: '查看命令帮助', category: 'system',
       run: (_args, ctx) => ctx.defs.map(c => `${c.cmd.padEnd(12)} ${c.desc}`).join('\n'),
     },
-    { cmd: '/clear', desc: 'Clear screen', category: 'system', run: (_args, ctx) => { ctx.clearView() } },
+    { cmd: '/clear', desc: '清空当前显示', category: 'system', run: (_args, ctx) => { ctx.clearView() } },
     {
-      cmd: '/undo', desc: 'Revert to previous checkpoint', category: 'system', needsSession: true, err: 'Undo failed',
+      cmd: '/undo', desc: '撤销到上一个检查点', category: 'system', needsSession: true, err: '撤销失败',
       run: async (_args, ctx) => {
         const r = await api.versionUndo(ctx.sid!)
         await ctx.refresh()
@@ -68,7 +70,7 @@ function buildCommandDefs(): CommandDef[] {
       },
     },
     {
-      cmd: '/redo', desc: 'Redo to next checkpoint', category: 'system', needsSession: true, err: 'Redo failed',
+      cmd: '/redo', desc: '重做到下一个检查点', category: 'system', needsSession: true, err: '重做失败',
       run: async (_args, ctx) => {
         const r = await api.versionRedo(ctx.sid!)
         await ctx.refresh()
@@ -76,43 +78,43 @@ function buildCommandDefs(): CommandDef[] {
       },
     },
     {
-      cmd: '/log', desc: 'View checkpoint log', category: 'system', needsSession: true, err: 'Log failed',
+      cmd: '/log', desc: '查看检查点历史', category: 'system', needsSession: true, err: '历史加载失败',
       run: async (_args, ctx) => {
         const { checkpoints: cps } = await api.getVersionLog(ctx.sid!, 10)
         return cps.length === 0 ? 'No checkpoints.' : cps.map(cp => `${cp.is_head ? '→ ' : '  '}${cp.id}  ${cp.question || ''}`).join('\n')
       },
     },
     {
-      cmd: '/status', desc: 'View version status', category: 'system', needsSession: true, err: 'Status failed',
+      cmd: '/status', desc: '查看会话版本状态', category: 'system', needsSession: true, err: '状态加载失败',
       run: async (_args, ctx) => {
         const s = await api.getVersionStatus(ctx.sid!)
         return `Session: ${s.session_id}\nHEAD: ${s.head?.id || 'none'}\nCan undo: ${s.can_undo}\nCan redo: ${s.can_redo}`
       },
     },
     {
-      cmd: '/compact', desc: 'Compress conversation context', category: 'system', needsSession: true, err: 'Compact failed',
+      cmd: '/compact', desc: '整理对话上下文', category: 'system', needsSession: true, err: '上下文整理失败',
       run: async (args, ctx) => {
-        ctx.addSys('Compressing context...')
+        ctx.addSys('正在整理上下文…')
         const r = await api.compactContext(ctx.sid!, args)
         return `Compacted: ${r.tokens_saved} tokens saved`
       },
     },
     {
-      cmd: '/sessions', desc: 'List recent sessions', category: 'system', err: 'Sessions failed',
+      cmd: '/sessions', desc: '查看最近会话', category: 'system', err: '会话加载失败',
       run: async () => {
         const { sessions } = await api.getRecentSessions(10)
         return sessions.length === 0 ? 'No recent sessions.' : sessions.map(s => `${s.session_id.slice(0, 12)}  ${s.preview || ''}`).join('\n')
       },
     },
     {
-      cmd: '/switch', desc: 'Switch session (usage: /switch <id>)', category: 'system',
-      run: (args) => {
+      cmd: '/switch', desc: '切换会话，用法：/switch <会话 ID>', category: 'system',
+      run: (args, ctx) => {
         if (!args) return 'Usage: /switch <session_id>'
-        window.location.href = `/chat/${args}`
+        ctx.switchSession(args)
       },
     },
     {
-      cmd: '/skill', desc: 'Manage skills (list/status/use/enable/disable)', category: 'skill',
+      cmd: '/skill', desc: '查看、启用或停用技能', category: 'skill',
       run: async (args, ctx) => {
         if (!args || args === 'list') {
           try {
@@ -137,7 +139,7 @@ function buildCommandDefs(): CommandDef[] {
       },
     },
     {
-      cmd: '/mcp', desc: 'Manage MCP servers (status/tools/resources)', category: 'mcp',
+      cmd: '/mcp', desc: '查看 MCP 状态、工具或重新加载', category: 'mcp',
       run: async (args) => {
         if (!args || args === 'status') {
           try {
@@ -159,11 +161,14 @@ function buildCommandDefs(): CommandDef[] {
       },
     },
     {
-      cmd: '/plugin', desc: 'Manage plugins (list/status/enable/disable)', category: 'plugin', err: 'Plugins failed',
-      run: async () => {
+      cmd: '/plugin', desc: '查看已发现的插件', category: 'plugin', err: '插件加载失败',
+      run: async (args) => {
+        if (args && args !== 'list' && args !== 'status') return '用法：/plugin [list]'
         const ext = await api.getExtensions()
-        const names = Object.keys(ext)
-        return names.length === 0 ? 'No plugins loaded.' : names.map(n => `● ${n}`).join('\n')
+        const entries: unknown = ext.discovered ?? ext.load_report?.loaded ?? []
+        const names = Array.isArray(entries) ? entries.flatMap(entry =>
+          typeof entry === 'object' && entry !== null && 'name' in entry && typeof entry.name === 'string' ? [entry.name] : []) : []
+        return names.length === 0 ? '尚未发现插件。' : [...new Set(names)].join('\n')
       },
     },
   ]
@@ -172,23 +177,23 @@ function buildCommandDefs(): CommandDef[] {
 const STARTERS = [
   {
     icon: BookOpen,
-    label: 'Explain this codebase',
-    prompt: 'Give me an overview of this codebase: architecture, main modules, and how they fit together.',
+    label: '理解这个项目',
+    prompt: '请介绍这个项目的架构、主要模块，以及模块之间的关系。',
   },
   {
     icon: Bug,
-    label: 'Help me fix a bug',
-    prompt: "Help me debug an issue — I'll describe the symptoms, and you ask me for logs or code as needed.",
+    label: '修复一个问题',
+    prompt: '帮我排查一个问题。我会描述现象，请根据需要向我索取日志或代码。',
   },
   {
     icon: FlaskConical,
-    label: 'Write tests',
-    prompt: 'Write unit tests for the current module. Cover the main paths and the important edge cases.',
+    label: '补充测试',
+    prompt: '请为当前模块编写单元测试，覆盖主要流程和重要边界情况。',
   },
   {
     icon: Wrench,
-    label: 'Refactor for clarity',
-    prompt: 'Review the current code for readability and refactoring opportunities, and propose changes incrementally.',
+    label: '改善代码结构',
+    prompt: '请检查当前代码的可读性和可重构之处，逐步提出修改建议。',
   },
 ]
 
@@ -199,10 +204,25 @@ export default function ChatPage() {
   const { theme } = useTheme()
   const reducedMotion = usePrefersReducedMotion()
   const currentSessionIdRef = useRef<string | null>(null)
-  const [input, setInput] = useState('')
+  const { selected: selectedProject } = useProjects()
+  const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null)
+  const draftKey = routeSessionId ? `session:${routeSessionId}` : `new:${workspaceKey(pendingWorkspace ?? selectedProject ?? '')}`
+  const { input, setInput, attachments, setAttachments } = useChatDraft(draftKey)
+  const draftKeyRef = useRef(draftKey)
+  draftKeyRef.current = draftKey
+  const sendGeneration = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [attachments, setAttachments] = useState<AttachmentRef[]>([])
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const pinnedToBottom = useRef(true)
+  const submitting = useRef<object | null>(null)
+  const [creatingSession, setCreatingSession] = useState(false)
+  const [hasNewContent, setHasNewContent] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [literalMessage, setLiteralMessage] = useState(false)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
+  const [commandNotice, setCommandNotice] = useState<{ tone: 'info' | 'error'; message: string } | null>(null)
+  const [versionBusy, setVersionBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [deadPaths, setDeadPaths] = useState<Set<string>>(new Set())
 
@@ -219,10 +239,7 @@ export default function ChatPage() {
 
   const [skills, setSkills] = useState<Array<{ id: string; display_name: string; description: string; enabled: boolean }>>([])
   const [mcpTools, setMcpTools] = useState<Array<{ server: string; tool: string; transport: string }>>([])
-  const [plugins, setPlugins] = useState<Record<string, any>>({})
-  const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null)
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null)
-  const { selected: selectedProject } = useProjects()
 
   const {
     sessionId, cwd, runtimeStatus: sessionRuntimeStatus, setSessionId: setGlobalSessionId, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
@@ -238,14 +255,42 @@ export default function ChatPage() {
     if (scrollRafRef.current) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = 0
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      const container = scrollContainerRef.current
+      if (pinnedToBottom.current && container) container.scrollTop = container.scrollHeight
     })
   }, [])
 
-  const loadAndDisplayMessages = useCallback(async (forceSessionId?: string) => {
-    const currentSid = forceSessionId || currentSessionIdRef.current
+  useLayoutEffect(() => {
+    const field = inputRef.current
+    if (!field) return
+    field.style.height = 'auto'
+    field.style.height = `${Math.max(26, Math.min(128, field.scrollHeight))}px`
+  }, [input, draftKey])
+
+  useEffect(() => {
+    sendGeneration.current++
+    submitting.current = null
+    setCreatingSession(false)
+    pinnedToBottom.current = true
+    setHasNewContent(false)
+    setDeadPaths(new Set())
+    setSendError(null)
+    setLiteralMessage(false)
+    setActionNotice(null)
+    setCommandNotice(null)
+    setShowPalette(false)
+    setPaletteFilter('')
+  }, [draftKey])
+
+  useLayoutEffect(() => () => {
+    sendGeneration.current++
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+  }, [])
+
+  const loadAndDisplayMessages = useCallback(async (options: { sessionId?: string; reload?: boolean } = {}) => {
+    const currentSid = options.sessionId || currentSessionIdRef.current
     console.log('[loadAndDisplayMessages] sid:', currentSid)
-    if (currentSid) {
+    if (currentSid && !options.reload) {
       const cachedMessages = getLiveDisplayMessages(currentSid)
       if (cachedMessages && cachedMessages.length > 0) {
         console.log('[loadAndDisplayMessages] Using Map cache:', cachedMessages.length, 'messages')
@@ -257,13 +302,15 @@ export default function ChatPage() {
       let stm: Array<{ role: string; content: string; ts?: number }>
       try {
         const hist = await api.listSessionHistory(0, currentSid || undefined)
-        stm = hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
+        stm = currentSid ? hist.messages ?? [] : hist.messages && hist.messages.length > 0 ? hist.messages : (await api.listShortMemories()).messages
       } catch {
+        if (currentSid) throw new Error('会话历史暂时不可用，请重试。')
         stm = (await api.listShortMemories()).messages
       }
+      if (currentSid !== currentSessionIdRef.current) return
       console.log('[loadAndDisplayMessages] Backend returned:', stm?.length, 'messages for sid:', currentSid)
       if (!stm || stm.length === 0) {
-        if (currentSid) {
+        if (currentSid && !options.reload) {
           const existingMessages = getLiveDisplayMessages(currentSid)
           if (existingMessages && existingMessages.length > 0) return
         }
@@ -275,7 +322,7 @@ export default function ChatPage() {
       console.log('[loadAndDisplayMessages] Transformed:', transformed.length, 'messages. Setting on active session.')
       for (const m of transformed) animatedIds.add(m.id)
       setMessages(transformed)
-    } catch (err) { console.error('Failed to load messages:', err) }
+    } catch (err) { if (currentSid === currentSessionIdRef.current) setActionNotice(`加载会话历史失败：${errMsg(err) ?? '请重试'}`) }
   }, [])
 
   useEffect(() => {
@@ -303,7 +350,6 @@ export default function ChatPage() {
   const fetchDynamicCommands = useCallback(() => {
     api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
     api.listMcpTools().then(d => setMcpTools(d.tools || [])).catch(() => {})
-    api.getExtensions().then(setPlugins).catch(() => {})
   }, [])
 
   const initNew = useCallback((sid: string) => {
@@ -339,7 +385,7 @@ export default function ChatPage() {
       console.log('[initRestore] Restoring session:', sid)
       currentSessionIdRef.current = sid
       setGlobalSessionId(sid)
-      loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
+      void loadAndDisplayMessages({ sessionId: sid })
       api.getVersionStatus(sid).then(setVersionStatus).catch(() => {})
       api.getVersionLog(sid, 5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
       api.getSession(sid).then((s) => {
@@ -401,10 +447,24 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeSessionId])
 
-  useEffect(scrollToBottom, [messages, scrollToBottom])
+  useEffect(() => {
+    if (pinnedToBottom.current) scrollToBottom()
+    else setHasNewContent(true)
+  }, [messages, scrollToBottom])
 
   useEffect(() => {
     const handleNewChat = () => {
+      sendGeneration.current++
+      submitting.current = null
+      setCreatingSession(false)
+      clearChatDraft(`new:${workspaceKey(selectedProject ?? '')}`)
+      setShowPalette(false)
+      setPaletteFilter('')
+      setCommandNotice(null)
+      setActionNotice(null)
+      setSendError(null)
+      setLiteralMessage(false)
+      setDeadPaths(new Set())
       currentSessionIdRef.current = null
       pendingFirstMessageRef.current = null
       setGlobalSessionId(null)
@@ -412,7 +472,7 @@ export default function ChatPage() {
     }
     window.addEventListener('new-chat', handleNewChat)
     return () => window.removeEventListener('new-chat', handleNewChat)
-  }, [])
+  }, [selectedProject])
 
   const pendingFirstMessageRef = useRef<{ text: string; attachments?: AttachmentRef[] } | null>(null)
 
@@ -423,10 +483,16 @@ export default function ChatPage() {
     sendMessage(pending.text, pending.attachments)
   }, [sendMessage])
 
-  const handleSendMessage = useCallback((text: string, atts?: AttachmentRef[]) => {
+  const handleSendMessage = async (text: string, atts?: AttachmentRef[]) => {
+    const sourceKey = draftKey
+    const sourceDraft = getChatDraft(sourceKey)
+    const generation = sendGeneration.current
+    const isCurrent = () => generation === sendGeneration.current && sourceKey === draftKeyRef.current
     if (!currentSessionIdRef.current) {
-      pendingFirstMessageRef.current = { text, attachments: atts }
-      api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null).then(async ({ session_id }) => {
+      setCreatingSession(true)
+      try {
+        const { session_id } = await api.createSession(undefined, pendingWorkspace ?? selectedProject ?? null)
+        if (!isCurrent()) return
         if (planModeArm.consume()) {
           try { await api.setPlanMode(session_id, true) } catch {  }
         }
@@ -434,23 +500,28 @@ export default function ChatPage() {
         if (armedEffort !== null) {
           try { await api.setThinkingEffort(session_id, armedEffort) } catch {  }
         }
+        if (!isCurrent()) return
+        const remainingDraft = getChatDraft(sourceKey)
+        if (remainingDraft !== sourceDraft) saveChatDraft(`session:${session_id}`, remainingDraft)
+        clearChatDraft(sourceKey)
+        pendingFirstMessageRef.current = { text, attachments: atts }
         currentSessionIdRef.current = session_id
         initNew(session_id)
         setPendingWorkspace(null)
         navigate(`/chat/${session_id}`, { replace: true })
-      }).catch((err) => {
-        pendingFirstMessageRef.current = null
-        setInput(text)
-        setAttachments(atts ?? [])
-        window.alert(`创建会话失败：${err instanceof Error ? err.message : err}`)
-      })
+      } catch (error) {
+        if (isCurrent()) setSendError(`创建会话失败：${errMsg(error) ?? '请重试'}。草稿已保留，可以再次发送。`)
+      } finally {
+        if (isCurrent()) setCreatingSession(false)
+      }
     } else {
       sendMessage(text, atts)
+      if (getChatDraft(sourceKey) === sourceDraft) clearChatDraft(sourceKey)
       if (location.pathname === '/') {
         navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
       }
     }
-  }, [sendMessage, location.pathname, navigate, initNew, pendingWorkspace, selectedProject])
+  }
 
   const chipWorkspace = cwd ?? pendingWorkspace ?? (sessionId ? null : selectedProject) ?? defaultWorkspace
   const handleWorkspacePick = async () => {
@@ -460,6 +531,7 @@ export default function ChatPage() {
   }
 
   const addSys = useCallback((c: string) => {
+    if (!currentSessionIdRef.current) { setActionNotice(c); return }
     setMessages(prev => [...prev, { id: `sys-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
   }, [setMessages, incrementMsgCounter])
 
@@ -482,7 +554,7 @@ export default function ChatPage() {
     } catch {
       setAttachments(prev => [...prev, ...fresh.map(c => ({ path: c.path, name: c.name, size: c.size, mime: mimeForPath(c.path) }))])
     }
-  }, [attachments, addSys])
+  }, [attachments, addSys, setAttachments])
 
   const handlePickFiles = async () => {
     const picked = await window.electronAPI?.pickFiles()
@@ -502,54 +574,89 @@ export default function ChatPage() {
     addAttachments(files)
   }
 
-  const handleSend = async () => {
+  const handleSend = async (asMessage = false) => {
+    if (submitting.current) return
+    const sourceDraft = getChatDraft(draftKey)
+    const generation = sendGeneration.current
+    const isCurrent = () => generation === sendGeneration.current && draftKey === draftKeyRef.current
     const text = input.trim(); if (!text && attachments.length === 0) return
+    const command = text.split(/\s+/)[0].toLowerCase()
+    if (!asMessage && text.startsWith('/') && !allCommands.some(item => item.cmd === command)) {
+      setSendError(`未找到命令「${command}」。输入和附件已保留，可将它作为普通消息发送。`)
+      setLiteralMessage(true)
+      return
+    }
+    const request = {}
+    submitting.current = request
+    try {
+    setSendError(null)
+    setLiteralMessage(false)
     if (attachments.length > 0 && window.electronAPI) {
       try {
         const stats = await window.electronAPI.statFiles(attachments.map(a => a.path))
+        if (!isCurrent()) return
+        if (getChatDraft(draftKey) !== sourceDraft) {
+          setSendError('附件检查期间输入或附件发生了变化，最新草稿已保留，请再次发送。')
+          return
+        }
         const dead = new Set(stats.filter(s => !s.ok).map(s => s.path))
         if (dead.size > 0) {
           setDeadPaths(dead)
           const names = attachments.filter(a => dead.has(a.path)).map(a => a.name).join(', ')
-          addSys(`附件已失效: ${names}。已阻止发送，请移除失效附件后重试。`)
+          if (currentSessionIdRef.current) addSys(`附件已失效: ${names}。已阻止发送，请移除失效附件后重试。`)
+          setSendError(`附件已失效：${names}。请移除或重新选择后发送。`)
           return
         }
         setDeadPaths(new Set())
       } catch {  }
     }
+    if (!isCurrent()) return
+    if (getChatDraft(draftKey) !== sourceDraft) {
+      setSendError('发送检查期间草稿发生了变化，最新内容已保留，请再次发送。')
+      return
+    }
     const atts = attachments.length > 0 ? attachments : undefined
-    setInput(''); setShowPalette(false); setPaletteDismissed(false)
-    setAttachments([]); setDeadPaths(new Set())
+    setShowPalette(false); setPaletteDismissed(false); setDeadPaths(new Set())
     const out = text || '（见附件）'
-    if (out.startsWith('/')) { handleSlashCommand(out); return }
-    if (isRunning) { queueMessage(out, atts) }
-    else handleSendMessage(out, atts)
+    pinnedToBottom.current = true
+    if (!asMessage && buildCommandDefs().some(item => item.cmd === command)) {
+      clearChatDraft(draftKey)
+      await handleSlashCommand(out)
+      return
+    }
+    if (isRunning) { queueMessage(out, atts); clearChatDraft(draftKey) }
+    else await handleSendMessage(out, atts)
+    } finally { if (submitting.current === request) submitting.current = null }
   }
 
   const handleSlashCommand = async (text: string) => {
     const parts = text.trim().split(/\s+/); const cmd = parts[0].toLowerCase(); const args = parts.slice(1).join(' ')
-    const addSys = (c: string) => setMessages(prev => [...prev, { id: `cmd-${incrementMsgCounter()}`, role: 'system', content: c, timestamp: new Date() }])
     const sid = currentSessionIdRef.current
+    const addSys = (content: string, failed = false) => {
+      if (!sid) setCommandNotice({ tone: failed ? 'error' : 'info', message: content })
+      else setMessages(previous => [...previous, { id: `cmd-${incrementMsgCounter()}`, role: 'system', content, timestamp: new Date() }])
+    }
     const ctx: SlashCtx = {
       sid,
       defs: [],
       addSys,
-      skills, setSkills, handleSendMessage,
+      skills, setSkills,
+      switchSession: id => navigate(`/chat/${encodeURIComponent(id)}`),
       refresh: async () => {
         setVersionStatus(await api.getVersionStatus(sid!))
         setCheckpoints((await api.getVersionLog(sid!, 5)).checkpoints || [])
-        await loadAndDisplayMessages()
+        await loadAndDisplayMessages({ sessionId: sid ?? undefined, reload: true })
       },
-      clearView: () => { setMessages([]); animatedIds.clear() },
+      clearView: () => { if (sid) setMessages([]); setCommandNotice(null); animatedIds.clear() },
     }
     ctx.defs = buildCommandDefs()
     const def = ctx.defs.find(d => d.cmd === cmd)
     if (def) {
-      if (def.needsSession && !sid) { addSys('No active session.'); return }
+      if (def.needsSession && !sid) { addSys('请先发送一条消息以创建会话。', true); return }
       try {
         const out = await def.run(args, ctx)
         if (typeof out === 'string') addSys(out)
-      } catch (e) { addSys(`${def.err ?? `${cmd} failed`}: ${errMsg(e)}`) }
+      } catch (e) { addSys(`${def.err ?? `${cmd} 执行失败`}：${errMsg(e) ?? '请重试'}`, true) }
       return
     }
     const skillMatch = skills.find(s => {
@@ -557,11 +664,12 @@ export default function ChatPage() {
       const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
       return `/${shortId}` === cmd
     })
-    if (skillMatch) { handleSendMessage(text); return }
+    if (skillMatch) { await handleSendMessage(text); return }
     addSys(`Unknown command: ${cmd}. Type /help for commands.`)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (showPalette && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteIndex(i => (i + 1) % filteredCommands.length); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return }
@@ -585,6 +693,8 @@ export default function ChatPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value
     setInput(v)
+    setSendError(null)
+    setLiteralMessage(false)
     const isSlashContext = v.startsWith('/') && v.length > 0
     if (!isSlashContext) setPaletteDismissed(false)
     const show = isSlashContext && !paletteDismissed
@@ -598,23 +708,29 @@ export default function ChatPage() {
   const handleConfirm = (approved: boolean) => { confirmToolCall(approved) }
   const handleUndo = async () => {
     const sid = currentSessionIdRef.current
-    if (!sid) return
+    if (!sid || versionBusy) return
+    setVersionBusy(true)
+    setActionNotice(null)
     try {
       await api.versionUndo(sid)
       setVersionStatus(await api.getVersionStatus(sid))
       setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
-      await loadAndDisplayMessages()
-    } catch { }
+      await loadAndDisplayMessages({ sessionId: sid, reload: true })
+    } catch (error) { setActionNotice(`撤销失败：${errMsg(error) ?? '请重试'}`) }
+    finally { setVersionBusy(false) }
   }
   const handleRedo = async () => {
     const sid = currentSessionIdRef.current
-    if (!sid) return
+    if (!sid || versionBusy) return
+    setVersionBusy(true)
+    setActionNotice(null)
     try {
       await api.versionRedo(sid)
       setVersionStatus(await api.getVersionStatus(sid))
       setCheckpoints((await api.getVersionLog(sid, 5)).checkpoints || [])
-      await loadAndDisplayMessages()
-    } catch { }
+      await loadAndDisplayMessages({ sessionId: sid, reload: true })
+    } catch (error) { setActionNotice(`重做失败：${errMsg(error) ?? '请重试'}`) }
+    finally { setVersionBusy(false) }
   }
 
   const allCommands = [
@@ -623,16 +739,6 @@ export default function ChatPage() {
       const shortId = s.id.includes('/') ? s.id.split('/').pop()! : s.id
       return { cmd: `/${shortId}`, desc: s.display_name || s.description || 'Invoke skill', category: 'skill' as const }
     }),
-    ...mcpTools.map(t => ({
-      cmd: `/${t.tool}`,
-      desc: `MCP tool (${t.server})`,
-      category: 'mcp' as const,
-    })),
-    ...Object.keys(plugins).map(name => ({
-      cmd: `/${name}`,
-      desc: `Plugin`,
-      category: 'plugin' as const,
-    })),
   ]
 
   const filteredCommands = allCommands.filter(c => {
@@ -643,9 +749,16 @@ export default function ChatPage() {
   return (
     <div className="flex-1 flex overflow-hidden relative" style={{ background: 'var(--surface-0)' }}>
       {}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {}
-      <div className="flex-1 overflow-y-auto">
+      <div className="relative flex-1 min-h-0">
+      <div ref={scrollContainerRef} data-testid="chat-scroll" className="h-full overflow-y-auto"
+        onScroll={() => {
+          const container = scrollContainerRef.current
+          if (!container) return
+          pinnedToBottom.current = container.scrollHeight - container.scrollTop - container.clientHeight < 64
+          if (pinnedToBottom.current) setHasNewContent(false)
+        }}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-6 animate-empty-in px-6">
             <div className="text-center">
@@ -653,10 +766,10 @@ export default function ChatPage() {
                 className="text-[27px] font-semibold mb-3"
                 style={{ letterSpacing: '-0.025em' }}
               >
-                <span className="metal-heading">What are we building?</span>
+                <span className="metal-heading">今天要完成什么？</span>
               </h1>
               <p className="text-[15px] max-w-md mx-auto" style={{ color: 'var(--fg-muted)' }}>
-                Code. Debug. Create. Ship.
+                选择项目，描述任务，从这里开始。
               </p>
             </div>
 
@@ -725,6 +838,14 @@ export default function ChatPage() {
         })()}
         <div ref={messagesEndRef} />
       </div>
+      {hasNewContent && <button type="button" className="absolute bottom-3 left-1/2 -translate-x-1/2 btn-primary text-sm"
+        onClick={() => {
+          pinnedToBottom.current = true
+          setHasNewContent(false)
+          const container = scrollContainerRef.current
+          if (container) container.scrollTop = container.scrollHeight
+        }}>回到最新消息</button>}
+      </div>
 
       {}
       {confirmRequest && (
@@ -749,12 +870,12 @@ export default function ChatPage() {
             <div className="rounded-2xl p-5" style={{ background: 'var(--surface-1)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-float)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <span className="w-2 h-2 rounded-full" style={{ background: 'var(--amber)' }} />
-                <span className="text-[14px] font-semibold" style={{ color: 'var(--fg)' }}>Confirmation required</span>
+                <span className="text-[14px] font-semibold" style={{ color: 'var(--fg)' }}>需要你的确认</span>
               </div>
               <pre className="text-[12.5px] rounded-xl p-3 mb-4 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
               <div className="flex gap-2.5">
-                <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">Approve</button>
-                <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">Deny</button>
+                <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">批准执行</button>
+                <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">拒绝执行</button>
               </div>
             </div>
           </BorderBeam>
@@ -764,6 +885,12 @@ export default function ChatPage() {
 
       {}
       <div className="px-6 pb-6 relative">
+        <div className="max-w-[720px] mx-auto mb-2 space-y-2">
+          {commandNotice && <div className="max-h-44 overflow-auto"><InlineNotice message={commandNotice.message} tone={commandNotice.tone} onDismiss={() => setCommandNotice(null)} /></div>}
+          <InlineNotice message={actionNotice} onDismiss={() => setActionNotice(null)} />
+          <InlineNotice message={sendError} onDismiss={() => { setSendError(null); setLiteralMessage(false) }} />
+          {literalMessage && <button type="button" className="btn-ghost text-sm" onClick={() => handleSend(true)}>作为普通消息发送</button>}
+        </div>
         {}
         {showPalette && filteredCommands.length > 0 && (
           <div
@@ -772,7 +899,7 @@ export default function ChatPage() {
           >
 
             {(() => {
-              const CATEGORY_LABELS: Record<string, string> = { system: 'System', skill: 'Skills', mcp: 'MCP Tools', plugin: 'Plugins' }
+              const CATEGORY_LABELS: Record<string, string> = { system: '系统命令', skill: '技能', mcp: 'MCP', plugin: '插件' }
               const CATEGORY_COLORS: Record<string, string> = { system: 'var(--fg-faint)', skill: 'var(--green)', mcp: 'var(--blue)', plugin: 'var(--amber)' }
               let lastCat = ''
               return filteredCommands.map((c, i) => {
@@ -851,7 +978,7 @@ export default function ChatPage() {
               >
                 <FolderOpen size={11} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
                 <span className="text-[10px] font-mono truncate max-w-[320px]">
-                  {chipWorkspace ?? '选择工作区…'}
+                      {chipWorkspace ?? '选择工作区…'}
                 </span>
               </button>
             )}
@@ -884,6 +1011,7 @@ export default function ChatPage() {
                       className="p-0.5 rounded"
                       style={{ color: 'var(--fg-faint)' }}
                       title="移除附件"
+                      aria-label={`移除附件 ${a.name}`}
                     >
                       <X size={10} />
                     </button>
@@ -900,6 +1028,7 @@ export default function ChatPage() {
                 className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 hover:bg-[var(--surface-2)]"
                 style={{ color: 'var(--fg-muted)' }}
                 title="添加附件（本地文件，按路径引用）"
+                aria-label="添加附件"
               >
                 <Paperclip size={14} />
               </button>
@@ -909,25 +1038,28 @@ export default function ChatPage() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              aria-busy={isRunning}
-              placeholder={isRunning ? "Agent running... messages will be queued" : "Message Nexus..."}
+              aria-label="消息输入"
+              aria-busy={isRunning || creatingSession}
+              placeholder={isRunning ? "Agent 正在运行，消息将加入队列" : "向 Nexus 发送消息…"}
               className="flex-1 bg-transparent text-[15px] resize-none focus:outline-none max-h-32 min-h-[26px]"
               style={{ color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}
               rows={1}
             />
             {isRunning ? (
-              <button onClick={handleCancel} className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
+              <button onClick={handleCancel} aria-label="停止任务" title="停止任务" className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
             ) : (
               <button
-                onClick={handleSend}
-                disabled={!input.trim() && attachments.length === 0}
+                onClick={() => handleSend()}
+                aria-label="发送消息"
+                title="发送消息（Enter）；换行（Shift+Enter）"
+                disabled={creatingSession || (!input.trim() && attachments.length === 0)}
                 className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 disabled:opacity-60"
                 style={{
                   background: 'var(--accent)',
                   color: 'var(--on-accent)',
                 }}
               >
-                <Send size={14} />
+                {creatingSession ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               </button>
             )}
           </div>
@@ -948,23 +1080,24 @@ export default function ChatPage() {
             {versionStatus?.head && (
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)' }} />
-                checkpoint: {versionStatus.head.id?.slice(0, 8)}
+                检查点：{versionStatus.head.id?.slice(0, 8)}
               </span>
             )}
             <div className="flex items-center gap-1 shrink-0 ml-auto">
               <HudAction icon={GitBranch} label="时间线" disabled={!sessionId}
-                title="Session timeline — every step + full context"
+                title="查看任务时间线与上下文"
                 onClick={() => sessionId && navigate(`/chat/${sessionId}/timeline`)} />
-              <HudAction icon={Undo2} label="撤销" disabled={!versionStatus?.can_undo}
-                title="撤销到上一个 checkpoint" onClick={handleUndo} />
-              <HudAction icon={Redo2} label="重做" disabled={!versionStatus?.can_redo}
-                title="重做到下一个 checkpoint" onClick={handleRedo} />
+              <HudAction icon={Undo2} label="撤销" disabled={isRunning || versionBusy || !versionStatus?.can_undo}
+                title="撤销到上一个检查点" onClick={handleUndo} />
+              <HudAction icon={Redo2} label="重做" disabled={isRunning || versionBusy || !versionStatus?.can_redo}
+                title="重做到下一个检查点" onClick={handleRedo} />
               <HudAction icon={History} label="检查点"
-                title="查看 checkpoint 历史"
+                title="查看检查点历史"
                 onClick={() => {
                   setShowCheckpoints(!showCheckpoints)
                   const sid = currentSessionIdRef.current
                   if (sid) api.getVersionLog(sid, 10).then(d => setCheckpoints(d.checkpoints || []))
+                    .catch(error => setActionNotice(`检查点加载失败：${errMsg(error) ?? '请重试'}`))
                 }} />
             </div>
           </div>
@@ -976,10 +1109,10 @@ export default function ChatPage() {
       {showCheckpoints && (
         <div className="absolute bottom-28 left-5 w-96 rounded-xl overflow-hidden z-50 animate-slide-up" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-elevated)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
-            <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>Checkpoints</span>
-            <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><Square size={12} /></button>
+            <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>检查点</span>
+            <button onClick={() => setShowCheckpoints(false)} aria-label="关闭检查点" className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><X size={12} /></button>
           </div>
-          {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>No checkpoints</p> : checkpoints.map(cp => (
+          {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>暂无检查点</p> : checkpoints.map(cp => (
             <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
               <div className="flex items-center gap-2">
                 {cp.is_head && <span style={{ color: 'var(--accent)' }}>→</span>}

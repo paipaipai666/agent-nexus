@@ -25,6 +25,12 @@ interface ModelPickerProps {
   onSwitched: (modelId: string) => void
 }
 
+type CapabilitiesState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; data: ModelCapabilities }
+  | { kind: 'error'; message: string }
+
 export default function ModelPicker({ currentModel, onSwitched }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -32,13 +38,22 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
   const [legacyModel, setLegacyModel] = useState<string | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [caps, setCaps] = useState<ModelCapabilities | null>(null)
+  const [capabilities, setCapabilities] = useState<CapabilitiesState>({ kind: 'idle' })
+  const caps = capabilities.kind === 'ready' ? capabilities.data : null
+  const requestId = useRef(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const reducedMotion = usePrefersReducedMotion()
 
-  const refreshCaps = () => {
-    api.getModelCapabilities().then(setCaps).catch(() => setCaps(null))
+  const refreshCaps = async () => {
+    const id = ++requestId.current
+    setCapabilities({ kind: 'loading' })
+    try {
+      const data = await api.getModelCapabilities()
+      if (id === requestId.current) setCapabilities({ kind: 'ready', data })
+    } catch (failure) {
+      if (id === requestId.current) setCapabilities({ kind: 'error', message: failure instanceof Error ? failure.message : '查询失败' })
+    }
   }
   const anchorRect = open ? rootRef.current?.getBoundingClientRect() : undefined
 
@@ -47,22 +62,27 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
     }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOpen(false); rootRef.current?.querySelector('button')?.focus() }
+    }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
 
+  const loadProviders = async () => {
+    setError(null)
+    try {
+      const data = await api.getLlmProviders()
+      setProviders(data.providers || [])
+      setActive(data.active_model || data.active || '')
+      setLegacyModel(data.legacy?.model_id ?? null)
+    } catch (failure) { setError(`模型列表加载失败：${failure instanceof Error ? failure.message : '请重试'}`) }
+  }
   const handleToggle = () => {
     const next = !open
     setOpen(next)
-    if (next) {
-      setError(null)
-      api.getLlmProviders().then((d) => {
-        setProviders(d.providers || [])
-        setActive(d.active_model || d.active || '')
-        setLegacyModel(d.legacy?.model_id ?? null)
-      }).catch(() => {})
-      refreshCaps()
-    }
+    if (next) { void loadProviders(); void refreshCaps() }
   }
 
   const handleSelect = async (selector: string) => {
@@ -74,7 +94,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
       setActive(selector)
       onSwitched(res.model_id)
       setOpen(false)
-      setCaps(null)
+      setCapabilities({ kind: 'idle' })
       refreshCaps()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -90,6 +110,9 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
         className="flex items-center gap-1.5 h-7 px-3 rounded-full transition-colors hover:bg-[var(--surface-3)] font-mono text-[12px]"
         style={{ color: 'var(--fg-muted)' }}
         title="切换模型（立即生效）"
+        aria-label="选择模型"
+        aria-expanded={open}
+        aria-haspopup="dialog"
       >
         {switching !== null ? (
           <ThinkingOrb
@@ -102,21 +125,23 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
         ) : (
           <Cpu size={12} style={{ color: 'var(--fg-faint)', flexShrink: 0 }} />
         )}
-        <span>{currentModel ? (currentModel.split('/').pop() ?? currentModel) : 'model'}</span>
+        <span>{currentModel ? (currentModel.split('/').pop() ?? currentModel) : '选择模型'}</span>
         <ChevronDown size={11} style={{ color: 'var(--fg-faint)' }} />
       </button>
 
       {open && (
         <div
+          role="dialog"
+          aria-label="模型选择"
           className="fixed w-64 rounded-[14px] overflow-hidden z-50 animate-slide-up max-h-[70vh] flex flex-col"
           style={{
             background: 'var(--surface-2)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-elevated)',
-            left: anchorRect?.left ?? 0,
+            left: Math.max(8, Math.min(window.innerWidth - 264, anchorRect?.left ?? 8)),
             bottom: anchorRect ? window.innerHeight - anchorRect.top + 6 : 0,
           }}
         >
           <div className="px-3 pt-2 pb-1 text-[11.5px] shrink-0" style={{ color: 'var(--fg-faint)' }}>
-            Model
+            模型
           </div>
 
           <div className="overflow-y-auto flex-1">
@@ -179,7 +204,9 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
           </div>
 
           {error && (
-            <div className="px-3 py-1.5 text-[12px] shrink-0" style={{ color: 'var(--red)' }}>{error}</div>
+            <div role="alert" className="px-3 py-1.5 text-[12px] shrink-0" style={{ color: 'var(--red)' }}>{error}
+              <button type="button" className="ml-2 underline" onClick={() => { void loadProviders(); void refreshCaps() }}>重试</button>
+            </div>
           )}
 
           {}
@@ -187,7 +214,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>能力检测</span>
               <span className="text-[12px]" style={{ color: 'var(--fg-faint)' }}>
-                {!caps ? '检测中…'
+                {!caps ? capabilities.kind === 'error' ? '检测失败' : capabilities.kind === 'loading' ? '检测中…' : '尚未检测'
                   : caps.source === 'probe' ? '实时探测'
                   : caps.source === 'config' ? '配置指定'
                   : '注册表'}
@@ -211,7 +238,7 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                       />
                     )
                   })()}
-                  <CapChip label="Thinking" ok={caps.thinking} disabled={caps.session_disabled.includes('thinking')} />
+                  <CapChip label="思考" ok={caps.thinking} disabled={caps.session_disabled.includes('thinking')} />
                   <CapChip label="视觉" ok={caps.vision} />
                   <CapChip label="并行工具" ok={caps.parallel_tool_calls} disabled={caps.session_disabled.includes('parallel_tool_calls')} />
                 </div>
@@ -219,13 +246,17 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                   上下文 {(caps.max_context_tokens / 1000).toFixed(0)}K · 输出 {(caps.max_output_tokens / 1000).toFixed(0)}K
                 </div>
               </>
-            ) : (
+            ) : capabilities.kind === 'error' ? (
+              <div role="alert" className="text-xs" style={{ color: 'var(--red)' }}>{capabilities.message}
+                <button type="button" className="ml-2 underline" onClick={() => void refreshCaps()}>重试能力检测</button>
+              </div>
+            ) : capabilities.kind === 'loading' ? (
               <div className="flex flex-wrap gap-1">
                 {[0, 1, 2, 3, 4].map(i => (
                   <span key={i} className="h-4 w-14 rounded animate-pulse" style={{ background: 'var(--surface-3)' }} />
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           <button
