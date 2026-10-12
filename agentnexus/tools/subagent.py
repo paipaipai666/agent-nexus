@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TYPE_CHECKING, Callable, Iterable
@@ -137,26 +138,39 @@ def _extract_step_summary(result) -> str:
     return ""
 
 
-def _make_child_forwarder(sctx, entry):
+def _make_child_forwarder(sctx, entry, child_run_id):
     """Bridge child-agent ReActEvents into the parent run's event stream.
 
     Called on the lane-pool thread running child_agent.run() (FSM subscribe
     callback, chat.py:795 signature). Observability only — a throwing
     forwarder must never break the child loop.
     """
+    stream_counts = {"content": 0, "reasoning": 0}
+
     def forward(event, _from_state, _to_state):
         if event is None:
             return
         try:
             etype = event.type.name
             p = event.payload or {}
+            step_id = getattr(event, "step_id", 0)
+            identity = {"child_run_id": child_run_id, "step_id": step_id}
+            journal = {**p, "event": etype, "thought": p.get("thought") or ""}
+            if etype in ("TOOLS_REQUESTED", "ANSWER_READY", "ANSWER_THOUGHT", "FAULT") and any(stream_counts.values()):
+                sctx.event(entry, "runtime", **identity, event_type="token_summary",
+                           event_payload={"content_chars": stream_counts["content"],
+                                          "reasoning_chars": stream_counts["reasoning"]})
+                stream_counts.update(content=0, reasoning=0)
             if etype == "TOOL_START":
                 sctx.event(entry, "tool_call", status="tool_calling",
+                           **identity, event_type="tool_start", event_payload=p,
                            tool_name=p.get("name", ""),
                            arguments=p.get("arguments", {}),
                            tool_call_id=p.get("id", ""))
             elif etype == "TOOL_DONE":
                 sctx.event(entry, "tool_result", status="thinking",
+                           **identity, event_type="tool_done",
+                           event_payload={**p, "result": collapse_and_truncate(p.get("result", ""), 300)},
                            tool_name=p.get("name", ""),
                            tool_call_id=p.get("id", ""),
                            result=collapse_and_truncate(p.get("result", ""), 300),
@@ -164,16 +178,21 @@ def _make_child_forwarder(sctx, entry):
             elif etype == "STREAM_TOKEN":
                 token = p.get("token", "")
                 if token:
-                    sctx.event(entry, "token", content=token)
+                    stream_counts["content"] += len(token)
+                    sctx.event(entry, "token", content=token, **identity)
             elif etype == "STREAM_REASONING":
                 token = p.get("token", "")
                 if token:
-                    sctx.event(entry, "reasoning", content=token)
+                    stream_counts["reasoning"] += len(token)
+                    sctx.event(entry, "reasoning", content=token, **identity)
             elif etype in ("TOOLS_REQUESTED", "ANSWER_THOUGHT"):
                 thought = (p.get("thought") or "").strip()
-                if thought:
-                    sctx.event(entry, "thinking", status="thinking",
-                               content=thought)
+                sctx.event(entry, "thinking" if thought else "runtime", status="thinking",
+                           **identity, event_type="turn_journal", event_payload=journal,
+                           content=thought)
+            else:
+                sctx.event(entry, "runtime", **identity,
+                           event_type="turn_journal", event_payload=journal)
         except Exception:
             logger.debug("subagent forwarder failed", exc_info=True)
 
@@ -222,7 +241,20 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                     or (subagent_entry is not None and subagent_entry.cancel_event.is_set())
         )
         if subagent_ctx is not None and subagent_entry is not None:
-            child_agent._on_event = _make_child_forwarder(subagent_ctx, subagent_entry)
+            child_run_id = f"subrun_{uuid.uuid4().hex}"
+            child_agent._on_event = _make_child_forwarder(subagent_ctx, subagent_entry, child_run_id)
+            child_agent.set_context_observer(
+                lambda step_id, messages: subagent_ctx.snapshot(
+                    subagent_entry, child_run_id, step_id, messages,
+                ),
+            )
+            subagent_ctx.event(subagent_entry, "runtime", child_run_id=child_run_id,
+                               event_type="run_started", event_payload={"role": role})
+
+        def finish_attempt(status: str, **payload) -> None:
+            if subagent_ctx is not None and subagent_entry is not None:
+                subagent_ctx.event(subagent_entry, "runtime", child_run_id=child_run_id,
+                                   event_type="run_finished", event_payload={"status": status, **payload})
 
         try:
             with trace_manager.span("subagent_attempt", {
@@ -271,6 +303,10 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                     runner.shutdown(wait=False)
                 answer = (result.answer or "").strip()
                 salvaged = _extract_step_summary(result)
+                if subagent_ctx is not None and subagent_entry is not None and (answer or salvaged):
+                    subagent_ctx.event(subagent_entry, "runtime", child_run_id=child_run_id,
+                                       event_type="message_delta", event_payload={"text": answer or salvaged})
+                finish_attempt("completed" if answer or salvaged else "empty_answer")
                 span.output = {
                     "answer": answer[:500],
                     "salvaged": salvaged[:500],
@@ -289,6 +325,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                     "result": result,
                 }, None
         except Exception as exc:
+            finish_attempt("interrupted" if isinstance(exc, AgentCancelled) else "failed", error=str(exc))
             hook_mgr.fire(HookType.AFTER_SUBAGENT_RUN, {
                 "task": task, "role": role, "success": False, "error": str(exc),
             })

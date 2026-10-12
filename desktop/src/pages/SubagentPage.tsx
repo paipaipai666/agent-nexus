@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Bot, Square } from 'lucide-react'
+import { ArrowLeft, Bot, Square, GitBranch } from 'lucide-react'
 import { api, type SubagentInfo, type TimelineEvent } from '../services/api'
 import { wsPool } from '../services/ws'
 import { useSession } from '../components/session/SessionManager'
@@ -159,7 +159,7 @@ export default function SubagentPage() {
       }
     }).catch(() => {})
 
-    api.getSessionEvents(sessionId, 0).then(d => {
+    api.getSessionEvents(sessionId, 0, subagentId, 'trajectory').then(d => {
       if (cancelled) return
       const rows = (d.events || []).filter((e: TimelineEvent) =>
         e.event_type === 'subagent_event' && isSubagentEventPayload(e.payload)
@@ -249,11 +249,20 @@ export default function SubagentPage() {
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_COLOR[displayStatus] || 'var(--fg-faint)' }} />
           {STATUS_LABEL[displayStatus] || displayStatus}
         </span>
+        <button
+          onClick={() => navigate(`/chat/${sessionId}/subagent/${subagentId}/timeline`)}
+          className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] shrink-0 transition-colors hover:bg-[var(--surface-2)]"
+          style={{ color: 'var(--fg-muted)', border: '1px solid var(--border)' }}
+          title="查看该子代理的运行时"
+        >
+          <GitBranch size={12} />
+          Timeline
+        </button>
         {isActive && (
           <button
             onClick={handleInterrupt}
             disabled={cancelRequested}
-            className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] shrink-0 transition-colors disabled:opacity-60"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] shrink-0 transition-colors disabled:opacity-60"
             style={{ background: 'var(--red-muted)', color: 'var(--red)' }}
             title="中断该子代理"
           >

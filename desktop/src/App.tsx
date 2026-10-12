@@ -56,6 +56,7 @@ export default function App() {
             <Route path="/" element={<ChatPage />} />
             <Route path="/chat/:sessionId/timeline" element={<TimelinePage />} />
             <Route path="/chat/:sessionId/subagent/:subagentId" element={<SubagentPage />} />
+            <Route path="/chat/:sessionId/subagent/:subagentId/timeline" element={<TimelinePage />} />
             <Route path="/chat/:sessionId" element={<ChatPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/knowledge" element={<KnowledgePage />} />

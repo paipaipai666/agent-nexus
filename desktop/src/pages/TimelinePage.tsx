@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Brain, Wrench, MessageSquare, Flag, Play, AlertTriangle, Shield,
@@ -25,6 +25,7 @@ const NODE_STYLE: Record<string, { icon: typeof Circle; color: string; label: st
   todo_change: { icon: ListTodo, color: 'var(--amber)', label: 'Todo' },
   workflow_step: { icon: Workflow, color: 'var(--cyan)', label: 'Workflow' },
   skill_auto_selected: { icon: Sparkles, color: 'var(--cyan)', label: 'Skill route' },
+  subagent_retry: { icon: RefreshCw, color: 'var(--amber)', label: 'Retry' },
 }
 
 const RUN_STATUS_STYLE: Record<string, { color: string; label: string } | undefined> = {
@@ -116,61 +117,72 @@ function nodeDetail(e: TimelineEvent): string {
       return join([p.summary, p.status && `status=${String(p.status)}`])
     case 'skill_auto_selected':
       return join([p.skill, p.source && `via ${String(p.source)}`, p.reason])
+    case 'subagent_retry':
+      return String(p.reason || '')
     default:
       return Object.keys(p).length ? JSON.stringify(p) : ''
   }
 }
 
 export default function TimelinePage() {
-  const { sessionId } = useParams<{ sessionId: string }>()
+  const { sessionId, subagentId } = useParams<{ sessionId: string; subagentId: string }>()
+  const agentId = subagentId || 'main'
   const navigate = useNavigate()
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [selected, setSelected] = useState<TimelineEvent | null>(null)
-  const [ctx, setCtx] = useState<{ step: number; run: string; messages: Array<{ role: string; content?: string }>; count: number; chars: number } | null>(null)
-  const lastIdRef = useRef(0)
-  const listRef = useRef<HTMLDivElement>(null)
-
-  const loadInitial = useCallback((sid: string) => {
-    api.getSessionEvents(sid, 0)
-      .then(({ events: evs, last_id }) => {
-        setEvents(evs)
-        lastIdRef.current = last_id
-      })
-      .catch(() => { setEvents([]) })
-  }, [])
+  const [ctx, setCtx] = useState<Awaited<ReturnType<typeof api.getContextSnapshot>> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
+  const [contextStatus, setContextStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle')
 
   useEffect(() => {
+    setEvents([]); setSelected(null); setCtx(null); setError(''); setLoading(true)
     if (!sessionId) return
-    setEvents([]); lastIdRef.current = 0; setSelected(null); setCtx(null)
-    loadInitial(sessionId)
-    const t = setInterval(() => {
-      api.getSessionEvents(sessionId, lastIdRef.current)
-        .then(({ events: evs, last_id }) => {
-          if (evs.length > 0) {
-            setEvents(prev => [...prev, ...evs])
-            lastIdRef.current = last_id
-          }
-        })
-        .catch(() => {})
-    }, POLL_MS)
-    return () => clearInterval(t)
-  }, [sessionId, loadInitial])
+    const sid = sessionId
+    let cancelled = false
+    let cursor = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function load() {
+      let delay = POLL_MS
+      try {
+        const { events: rows, last_id, count } = await api.getSessionEvents(sid, cursor, agentId)
+        if (cancelled) return
+        setEvents(prev => [...prev, ...rows])
+        cursor = last_id
+        setError('')
+        if (count === 2000) delay = 0
+      } catch {
+        if (cancelled) return
+        setError('Unable to load timeline events. Retry with Reload.')
+      }
+      if (!cancelled) {
+        setLoading(false)
+        timer = setTimeout(load, delay)
+      }
+    }
+    void load()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [sessionId, agentId, reload])
 
   useEffect(() => {
-    if (!selected || !sessionId || selected.step_id <= 0) { if (!selected || selected.step_id <= 0) setCtx(null); return }
+    setCtx(null)
+    setContextStatus('idle')
+    if (!selected || !sessionId || selected.step_id <= 0) return
     let cancelled = false
-    api.getContextSnapshot(sessionId, selected.run_id, selected.step_id)
+    setContextStatus('loading')
+    api.getContextSnapshot(sessionId, selected.run_id, selected.step_id, agentId)
       .then(snap => {
         if (cancelled) return
-        setCtx({
-          step: selected.step_id, run: selected.run_id,
-          messages: snap.messages as Array<{ role: string; content?: string }>,
-          count: snap.message_count, chars: snap.char_count,
-        })
+        setCtx(snap)
+        setContextStatus('idle')
       })
-      .catch(() => { if (!cancelled) setCtx(null) })
+      .catch(() => { if (!cancelled) setContextStatus('unavailable') })
     return () => { cancelled = true }
-  }, [selected, sessionId])
+  }, [selected, sessionId, agentId])
+
+  const name = events.find(e => e.event_type === 'run_started' && typeof e.payload.name === 'string')?.payload.name
+  const title = subagentId ? `${typeof name === 'string' ? name : subagentId} Timeline` : 'Timeline'
 
   const visible = events.filter(e =>
     e.event_type !== 'turn_journal'
@@ -189,27 +201,29 @@ export default function TimelinePage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
-        <div>
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--fg)' }}>Timeline</h1>
+      <div className="px-6 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold break-words" style={{ color: 'var(--fg)' }}>{title}</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--fg-muted)' }}>
-            Every step the agent took, with the full context sent to the model at each step
+            {subagentId ? 'Runtime events and model context for this subagent' : 'Main agent runtime events and model context'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
-            onClick={() => navigate(sessionId ? `/chat/${sessionId}` : '/')}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors hover:opacity-70"
+            onClick={() => navigate(sessionId
+              ? subagentId ? `/chat/${sessionId}/subagent/${subagentId}` : `/chat/${sessionId}`
+              : '/')}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs whitespace-nowrap transition-colors hover:opacity-70"
             style={{ color: 'var(--fg-muted)', border: '1px solid var(--border)' }}
           >
             <ArrowLeft size={12} />
-            Back to Chat
+            {subagentId ? 'Back to Subagent' : 'Back to Chat'}
           </button>
           <span className="text-[10px] font-mono px-1.5 py-1 rounded" style={{ color: 'var(--fg-faint)', background: 'var(--surface-2)' }}>
-            {sessionId ?? 'no session'}
+            {subagentId ?? sessionId ?? 'no session'}
           </span>
           <button
-            onClick={() => sessionId && loadInitial(sessionId)}
+            onClick={() => setReload(value => value + 1)}
             className="p-1.5 rounded hover:opacity-70"
             style={{ color: 'var(--fg-muted)' }}
             title="Reload"
@@ -219,19 +233,22 @@ export default function TimelinePage() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      {error && <p role="alert" className="px-6 py-2 text-xs" style={{ color: 'var(--red)' }}>{error}</p>}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {}
-        <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
           {!sessionId ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <GitBranch size={32} style={{ color: 'var(--fg-faint)' }} />
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>No session selected.</p>
             </div>
-          ) : events.length === 0 ? (
+          ) : loading ? (
+            <p role="status" className="py-12 text-sm" style={{ color: 'var(--fg-muted)' }}>Loading timeline…</p>
+          ) : visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <GitBranch size={32} style={{ color: 'var(--fg-faint)' }} />
               <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
-                No events recorded yet — send a message in Chat first.
+                {subagentId ? 'No runtime events recorded for this subagent yet.' : 'No events recorded yet. Send a message in Chat first.'}
               </p>
             </div>
           ) : (
@@ -294,7 +311,7 @@ export default function TimelinePage() {
 
         {}
         <div
-          className="w-[420px] shrink-0 overflow-y-auto px-4 py-4"
+          className="w-full md:w-[420px] max-h-[45%] md:max-h-none shrink-0 overflow-y-auto px-4 py-4"
           style={{ borderLeft: '1px solid var(--border)' }}
         >
           {ctx ? (
@@ -302,11 +319,11 @@ export default function TimelinePage() {
               <div className="flex items-center gap-2 mb-1">
                 <Database size={12} style={{ color: 'var(--accent)' }} />
                 <span className="text-xs font-semibold" style={{ color: 'var(--fg)' }}>
-                  Context @ step {ctx.step}
+                  Context @ step {ctx.step_id}
                 </span>
               </div>
               <p className="text-[10px] mb-3 font-mono" style={{ color: 'var(--fg-faint)' }}>
-                run {ctx.run.slice(-8)} · {ctx.count} messages · {ctx.chars.toLocaleString()} chars (~{Math.round(ctx.chars / 4).toLocaleString()} tokens)
+                run {ctx.run_id.slice(-8)} · {ctx.message_count} messages · {ctx.char_count.toLocaleString()} chars (~{Math.round(ctx.char_count / 4).toLocaleString()} tokens)
               </p>
               <div className="space-y-2">
                 {ctx.messages.map((m, i) => (
@@ -328,7 +345,9 @@ export default function TimelinePage() {
             <div className="flex flex-col items-center justify-center h-full gap-2">
               <Database size={24} style={{ color: 'var(--fg-faint)' }} />
               <p className="text-xs text-center px-4" style={{ color: 'var(--fg-muted)' }}>
-                {selected && selected.step_id <= 0
+                {contextStatus === 'loading' ? 'Loading model context…'
+                  : contextStatus === 'unavailable' ? 'No context snapshot is available for this step. Older subagent runs may not have recorded one.'
+                  : selected && selected.step_id <= 0
                   ? 'This event has no model call attached (run-level event).'
                   : 'Click a timeline node to see the exact context sent to the model at that step.'}
               </p>

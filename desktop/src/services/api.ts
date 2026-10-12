@@ -241,9 +241,9 @@ export const api = {
       `/api/session/${sessionId}/subagents`
     ),
 
-  getSessionEvents: (sessionId: string, after = 0) =>
+  getSessionEvents: (sessionId: string, after = 0, agentId?: string, view: 'timeline' | 'trajectory' = 'timeline') =>
     request<{ session_id: string; events: TimelineEvent[]; last_id: number; count: number }>(
-      `/api/session/${sessionId}/events?after=${after}`
+      `/api/session/${sessionId}/events?after=${after}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}${view === 'trajectory' ? '&view=trajectory' : ''}`
     ),
 
   deleteSessions: (sessionIds: string[]) =>
@@ -252,7 +252,7 @@ export const api = {
       body: JSON.stringify({ session_ids: sessionIds }),
     }),
 
-  getContextSnapshot: (sessionId: string, runId: string, stepId: number) =>
+  getContextSnapshot: (sessionId: string, runId: string, stepId: number, agentId?: string) =>
     request<{
       session_id: string
       run_id: string
@@ -261,7 +261,7 @@ export const api = {
       message_count: number
       char_count: number
       messages: Array<{ role: string; content?: string; tool_call_id?: string; [k: string]: unknown }>
-    }>(`/api/session/${sessionId}/context/${runId}/${stepId}`),
+    }>(`/api/session/${sessionId}/context/${runId}/${stepId}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
 
   getContextSteps: (sessionId: string, runId: string) =>
     request<{ session_id: string; run_id: string; steps: number[] }>(

@@ -131,9 +131,8 @@ class SubagentRegistry:
 class SubagentRunContext:
     """Per-run handle handed to the subagent tool closure via SubagentBridge.
 
-    Methods are called from dispatcher lane-pool threads; they only touch the
-    thread-safe registry and ChatService._put_event (which serializes via its
-    own lock) — never the agent loop.
+    Lane-pool threads update the registry and emit through ChatService._put_event.
+    Context snapshots use TimelineStore's lock and each attempt's run id.
     """
 
     def __init__(self, service, session_id: str, run_id: str) -> None:
@@ -159,3 +158,15 @@ class SubagentRunContext:
                  error: str = "", steps_used: int = 0) -> None:
         self.event(entry, "finished", status=status, summary=summary,
                    error=error, steps_used=steps_used)
+
+    def snapshot(self, entry: SubagentEntry, child_run_id: str, step_id: int,
+                 messages: list[dict]) -> None:
+        """Persist one attempt's model input under its own run and step ids."""
+        try:
+            from agentnexus.observability.timeline import get_timeline_store
+
+            get_timeline_store().record_snapshot(
+                entry.session_id, child_run_id, step_id, messages,
+            )
+        except Exception:
+            logger.debug("subagent context snapshot failed", exc_info=True)

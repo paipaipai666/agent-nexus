@@ -408,6 +408,7 @@ class ChatService:
             {"subagent_id": entry.subagent_id, "name": entry.name,
              "kind": kind, "status": entry.status, **fields},
             run_id=entry.run_id, session_id=entry.session_id,
+            step_id=fields.get("step_id", 0),
         ), persist=kind not in ("token", "reasoning"))
 
     def cancel_subagent(self, session_id: str, subagent_id: str) -> bool:

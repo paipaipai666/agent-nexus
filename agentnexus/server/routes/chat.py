@@ -6,6 +6,7 @@ import asyncio
 import logging
 import secrets
 import threading
+from typing import Literal
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -380,21 +381,27 @@ def list_subagents(session_id: str, runtime=Depends(get_runtime)):
 
 
 @router.get("/session/{session_id}/events")
-def list_session_events(session_id: str, after: int = 0, limit: int = 2000):
+def list_session_events(session_id: str, after: int = 0, limit: int = 2000,
+                        agent_id: str | None = None,
+                        view: Literal["timeline", "trajectory"] = "timeline"):
     """Append-only session event log for the timeline UI (cursor: row id)."""
     from agentnexus.observability.timeline import get_timeline_store
 
-    events = get_timeline_store().list_events(session_id, after_id=after, limit=limit)
+    events = get_timeline_store().list_events(
+        session_id, after_id=after, limit=limit, agent_id=agent_id,
+        normalize=view == "timeline",
+    )
     last_id = events[-1]["id"] if events else after
     return {"session_id": session_id, "events": events, "last_id": last_id, "count": len(events)}
 
 
 @router.get("/session/{session_id}/context/{run_id}/{step_id}")
-def get_context_snapshot(session_id: str, run_id: str, step_id: int):
+def get_context_snapshot(session_id: str, run_id: str, step_id: int,
+                         agent_id: str | None = None):
     """Full context snapshot (the exact messages array) for one model call."""
     from agentnexus.observability.timeline import get_timeline_store
 
-    snapshot = get_timeline_store().get_snapshot(session_id, run_id, step_id)
+    snapshot = get_timeline_store().get_snapshot(session_id, run_id, step_id, agent_id=agent_id)
     if snapshot is None:
         raise APIError(404, "not_found", f"No context snapshot for step {step_id}")
     return {"session_id": session_id, "run_id": run_id, "step_id": step_id, **snapshot}

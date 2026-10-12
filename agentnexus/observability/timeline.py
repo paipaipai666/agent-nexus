@@ -46,6 +46,40 @@ CREATE TABLE IF NOT EXISTS context_snapshots (
 _SKIP_TYPES = frozenset({"stream_token", "stream_reasoning"})
 
 
+def _subagent_timeline_event(row: dict[str, Any]) -> dict[str, Any]:
+    envelope = row["payload"]
+    kind = envelope.get("kind", "")
+    event_type = envelope.get("event_type")
+    payload = envelope.get("event_payload")
+    if not event_type or not isinstance(payload, dict):
+        match kind:
+            case "started":
+                event_type, payload = "run_started", envelope
+            case "finished":
+                event_type, payload = "run_finished", envelope
+            case "thinking":
+                event_type, payload = "turn_journal", {
+                    "event": "TOOLS_REQUESTED", "thought": envelope.get("content", ""),
+                }
+            case "tool_call" | "tool_result":
+                event_type = "tool_start" if kind == "tool_call" else "tool_done"
+                payload = {
+                    **envelope, "name": envelope.get("tool_name", ""),
+                    "id": envelope.get("tool_call_id", ""),
+                }
+            case "retry":
+                event_type, payload = "subagent_retry", envelope
+            case _:
+                event_type, payload = f"subagent_{kind or 'unknown'}", envelope
+    return {
+        **row,
+        "run_id": envelope.get("child_run_id") or f"{row['run_id']}:{envelope['subagent_id']}",
+        "step_id": envelope.get("step_id", row["step_id"]),
+        "event_type": event_type,
+        "payload": payload,
+    }
+
+
 class TimelineStore:
     """Append-only session event log + per-step context snapshots."""
 
@@ -116,19 +150,28 @@ class TimelineStore:
             logger.debug("Context snapshot persist failed: %s", e)
 
     def list_events(
-        self, session_id: str, after_id: int = 0, limit: int = 2000
+        self, session_id: str, after_id: int = 0, limit: int = 2000,
+        *, agent_id: str | None = None, normalize: bool = True,
     ) -> list[dict[str, Any]]:
         if self._conn is None:
             return []
         try:
+            scope = ""
+            params: list[Any] = [session_id, after_id]
+            if agent_id == "main":
+                scope = " AND event_type != 'subagent_event'"
+            elif agent_id is not None:
+                scope = " AND event_type = 'subagent_event' AND json_extract(payload, '$.subagent_id') = ?"
+                params.append(agent_id)
+            params.append(limit)
             with self._lock:
                 rows = self._conn.execute(
                     "SELECT id, run_id, seq, ts, event_type, step_id, payload "
-                    "FROM session_events WHERE session_id = ? AND id > ? "
-                    "ORDER BY id LIMIT ?",
-                    (session_id, after_id, limit),
+                    "FROM session_events WHERE session_id = ? AND id > ?"
+                    + scope + " ORDER BY id LIMIT ?",
+                    params,
                 ).fetchall()
-            return [
+            events = [
                 {
                     "id": r["id"], "run_id": r["run_id"], "seq": r["seq"],
                     "ts": r["ts"], "event_type": r["event_type"],
@@ -137,17 +180,38 @@ class TimelineStore:
                 }
                 for r in rows
             ]
+            if agent_id is not None and agent_id != "main" and normalize:
+                return [_subagent_timeline_event(event) for event in events]
+            return events
         except Exception as e:
             logger.debug("Timeline event read failed: %s", e)
             return []
 
     def get_snapshot(
-        self, session_id: str, run_id: str, step_id: int
+        self, session_id: str, run_id: str, step_id: int,
+        *, agent_id: str | None = None,
     ) -> dict[str, Any] | None:
         if self._conn is None:
             return None
         try:
             with self._lock:
+                if agent_id is not None:
+                    if agent_id == "main":
+                        owned = self._conn.execute(
+                            "SELECT 1 FROM session_events WHERE session_id = ? AND run_id = ? "
+                            "AND event_type != 'subagent_event' LIMIT 1",
+                            (session_id, run_id),
+                        ).fetchone()
+                    else:
+                        owned = self._conn.execute(
+                            "SELECT 1 FROM session_events WHERE session_id = ? "
+                            "AND event_type = 'subagent_event' "
+                            "AND json_extract(payload, '$.subagent_id') = ? "
+                            "AND json_extract(payload, '$.child_run_id') = ? LIMIT 1",
+                            (session_id, agent_id, run_id),
+                        ).fetchone()
+                    if owned is None:
+                        return None
                 row = self._conn.execute(
                     "SELECT ts, message_count, char_count, messages FROM context_snapshots "
                     "WHERE session_id = ? AND run_id = ? AND step_id = ?",
