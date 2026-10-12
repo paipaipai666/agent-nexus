@@ -1,7 +1,6 @@
 """Attachment paths extend the file_read allow-list for exactly one run.
 
-Registry is global module state (not a ContextVar) on purpose: tool calls
-execute on dispatcher lane threads that never inherit context.
+Reference counts keep shared attachments readable until all runs release them.
 """
 
 import pytest
@@ -38,14 +37,20 @@ class TestAttachmentRoots:
             current_workspace.reset(ws_token)
 
     def test_refcount_two_runs_one_unregister_keeps_access(self, tmp_path):
+        ws = tmp_path / "ws"
+        ws.mkdir()
         f = tmp_path / "shared.txt"
         f.write_text("shared", encoding="utf-8")
-        register_attachment_paths((str(f),))
-        register_attachment_paths((str(f),))
-        unregister_attachment_paths((str(f),))
+        token = current_workspace.set(str(ws))
         try:
-            assert "shared" in file_read(str(f))
-        finally:
+            register_attachment_paths((str(f),))
+            register_attachment_paths((str(f),))
             unregister_attachment_paths((str(f),))
-        with pytest.raises(ValueError, match="路径越界|out of bounds"):
-            file_read(str(f))
+            try:
+                assert "shared" in file_read(str(f))
+            finally:
+                unregister_attachment_paths((str(f),))
+            with pytest.raises(ValueError, match="路径越界|out of bounds"):
+                file_read(str(f))
+        finally:
+            current_workspace.reset(token)

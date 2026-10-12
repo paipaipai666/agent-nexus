@@ -17,6 +17,7 @@ Commands run with the effective workspace as cwd.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -229,7 +230,7 @@ def _run_async_observer(config: HookConfig, hook_event: str, payload: dict) -> N
                 config.command[:60], result.exit_code, round(result.duration_ms),
             )
 
-    _observer_pool().submit(_job)
+    _observer_pool().submit(contextvars.copy_context().run, _job)
 
 
 class ExecutionPolicy(Protocol):
@@ -272,6 +273,7 @@ class ConcurrentObserver:
             max_timeout = max(max_timeout, cfg.timeout)
             futures.append(
                 _observer_pool().submit(
+                    contextvars.copy_context().run,
                     execute_command_hook, cfg,
                     hook_event=hook_event, payload=dict(payload),
                     abort_supported=False,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import threading
@@ -281,6 +282,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
 
                 try:
                     future = runner.submit(
+                        contextvars.copy_context().run,
                         _run_child,
                         _build_subagent_prompt(task, role, retry_reason),
                     )

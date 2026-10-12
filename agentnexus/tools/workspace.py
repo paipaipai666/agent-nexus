@@ -2,8 +2,8 @@
 
 Tools resolve relative paths against the process cwd by default. ChatService
 sets the override around each agent run so shell/file tools operate in the
-session's chosen folder. ContextVar propagates through ``asyncio.to_thread``
-and FastAPI's threadpool, covering both the WS and REST run paths.
+session's chosen folder. Async framework workers inherit the ContextVar;
+tool, subagent, and hook pools explicitly copy the submitting run's context.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextvars
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 current_workspace: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -43,21 +44,25 @@ def get_registered_attachment_paths() -> tuple[str, ...]:
 
 
 _APPROVED_PATHS: set[tuple[str, str]] = set()
+_APPROVED_PATHS_LOCK = threading.Lock()
 
 
 def approve_extra_path(path: str | Path) -> None:
     """Allow the resolved path for the current workspace until process exit."""
-    _APPROVED_PATHS.add((str(get_effective_workspace()),
-                         str(Path(path).resolve(strict=False))))
+    grant = (str(get_effective_workspace()), str(Path(path).resolve(strict=False)))
+    with _APPROVED_PATHS_LOCK:
+        _APPROVED_PATHS.add(grant)
 
 
 def get_approved_extra_paths() -> tuple[str, ...]:
-    return tuple(p for ws, p in _APPROVED_PATHS
-                 if ws == str(get_effective_workspace()))
+    workspace = str(get_effective_workspace())
+    with _APPROVED_PATHS_LOCK:
+        return tuple(p for ws, p in _APPROVED_PATHS if ws == workspace)
 
 
 def clear_approved_paths() -> None:
-    _APPROVED_PATHS.clear()
+    with _APPROVED_PATHS_LOCK:
+        _APPROVED_PATHS.clear()
 
 
 def get_effective_workspace() -> Path:

@@ -9,6 +9,7 @@ tool_calls order.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -143,7 +144,7 @@ class ToolDispatcher:
         """Submit calls to *pool* and collect results in order. Does NOT shut
         the pool down — lane pools are session-scoped and reused."""
         future_to_call = {
-            pool.submit(self._run_single, call, execute_fn, parent_trace_id): call
+            pool.submit(contextvars.copy_context().run, self._run_single, call, execute_fn, parent_trace_id): call
             for call in calls
         }
         for future in as_completed(future_to_call):

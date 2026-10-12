@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import time
@@ -554,7 +555,7 @@ class HookManager:
         import concurrent.futures
 
         pool = _hook_timeout_pool()
-        future = pool.submit(entry.callback, ctx)
+        future = pool.submit(contextvars.copy_context().run, entry.callback, ctx)
         try:
             future.result(timeout=entry.timeout)
             return "ok"

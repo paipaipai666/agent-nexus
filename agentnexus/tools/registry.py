@@ -7,6 +7,7 @@ risk-level HITL gates, timeout control, and audit logging.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import threading
@@ -319,7 +320,7 @@ class ToolRegistry:
                 "risk_level": meta.risk_level.value,
             }
             with trace_manager.span("tool", span_input) as span:
-                future = self._executor.submit(func, **params)
+                future = self._executor.submit(contextvars.copy_context().run, func, **params)
                 try:
                     result = future.result(timeout=meta.timeout_sec)
                 except FutureTimeout:

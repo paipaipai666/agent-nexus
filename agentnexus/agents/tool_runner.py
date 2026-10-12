@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import logging
 import threading
 import traceback
@@ -163,6 +164,7 @@ def execute_tool(
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(
+            contextvars.copy_context().run,
             _invoke_tracked,
             name=name,
             params=arguments,

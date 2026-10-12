@@ -16,6 +16,7 @@ from agentnexus.services.chat import ChatService
 from agentnexus.services.subagents import SubagentRunContext
 from agentnexus.tools.confirm_bridge import SubagentBridge
 from agentnexus.tools.subagent import make_subagent_run
+from agentnexus.tools.workspace import current_workspace
 
 
 @pytest.fixture
@@ -229,7 +230,11 @@ def test_child_tool_and_stream_events_have_readable_timeline_nodes(timeline_api,
     )
     bridge = SubagentBridge()
     bridge.set_context(SubagentRunContext(service, "s1", "parent"))
-    child = json.loads(make_subagent_run(non_interactive=True, subagent_bridge=bridge)(task="Read module"))
+    token = current_workspace.set(str(source.parent))
+    try:
+        child = json.loads(make_subagent_run(non_interactive=True, subagent_bridge=bridge)(task="Read module"))
+    finally:
+        current_workspace.reset(token)
     assert child["answer"] == "Child result"
     events = client.get("/api/session/s1/events", params={"agent_id": child["subagent_id"]}).json()["events"]
     tools = [e for e in events if e["event_type"] in ("tool_start", "tool_done")]
