@@ -22,6 +22,7 @@ jobs:
           cache: "pip"
       - run: pip install ruff
       - run: ruff check .
+      - run: python scripts/check_no_comments.py
 
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})

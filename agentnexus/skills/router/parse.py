@@ -24,8 +24,6 @@ def extract_intent_signals(
         offset = 0
         for line in lines:
             start = line.find(prefix)
-            # The original patterns require at least one character between
-            # the literals, and never span a newline.
             end = line.find(suffix, start + len(prefix) + 1) if start >= 0 else -1
             if end >= 0:
                 connectors.append((line[start:end + len(suffix)], offset + start))

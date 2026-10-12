@@ -32,9 +32,6 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
-    # collect_submodules('chromadb'): chromadb resolves several implementations
-    # via string config + importlib (e.g. chromadb.telemetry.product.posthog),
-    # invisible to PyInstaller's static analysis — bundle them all.
     hiddenimports=[
         'chromadb',
         'sentence_transformers',
@@ -103,16 +100,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Chroma receives our SentenceTransformer embeddings for add and query.
-    # Its optional default ONNX embedding runtime is not used by the app.
     excludes=['onnxruntime'],
     noarchive=False,
     optimize=0,
 )
 
 if sys.platform == 'win32':
-    # PATH may contain older copies shipped with Java or other SDKs. Use a
-    # consistent system C++ runtime for Torch and the Python bootloader.
     import pefile
 
     runtime_names = {'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'}
@@ -141,10 +134,6 @@ if sys.platform == 'win32':
     ]
 
 pyz = PYZ(a.pure)
-# Onedir, not onefile: a single-file build forces the bootloader to extract
-# ~2GB (torch DLLs etc.) into %TEMP%\_MEI on EVERY launch — measured ~11.5s
-# of a 12.7s cold start — and leaked _MEI dirs orphan the backend process.
-# Onedir loads DLLs in place: cold start drops to ~2-3s.
 exe = EXE(
     pyz,
     a.scripts,
