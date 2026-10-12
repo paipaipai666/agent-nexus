@@ -56,15 +56,29 @@ class ThreadSafeChromaCollection:
         return _locked_call
 
 
+def base_collection_name(namespace: str) -> str:
+    settings = get_settings()
+    normalized = re.sub(r"[^0-9A-Za-z_.-]+", "_", namespace.strip()).strip("_.-")
+    normalized = normalized or settings.rag_default_namespace
+    return f"{settings.rag_collection_prefix}{normalized}"
+
+
 def resolve_collection_name(name: str | None = None, namespace: str | None = None) -> str:
     if name:
         return name
     if namespace:
-        settings = get_settings()
-        normalized = re.sub(r"[^0-9A-Za-z_.-]+", "_", namespace.strip()).strip("_.-")
-        normalized = normalized or settings.rag_default_namespace
-        return f"{settings.rag_collection_prefix}{normalized}"
+        return base_collection_name(namespace)
     return COLLECTION_NAME
+
+
+def _active_collection_name(name: str | None, namespace: str | None) -> str:
+    if namespace and name is None:
+        from agentnexus.rag.store import get_knowledge_base_catalog
+
+        kb = get_knowledge_base_catalog().get_knowledge_base(namespace)
+        if kb is not None:
+            return kb.collection_name
+    return resolve_collection_name(name=name, namespace=namespace)
 
 
 def get_chroma_client():
@@ -85,7 +99,7 @@ def get_collection(
     namespace: str | None = None,
     metadata: dict | None = None,
 ):
-    collection_name = resolve_collection_name(name=name, namespace=namespace)
+    collection_name = _active_collection_name(name, namespace)
     with chroma_operation_lock():
         if collection_name not in _collections:
             client = get_chroma_client()
@@ -137,7 +151,7 @@ def chunk_metadata_to_chroma(chunk) -> dict[str, str | int | float | bool]:
 
 
 def delete_collection(name: str | None = None, namespace: str | None = None):
-    collection_name = resolve_collection_name(name=name, namespace=namespace)
+    collection_name = _active_collection_name(name, namespace)
     client = get_chroma_client()
     with chroma_operation_lock():
         try:

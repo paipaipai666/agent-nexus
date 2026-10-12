@@ -89,7 +89,7 @@ def free_port():
 
 
 @contextmanager
-def backend(binary, home, gateway, *, mcp=False):
+def backend(binary, home, gateway, *, mcp=False, env_overrides=None):
     home.mkdir(parents=True, exist_ok=True)
     workspace = home / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -112,6 +112,8 @@ def backend(binary, home, gateway, *, mcp=False):
     env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTNEXUS_") and k not in {"PYTHONPATH", "PYTHONHOME"}}
     env.update(AGENTNEXUS_HOME=str(home), AGENTNEXUS_LLM_API_KEY="package-test-key", PYTHONIOENCODING="utf-8",
                HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    if env_overrides:
+        env.update(env_overrides)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     log_path = home / f"server-{uuid.uuid4().hex[:8]}.log"

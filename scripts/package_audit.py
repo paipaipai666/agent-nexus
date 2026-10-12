@@ -171,9 +171,8 @@ def desktop(out: Path, variant: str) -> None:
     env = dict(os.environ, CSC_IDENTITY_AUTO_DISCOVERY="false")
     if not (project / "node_modules").is_dir():
         run(out, "desktop-install", ["npm", "ci", "--no-audit", "--no-fund"], cwd=project, env=env)
-    if not (project / "dist/index.html").exists():
-        run(out, "desktop-typecheck", ["node", "node_modules/typescript/bin/tsc", "--noEmit"], cwd=project, env=env)
-        run(out, "desktop-vite", ["node", "node_modules/vite/bin/vite.js", "build"], cwd=project, env=env)
+    run(out, "desktop-typecheck", ["node", "node_modules/typescript/bin/tsc", "--noEmit"], cwd=project, env=env)
+    run(out, "desktop-vite", ["node", "node_modules/vite/bin/vite.js", "build"], cwd=project, env=env)
     config = yaml.safe_load((source / "electron-builder.yml").read_text(encoding="utf-8"))
     target = out / variant
     target.mkdir(exist_ok=True)

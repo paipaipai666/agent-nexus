@@ -17,6 +17,8 @@ interface IngestionProgress {
 }
 
 const STAGE_LABELS: Record<string, string> = {
+  preparing_embedding: 'Preparing embedding model',
+  rebuilding_index: 'Rebuilding knowledge index',
   loading: 'Loading document',
   chunking: 'Chunking text',
   enriching: 'Enriching chunks',
@@ -43,6 +45,11 @@ function clearActiveUpload() {
   try { localStorage.removeItem(ACTIVE_UPLOAD_KEY) } catch {}
 }
 
+function downloadSize(bytes: number | null): string {
+  if (bytes === null) return 'size varies by model'
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${Math.ceil(bytes / 1024 ** 2)} MiB`
+}
+
 export default function KnowledgePage() {
   const { theme } = useTheme()
   const reducedMotion = usePrefersReducedMotion()
@@ -52,6 +59,9 @@ export default function KnowledgePage() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [preparingModel, setPreparingModel] = useState<'embedding' | 'reranker' | null>(null)
+  const [operationError, setOperationError] = useState<string | null>(null)
+  const [rankingMode, setRankingMode] = useState<'hybrid' | 'rerank' | null>(null)
   const [progress, setProgress] = useState<IngestionProgress | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -59,6 +69,19 @@ export default function KnowledgePage() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: docData, error: docError, reload: reloadDocuments } = useApiQuery((signal) => api.listDocuments(signal), [])
+  const { data: modelData, error: modelError, reload: reloadModels } = useApiQuery((signal) => api.getKnowledgeModels(signal), [])
+  const embeddingBusy = modelData?.models.embedding.state === 'downloading' || modelData?.models.embedding.state === 'loading'
+  const rerankerBusy = modelData?.models.reranker.state === 'downloading' || modelData?.models.reranker.state === 'loading'
+  const embeddingAvailable = modelData?.models.embedding.state === 'ready' || modelData?.models.embedding.state === 'cached'
+  const rerankerAvailable = modelData?.models.reranker.state === 'ready' || modelData?.models.reranker.state === 'cached'
+  const needsEmbedding = !embeddingAvailable || modelData?.index_state === 'rebuild_required'
+  const indeterminateProgress = progress?.stage === 'preparing_embedding' || progress?.stage === 'rebuilding_index'
+
+  useEffect(() => {
+    if (!embeddingBusy && !rerankerBusy && !isUploading) return
+    const timer = setInterval(reloadModels, 1500)
+    return () => clearInterval(timer)
+  }, [embeddingBusy, rerankerBusy, isUploading, reloadModels])
 
   useEffect(() => {
     if (!docData) return
@@ -86,32 +109,13 @@ export default function KnowledgePage() {
     if (pollRef.current) clearInterval(pollRef.current)
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
 
-    let lastPct = -1
-    let staleTicks = 0
-    const MAX_STALE_TICKS = 30
-
     pollRef.current = setInterval(async () => {
       try {
         const run = await api.getIngestionProgress(runId)
+        setOperationError(null)
         const stage = run.metadata?.progress_stage || run.status
         const pct = run.metadata?.progress_pct ?? 0
         const message = run.metadata?.progress_message || STAGE_LABELS[stage] || stage
-
-        if (pct === lastPct && run.status === 'running') {
-          staleTicks++
-          if (staleTicks >= MAX_STALE_TICKS) {
-            setProgress({ runId, filename, stage: 'failed', pct, message: 'Timed out — no progress', status: 'failed' })
-            if (pollRef.current) clearInterval(pollRef.current)
-            pollRef.current = null
-            setIsUploading(false)
-            clearActiveUpload()
-            timeoutRef.current = setTimeout(() => setProgress(null), 5000)
-            return
-          }
-        } else {
-          staleTicks = 0
-          lastPct = pct
-        }
 
         if (run.status === 'completed') {
           setProgress({ runId, filename, stage: 'completed', pct: 100, message: 'Done', status: 'completed' })
@@ -120,6 +124,7 @@ export default function KnowledgePage() {
           setIsUploading(false)
           clearActiveUpload()
           reloadDocuments()
+          reloadModels()
           timeoutRef.current = setTimeout(() => setProgress(null), 2000)
         } else if (run.status === 'failed') {
           setProgress({ runId, filename, stage: 'failed', pct: 0, message: run.error_message || 'Ingestion failed', status: 'failed' })
@@ -127,21 +132,40 @@ export default function KnowledgePage() {
           pollRef.current = null
           setIsUploading(false)
           clearActiveUpload()
-          timeoutRef.current = setTimeout(() => setProgress(null), 5000)
+          reloadModels()
         } else {
           setProgress({ runId, filename, stage, pct, message, status: 'processing' })
         }
       } catch (err) {
-        console.error('Poll error:', err)
+        setOperationError(`Unable to read upload progress; retrying. ${err instanceof Error ? err.message : String(err)}`)
       }
     }, 1000)
-  }, [reloadDocuments])
+  }, [reloadDocuments, reloadModels])
+
+  const handlePrepareModel = async (kind: 'embedding' | 'reranker') => {
+    setPreparingModel(kind)
+    setOperationError(null)
+    try {
+      await api.prepareKnowledgeModel(kind)
+      reloadModels()
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setPreparingModel(null)
+    }
+  }
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
     setIsSearching(true)
-    try { const { results } = await api.searchKnowledge(searchQuery); setSearchResults(results) }
-    catch (e) { console.error(e) }
+    setOperationError(null)
+    try {
+      const { results, ranking_mode } = await api.searchKnowledge(searchQuery)
+      setSearchResults(results)
+      setRankingMode(ranking_mode)
+      reloadModels()
+    }
+    catch (e) { setOperationError(e instanceof Error ? e.message : String(e)); reloadModels() }
     finally { setIsSearching(false) }
   }
 
@@ -161,7 +185,7 @@ export default function KnowledgePage() {
       setProgress({ runId: '', filename: file.name, stage: 'failed', pct: 0, message: String(err), status: 'failed' })
       setIsUploading(false)
       clearActiveUpload()
-      setTimeout(() => setProgress(null), 5000)
+      reloadModels()
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
@@ -190,6 +214,45 @@ export default function KnowledgePage() {
         </button>
       </div>
 
+      {modelData && (needsEmbedding || !rerankerAvailable) && (
+        <div className="mx-6 mb-3 p-3 rounded-lg space-y-3" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+          <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
+            Local models stay cached for offline use. The first upload prepares embeddings; enhanced ranking is optional.
+          </p>
+          {needsEmbedding && (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 text-xs" role="status" aria-live="polite">
+                <p style={{ color: 'var(--fg)' }}>Embedding model · {downloadSize(modelData.models.embedding.download_bytes)}</p>
+                <p className="mt-1" style={{ color: modelData.models.embedding.state === 'failed' ? 'var(--red)' : 'var(--fg-muted)' }}>
+                  {modelData.index_state === 'rebuild_required' && !embeddingBusy && embeddingAvailable
+                    ? 'Existing documents need an index rebuild before search.'
+                    : modelData.models.embedding.message}
+                </p>
+              </div>
+              <button onClick={() => handlePrepareModel('embedding')} disabled={embeddingBusy || preparingModel !== null || isUploading} className="btn-secondary text-xs shrink-0 flex items-center gap-1.5">
+                {embeddingBusy ? <Loader2 size={14} className={reducedMotion ? '' : 'animate-spin'} /> : null}
+                {embeddingBusy ? 'Preparing…' : modelData.models.embedding.state === 'failed' ? 'Retry' : 'Prepare'}
+              </button>
+            </div>
+          )}
+          {!rerankerAvailable && (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 text-xs" role="status" aria-live="polite">
+                <p style={{ color: 'var(--fg)' }}>Enhanced ranking · {downloadSize(modelData.models.reranker.download_bytes)}</p>
+                <p className="mt-1" style={{ color: modelData.models.reranker.state === 'failed' ? 'var(--red)' : 'var(--fg-muted)' }}>
+                  {modelData.models.reranker.state === 'missing' ? 'Search uses hybrid ranking until this optional model is ready.' : modelData.models.reranker.message}
+                </p>
+              </div>
+              <button onClick={() => handlePrepareModel('reranker')} disabled={rerankerBusy || preparingModel !== null} className="btn-secondary text-xs shrink-0 flex items-center gap-1.5">
+                {rerankerBusy ? <Loader2 size={14} className={reducedMotion ? '' : 'animate-spin'} /> : null}
+                {rerankerBusy ? 'Preparing…' : modelData.models.reranker.state === 'failed' ? 'Retry preparation' : 'Download model'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {(operationError || modelError) && <p role="alert" className="px-6 pb-3 text-xs" style={{ color: 'var(--red)' }}>{operationError || modelError?.message}</p>}
+
       {}
       {progress && (
         <div className="px-6 pb-3">
@@ -215,7 +278,7 @@ export default function KnowledgePage() {
                 </span>
               </div>
               <span className="text-xs font-mono" style={{ color: 'var(--fg-muted)' }}>
-                {progress.status === 'completed' ? '100%' : `${progress.pct}%`}
+                {progress.status === 'completed' ? '100%' : indeterminateProgress ? 'Preparing…' : `${progress.pct}%`}
               </span>
             </div>
             {}
@@ -223,7 +286,8 @@ export default function KnowledgePage() {
               <div
                 className="h-full rounded-full transition-all duration-300 ease-out"
                 style={{
-                  width: `${progress.status === 'completed' ? 100 : progress.pct}%`,
+                  width: `${progress.status === 'completed' || indeterminateProgress ? 100 : progress.pct}%`,
+                  opacity: indeterminateProgress ? 0.45 : 1,
                   background: progress.status === 'failed'
                     ? 'var(--red)'
                     : progress.status === 'completed'
@@ -244,7 +308,7 @@ export default function KnowledgePage() {
         {}
         <div className="flex gap-2">
           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search knowledge base..." className="input-field flex-1" />
-          <button onClick={handleSearch} disabled={isSearching} className="btn-primary flex items-center gap-1.5 text-sm">
+          <button onClick={handleSearch} disabled={isSearching || needsEmbedding} className="btn-primary flex items-center gap-1.5 text-sm">
             <Search size={14} /> Search
           </button>
         </div>
@@ -253,7 +317,7 @@ export default function KnowledgePage() {
         {searchResults.length > 0 && (
           <div ref={(el) => { if (el) animateEntrance(Array.from(el.children), { stagger: 0.05 }) }} className="space-y-2">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Search Results</h2>
+              <h2 className="text-sm font-medium" style={{ color: 'var(--fg-secondary)' }}>Search Results · {rankingMode === 'rerank' ? 'Enhanced ranking' : 'Hybrid ranking'}</h2>
               <button onClick={() => setSearchResults([])} className="text-xs transition-colors" style={{ color: 'var(--fg-faint)' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--fg-secondary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-faint)'}>Clear</button>
             </div>
             {searchResults.map((r, i) => (

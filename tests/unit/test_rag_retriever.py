@@ -147,7 +147,7 @@ class TestRestartSafeRetrieval:
         monkeypatch.setattr("agentnexus.rag.retriever.expand_queries", lambda query: [query])
         monkeypatch.setattr(
             "agentnexus.rag.retriever.chroma_search",
-            lambda query, limit=10, name=None, namespace=None: [
+            lambda query, limit=10, name=None, namespace=None, **_: [
                 {"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": {"source_uri": "docs/support.md"}}
             ],
         )
@@ -168,7 +168,7 @@ class TestRestartSafeRetrieval:
         monkeypatch.setattr("agentnexus.rag.retriever.expand_queries", lambda query: [query])
         monkeypatch.setattr(
             "agentnexus.rag.retriever.chroma_search",
-            lambda query, limit=10, name=None, namespace=None: [
+            lambda query, limit=10, name=None, namespace=None, **_: [
                 {"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": {"source_uri": "docs/support.md"}}
             ],
         )
@@ -203,7 +203,7 @@ class TestRestartSafeRetrieval:
         monkeypatch.setattr(HybridRetriever, "load_reranker", lambda self, model_name=None: setattr(self, "_reranker", object()))
         monkeypatch.setattr("agentnexus.rag.retriever.expand_queries", lambda query: [query, "BM25 查询"])
 
-        def fake_search(query, limit=10, name=None, namespace=None):
+        def fake_search(query, limit=10, name=None, namespace=None, **_):
             captured_queries.append(query)
             return [{"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": chunk.metadata}]
 
@@ -229,7 +229,7 @@ class TestRestartSafeRetrieval:
             lambda query: "BM25 是稀疏检索算法",
         )
 
-        def fake_search(query, limit=10, name=None, namespace=None):
+        def fake_search(query, limit=10, name=None, namespace=None, **_):
             captured_queries.append(query)
             return [{"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": chunk.metadata}]
 

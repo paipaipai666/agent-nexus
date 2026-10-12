@@ -196,6 +196,33 @@ def kb_add(path: str = typer.Argument(..., help="文档路径或目录")):
     console.print(f"\nKnowledge base has [bold]{get_collection(namespace=namespace).count()}[/bold] chunks")
 
 
+@kb_app.command("prepare")
+def kb_prepare(reranker: bool = typer.Option(False, "--reranker", help="同时准备约 2.14 GiB 的可选重排模型")):
+    """下载并验证本地知识库模型，重建旧向量索引。"""
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import ModelUnavailable, prepare_embedding, start_reranker_prepare, status
+
+    try:
+        model, identity = prepare_embedding(progress=console.print)
+        ensure_embedding_index(get_settings().rag_default_namespace, model, identity, progress=console.print)
+    except ModelUnavailable as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print("[green]Embedding model and knowledge index are ready[/green]")
+    if reranker:
+        current = start_reranker_prepare()
+        previous = ""
+        while current.state in {"downloading", "loading"}:
+            if current.message != previous:
+                console.print(current.message)
+                previous = current.message
+            time.sleep(0.5)
+            current = status("reranker")
+        console.print(current.message)
+        if current.state == "failed":
+            raise typer.Exit(code=1)
+
+
 @kb_app.command("list")
 def kb_list():
     """查看知识库状态。"""
@@ -254,16 +281,18 @@ def kb_search_command(
     """搜索知识库。"""
     settings = get_settings()
     namespace = settings.rag_default_namespace
-    retriever = HybridRetriever(namespace=namespace)
-    retriever.rebuild_from_catalog()
+    from agentnexus.rag import kb_service
+
+    retriever = kb_service._get_retriever(namespace=namespace)
     if not retriever._chunks:
         console.print("[yellow]Knowledge base is empty[/yellow]")
         raise typer.Exit(code=0)
 
-    if retriever._reranker is None:
-        retriever.load_reranker()
-
-    where = _build_search_where(
+    results = kb_service.search_kb(
+        query,
+        namespace=namespace,
+        top_k=top_k,
+        view=view,
         source=source,
         file_format=file_format,
         section_title=section_title,
@@ -273,28 +302,11 @@ def kb_search_command(
         has_list=has_list,
         heading_depth=heading_depth,
     )
-    dense_fused: dict[str, float] = {}
-    for search_query in expand_queries(query):
-        dense_results = chroma_search(
-            search_query,
-            limit=max(top_k * 2, 10),
-            namespace=namespace,
-            where=where,
-        )
-        for rank, item in enumerate(dense_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
-    dense = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
-    results = retriever.search(
-        query,
-        dense,
-        top_k=top_k,
-        min_score=0.0,
-        metadata_filters=where,
-    )
     if not results:
         console.print("[yellow]No relevant knowledge found[/yellow]")
         raise typer.Exit(code=0)
-    results = retriever.expand_contexts(results, view=view)
+    if any(item.source != "rerank" for item in results):
+        console.print("[yellow]Hybrid ranking: local reranker is unavailable[/yellow]")
 
     for index, item in enumerate(results, start=1):
         console.print(f"[{index}] {result_citation(item)} score={item.score:.2f}")

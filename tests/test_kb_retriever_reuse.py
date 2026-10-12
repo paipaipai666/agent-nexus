@@ -69,6 +69,10 @@ def _isolate_reranker_cache():
 
 @pytest.fixture
 def counting_retriever(monkeypatch):
+    from agentnexus.rag import kb_index, model_assets
+
+    monkeypatch.setattr(model_assets, "prepare_embedding", lambda **_: (object(), "test-model"))
+    monkeypatch.setattr(kb_index, "ensure_embedding_index", lambda *_args, **_kwargs: "kb_default")
     _CountingRetriever.constructions = 0
     _CountingRetriever.rebuilds = 0
     _CountingRetriever.reranker_loads = 0

@@ -70,6 +70,7 @@ nexus tui
 
 ```bash
 nexus kb add ./docs              # 添加文档到知识库
+nexus kb prepare                 # 提前准备本地嵌入模型，供离线使用
 nexus wiki init default          # 为 RAG 命名空间初始化 Wiki
 nexus wiki ingest ./doc.md       # 将源文档导入 Wiki
 nexus wiki query "什么是 X？"     # 置信度路由查询 Wiki
@@ -82,6 +83,8 @@ nexus eval agent --days 1        # 运行 Agent 质量评估
 ```
 
 ## 文档
+
+模型下载体积、重试和离线准备步骤见[准备知识库模型](docs/Model-Downloads.md)。
 
 | 文档 | 内容 |
 | --- | --- |

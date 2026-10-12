@@ -58,7 +58,7 @@ def _build_cross_encoder(cross_encoder_cls, model_name: str) -> "CrossEncoder":
 
     local_path = _resolve_local_model_path(model_name)
     if local_path is None:
-        return cross_encoder_cls(model_name)
+        raise FileNotFoundError(f"Reranker model '{model_name}' is not cached")
     try:
         return cross_encoder_cls(local_path, local_files_only=True)
     except TypeError:
@@ -443,8 +443,12 @@ class HybridRetriever:
                 return
             try:
                 model = _build_cross_encoder(CrossEncoder, name)
-            except Exception:
+            except Exception as exc:
                 logger.warning("Failed to load reranker model '%s'", name, exc_info=True)
+                if not isinstance(exc, FileNotFoundError):
+                    from agentnexus.rag.model_assets import report_load_failure
+
+                    report_load_failure("reranker", name)
                 _reranker_failures[name] = time.monotonic()
                 self._reranker = None
                 return
@@ -548,25 +552,33 @@ def _predict_in_batches(reranker, pairs: list[tuple[str, str]]) -> list[float]:
 
 _retriever: HybridRetriever | None = None
 _retriever_reranker_requested: dict[str, bool] = {}
+_retriever_catalog_revision: tuple[object, tuple[str, int] | None] | None = None
+_retriever_lock = threading.Lock()
 
 
 def _get_retriever(namespace: str = "default", docs: list[str] | None = None) -> HybridRetriever:
-    global _retriever
-    if _retriever is None or _retriever.namespace != namespace:
-        _retriever = HybridRetriever(namespace=namespace)
-        if docs:
-            _retriever.build_bm25(docs)
-        else:
-            _retriever.rebuild_from_catalog()
-    elif docs:
-        _retriever.build_bm25(docs)
-    return _retriever
+    global _retriever, _retriever_catalog_revision
+    with _retriever_lock:
+        catalog = get_knowledge_base_catalog()
+        revision = (catalog, catalog.content_revision(namespace))
+        if (
+            _retriever is None or _retriever.namespace != namespace
+            or _retriever_catalog_revision != revision or docs
+        ):
+            retriever = HybridRetriever(namespace=namespace)
+            if docs:
+                retriever.build_bm25(docs)
+            else:
+                retriever.rebuild_from_catalog()
+            _retriever = retriever
+            _retriever_catalog_revision = revision
+        return _retriever
 
 
 def build_knowledge_base(documents: list[str], load_reranker: bool = True, namespace: str = "default"):
     from agentnexus.storage.chroma import delete_collection
 
-    global _retriever
+    global _retriever, _retriever_catalog_revision
 
     delete_collection(namespace=namespace)
 
@@ -630,6 +642,7 @@ def build_knowledge_base(documents: list[str], load_reranker: bool = True, names
     if load_reranker:
         retriever.load_reranker()
     _retriever = retriever
+    _retriever_catalog_revision = (catalog, catalog.content_revision(namespace))
 
 
 def _expand_rag_queries(query: str) -> tuple[list[str], str]:
@@ -639,15 +652,21 @@ def _expand_rag_queries(query: str) -> tuple[list[str], str]:
 
 def _fuse_dense_candidates(
     queries: list[str], hypothetical_document: str, namespace: str,
+    *, model, collection_name: str,
 ) -> list[tuple[str, float]]:
     """Dense stage: RRF-pre-fuse per-query Chroma hits, plus the HyDE hit."""
     fused: dict[str, float] = {}
     for search_query in queries:
-        hits = chroma_search(search_query, limit=10, namespace=namespace)
+        hits = chroma_search(
+            search_query, limit=10, namespace=namespace, name=collection_name, embedding_model_provider=lambda: model,
+        )
         for rank, item in enumerate(hits):
             fused[item["id"]] = fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
     if hypothetical_document:
-        hyde_hits = chroma_search(hypothetical_document, limit=10, namespace=namespace)
+        hyde_hits = chroma_search(
+            hypothetical_document, limit=10, namespace=namespace, name=collection_name,
+            embedding_model_provider=lambda: model,
+        )
         for rank, item in enumerate(hyde_hits):
             fused[item["id"]] = fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
     return sorted(fused.items(), key=lambda x: x[1], reverse=True)
@@ -665,11 +684,18 @@ def search_knowledge_base(query: str, namespace: str = "default") -> str:
     retriever = _get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "知识库为空，请先用 `nexus kb add` 添加文档。"
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import prepare_embedding
+
+    model, identity = prepare_embedding(allow_download=False)
+    collection_name = ensure_embedding_index(namespace, model, identity)
     should_load_reranker = _retriever_reranker_requested.get(namespace, True)
     if should_load_reranker and retriever._reranker is None:
         retriever.load_reranker()
     queries, hypothetical_document = _expand_rag_queries(query)
-    dense_results = _fuse_dense_candidates(queries, hypothetical_document, namespace)
+    dense_results = _fuse_dense_candidates(
+        queries, hypothetical_document, namespace, model=model, collection_name=collection_name,
+    )
     if not dense_results:
         return "未找到相关知识。"
     results = retriever.search(query, dense_results, top_k=5)

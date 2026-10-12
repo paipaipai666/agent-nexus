@@ -38,6 +38,7 @@ nexus = "agentnexus.cli:main"
 
 [project.optional-dependencies]
 rag = [
+    "filelock>=3.0",
     "sentence-transformers>=4.0",
     "chromadb>=1.0,<3",
     "pymupdf>=1.24",

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 import uuid
+from functools import wraps
 
 from agentnexus.rag.ingestion import ingest_document
 from agentnexus.rag.models import IngestedDocument, IngestionRunRecord, KnowledgeBaseRecord
-from agentnexus.rag.retriever import _get_retriever, expand_queries
+from agentnexus.rag.retriever import _get_retriever, _retriever_reranker_requested, expand_queries
 from agentnexus.rag.store import get_knowledge_base_catalog
 from agentnexus.storage.chroma import (
     chunk_metadata_to_chroma,
@@ -20,7 +21,35 @@ from agentnexus.storage.chroma import search as chroma_search
 from agentnexus.tools.kb_search import _build_search_where
 
 
+def _locked_kb_operation(function):
+    @wraps(function)
+    def run(namespace: str, *args, **kwargs):
+        from agentnexus.rag.kb_index import index_lock
+
+        with index_lock(namespace):
+            return function(namespace, *args, **kwargs)
+
+    return run
+
+
+def _locked_deletion_log_operation(function):
+    @wraps(function)
+    def run(log_id: int):
+        from agentnexus.rag.kb_index import index_lock
+
+        entry = get_knowledge_base_catalog().get_deletion_log(log_id)
+        if entry is None:
+            raise KeyError(f"deletion log not found: {log_id}")
+        with index_lock(entry["namespace"]):
+            return function(log_id)
+
+    return run
+
+
 def default_kb_record(namespace: str) -> KnowledgeBaseRecord:
+    existing = get_knowledge_base_catalog().get_knowledge_base(namespace)
+    if existing is not None:
+        return existing
     collection_name = resolve_collection_name(namespace=namespace)
     return KnowledgeBaseRecord(
         kb_id=collection_name,
@@ -30,6 +59,7 @@ def default_kb_record(namespace: str) -> KnowledgeBaseRecord:
     )
 
 
+@_locked_kb_operation
 def reconcile_kb(namespace: str, *, repair: bool = True) -> dict[str, int]:
     """对账 catalog 与 Chroma 的 chunk 集合，双向修复。
 
@@ -53,9 +83,22 @@ def reconcile_kb(namespace: str, *, repair: bool = True) -> dict[str, int]:
         stats["vectors_reembedded"] = len(catalog_ids - chroma_ids)
         return stats
 
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import prepare_embedding
+
+    model, identity = prepare_embedding(allow_download=False)
+    previous_name = kb.collection_name
+    name = (
+        kb.collection_name if kb.metadata.get("embedding_identity") == identity
+        else ensure_embedding_index(namespace, model, identity)
+    )
+    chroma_ids = set(get_collection(name=name).get(include=[])["ids"])
+    if previous_name != name:
+        stats["vectors_reembedded"] = len(chunks)
+
     orphans = sorted(chroma_ids - catalog_ids)
     if orphans:
-        delete_documents(ids=orphans, namespace=namespace)
+        delete_documents(ids=orphans, name=name)
         stats["orphans_deleted"] = len(orphans)
 
     missing = [chunk for chunk in chunks if chunk.chunk_id not in chroma_ids]
@@ -64,9 +107,10 @@ def reconcile_kb(namespace: str, *, repair: bool = True) -> dict[str, int]:
             [chunk.indexed_text or chunk.text for chunk in missing],
             metadatas=[chunk_metadata_to_chroma(chunk) for chunk in missing],
             ids=[chunk.chunk_id for chunk in missing],
-            namespace=namespace,
+            name=name,
+            embed_texts_provider=lambda texts: _encode_for_kb(model, texts),
         )
-        stats["vectors_reembedded"] = len(missing)
+        stats["vectors_reembedded"] += len(missing)
     return stats
 
 
@@ -86,6 +130,14 @@ class DeleteIncompleteError(Exception):
         self.cause = cause
 
 
+def _delete_vectors(namespace: str, ids: list[str]) -> None:
+    delete_documents(ids=ids, namespace=namespace)
+    kb = get_knowledge_base_catalog().get_knowledge_base(namespace)
+    if kb is not None:
+        for name in kb.metadata.get("retired_collections", []):
+            delete_documents(ids=ids, name=name)
+
+
 def _delete_catalog_with_retry(catalog, document_id: str,
                                attempts: int = 3, base_delay: float = 0.1) -> None:
     """catalog 删除失败默认重试（指数退避），3 次无果抛最后一次异常。"""
@@ -101,6 +153,7 @@ def _delete_catalog_with_retry(catalog, document_id: str,
     raise last  # type: ignore[misc]
 
 
+@_locked_kb_operation
 def delete_document_and_vectors(namespace: str, document_id: str) -> int:
     """完整删除一个文档：Chroma 向量 + catalog 文档（chunks 由 FK 级联清理）。
 
@@ -117,7 +170,7 @@ def delete_document_and_vectors(namespace: str, document_id: str) -> int:
     chunk_ids = [chunk.chunk_id for chunk in chunks]
     deleted = 0
     if chunk_ids:
-        delete_documents(ids=chunk_ids, namespace=namespace)
+        _delete_vectors(namespace, chunk_ids)
         deleted = len(chunk_ids)
     try:
         _delete_catalog_with_retry(catalog, document_id)
@@ -130,6 +183,7 @@ def delete_document_and_vectors(namespace: str, document_id: str) -> int:
     return deleted
 
 
+@_locked_deletion_log_operation
 def retry_failed_deletion(log_id: int) -> dict:
     """补完一次失败的删除：重试 catalog 删除（Chroma 侧幂等重删兜底）。"""
     catalog = get_knowledge_base_catalog()
@@ -144,11 +198,12 @@ def retry_failed_deletion(log_id: int) -> dict:
         catalog.update_deletion_log_status(log_id, "failed", str(e))
         raise
     if entry["chunk_ids"]:
-        delete_documents(ids=entry["chunk_ids"], namespace=entry["namespace"])
+        _delete_vectors(entry["namespace"], entry["chunk_ids"])
     catalog.update_deletion_log_status(log_id, "completed")
     return {"log_id": log_id, "status": "completed", "changed": True}
 
 
+@_locked_deletion_log_operation
 def rollback_failed_deletion(log_id: int) -> dict:
     """撤回一次失败的删除：用 catalog 留存的 indexed_text 重嵌向量。"""
     catalog = get_knowledge_base_catalog()
@@ -161,17 +216,24 @@ def rollback_failed_deletion(log_id: int) -> dict:
     if not chunks:
         raise RuntimeError(
             f"无法撤回: 目录中已无 {entry['document_id']} 的原文（可能已被后续操作删除）")
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import prepare_embedding
+
+    model, identity = prepare_embedding(allow_download=False)
+    name = ensure_embedding_index(entry["namespace"], model, identity)
     upsert_documents(
         [chunk.indexed_text or chunk.text for chunk in chunks],
         metadatas=[chunk_metadata_to_chroma(chunk) for chunk in chunks],
         ids=[chunk.chunk_id for chunk in chunks],
-        namespace=entry["namespace"],
+        name=name,
+        embed_texts_provider=lambda texts: _encode_for_kb(model, texts),
     )
     catalog.update_deletion_log_status(log_id, "rolled_back")
     return {"log_id": log_id, "status": "rolled_back",
             "restored_vectors": len(chunks), "changed": True}
 
 
+@_locked_kb_operation
 def delete_existing_source_versions(namespace: str, source_id: str) -> int:
     catalog = get_knowledge_base_catalog()
     kb_record = default_kb_record(namespace)
@@ -186,51 +248,63 @@ def delete_existing_source_versions(namespace: str, source_id: str) -> int:
         chunks = catalog.list_chunks(document.document_id)
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         if chunk_ids:
-            delete_documents(ids=chunk_ids, namespace=namespace)
+            _delete_vectors(namespace, chunk_ids)
             deleted_chunks += len(chunk_ids)
         catalog.delete_document(document.document_id)
     return deleted_chunks
 
 
-def persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict:
+def persist_ingested_document(artifacts: IngestedDocument, namespace: str, *, prepared_embedding=None) -> dict:
     """持久化摄入产物。内容未变更时整体跳过（增量第一层）。
 
     相同版本只有在 catalog 与向量索引完整时才跳过，避免失败的批量
     写入被误判为已经完成。
     """
-    kb_record = default_kb_record(namespace)
-    catalog = get_knowledge_base_catalog()
-    catalog.upsert_knowledge_base(kb_record)
+    from agentnexus.rag.kb_index import ensure_embedding_index, index_lock
+    from agentnexus.rag.model_assets import prepare_embedding
 
-    artifacts.document.kb_id = kb_record.kb_id
+    model, identity = prepared_embedding or prepare_embedding()
+    with index_lock(namespace):
+        collection_name = ensure_embedding_index(namespace, model, identity)
+        kb_record = default_kb_record(namespace)
+        catalog = get_knowledge_base_catalog()
 
-    existing = catalog.list_documents_by_source(kb_record.kb_id, artifacts.document.source_id)
-    if (len(existing) == 1
-            and existing[0].document_version == artifacts.document.document_version
-            and catalog.count_chunks(existing[0].document_id) > 0):
-        stored_ids = {chunk.chunk_id for chunk in catalog.list_chunks(existing[0].document_id)}
-        expected_ids = {chunk.chunk_id for chunk in artifacts.chunks}
-        if stored_ids == expected_ids:
-            indexed_ids = set(get_collection(namespace=namespace).get(ids=sorted(stored_ids), include=[])["ids"])
-            if indexed_ids == stored_ids:
-                return {"replaced_chunks": 0, "written_chunks": 0, "skipped": True}
+        artifacts.document.kb_id = kb_record.kb_id
 
-    replaced_chunks = delete_existing_source_versions(namespace, artifacts.document.source_id)
-    catalog.upsert_document(artifacts.document)
+        existing = catalog.list_documents_by_source(kb_record.kb_id, artifacts.document.source_id)
+        if (len(existing) == 1
+                and existing[0].document_version == artifacts.document.document_version
+                and catalog.count_chunks(existing[0].document_id) > 0):
+            stored_ids = {chunk.chunk_id for chunk in catalog.list_chunks(existing[0].document_id)}
+            expected_ids = {chunk.chunk_id for chunk in artifacts.chunks}
+            if stored_ids == expected_ids:
+                indexed_ids = set(get_collection(name=collection_name).get(ids=sorted(stored_ids), include=[])["ids"])
+                if indexed_ids == stored_ids:
+                    return {"replaced_chunks": 0, "written_chunks": 0, "skipped": True}
 
-    for chunk in artifacts.chunks:
-        chunk.kb_id = kb_record.kb_id
-    catalog.upsert_chunks(artifacts.chunks)
+        replaced_chunks = delete_existing_source_versions(namespace, artifacts.document.source_id)
+        catalog.upsert_document(artifacts.document)
 
-    upsert_documents(
-        [chunk.indexed_text or chunk.text for chunk in artifacts.chunks],
-        metadatas=[chunk_metadata_to_chroma(chunk) for chunk in artifacts.chunks],
-        ids=[chunk.chunk_id for chunk in artifacts.chunks],
-        namespace=namespace,
-    )
-    return {"replaced_chunks": replaced_chunks, "written_chunks": len(artifacts.chunks)}
+        for chunk in artifacts.chunks:
+            chunk.kb_id = kb_record.kb_id
+        catalog.upsert_chunks(artifacts.chunks)
+
+        upsert_documents(
+            [chunk.indexed_text or chunk.text for chunk in artifacts.chunks],
+            metadatas=[chunk_metadata_to_chroma(chunk) for chunk in artifacts.chunks],
+            ids=[chunk.chunk_id for chunk in artifacts.chunks],
+            name=collection_name,
+            embed_texts_provider=lambda texts: _encode_for_kb(model, texts),
+        )
+        return {"replaced_chunks": replaced_chunks, "written_chunks": len(artifacts.chunks)}
 
 
+def _encode_for_kb(model, texts: list[str]) -> list[list[float]]:
+    values = model.encode(texts, normalize_embeddings=True, batch_size=1024, show_progress_bar=False)
+    return values.tolist() if hasattr(values, "tolist") else values
+
+
+@_locked_kb_operation
 def start_ingestion_run(namespace: str, source_uri: str, run_id: str | None = None) -> IngestionRunRecord:
     kb_record = default_kb_record(namespace)
     catalog = get_knowledge_base_catalog()
@@ -303,9 +377,25 @@ def ingest_one_document(
     run = start_ingestion_run(namespace, effective_uri, run_id=run_id)
     started_at = time.perf_counter()
 
-    _update_run_progress(run, stage="loading", stage_pct=10, message="Loading document")
-
     try:
+        from agentnexus.rag.kb_index import ensure_embedding_index
+        from agentnexus.rag.model_assets import prepare_embedding
+
+        def _model_progress(message: str) -> None:
+            _update_run_progress(run, stage="preparing_embedding", stage_pct=10, message=message)
+
+        _model_progress("Preparing the knowledge embedding model")
+        model, identity = prepare_embedding(progress=_model_progress)
+        ensure_embedding_index(
+            namespace,
+            model,
+            identity,
+            progress=lambda message: _update_run_progress(
+                run, stage="rebuilding_index", stage_pct=15, message=message,
+            ),
+        )
+        _update_run_progress(run, stage="loading", stage_pct=20, message="Loading document")
+
         def _enrichment_progress(current: int, total: int) -> None:
             pct = 30 + int(40 * current / total) if total > 0 else 50
             _update_run_progress(
@@ -324,7 +414,7 @@ def ingest_one_document(
         )
 
         _update_run_progress(run, stage="embedding", stage_pct=80, message="Generating embeddings")
-        stats = persist_ingested_document(artifacts, namespace)
+        stats = persist_ingested_document(artifacts, namespace, prepared_embedding=(model, identity))
         _update_run_progress(run, stage="persisting", stage_pct=90, message="Saving to database")
     except Exception as exc:
         finish_ingestion_run(
@@ -335,20 +425,6 @@ def ingest_one_document(
             error_message=str(exc),
         )
         raise
-
-    finish_ingestion_run(
-        run,
-        status="completed",
-        documents_seen=1,
-        chunks_written=stats["written_chunks"],
-        metadata={
-            "replaced_chunks": stats["replaced_chunks"],
-            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
-            "progress_stage": "completed",
-            "progress_pct": 100,
-            "progress_message": "Done",
-        },
-    )
 
     hook_mgr.fire(HookType.AFTER_KB_INGEST, {
         "filepath": filepath, "namespace": namespace,
@@ -371,6 +447,19 @@ def ingest_one_document(
         import logging
         logging.getLogger(__name__).warning("Wiki auto-generation failed (non-fatal): %s", exc)
 
+    finish_ingestion_run(
+        run,
+        status="completed",
+        documents_seen=1,
+        chunks_written=stats["written_chunks"],
+        metadata={
+            "replaced_chunks": stats["replaced_chunks"],
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            "progress_stage": "completed",
+            "progress_pct": 100,
+            "progress_message": "Done",
+        },
+    )
     return artifacts, run
 
 
@@ -393,7 +482,13 @@ def search_kb(
     if not retriever._chunks:
         return []
 
-    if retriever._reranker is None:
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import prepare_embedding
+
+    model, identity = prepare_embedding(allow_download=False)
+    collection_name = ensure_embedding_index(namespace, model, identity)
+
+    if _retriever_reranker_requested.get(namespace, True) and retriever._reranker is None:
         retriever.load_reranker()
 
     where = _build_search_where(
@@ -412,7 +507,9 @@ def search_kb(
             search_query,
             limit=max(top_k * 2, 10),
             namespace=namespace,
+            name=collection_name,
             where=where,
+            embedding_model_provider=lambda: model,
         )
         for rank, item in enumerate(dense_results):
             dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)

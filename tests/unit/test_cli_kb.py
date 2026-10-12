@@ -128,7 +128,7 @@ class TestKbList:
 
 class TestKbSearch:
     def test_search_empty_kb(self):
-        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls:
+        with patch("agentnexus.rag.kb_service._get_retriever") as retriever_cls:
             retriever = MagicMock()
             retriever._chunks = {}
             retriever_cls.return_value = retriever
@@ -137,9 +137,9 @@ class TestKbSearch:
             assert "Knowledge base is empty" in result.stdout
 
     def test_search_outputs_ranked_results(self):
-        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
-             patch("agentnexus.cli.kb.chroma_search") as chroma_search, \
-             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么", "BM25 查询"]):
+        with patch("agentnexus.rag.kb_service._get_retriever") as retriever_cls, \
+             patch("agentnexus.rag.kb_service.chroma_search") as chroma_search, \
+             patch("agentnexus.rag.kb_service.expand_queries", return_value=["检索用什么", "BM25 查询"]):
             retriever = MagicMock()
             retriever._chunks = {"chunk_1": object()}
             retriever._reranker = None
@@ -170,9 +170,9 @@ class TestKbSearch:
             assert chroma_search.call_count == 2
 
     def test_search_passes_structural_filters(self):
-        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
-             patch("agentnexus.cli.kb.chroma_search", return_value=[]), \
-             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+        with patch("agentnexus.rag.kb_service._get_retriever") as retriever_cls, \
+             patch("agentnexus.rag.kb_service.chroma_search", return_value=[]), \
+             patch("agentnexus.rag.kb_service.expand_queries", return_value=["检索用什么"]):
             retriever = MagicMock()
             retriever._chunks = {"chunk_1": object()}
             retriever._reranker = None
@@ -221,9 +221,9 @@ class TestKbSearch:
             )
 
     def test_search_outputs_expanded_context(self):
-        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
-             patch("agentnexus.cli.kb.chroma_search") as chroma_search, \
-             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+        with patch("agentnexus.rag.kb_service._get_retriever") as retriever_cls, \
+             patch("agentnexus.rag.kb_service.chroma_search") as chroma_search, \
+             patch("agentnexus.rag.kb_service.expand_queries", return_value=["检索用什么"]):
             retriever = MagicMock()
             retriever._chunks = {"chunk_1": object()}
             retriever._reranker = object()
@@ -254,9 +254,9 @@ class TestKbSearch:
             assert "后续补充" in result.stdout
 
     def test_search_passes_chunk_view(self):
-        with patch("agentnexus.cli.kb.HybridRetriever") as retriever_cls, \
-             patch("agentnexus.cli.kb.chroma_search", return_value=[]), \
-             patch("agentnexus.cli.kb.expand_queries", return_value=["检索用什么"]):
+        with patch("agentnexus.rag.kb_service._get_retriever") as retriever_cls, \
+             patch("agentnexus.rag.kb_service.chroma_search", return_value=[]), \
+             patch("agentnexus.rag.kb_service.expand_queries", return_value=["检索用什么"]):
             retriever = MagicMock()
             retriever._chunks = {"chunk_1": object()}
             retriever._reranker = object()
@@ -306,7 +306,7 @@ class TestKbPersistence:
         assert len(documents) == 1
         assert documents[0].raw_text == "# Guide\n\nNew body\n"
         assert stats["replaced_chunks"] == len(old_artifacts.chunks)
-        assert deleted_ids == [old_artifacts.chunks[0].chunk_id]
+        assert set(deleted_ids) == {old_artifacts.chunks[0].chunk_id}
         assert recorded_ids[-1] == [new_artifacts.chunks[0].chunk_id]
 
     def test_add_records_ingestion_run(self, temp_agentnexus_home):

@@ -1,13 +1,9 @@
 """kb_search tool — search the structured knowledge base with citations."""
 
 from agentnexus.rag.retriever import (
-    _get_retriever,
-    _retriever_reranker_requested,
-    expand_queries,
     result_citation,
     result_display_text,
 )
-from agentnexus.storage.chroma import search as chroma_search
 
 
 def _build_search_where(
@@ -54,15 +50,17 @@ def kb_search(
     has_list: bool | None = None,
     heading_depth: int | None = None,
 ) -> str:
-    retriever = _get_retriever(namespace=namespace)
+    from agentnexus.rag import kb_service
+
+    retriever = kb_service._get_retriever(namespace=namespace)
     if not retriever._chunks:
         return "[kb_search] 知识库为空"
 
-    should_load_reranker = _retriever_reranker_requested.get(namespace, True)
-    if should_load_reranker and retriever._reranker is None:
-        retriever.load_reranker()
-
-    where = _build_search_where(
+    results = kb_service.search_kb(
+        query,
+        namespace=namespace,
+        top_k=top_k,
+        view=view,
         source=source,
         file_format=file_format,
         section_title=section_title,
@@ -73,29 +71,11 @@ def kb_search(
         heading_depth=heading_depth,
     )
 
-    dense_fused: dict[str, float] = {}
-    for search_query in expand_queries(query):
-        dense_results = chroma_search(
-            search_query,
-            limit=max(top_k * 2, 10),
-            namespace=namespace,
-            where=where,
-        )
-        for rank, item in enumerate(dense_results):
-            dense_fused[item["id"]] = dense_fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
-    dense = sorted(dense_fused.items(), key=lambda x: x[1], reverse=True)
-    results = retriever.search(
-        query,
-        dense,
-        top_k=top_k,
-        min_score=0.0,
-        metadata_filters=where,
-    )
     if not results:
         return "[kb_search] 未找到相关知识"
-    results = retriever.expand_contexts(results, view=view)
 
-    lines = [f"知识库检索结果 (namespace={namespace}):"]
+    ranking = "重排检索" if all(item.source == "rerank" for item in results) else "混合检索（未使用重排模型）"
+    lines = [f"知识库检索结果 (namespace={namespace}, {ranking}):"]
     for item in results:
         lines.append(
             f"- {result_citation(item)} score={item.score:.2f}\n  {result_display_text(item)}"

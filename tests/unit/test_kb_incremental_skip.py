@@ -25,6 +25,10 @@ def catalog(tmp_path, monkeypatch):
     reset_storage_client()
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
     monkeypatch.setattr(kbs, "get_knowledge_base_catalog", lambda: cat)
+    import agentnexus.rag.kb_index as index
+    import agentnexus.rag.store as store
+    monkeypatch.setattr(index, "get_knowledge_base_catalog", lambda: cat)
+    monkeypatch.setattr(store, "get_knowledge_base_catalog", lambda: cat)
     kb_id = resolve_collection_name(namespace="default")
     from agentnexus.rag.models import KnowledgeBaseRecord
     cat.upsert_knowledge_base(KnowledgeBaseRecord(

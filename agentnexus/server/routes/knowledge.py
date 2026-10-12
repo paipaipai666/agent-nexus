@@ -26,6 +26,40 @@ class SearchRequest(BaseModel):
     view: str | None = None
 
 
+@router.get("/models")
+def local_model_status():
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.model_assets import cached_snapshot, statuses
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    settings = get_settings()
+    embedding = cached_snapshot(settings.embedding_model)
+    kb = get_knowledge_base_catalog().get_knowledge_base(settings.rag_default_namespace)
+    if kb is None or get_knowledge_base_catalog().count_chunks_by_kb(kb.kb_id) == 0:
+        index_state = "empty"
+    elif embedding is not None and kb.metadata.get("embedding_identity") == embedding.identity:
+        index_state = "ready"
+    else:
+        index_state = "rebuild_required"
+    return {"models": statuses(), "index_state": index_state}
+
+
+@router.post("/models/embedding/prepare")
+def prepare_local_embedding():
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.model_assets import start_embedding_prepare
+
+    settings = get_settings()
+    return {"model": start_embedding_prepare(settings.rag_default_namespace).to_dict()}
+
+
+@router.post("/models/reranker/prepare")
+def prepare_local_reranker():
+    from agentnexus.rag.model_assets import start_reranker_prepare
+
+    return {"model": start_reranker_prepare().to_dict()}
+
+
 @router.get("/documents")
 def list_documents():
     from dataclasses import asdict
@@ -50,17 +84,20 @@ def list_documents():
 
 @router.post("/search")
 def search_kb(req: SearchRequest):
+    from agentnexus.core.config import get_settings
     from agentnexus.rag.kb_service import search_kb
+    from agentnexus.rag.model_assets import ModelUnavailable
 
     try:
+        settings = get_settings()
         results = search_kb(
             query=req.query,
-            namespace=req.namespace,
+            namespace=req.namespace or settings.rag_default_namespace,
             top_k=req.top_k,
-            source=req.source,
-            file_format=req.file_format,
-            section_title=req.section_title,
-            view=req.view,
+            source=req.source or "",
+            file_format=req.file_format or "",
+            section_title=req.section_title or "",
+            view=req.view or "chunk",
         )
         results_data = []
         for r in results:
@@ -70,7 +107,12 @@ def search_kb(req: SearchRequest):
                 results_data.append(r)
             else:
                 results_data.append({"text": str(r)})
-        return {"results": results_data, "query": req.query}
+        ranking_mode = "rerank" if results_data and all(
+            result.get("source") == "rerank" for result in results_data
+        ) else "hybrid"
+        return {"results": results_data, "query": req.query, "ranking_mode": ranking_mode}
+    except ModelUnavailable as e:
+        raise APIError(409, "model_not_ready", str(e)) from e
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 

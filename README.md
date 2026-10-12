@@ -71,6 +71,7 @@ That's it. No API keys required for local models — just configure your LLM pro
 
 ```bash
 nexus kb add ./docs              # Add documents to knowledge base
+nexus kb prepare                 # Prepare the local embedding model for offline use
 nexus wiki init default          # Initialize wiki for a RAG namespace
 nexus wiki ingest ./doc.md       # Ingest source document into wiki
 nexus wiki query "what is X?"    # Query wiki with confidence-based routing
@@ -83,6 +84,8 @@ nexus eval agent --days 1        # Run agent quality evaluation
 ```
 
 ## Documentation
+
+For model download sizes, retries, and offline preparation, see [Prepare knowledge base models](docs/Model-Downloads.en.md).
 
 | Document | Content |
 | --- | --- |

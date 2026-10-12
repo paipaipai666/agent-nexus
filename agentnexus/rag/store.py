@@ -78,6 +78,26 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(do
 CREATE INDEX IF NOT EXISTS idx_document_chunks_kb_id ON document_chunks(kb_id);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_document_version ON document_chunks(document_version);
 
+CREATE TABLE IF NOT EXISTS kb_content_revisions (
+    kb_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE TRIGGER IF NOT EXISTS kb_chunks_insert_revision AFTER INSERT ON document_chunks BEGIN
+    INSERT INTO kb_content_revisions (kb_id, revision) VALUES (NEW.kb_id, 1)
+    ON CONFLICT(kb_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS kb_chunks_delete_revision AFTER DELETE ON document_chunks BEGIN
+    INSERT INTO kb_content_revisions (kb_id, revision) VALUES (OLD.kb_id, 1)
+    ON CONFLICT(kb_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS kb_chunks_update_revision AFTER UPDATE ON document_chunks BEGIN
+    INSERT INTO kb_content_revisions (kb_id, revision) VALUES (OLD.kb_id, 1)
+    ON CONFLICT(kb_id) DO UPDATE SET revision = revision + 1;
+    INSERT INTO kb_content_revisions (kb_id, revision)
+    SELECT NEW.kb_id, 1 WHERE NEW.kb_id != OLD.kb_id
+    ON CONFLICT(kb_id) DO UPDATE SET revision = revision + 1;
+END;
+
 CREATE TABLE IF NOT EXISTS ingestion_runs (
     run_id TEXT PRIMARY KEY,
     kb_id TEXT NOT NULL,
@@ -630,6 +650,18 @@ class KnowledgeBaseCatalog:
                 (kb_id,),
             ).fetchall()
             return [_chunk_record_from_row(row) for row in rows]
+
+    def content_revision(self, namespace: str) -> tuple[str, int] | None:
+        """Read a cheap content token shared by all catalog writers."""
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT kb.kb_id, COALESCE(rev.revision, 0) AS revision
+                FROM knowledge_bases AS kb
+                LEFT JOIN kb_content_revisions AS rev ON rev.kb_id = kb.kb_id
+                WHERE kb.namespace = ?""",
+                (namespace,),
+            ).fetchone()
+            return (row["kb_id"], row["revision"]) if row else None
 
     def list_neighbor_chunks(
         self,

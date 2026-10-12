@@ -42,8 +42,8 @@ class TestKbSearchTool:
         catalog.upsert_chunks([chunk])
 
         monkeypatch.setattr(
-            "agentnexus.tools.kb_search.chroma_search",
-            lambda query, limit=10, name=None, namespace=None, where=None: [
+            "agentnexus.rag.kb_service.chroma_search",
+            lambda query, limit=10, name=None, namespace=None, where=None, **_: [
                 {"id": chunk.chunk_id, "score": 0.9, "text": chunk.text, "metadata": chunk.metadata}
             ],
         )
@@ -77,15 +77,15 @@ class TestKbSearchTool:
                 results[0].context_text = "前置说明\n\n>> 核心答案\n\n后续补充"
                 return results
 
-        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
-        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {})
+        monkeypatch.setattr("agentnexus.rag.kb_service._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.rag.kb_service._retriever_reranker_requested", {})
         monkeypatch.setattr(
-            "agentnexus.tools.kb_search.chroma_search",
-            lambda query, limit=10, name=None, namespace=None, where=None: [
+            "agentnexus.rag.kb_service.chroma_search",
+            lambda query, limit=10, name=None, namespace=None, where=None, **_: [
                 {"id": "chunk_1", "score": 0.9, "text": "核心答案", "metadata": {}}
             ],
         )
-        monkeypatch.setattr("agentnexus.tools.kb_search.expand_queries", lambda query: [query])
+        monkeypatch.setattr("agentnexus.rag.kb_service.expand_queries", lambda query: [query])
 
         result = kb_search("检索用什么", namespace="support")
 
@@ -109,17 +109,17 @@ class TestKbSearchTool:
             def search(self, query, dense, top_k=5, min_score=0.0, metadata_filters=None):
                 return []
 
-        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
-        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {"support": True})
+        monkeypatch.setattr("agentnexus.rag.kb_service._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.rag.kb_service._retriever_reranker_requested", {"support": True})
 
-        def fake_chroma_search(query, limit=10, name=None, namespace=None, where=None):
+        def fake_chroma_search(query, limit=10, name=None, namespace=None, where=None, **_):
             captured.setdefault("queries", []).append(query)
             captured["where"] = where
             return []
 
-        monkeypatch.setattr("agentnexus.tools.kb_search.chroma_search", fake_chroma_search)
+        monkeypatch.setattr("agentnexus.rag.kb_service.chroma_search", fake_chroma_search)
         monkeypatch.setattr(
-            "agentnexus.tools.kb_search.expand_queries",
+            "agentnexus.rag.kb_service.expand_queries",
             lambda query: [query, "BM25 查询"],
         )
 
@@ -168,15 +168,15 @@ class TestKbSearchTool:
                 captured["view"] = view
                 return results
 
-        monkeypatch.setattr("agentnexus.tools.kb_search._get_retriever", lambda namespace="default": FakeRetriever())
-        monkeypatch.setattr("agentnexus.tools.kb_search._retriever_reranker_requested", {})
+        monkeypatch.setattr("agentnexus.rag.kb_service._get_retriever", lambda namespace="default": FakeRetriever())
+        monkeypatch.setattr("agentnexus.rag.kb_service._retriever_reranker_requested", {})
         monkeypatch.setattr(
-            "agentnexus.tools.kb_search.chroma_search",
-            lambda query, limit=10, name=None, namespace=None, where=None: [
+            "agentnexus.rag.kb_service.chroma_search",
+            lambda query, limit=10, name=None, namespace=None, where=None, **_: [
                 {"id": "chunk_1", "score": 0.9, "text": "核心答案", "metadata": {}}
             ],
         )
-        monkeypatch.setattr("agentnexus.tools.kb_search.expand_queries", lambda query: [query])
+        monkeypatch.setattr("agentnexus.rag.kb_service.expand_queries", lambda query: [query])
 
         kb_search("检索用什么", namespace="support", view="chunk")
 

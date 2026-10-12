@@ -106,6 +106,62 @@ export interface ProviderSaveInput {
   models: ModelDraft[]
 }
 
+interface LocalModelInfo {
+  name: string
+  message: string
+  download_bytes: number | null
+}
+
+export type LocalModelStatus = LocalModelInfo & (
+  | { state: 'ready' | 'cached'; identity: string }
+  | { state: 'missing' | 'downloading' | 'loading' | 'failed' }
+)
+
+export interface KnowledgeModels {
+  models: { embedding: LocalModelStatus; reranker: LocalModelStatus }
+  index_state: 'empty' | 'ready' | 'rebuild_required'
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseLocalModel(value: unknown): LocalModelStatus {
+  if (!isObject(value) || typeof value.name !== 'string' || typeof value.message !== 'string') {
+    throw new Error('Invalid local model status')
+  }
+  const downloadBytes = value.download_bytes
+  if (downloadBytes !== null && (typeof downloadBytes !== 'number' || !Number.isFinite(downloadBytes) || downloadBytes < 0)) {
+    throw new Error('Invalid model download size')
+  }
+  const info = { name: value.name, message: value.message, download_bytes: downloadBytes }
+  switch (value.state) {
+    case 'ready':
+    case 'cached':
+      if (typeof value.identity !== 'string') throw new Error('Missing model identity')
+      return { ...info, state: value.state, identity: value.identity }
+    case 'missing':
+    case 'downloading':
+    case 'loading':
+    case 'failed':
+      return { ...info, state: value.state }
+    default:
+      throw new Error('Unknown local model status')
+  }
+}
+
+function parseKnowledgeModels(value: unknown): KnowledgeModels {
+  if (!isObject(value) || !isObject(value.models)) throw new Error('Invalid knowledge model status')
+  const state = value.index_state
+  if (state !== 'empty' && state !== 'ready' && state !== 'rebuild_required') {
+    throw new Error('Unknown knowledge index status')
+  }
+  return {
+    models: { embedding: parseLocalModel(value.models.embedding), reranker: parseLocalModel(value.models.reranker) },
+    index_state: state,
+  }
+}
+
 async function request<T>(path: string, options: RequestInit & { query?: Record<string, string> } = {}): Promise<T> {
   const { query, headers: optsHeaders, ...rest } = options
   const headers: Record<string, string> = {
@@ -216,10 +272,17 @@ export const api = {
     request<{ documents: any[]; total_chunks: number }>('/api/kb/documents', { signal }),
 
   searchKnowledge: (query: string, topK = 5) =>
-    request<{ results: any[] }>('/api/kb/search', {
+    request<{ results: any[]; ranking_mode: 'hybrid' | 'rerank' }>('/api/kb/search', {
       method: 'POST',
       body: JSON.stringify({ query, top_k: topK }),
     }),
+
+  getKnowledgeModels: async (signal?: AbortSignal) =>
+    parseKnowledgeModels(await request<unknown>('/api/kb/models', { signal })),
+
+  prepareKnowledgeModel: async (kind: 'embedding' | 'reranker') => {
+    await request<unknown>(`/api/kb/models/${kind}/prepare`, { method: 'POST' })
+  },
 
   uploadDocumentWithProgress: (file: File) =>
     uploadRequest<{ status: string; run_id: string; filename: string }>('/api/kb/documents', file),

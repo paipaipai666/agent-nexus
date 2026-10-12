@@ -15,14 +15,19 @@ def catalog(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTNEXUS_HOME", str(tmp_path))
     import agentnexus.core.config as cfg
     cfg._settings_cache = None
+    from agentnexus.rag.model_assets import prepare_embedding
     from agentnexus.rag.store import KnowledgeBaseCatalog
     from agentnexus.storage.chroma import resolve_collection_name
     kb_id = resolve_collection_name(namespace="default")
     cat = KnowledgeBaseCatalog(db_path=str(tmp_path / "kb.db"))
+    _, identity = prepare_embedding(allow_download=False)
     cat.upsert_knowledge_base(KnowledgeBaseRecord(
-        kb_id=kb_id, namespace="default", display_name="d", collection_name=kb_id))
+        kb_id=kb_id, namespace="default", display_name="d", collection_name=kb_id,
+        metadata={"embedding_identity": identity}))
     monkeypatch.setattr(
         "agentnexus.rag.kb_service.get_knowledge_base_catalog", lambda: cat)
+    monkeypatch.setattr("agentnexus.rag.kb_index.get_knowledge_base_catalog", lambda: cat)
+    monkeypatch.setattr("agentnexus.rag.store.get_knowledge_base_catalog", lambda: cat)
     yield cat
     cat.close()
 
@@ -274,10 +279,10 @@ class TestReconcileKb:
             from agentnexus.rag.kb_service import reconcile_kb
             stats = reconcile_kb("default")
         assert stats == {"orphans_deleted": 1, "vectors_reembedded": 1}
-        mock_del.assert_called_once_with(ids=["ghost_ch"], namespace="default")
+        mock_del.assert_called_once_with(ids=["ghost_ch"], name="kb_default")
         upsert_kwargs = mock_upsert.call_args.kwargs
         assert upsert_kwargs["ids"] == ["doc1_ch1"]
-        assert upsert_kwargs["namespace"] == "default"
+        assert upsert_kwargs["name"] == "kb_default"
 
     def test_dry_run_reports_without_repair(self, catalog):
         _seed(catalog, "doc1", n_chunks=1)

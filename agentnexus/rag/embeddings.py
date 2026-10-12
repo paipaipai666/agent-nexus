@@ -10,27 +10,17 @@ from collections.abc import Callable
 from hashlib import blake2b
 from typing import Any
 
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
 logger = logging.getLogger(__name__)
 
 from agentnexus.core.config import get_settings
 
 
 def _resolve_local_model_path(model_name: str) -> str | None:
-    """Return the local cache path for a HuggingFace model, or ``None``.
+    """Return a complete local snapshot without triggering a network request."""
+    from agentnexus.rag.model_assets import cached_snapshot
 
-    Uses ``snapshot_download(local_files_only=True)`` which **never** makes
-    HTTP requests — it returns the cached directory path or raises an error.
-    This is more reliable than ``HF_HUB_OFFLINE`` because
-    ``sentence_transformers`` can bypass the hub's offline check.
-    """
-    try:
-        from huggingface_hub import snapshot_download
-
-        return snapshot_download(model_name, local_files_only=True)
-    except Exception:
-        return None
+    snapshot = cached_snapshot(model_name)
+    return snapshot.path if snapshot is not None else None
 
 VECTOR_DIM = 512
 _EMBED_BATCH_SIZE = 1024
@@ -153,10 +143,9 @@ def get_embedding_model(
                 logger.info("Embedding model '%s' found in local cache, loading offline.", settings.embedding_model)
                 model_source = local_path
             else:
-                logger.info("Embedding model '%s' not cached, will download from HuggingFace Hub.", settings.embedding_model)
-                model_source = settings.embedding_model
+                raise FileNotFoundError(f"Embedding model '{settings.embedding_model}' is not cached")
 
-            _model = SentenceTransformer(model_source, device="cpu")
+            _model = SentenceTransformer(model_source, device="cpu", local_files_only=True)
             if resolved_device != "cpu":
                 try:
                     _model = _model.to(resolved_device)

@@ -132,13 +132,25 @@ class TestEmbeddingToList:
 
 class TestResolveLocalModelPath:
     @patch("huggingface_hub.snapshot_download")
-    def test_returns_path_when_cached(self, mock_download):
-        mock_download.return_value = "/home/user/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5"
+    def test_returns_path_when_cached(self, mock_download, tmp_path):
+        for filename in (
+            "config.json", "config_sentence_transformers.json", "model.safetensors", "modules.json",
+            "README.md", "sentence_bert_config.json", "special_tokens_map.json", "tokenizer.json",
+            "tokenizer_config.json", "vocab.txt", "1_Pooling/config.json",
+        ):
+            path = tmp_path / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}", encoding="utf-8")
+        mock_download.return_value = str(tmp_path)
 
         result = _resolve_local_model_path("BAAI/bge-small-zh-v1.5")
 
-        assert result == "/home/user/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5"
-        mock_download.assert_called_once_with("BAAI/bge-small-zh-v1.5", local_files_only=True)
+        assert result == str(tmp_path)
+        mock_download.assert_called_once_with(
+            "BAAI/bge-small-zh-v1.5",
+            revision="7999e1d3359715c523056ef9478215996d62a620",
+            local_files_only=True,
+        )
 
     @patch("huggingface_hub.snapshot_download", side_effect=FileNotFoundError("not cached"))
     def test_returns_none_when_not_cached(self, mock_download):
