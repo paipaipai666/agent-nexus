@@ -1,5 +1,6 @@
 appId: com.agentnexus.desktop
 productName: AgentNexus
+icon: public/agentnexus-mark.png
 directories:
   output: release
 

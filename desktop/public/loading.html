@@ -4,73 +4,33 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentNexus</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #111318;
-      color: #e0e0e0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      -webkit-app-region: drag;
-      user-select: none;
-    }
-    .container {
-      text-align: center;
-      -webkit-app-region: no-drag;
-    }
-    .logo {
-      font-size: 2rem;
-      font-weight: 700;
-      margin-bottom: 2rem;
-      letter-spacing: -0.02em;
-    }
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(255,255,255,0.1);
-      border-top-color: #6366f1;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 1.5rem;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .status {
-      font-size: 0.875rem;
-      color: #888;
-    }
-    .error {
-      color: #ef4444;
-      margin-top: 1rem;
-      font-size: 0.875rem;
-    }
-  </style>
+  <link rel="icon" type="image/png" href="./agentnexus-mark.png">
+  <link rel="stylesheet" href="./startup.css">
 </head>
 <body>
-  <div class="container">
-    <div class="logo">AgentNexus</div>
-    <div class="spinner" id="spinner"></div>
-    <div class="status" id="status">Starting backend...</div>
-    <div class="error" id="error" style="display:none"></div>
-  </div>
+  <main class="startup-screen" aria-label="Starting AgentNexus">
+    <div class="startup-brand">
+      <img class="startup-mark" src="./agentnexus-mark.png" width="72" height="72" alt="AgentNexus logo">
+      <h1 class="startup-title">AgentNexus</h1>
+    </div>
+    <div class="startup-spinner" id="spinner" aria-hidden="true"></div>
+    <p class="startup-status" id="status" role="status">Starting backend...</p>
+    <p class="startup-error" id="error" role="alert" hidden></p>
+    <button class="startup-close" id="close" type="button" aria-label="Close AgentNexus" hidden>×</button>
+  </main>
   <script>
-    const statusEl = document.getElementById('status')
-    const errorEl = document.getElementById('error')
-    const spinnerEl = document.getElementById('spinner')
-
-    // electronAPI is exposed by the preload script
     if (window.electronAPI) {
-      window.electronAPI.onBackendReady(() => {
-        statusEl.textContent = 'Ready'
+      const closeButton = document.getElementById('close')
+      closeButton.hidden = false
+      closeButton.addEventListener('click', () => window.electronAPI.close())
+      const unsubscribe = window.electronAPI.onBackendError((message) => {
+        document.getElementById('spinner').hidden = true
+        document.getElementById('status').textContent = 'Unable to start AgentNexus'
+        const error = document.getElementById('error')
+        error.textContent = message
+        error.hidden = false
       })
-      window.electronAPI.onBackendError((message) => {
-        spinnerEl.style.display = 'none'
-        statusEl.textContent = 'Failed to start'
-        errorEl.textContent = message
-        errorEl.style.display = 'block'
-      })
+      window.addEventListener('pagehide', unsubscribe, { once: true })
     }
   </script>
 </body>

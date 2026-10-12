@@ -2,6 +2,8 @@
 
 # AgentNexus
 
+<img src="desktop/public/agentnexus-logo.png" alt="AgentNexus" width="480" />
+
 **生产级、纯本地 AI Agent — FSM 驱动安全循环 + 329 个测试文件。**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)

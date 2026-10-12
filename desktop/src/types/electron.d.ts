@@ -31,6 +31,7 @@ interface ElectronAPI {
   getPathForFile: (file: File) => string
 
   getBackendStatus: () => Promise<BackendStatus>
+  onBackendError: (callback: (message: string) => void) => () => void
 }
 
 interface Window {

@@ -1,6 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
-import { ThinkingOrb } from 'thinking-orbs'
-import { usePrefersReducedMotion } from '../utils/effects'
+import { useEffect, useState } from 'react'
 
 const HEALTH_CHECK_INTERVAL_MS = 1000
 const MAX_RETRIES = 30
@@ -24,10 +22,6 @@ async function checkHealth(port: number): Promise<boolean> {
 export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingScreenProps) {
   const [retries, setRetries] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const reducedMotion = usePrefersReducedMotion()
-
-  const stableOnReady = useCallback(onReady, [])
-
   useEffect(() => {
     let cancelled = false
     let timeoutId: ReturnType<typeof setTimeout>
@@ -35,8 +29,9 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
     const poll = async () => {
       if (cancelled) return
       const healthy = await checkHealth(backendPort)
+      if (cancelled) return
       if (healthy) {
-        stableOnReady()
+        onReady()
       } else {
         setRetries((prev) => {
           const next = prev + 1
@@ -57,54 +52,29 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
       cancelled = true
       clearTimeout(timeoutId)
     }
-  }, [stableOnReady, backendPort])
+  }, [onReady, backendPort])
 
   return (
-    <div
-      data-theme="dark"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--color-bg, #111318)',
-        color: 'var(--color-text, #e0e0e0)',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        gap: '1.5rem',
-      }}
-    >
-      <div
-        className="metal-heading"
-        style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '-0.02em' }}
-      >
-        AgentNexus
+    <div className="startup-screen" aria-label="Starting AgentNexus">
+      <div className="startup-brand">
+        <img className="startup-mark" src={`${import.meta.env.BASE_URL}agentnexus-mark.png`} width={72} height={72} alt="AgentNexus logo" />
+        <h1 className="startup-title">AgentNexus</h1>
       </div>
       {!error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ThinkingOrb
-            state="connecting"
-            size={32}
-            theme="dark"
-            paused={reducedMotion}
-            aria-label="Connecting to backend"
-          />
-          <div style={{ fontSize: '0.875rem', color: '#888' }}>
+        <>
+          <div className="startup-spinner" aria-hidden="true" />
+          <p className="startup-status" role="status">
             Connecting to backend... ({retries})
-          </div>
-        </div>
+          </p>
+        </>
       )}
       {error && (
-        <div
-          style={{
-            fontSize: '0.875rem',
-            color: '#ef4444',
-            maxWidth: 400,
-            textAlign: 'center',
-          }}
-        >
-          {error}
-        </div>
+        <p className="startup-error" role="alert">{error}</p>
+      )}
+      {window.electronAPI && (
+        <button className="startup-close" type="button" aria-label="Close AgentNexus" onClick={() => window.electronAPI?.close()}>
+          ×
+        </button>
       )}
     </div>
   )

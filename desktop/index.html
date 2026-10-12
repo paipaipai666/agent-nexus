@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgentNexus</title>
+    <link rel="icon" type="image/png" href="/agentnexus-mark.png" />
+    <link rel="stylesheet" href="/startup.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" media="print" onload="this.media='all'" />
     <script>
-      // Apply theme immediately to prevent flash of wrong theme
       (function() {
         var t = localStorage.getItem('agentnexus-theme') || 'dark';
         document.documentElement.setAttribute('data-theme', t);
@@ -15,7 +17,16 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="startup-screen" aria-label="Starting AgentNexus">
+        <div class="startup-brand">
+          <img class="startup-mark" src="/agentnexus-mark.png" width="72" height="72" alt="AgentNexus logo" />
+          <h1 class="startup-title">AgentNexus</h1>
+        </div>
+        <div class="startup-spinner" aria-hidden="true"></div>
+        <p class="startup-status" role="status">Loading application...</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

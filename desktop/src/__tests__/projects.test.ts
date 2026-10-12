@@ -23,6 +23,7 @@ function mockElectronBridge(overrides: Partial<ElectronAPI>) {
     statFiles: vi.fn().mockResolvedValue([]),
     getPathForFile: vi.fn().mockReturnValue(''),
     getBackendStatus: vi.fn().mockResolvedValue({ ready: true, port: 0 }),
+    onBackendError: vi.fn(() => vi.fn()),
     ...overrides,
   }
 }

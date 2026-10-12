@@ -8,28 +8,30 @@ import path from 'path'
 export default defineConfig({
   plugins: [
     react(),
-    electron([
-      {
-        entry: 'electron/main.ts',
-        vite: {
-          build: {
-            outDir: 'dist-electron',
+    ...(process.env.VITEST ? [] : [
+      electron([
+        {
+          entry: 'electron/main.ts',
+          vite: {
+            build: {
+              outDir: 'dist-electron',
+            },
           },
         },
-      },
-      {
-        entry: 'electron/preload.ts',
-        onstart(options) {
-          options.reload()
-        },
-        vite: {
-          build: {
-            outDir: 'dist-electron',
+        {
+          entry: 'electron/preload.ts',
+          onstart(options) {
+            options.reload()
+          },
+          vite: {
+            build: {
+              outDir: 'dist-electron',
+            },
           },
         },
-      },
     ]),
     renderer(),
+    ]),
   ],
   resolve: {
     alias: {

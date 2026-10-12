@@ -1,16 +1,1 @@
-"use strict";
-const electron = require("electron");
-electron.contextBridge.exposeInMainWorld("electronAPI", {
-  minimize: () => electron.ipcRenderer.send("window-minimize"),
-  maximize: () => electron.ipcRenderer.send("window-maximize"),
-  close: () => electron.ipcRenderer.send("window-close"),
-  pickDirectory: () => electron.ipcRenderer.invoke("pick-directory"),
-  getProjects: () => electron.ipcRenderer.invoke("get-projects"),
-  addProject: (path) => electron.ipcRenderer.invoke("add-project", path),
-  removeProject: (path) => electron.ipcRenderer.invoke("remove-project", path),
-  setLastProject: (path) => electron.ipcRenderer.invoke("set-last-project", path),
-  pickFiles: () => electron.ipcRenderer.invoke("pick-files"),
-  statFiles: (paths) => electron.ipcRenderer.invoke("stat-files", paths),
-  getPathForFile: (file) => electron.webUtils.getPathForFile(file),
-  getBackendStatus: () => electron.ipcRenderer.invoke("get-backend-status")
-});
+"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("electronAPI",{minimize:()=>e.ipcRenderer.send("window-minimize"),maximize:()=>e.ipcRenderer.send("window-maximize"),close:()=>e.ipcRenderer.send("window-close"),pickDirectory:()=>e.ipcRenderer.invoke("pick-directory"),getProjects:()=>e.ipcRenderer.invoke("get-projects"),addProject:r=>e.ipcRenderer.invoke("add-project",r),removeProject:r=>e.ipcRenderer.invoke("remove-project",r),setLastProject:r=>e.ipcRenderer.invoke("set-last-project",r),pickFiles:()=>e.ipcRenderer.invoke("pick-files"),statFiles:r=>e.ipcRenderer.invoke("stat-files",r),getPathForFile:r=>e.webUtils.getPathForFile(r),getBackendStatus:()=>e.ipcRenderer.invoke("get-backend-status"),onBackendError:r=>{const i=(t,n)=>r(n);return e.ipcRenderer.on("backend-error",i),()=>e.ipcRenderer.removeListener("backend-error",i)}});

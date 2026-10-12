@@ -2,6 +2,8 @@
 
 # AgentNexus
 
+<img src="desktop/public/agentnexus-logo.png" alt="AgentNexus" width="480" />
+
 **A production-grade, fully local AI agent with FSM-driven safety and 329 test files.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)

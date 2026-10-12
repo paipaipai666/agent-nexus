@@ -210,7 +210,9 @@ async function stopBackend() {
 }
 
 async function createWindow() {
-  mainWindow = new BrowserWindow({
+  const development = isDev()
+  const assetsDirectory = path.join(__dirname, development ? '../public' : '../dist')
+  const window = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -218,6 +220,7 @@ async function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     show: false,
+    icon: path.join(assetsDirectory, 'agentnexus-mark.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -225,40 +228,62 @@ async function createWindow() {
     },
     backgroundColor: '#111318',
   })
+  mainWindow = window
 
-  if (isDev()) {
-    const devUrl = (process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/')
-      .replace('://localhost:', '://127.0.0.1:')
-    const loadDev = async (attempt = 0): Promise<void> => {
-      try {
-        await mainWindow!.loadURL(devUrl)
-        console.log(`[dev] renderer loaded: ${devUrl}`)
-      } catch (e) {
-        if (attempt < 10) {
-          await new Promise((r) => setTimeout(r, 500))
-          return loadDev(attempt + 1)
+  const firstFrame = new Promise<void>((resolve) => {
+    window.once('ready-to-show', () => {
+      if (!window.isDestroyed()) window.show()
+      resolve()
+    })
+    window.once('closed', () => {
+      if (mainWindow === window) mainWindow = null
+      resolve()
+    })
+  })
+
+  try {
+    await window.loadFile(path.join(assetsDirectory, 'loading.html'))
+    await firstFrame
+    if (window.isDestroyed()) return
+
+    if (development) {
+      const devUrl = (process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/')
+        .replace('://localhost:', '://127.0.0.1:')
+      const loadDev = async (attempt = 0): Promise<void> => {
+        if (window.isDestroyed()) return
+        try {
+          await window.loadURL(devUrl)
+          console.log(`[dev] renderer loaded: ${devUrl}`)
+        } catch (e) {
+          if (attempt < 10) {
+            await new Promise((r) => setTimeout(r, 500))
+            return loadDev(attempt + 1)
+          }
+          console.error(`[dev] giving up loading ${devUrl}:`, e)
+          if (!window.isDestroyed()) {
+            await window.loadFile(path.join(assetsDirectory, 'loading.html'))
+            window.webContents.send('backend-error', 'Unable to load the application. Restart AgentNexus and try again.')
+          }
         }
-        console.error(`[dev] giving up loading ${devUrl}:`, e)
+      }
+      await loadDev()
+      if (!window.isDestroyed()) window.webContents.openDevTools()
+    } else {
+      const ready = await startBackend()
+      if (window.isDestroyed()) return
+      if (ready) {
+        await window.loadFile(path.join(assetsDirectory, 'index.html'))
+      } else {
+        console.error('Failed to start backend')
+        window.webContents.send('backend-error', 'Backend failed to start. Restart AgentNexus and try again.')
       }
     }
-    void loadDev()
-    mainWindow.webContents.openDevTools()
-    mainWindow.show()
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/loading.html'))
-    mainWindow.show()
-
-    const ready = await startBackend()
-    if (ready) {
-      mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
-    } else {
-      console.error('Failed to start backend')
+  } catch (error) {
+    if (!window.isDestroyed()) {
+      console.error('Failed to load application window:', error)
+      window.close()
     }
   }
-
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
 }
 
 app.whenReady().then(createWindow)

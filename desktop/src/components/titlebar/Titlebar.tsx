@@ -1,4 +1,4 @@
-import { Minus, Square, X, Sun, Moon, Search } from 'lucide-react'
+import { Minus, Square, X, Sun, Moon, Search, PanelLeft, PanelLeftClose } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useTheme } from '../theme/ThemeProvider'
 import { useUIStore } from '../../services/ui'
@@ -8,6 +8,8 @@ export default function Titlebar() {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen)
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const current = navItemForPath(location.pathname)
 
   return (
@@ -23,15 +25,18 @@ export default function Titlebar() {
     >
       {}
       <div className="w-[232px] shrink-0 px-3 flex items-center gap-2">
-        <span
-          className="grid place-items-center w-5 h-5 rounded-[5px] font-mono font-bold text-[12px]"
-          style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="window-no-drag w-8 h-8 grid place-items-center rounded-md transition-colors hover:bg-[var(--surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+          style={{ color: 'var(--fg-secondary)' }}
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls="navigation-sidebar"
+          title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (Ctrl+B)`}
         >
-          N
-        </span>
-        <span className="text-[12px] font-semibold tracking-tight" style={{ color: 'var(--fg-secondary)' }}>
-          AgentNexus
-        </span>
+          {sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
+        </button>
       </div>
 
       {}

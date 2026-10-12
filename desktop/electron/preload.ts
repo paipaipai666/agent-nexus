@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -14,4 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),
+  onBackendError: (callback: (message: string) => void) => {
+    const listener = (_event: IpcRendererEvent, message: string) => callback(message)
+    ipcRenderer.on('backend-error', listener)
+    return () => ipcRenderer.removeListener('backend-error', listener)
+  },
 })

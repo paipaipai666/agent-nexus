@@ -23,6 +23,9 @@ export default function AppShell({ children }: AppShellProps) {
       <Titlebar />
       <div className="flex flex-1 overflow-hidden">
         <div
+          id="navigation-sidebar"
+          aria-hidden={!showSidebar}
+          inert={!showSidebar}
           className="shrink-0 overflow-hidden"
           style={{
             width: showSidebar ? 232 : 0,
