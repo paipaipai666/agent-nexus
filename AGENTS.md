@@ -62,9 +62,14 @@ Follow this exact sequence; never act on unverifiable assumptions:
 
 No explanatory comments in code. Comments rot; the code and its tests are the documentation.
 
-- Never write `//`, `/* */`, `///`, `//!`, `<!-- -->`, or PowerShell `#` prose comments.
-- The only allowed comment tokens are machine directives that alter tool behavior: `@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`, `eslint-disable` / `eslint-enable`, `prettier-ignore`, `@formatter:`, coverage ignores (`istanbul ignore`, `c8 ignore`, `v8 ignore`), shebang lines.
-- CI enforces this: `npm run check:comments` (scripts/no-comments.mjs --check) fails the build on any prose comment.
+- Never write `//`, `/* */`, `//!`, `<!-- -->`, or PowerShell `#` prose comments. TODO/FIXME/XXX/HACK markers are also banned — track pending work in issues, not in source files.
+- The only allowed comment tokens are machine directives that alter tool behavior:
+  - Python: shebang, `# -*- coding: ... -*-`, `# type: ...`, `# noqa`, `# nosec`, `# pragma: ...`, `# pylint:` / `fmt:` / `isort:` / `pyright:` / `ruff:` / `yapf:` / `mypy:`, PEP 723 `# ///` blocks
+  - TS/JS: `/// <reference ...>`, `@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`, `eslint-*`, `prettier-ignore`, `@formatter:`, coverage ignores (`istanbul ignore`, `c8 ignore`, `v8 ignore`), `@__PURE__`, `webpack*` / `vite-ignore` magic comments, `sourceMappingURL`
+  - CSS: `/*! ... */` license banners
+  - YAML / shell: shebang, `# yaml-language-server: ...`, `# shellcheck ...`
+- Docstrings are documentation, not comments — keep writing them for public modules, classes, and functions.
+- CI enforces this: `python scripts/check_no_comments.py` runs in the lint job and locally under pytest (`tests/unit/test_comment_gate.py`); a red gate blocks merge.
 - Code that seems to need a comment needs clearer code or a stronger test instead.
 
 ## Technical Standards
@@ -73,34 +78,6 @@ No explanatory comments in code. Comments rot; the code and its tests are the do
 - **Commits**: Conventional (`feat:`, `fix:`, `refactor:`, `test:`, `chore:`).
 - **Security**: No hardcoded secrets. Follow OWASP.
 - **Delegation**: Provide full context to sub-agents. Synthesize their output. Do not delegate irreversible or security-critical actions.
-
-## No explanatory comments
-
-Do not write explanatory comments — prose that restates what the code does
-(`# increment the counter`, `// fetch user data`, `/* card styles */`). Code
-must explain itself through naming and structure. This covers Python, TS/JS,
-CSS, YAML/TOML, shell, and config files (requirements.txt, .gitignore, …).
-
-TODO/FIXME/XXX/HACK markers are also banned — track pending work in issues,
-not in source files.
-
-Allowed: functional directives that a tool reads, never prose for humans.
-
-- Python: shebang, `# -*- coding: ... -*-`, `# type: ...`, `# noqa`,
-  `# nosec`, `# pragma: ...`, `# pylint:/fmt:/isort:/pyright:/ruff:/yapf:/mypy:`,
-  PEP 723 `# ///` blocks
-- TS/JS: `/// <reference ...>`, `eslint-*`, `@ts-ignore` / `@ts-expect-error` /
-  `@ts-nocheck`, `@__PURE__`, `webpack*` / `vite-ignore` magic comments,
-  `sourceMappingURL`
-- CSS: `/*! ... */` license banners
-- YAML / shell: shebang, `# yaml-language-server: ...`, `# shellcheck ...`
-
-Docstrings are documentation, not comments — keep writing them for public
-modules, classes, and functions.
-
-Enforcement: `python scripts/check_no_comments.py` runs in the CI lint job and
-locally under pytest (`tests/unit/test_comment_gate.py`). A red gate blocks
-merge: strip the comment, or convert it to an allowed directive.
 
 <!-- headroom:rtk-instructions -->
 
