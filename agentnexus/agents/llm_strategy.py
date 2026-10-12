@@ -65,7 +65,8 @@ def prepare_llm_call(
 
 
 def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
-             on_token: Any = None, effort: str | None = None) -> str:
+             on_token: Any = None, effort: str | None = None,
+             on_context: Callable[[list[dict], list[dict] | None], None] | None = None) -> str:
     from agentnexus.core.hooks import HookType, fire_hook
 
     run_state = ctx.run_state
@@ -87,7 +88,12 @@ def call_llm(llm_client: Any, ctx, *, json_format_section: str | None = None,
         tool_state.tools,
         json_format_section=json_format_section,
     )
-    projection_fn = memory_state.memory_manager.build_projection if memory_state.memory_manager else None
+    def projection_fn(messages):
+        projected = memory_state.memory_manager.build_projection(messages) if memory_state.memory_manager else messages
+        if on_context is not None:
+            on_context(projected, think_tools)
+        return projected
+
     result = llm_client.think(
         messages=ctx.messages,
         tools=think_tools,

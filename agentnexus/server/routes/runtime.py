@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
+from agentnexus.agents.context_usage import ContextUsageSnapshot
 from agentnexus.server.deps import get_runtime
 
 router = APIRouter(tags=["runtime"])
@@ -89,6 +90,14 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
         snapshot = skill_service.snapshot() if hasattr(skill_service, "snapshot") else {}
         skill_id = getattr(snapshot, "current_skill_id", None) or (snapshot.get("current_skill_id") if isinstance(snapshot, dict) else None)
 
+    session_loaded = not session_id or session_id in getattr(runtime.chat, "_agents", {})
+    context_snapshot = getattr(agent, "context_usage", None) if session_loaded else None
+    context_usage = context_snapshot.to_dict(capacity=ctx_max) if isinstance(context_snapshot, ContextUsageSnapshot) else None
+    threshold = getattr(mm, "effective_compact_threshold", None) or getattr(mm, "compact_threshold", None)
+    compaction = None
+    if session_loaded and isinstance(threshold, int):
+        compaction = {"basis": "short_term_memory", "used_tokens": stm_tokens, "threshold_tokens": threshold}
+
     return {
         "model_id": model_id,
         "total_usage": usage,
@@ -96,6 +105,8 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
         "stm_tokens": stm_tokens,
         "step_count": step_count,
         "skill_id": skill_id,
+        "context_usage": context_usage,
+        "compaction": compaction,
     }
 
 

@@ -130,6 +130,14 @@ class CompactionEngine:
         self.transcript_dir: str = ""
         self.history_dir: str = ""
 
+    @property
+    def effective_threshold(self) -> int:
+        """Return the automatic threshold after accounting for freed tokens."""
+        threshold = self.compact_threshold
+        if self.snip_freed_tokens > 0:
+            return max(threshold - self.snip_freed_tokens, threshold // 2)
+        return threshold
+
     def _fire_compact(self, event_type: str, **kwargs):
         """Fire compact event callback if set."""
         if self.on_compact:
@@ -350,9 +358,7 @@ class CompactionEngine:
             self._fire_compact("circuit_half_open", elapsed=remaining)
 
         if threshold is None:
-            threshold = self.compact_threshold
-            if self.snip_freed_tokens > 0:
-                threshold = max(threshold - self.snip_freed_tokens, threshold // 2)
+            threshold = self.effective_threshold
 
         stm = mgr.short_term
         tokens_before = stm.token_count or stm.estimate_tokens()

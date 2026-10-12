@@ -83,6 +83,7 @@ def assemble_react_messages(
     question: str,
     workflow_context: str = "",
     include_tools_desc: bool = True,
+    source_locations: dict[str, tuple[int, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Render sections into messages, one message per group.
 
@@ -102,24 +103,32 @@ def assemble_react_messages(
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_rules},
     ]
+    if source_locations is not None:
+        source_locations.clear()
+
+    def append_group(group: str, text: str) -> None:
+        if source_locations is not None:
+            source_locations[group] = (len(messages), text)
+        messages.append({"role": "system", "content": text})
+
     if sections.get(SECTION_MEMORY):
-        messages.append({"role": "system", "content": sections[SECTION_MEMORY]})
+        append_group(SECTION_MEMORY, sections[SECTION_MEMORY])
     if sections.get(SECTION_CONVERSATION):
-        messages.append({"role": "system", "content": sections[SECTION_CONVERSATION]})
+        append_group(SECTION_CONVERSATION, sections[SECTION_CONVERSATION])
 
     static_text = _join_group(sections, _STATIC_SECTIONS)
     if static_text:
-        messages.append({"role": "system", "content": static_text})
+        append_group("static", static_text)
 
     if include_tools_desc and tools_desc:
-        messages.append({"role": "system", "content": f"== 可用工具 ==\n{tools_desc}"})
+        append_group("tools", f"== 可用工具 ==\n{tools_desc}")
 
     volatile_text = _join_group(sections, _VOLATILE_SECTIONS)
     if volatile_text:
-        messages.append({"role": "system", "content": volatile_text})
+        append_group("volatile", volatile_text)
 
     if workflow_context:
-        messages.append({"role": "system", "content": workflow_context})
+        append_group("workflow", workflow_context)
 
     messages.append({"role": "user", "content": f"== 当前任务 ==\nQuestion: {question}"})
     return messages

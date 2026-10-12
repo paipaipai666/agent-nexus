@@ -110,6 +110,10 @@ beforeEach(() => {
   ;(global as any).WebSocket = MockWebSocket
   ;(Element.prototype as any).scrollIntoView = vi.fn()
   for (const k of Object.keys(apiOverrides)) delete apiOverrides[k]
+  apiOverrides.getRuntimeStatus = async () => ({
+    model_id: 'test/model', ctx_max: 10000, stm_tokens: 0, step_count: 0, skill_id: null,
+    total_usage: { input_tokens: 0, output_tokens: 0 }, context_usage: null, compaction: null,
+  })
 })
 
 afterEach(() => {

@@ -66,6 +66,16 @@ class MemoryManager:
         threading.Thread(target=self._resolve_ctx_max_async, daemon=True, name="mem-ctx-resolve").start()
 
     @property
+    def ctx_max(self) -> int:
+        """Return the model window resolved by the compaction engine."""
+        return self._engine.ctx_max
+
+    @property
+    def effective_compact_threshold(self) -> int:
+        """Return the threshold currently used by automatic compaction."""
+        return self._engine.effective_threshold
+
+    @property
     def compact_threshold(self) -> int:
         """Compaction token threshold. Assignment writes through to the engine."""
         return self._engine.compact_threshold

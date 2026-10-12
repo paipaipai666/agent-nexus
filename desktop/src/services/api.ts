@@ -1,5 +1,8 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
+import { parseRuntimeStatus } from './runtime-status'
+export type { ContextCategory, RuntimeStatus } from './runtime-status'
+
 export interface AttachmentRef {
   path: string
   name: string
@@ -516,14 +519,7 @@ export const api = {
 
   getRuntimeStatus: (sessionId?: string) => {
     const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
-    return request<{
-      model_id: string
-      total_usage: { input_tokens: number; output_tokens: number }
-      ctx_max: number
-      stm_tokens: number
-      step_count: number
-      skill_id: string | null
-    }>(`/api/runtime/status${qs}`)
+    return request<unknown>(`/api/runtime/status${qs}`).then(parseRuntimeStatus)
   },
 
   listEvalTasks: (category?: string, difficulty?: string, evalType?: string) => {

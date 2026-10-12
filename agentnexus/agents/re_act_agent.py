@@ -11,6 +11,7 @@ import time as _time
 from typing import Any, Callable
 
 from agentnexus.agents import decisions, json_helpers, react_runtime
+from agentnexus.agents.context_usage import ContextFragment, ContextUsageSnapshot, estimate_context_usage
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
@@ -100,6 +101,8 @@ class ReActAgent:
         self._available_skill_context: str = ""
         self._mcp_context: str = ""
         self._workflow_context: str = ""
+        self._context_usage: ContextUsageSnapshot | None = None
+        self._context_fragments: tuple[ContextFragment, ...] = ()
         self._cancel_checker: Callable[[], bool] | None = None
         self._round_persist: Callable[[], bool] | None = None
         self._todo_list = None
@@ -110,6 +113,21 @@ class ReActAgent:
         self._persona_text: str = compile_persona_fragment(settings.persona)
         self._behavior_fragments_text: str = load_core_fragments()
         self._append_system_prompt: str = (settings.append_system_prompt or "").strip()
+
+    @property
+    def context_usage(self) -> ContextUsageSnapshot | None:
+        """Return estimates from the most recent projected model request."""
+        return self._context_usage
+
+    def _measure_context(self, messages: list[dict], tools: list[dict] | None) -> None:
+        mcp_names = frozenset(
+            name for name in self.tool_executor.list_tools()
+            if (meta := self.tool_executor.get_meta(name)) is not None and meta.source_type == "mcp"
+        )
+        self._context_usage = estimate_context_usage(
+            messages=messages, tools=tools, fragments=self._context_fragments,
+            mcp_tool_names=mcp_names,
+        )
 
     @property
     def total_usage(self) -> dict:
@@ -479,6 +497,7 @@ class ReActAgent:
             json_format_section=self._build_json_format_section(),
             on_token=_stream_token,
             effort=getattr(self, "_thinking_effort", None),
+            on_context=self._measure_context,
         )
         try:
             _usage = self.llm_client.last_usage or {}
@@ -1060,6 +1079,7 @@ class ReActAgent:
             append_system_prompt=appendix,
         )
         effective_question = question + self._run_attachment_note
+        locations: dict[str, tuple[int, str]] = {}
         messages = assemble_react_messages(
             system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
             tools_desc=tools_desc,
@@ -1067,7 +1087,30 @@ class ReActAgent:
             question=effective_question,
             workflow_context=workflow_context,
             include_tools_desc=not native_tools,
+            source_locations=locations,
         )
+        fragments = [
+            ContextFragment("memory", memory_context, locations.get("memory")),
+            ContextFragment("conversation", conversation_context, locations.get("conversation")),
+            ContextFragment("skills", self._available_skill_context, locations.get("static")),
+            ContextFragment("skills", workflow_context, locations.get("workflow")),
+            ContextFragment("mcp", self._mcp_context, locations.get("static")),
+        ]
+        if compiled is not None:
+            fragments.extend([
+                ContextFragment("skills", compiled.fragments_text, locations.get("static")),
+                ContextFragment("skills", compiled.workflow_guidance, locations.get("static")),
+            ])
+        if not native_tools:
+            for name in self.tool_executor.list_tools():
+                meta = self.tool_executor.get_meta(name)
+                if meta is not None:
+                    block = f"- {name}: {meta.description} [{meta.risk_level.value}]"
+                    if block in tools_desc:
+                        fragments.append(ContextFragment(
+                            "mcp" if meta.source_type == "mcp" else "tools", block, locations.get("tools"),
+                        ))
+        self._context_fragments = tuple(fragment for fragment in fragments if fragment.text and fragment.source is not None)
         if self._run_images and messages:
             for msg in reversed(messages):
                 if msg.get("role") == "user":

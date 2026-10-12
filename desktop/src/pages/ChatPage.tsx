@@ -207,7 +207,7 @@ export default function ChatPage() {
   const [deadPaths, setDeadPaths] = useState<Set<string>>(new Set())
 
   const [versionStatus, setVersionStatus] = useState<any>(null)
-  const [runtimeStatus, setRuntimeStatus] = useState<any>(null)
+  const [defaultRuntimeStatus, setDefaultRuntimeStatus] = useState<Awaited<ReturnType<typeof api.getRuntimeStatus>> | null>(null)
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
   const [showCheckpoints, setShowCheckpoints] = useState(false)
 
@@ -225,13 +225,13 @@ export default function ChatPage() {
   const { selected: selectedProject } = useProjects()
 
   const {
-    sessionId, cwd, setSessionId: setGlobalSessionId, setModelName, setContextUsed, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
+    sessionId, cwd, runtimeStatus: sessionRuntimeStatus, setSessionId: setGlobalSessionId, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
     messages, setMessages, isRunning, confirmRequest,
     sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveDisplayMessages,
   } = useSession()
+  const runtimeStatus = sessionId ? sessionRuntimeStatus : defaultRuntimeStatus
 
   const scrollRafRef = useRef<number>(0)
-  const prevIsRunningRef = useRef(false)
   const lastEscapeAtRef = useRef<number>(0)
   const ESC_DOUBLE_TAP_MS = 600
   const scrollToBottom = useCallback(() => {
@@ -279,29 +279,26 @@ export default function ChatPage() {
   }, [])
 
   useEffect(() => {
-    if (runtimeStatus?.model_id) {
-      setModelName(runtimeStatus.model_id.split('/').pop() || runtimeStatus.model_id)
+    let cancelled = false
+    let pending = false
+    const refresh = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const status = await api.getRuntimeStatus(sessionId ?? undefined)
+        if (!cancelled) {
+          if (sessionId) setRuntimeInfo(sessionId, status)
+          else setDefaultRuntimeStatus(status)
+        }
+      } catch {
+      } finally {
+        pending = false
+      }
     }
-    if (runtimeStatus?.ctx_max > 0) {
-      setContextUsed(Math.round(runtimeStatus.stm_tokens / runtimeStatus.ctx_max * 100))
-    }
-    if (runtimeStatus) {
-      setRuntimeInfo({
-        stmTokens: runtimeStatus.stm_tokens,
-        ctxMax: runtimeStatus.ctx_max,
-        totalInput: runtimeStatus.total_usage?.input_tokens,
-        totalOutput: runtimeStatus.total_usage?.output_tokens,
-        stepCount: runtimeStatus.step_count,
-      })
-    }
-  }, [runtimeStatus, setModelName, setContextUsed, setRuntimeInfo])
-
-  useEffect(() => {
-    if (prevIsRunningRef.current && !isRunning) {
-      api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
-    }
-    prevIsRunningRef.current = isRunning
-  }, [isRunning])
+    void refresh()
+    const interval = window.setInterval(refresh, isRunning ? 1000 : 5000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [sessionId, isRunning, setRuntimeInfo])
 
   const fetchDynamicCommands = useCallback(() => {
     api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
@@ -312,7 +309,6 @@ export default function ChatPage() {
   const initNew = useCallback((sid: string) => {
     currentSessionIdRef.current = sid
     setGlobalSessionId(sid)
-    api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
     api.getSession(sid).then((s) => {
       setCwd(s.workspace ?? null)
     }).catch(() => {})
@@ -346,7 +342,6 @@ export default function ChatPage() {
       loadAndDisplayMessages(sid).catch((err) => console.error('[initRestore] loadAndDisplayMessages failed:', err))
       api.getVersionStatus(sid).then(setVersionStatus).catch(() => {})
       api.getVersionLog(sid, 5).then(d => setCheckpoints(d.checkpoints || [])).catch(() => {})
-      api.getRuntimeStatus(sid).then(setRuntimeStatus).catch(() => {})
       api.getSession(sid).then((s) => {
         setCwd(s.workspace ?? null)
       }).catch(() => {})
@@ -392,7 +387,6 @@ export default function ChatPage() {
       resetForSessionSwitch()
       currentSessionIdRef.current = null
       setGlobalSessionId(null)
-      api.getRuntimeStatus(sessionId ?? undefined).then(setRuntimeStatus).catch(() => {})
       api.getConfig().then((config: any) => { if (config.cwd) setDefaultWorkspace(config.cwd) }).catch(() => {})
       fetchDynamicCommands()
       if (isFirstMount) {
@@ -942,7 +936,12 @@ export default function ChatPage() {
           <div className="flex items-center gap-1 px-3 py-2 text-[12px] overflow-x-auto whitespace-nowrap" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--fg-muted)' }}>
             <ModelPicker
               currentModel={runtimeStatus?.model_id ?? null}
-              onSwitched={(id) => setRuntimeStatus((prev: Record<string, unknown> | null) => (prev ? { ...prev, model_id: id } : prev))}
+              onSwitched={(id) => {
+                if (!runtimeStatus) return
+                const next = { ...runtimeStatus, model_id: id, context_usage: null }
+                if (sessionId) setRuntimeInfo(sessionId, next)
+                else setDefaultRuntimeStatus(next)
+              }}
             />
             <ThinkEffortControl />
             <PlanModeToggle />

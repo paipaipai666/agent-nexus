@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { wsPool } from '../../services/ws'
-import type { AttachmentRef } from '../../services/api'
+import type { AttachmentRef, RuntimeStatus } from '../../services/api'
 
 export interface Message {
   id: string
@@ -44,12 +44,7 @@ interface SessionState {
   currentAssistantId: string | null
   currentReasoningId: string | null
   modelName: string | null
-  contextUsed: number | null
-  stmTokens: number | null
-  ctxMax: number | null
-  totalInput: number | null
-  totalOutput: number | null
-  stepCount: number | null
+  runtimeStatus: RuntimeStatus | null
   cwd: string | null
   toolCount: number
   todoCount: number
@@ -84,12 +79,7 @@ function createEmptySession(sessionId: string): SessionState {
     currentAssistantId: null,
     currentReasoningId: null,
     modelName: null,
-    contextUsed: null,
-    stmTokens: null,
-    ctxMax: null,
-    totalInput: null,
-    totalOutput: null,
-    stepCount: null,
+    runtimeStatus: null,
     cwd: null,
     toolCount: 0,
     todoCount: 0,
@@ -105,19 +95,13 @@ function createEmptySession(sessionId: string): SessionState {
 export interface SessionManagerContextType {
   sessionId: string | null
   modelName: string | null
-  contextUsed: number | null
-  stmTokens: number | null
-  ctxMax: number | null
-  totalInput: number | null
-  totalOutput: number | null
-  stepCount: number | null
+  runtimeStatus: RuntimeStatus | null
   cwd: string | null
   toolCount: number
   todoCount: number
   setSessionId: (id: string | null) => void
   setModelName: (name: string | null) => void
-  setContextUsed: (pct: number | null) => void
-  setRuntimeInfo: (info: { stmTokens?: number; ctxMax?: number; totalInput?: number; totalOutput?: number; stepCount?: number } | null) => void
+  setRuntimeInfo: (sessionId: string, info: RuntimeStatus | null) => void
   setCwd: (cwd: string | null) => void
   setToolCount: (count: number) => void
   setTodoCount: (count: number) => void
@@ -152,18 +136,12 @@ export interface SessionManagerContextType {
 const SessionContext = createContext<SessionManagerContextType>({
   sessionId: null,
   modelName: null,
-  contextUsed: null,
-  stmTokens: null,
-  ctxMax: null,
-  totalInput: null,
-  totalOutput: null,
-  stepCount: null,
+  runtimeStatus: null,
   cwd: null,
   toolCount: 0,
   todoCount: 0,
   setSessionId: () => {},
   setModelName: () => {},
-  setContextUsed: () => {},
   setRuntimeInfo: () => {},
   setCwd: () => {},
   setToolCount: () => {},
@@ -736,21 +714,11 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     if (sid) updateSession(sid, prev => ({ ...prev, modelName: name }))
   }, [updateSession])
 
-  const handleSetContextUsed = useCallback((pct: number | null) => {
-    const sid = activeSessionIdRef.current
-    if (sid) updateSession(sid, prev => ({ ...prev, contextUsed: pct }))
-  }, [updateSession])
-
-  const handleSetRuntimeInfo = useCallback((info: { stmTokens?: number; ctxMax?: number; totalInput?: number; totalOutput?: number; stepCount?: number } | null) => {
-    const sid = activeSessionIdRef.current
-    if (!info || !sid) return
+  const handleSetRuntimeInfo = useCallback((sid: string, info: RuntimeStatus | null) => {
     updateSession(sid, prev => ({
       ...prev,
-      ...(info.stmTokens != null && { stmTokens: info.stmTokens }),
-      ...(info.ctxMax != null && { ctxMax: info.ctxMax }),
-      ...(info.totalInput != null && { totalInput: info.totalInput }),
-      ...(info.totalOutput != null && { totalOutput: info.totalOutput }),
-      ...(info.stepCount != null && { stepCount: info.stepCount }),
+      runtimeStatus: info,
+      modelName: info ? info.model_id.split('/').pop() || info.model_id : prev.modelName,
     }))
   }, [updateSession])
 
@@ -789,18 +757,12 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     <SessionContext.Provider value={{
       sessionId: activeSessionId,
       modelName: activeState?.modelName ?? null,
-      contextUsed: activeState?.contextUsed ?? null,
-      stmTokens: activeState?.stmTokens ?? null,
-      ctxMax: activeState?.ctxMax ?? null,
-      totalInput: activeState?.totalInput ?? null,
-      totalOutput: activeState?.totalOutput ?? null,
-      stepCount: activeState?.stepCount ?? null,
+      runtimeStatus: activeState?.runtimeStatus ?? null,
       cwd: activeState?.cwd ?? null,
       toolCount: activeState?.toolCount ?? 0,
       todoCount: activeState?.todoCount ?? 0,
       setSessionId: handleSetSessionId,
       setModelName: handleSetModelName,
-      setContextUsed: handleSetContextUsed,
       setRuntimeInfo: handleSetRuntimeInfo,
       setCwd: handleSetCwd,
       setToolCount: handleSetToolCount,
