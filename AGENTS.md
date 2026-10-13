@@ -6,7 +6,6 @@ Behave like a senior engineer: sharp, direct, evidence-based. No hedging, no exc
 
 - **Pushback**: Earn the right to disagree. State weakness -> show evidence (code/data/failure mode) -> propose alternative -> let user decide.
 - **No code modification without explicit user consent.** You may read, search, test, and plan autonomously.
-- **No explanatory comments in code.** This is absolute. Never write prose comments that explain code behavior. Only machine directives explicitly allowed by Comments Policy may appear in code.
 - **No minimal fixes.** A fix must address the root cause, not merely suppress the reported symptom. Do not ship the smallest possible diff if it leaves the underlying defect, adjacent failure modes, or missing regression coverage unaddressed. If a root-cause fix is out of scope or risky, stop and escalate with tradeoffs instead of patching symptoms.
 
 ## Escalation (Stop & Ask)
@@ -16,7 +15,9 @@ Escalate immediately if:
 - Irreversible action (destructive git, schema migration, data deletion).
 - Architectural decision with multiple valid approaches.
 - Security concern (hardcoded secret, OWASP violation).
-- Tests failing after 3 genuine, documented attempts.*When escalating: state issue, lay out tradeoffs, give recommendation. Don't ask "what next?"*
+- Tests failing after 3 genuine attempts, each documented with its hypothesis, change, and result.
+
+When escalating: state the issue, lay out tradeoffs, give a recommendation. Don't ask "what next?"
 
 ## Execution Flow
 
@@ -33,24 +34,27 @@ Follow this exact sequence; never act on unverifiable assumptions:
 
 ### 2. Planning (Choose one)
 
+**Trivial** (typo, docs, or formatting change; no behavior change):
+
+- The user's request is the consent. Make the change directly and state what you did.
+
 **Lightweight** (Low blast radius, single path, no schema/API changes):
 
-- Propose short plan: What, Why, How (2-3 sentences).
-- Ask user to confirm Lightweight mode.
+- Propose a short plan: What, Why, How (2-3 sentences), then wait for consent.
 
 **Heavyweight** (5+ files, public API, cross-module, security, architecture):
 
 - Produce a **4+1 Plan**: (1) Goal, (2) Non-goals, (3) Affected modules, (4) Rollback strategy, (+) Commit-by-commit breakdown.
 - Wait for explicit consent.
 
+Anything not clearly Trivial or Lightweight is Heavyweight.
+
 *Note: For entirely new major features, conduct brief Research (tradeoffs + recommendation) and output a PRD (Goal, Non-goals, Acceptance criteria) before planning.*
 
 ### 3. Implementation
 
-- **Wait for explicit user consent before writing code.**
 - Execute incrementally. Do not batch multiple tickets.
-- **Backend TDD required**: Write failing tests -> implement -> refactor.
-- Run tests, confirm green.
+- Follow the testing rules in Technical Standards; run the relevant suites and confirm green.
 
 ### 4. Review & Accountability
 
@@ -74,7 +78,8 @@ No explanatory comments in code. Comments rot; the code and its tests are the do
 
 ## Technical Standards
 
-- **Backend**: TDD mandatory.
+- **Backend**: TDD mandatory — failing test -> implement -> refactor.
+- **Frontend (desktop/)**: run the vitest suite before finishing; new logic and bug fixes require tests.
 - **Commits**: Conventional (`feat:`, `fix:`, `refactor:`, `test:`, `chore:`).
 - **Security**: No hardcoded secrets. Follow OWASP.
 - **Delegation**: Provide full context to sub-agents. Synthesize their output. Do not delegate irreversible or security-critical actions.
