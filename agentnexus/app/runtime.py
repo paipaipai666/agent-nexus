@@ -151,7 +151,7 @@ class AppRuntime:
 
         build_agent = agent_factory()
         build_agent._todo_list = todo_list
-        skill_registry = SkillRegistry.from_settings(settings)
+        skill_registry = SkillRegistry.from_settings(settings, workspace_path=workspace_path)
         skill_registry.discover()
         auto_route = getattr(settings, "skill_auto_route", True)
         auto_route_llm_fallback = getattr(settings, "skill_auto_route_llm_fallback", True)

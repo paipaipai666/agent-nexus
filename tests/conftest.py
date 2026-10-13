@@ -25,7 +25,7 @@ def _ensure_valid_cwd():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_agentnexus_home():
+def _isolate_agentnexus_home(monkeypatch):
     """Every test runs against a throwaway AGENTNEXUS_HOME.
 
     Without this, tests that build ChatService/ConversationVersionManager
@@ -38,6 +38,7 @@ def _isolate_agentnexus_home():
     old_cache = cfg._settings_cache
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         os.environ["AGENTNEXUS_HOME"] = tmpdir
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path(tmpdir) / "user"))
         cfg._settings_cache = None
         from agentnexus.memory.long_term import _reset_long_term_memory
         _reset_long_term_memory()

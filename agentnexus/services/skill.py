@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agentnexus.skills import SkillEntry, SkillRegistry, WorkflowRunResult, WorkflowRuntime, validate_session_profile
@@ -56,30 +58,89 @@ class SkillService:
         self.auto_route_llm_fallback = auto_route_llm_fallback
         self.llm_client = llm_client
         self._local = threading.local()
+        self._session_bound = False
         self._default_current: SkillEntry | None = None
         self.status = "idle"
         self.last_run = None
         self.last_route: SkillRoute | None = None
         self.selection_source = "none"
         self.enabled_skills: dict[str, bool] = {}
+        self.generation = 0
+        self._source: SkillService | None = None
+        self._source_generation = 0
         self._embed_rebuild_gen = 0
         self._rebuild_router_index()
 
     @property
     def current(self) -> SkillEntry | None:
+        if self._session_bound:
+            return self._default_current
         if hasattr(self._local, "current"):
             return self._local.current
         return self._default_current
 
     @current.setter
     def current(self, entry: SkillEntry | None) -> None:
-        self._local.current = entry
+        if self._session_bound:
+            self._default_current = entry
+        else:
+            self._local.current = entry
 
     def refresh(self) -> list[SkillEntry]:
+        current = self.current
+        was_default = current is not None and current is self._default_current
+        selection_source = self.selection_source
         entries = self.registry.discover()
+        if current is not None:
+            try:
+                refreshed = self.registry.get(current.qualified_id)
+            except ValueError:
+                refreshed = None
+            if refreshed is None or not self.is_enabled(refreshed):
+                self.reset()
+                if was_default:
+                    self._default_current = None
+            else:
+                try:
+                    self.use(refreshed.qualified_id)
+                    self.selection_source = selection_source
+                    if was_default:
+                        self._default_current = refreshed
+                except Exception as exc:
+                    self.reset()
+                    if was_default:
+                        self._default_current = None
+                    self.registry.errors.append(f"{refreshed.qualified_id}: {exc}")
         self._rebuild_router_index()
+        self.generation += 1
         self.status = "error" if self.registry.errors else ("selected" if self.current else "idle")
         return entries
+
+    def for_workspace(self, workspace_path: str | Path | None, *, agent: Any = None) -> "SkillService":
+        """Create an independent skill service for a session's workspace."""
+        service = type(self)(
+            self.registry.for_workspace(workspace_path), agent=agent,
+            auto_route=self.auto_route_enabled,
+            auto_route_llm_fallback=self.auto_route_llm_fallback,
+            llm_client=self.llm_client, router=deepcopy(self.router),
+        )
+        service.set_enabled_map(self.enabled_skills)
+        service._session_bound = True
+        service._source = self
+        service._source_generation = self.generation
+        current = self._default_current or (self.current if workspace_path is None else None)
+        if current is not None:
+            service.use_default(current.qualified_id)
+        return service
+
+    def synchronize(self) -> None:
+        """Apply shared capability changes without replacing this workspace's roots."""
+        if self._source is None or self._source_generation == self._source.generation:
+            return
+        generation = self._source.generation
+        self.set_enabled_map(self._source.enabled_skills)
+        self.refresh()
+        self._source_generation = generation
 
     def list(self) -> list[SkillEntry]:
         return [entry for entry in self.registry.list() if self.is_enabled(entry)]
@@ -91,16 +152,18 @@ class SkillService:
     def set_enabled(self, target: str, enabled: bool) -> None:
         entry = self.registry.get(target)
         qualified_id = entry.qualified_id if entry is not None else target
-        self.enabled_skills[qualified_id] = enabled
+        self.enabled_skills = {**self.enabled_skills, qualified_id: enabled}
         if not enabled and self.current is not None and self.current.qualified_id == qualified_id:
             self.reset()
         self._rebuild_router_index()
+        self.generation += 1
 
     def set_enabled_map(self, enabled_map: dict[str, bool]) -> None:
         self.enabled_skills = dict(enabled_map or {})
         if self.current is not None and not self.is_enabled(self.current):
             self.reset()
         self._rebuild_router_index()
+        self.generation += 1
 
     def validate(self, target: str | None = None) -> list[str]:
         errors = self.registry.validate(target)

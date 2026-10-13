@@ -298,7 +298,7 @@ class TestChatService:
         workflow_event = events[1]
         assert workflow_event.payload["status"] == "ok"
         assert workflow_event.payload["summary"]
-        assert skill.snapshot().last_run_status == "completed"
+        assert service.session_skills(session.id).snapshot().last_run_status == "completed"
         agent.set_workflow_context.assert_called()
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Inspect." in ctx
@@ -361,7 +361,7 @@ class TestChatService:
 
         service.send_message(session.id, "hello")
 
-        assert skill.current == entry
+        assert service.session_skills(session.id).current == entry
         agent.set_workflow_context.assert_called()
         ctx = agent.set_workflow_context.call_args[0][0]
         assert "Inspect session skill." in ctx
@@ -392,7 +392,7 @@ class TestChatService:
 
         run = service.send_message(session.id, "Please write concise release notes.")
 
-        assert skill.current == entry
+        assert service.session_skills(session.id).current == entry
         events = list(service.stream_events(run.id))
         event_types = [event.type for event in events]
         assert "skill_auto_selected" in event_types

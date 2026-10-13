@@ -74,8 +74,13 @@ class SkillRegistry:
         *,
         default_namespace: str = "default",
         loader: WorkflowLoader | None = None,
+        workspace_path: str | Path | None = None,
     ):
-        self.roots = [Path(root).expanduser() for root in roots or []]
+        self._shared_roots = tuple(Path(root).expanduser() for root in roots or [])
+        self.workspace_path = Path(workspace_path).expanduser().resolve() if workspace_path is not None else None
+        self.roots = list(self._shared_roots)
+        if self.workspace_path is not None:
+            self.roots.append(self.workspace_path / ".agents" / "skills")
         self.default_namespace = default_namespace or "default"
         self.loader = loader or WorkflowLoader()
         self.errors: list[str] = []
@@ -84,9 +89,11 @@ class SkillRegistry:
         self._entries: list[SkillEntry] = []
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "SkillRegistry":
+    def from_settings(
+        cls, settings: Settings, *, workspace_path: str | Path | None = None,
+    ) -> "SkillRegistry":
         home = Path(os.environ.get("AGENTNEXUS_HOME", Path.home() / ".agentnexus"))
-        roots: list[Path | str] = [home / "skills"]
+        roots: list[Path | str] = [home / "skills", Path.home() / ".agents" / "skills"]
         extensions_dirs = getattr(settings, "extensions_dirs", [])
         if isinstance(extensions_dirs, (list, tuple)):
             roots.extend(extensions_dirs)
@@ -96,7 +103,25 @@ class SkillRegistry:
         default_namespace = getattr(settings, "skills_default_namespace", "default")
         if not isinstance(default_namespace, str):
             default_namespace = "default"
-        return cls(roots, default_namespace=default_namespace)
+        return cls(
+            roots, default_namespace=default_namespace,
+            workspace_path=workspace_path if workspace_path is not None else Path.cwd(),
+        )
+
+    def for_workspace(self, workspace_path: str | Path | None) -> "SkillRegistry":
+        """Discover shared skills and only the requested workspace's project skills."""
+        registry = type(self)(
+            list(self._shared_roots), default_namespace=self.default_namespace,
+            loader=self.loader, workspace_path=workspace_path if workspace_path is not None else self.workspace_path,
+        )
+        if registry.workspace_path == self.workspace_path:
+            registry._entries = self.list()
+            registry.errors = list(self.errors)
+            registry.discovery_errors = list(self.discovery_errors)
+            registry.duplicate_ids = {key: list(paths) for key, paths in self.duplicate_ids.items()}
+        else:
+            registry.discover()
+        return registry
 
     def discover(self) -> list[SkillEntry]:
         self.errors = []

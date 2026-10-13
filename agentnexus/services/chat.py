@@ -25,7 +25,7 @@ from agentnexus.services.turn import TurnRecord, TurnRuntime
 if TYPE_CHECKING:
     from agentnexus.capabilities.runtime import CapabilityRuntime
     from agentnexus.memory.versioned import ConversationVersionManager
-    from agentnexus.skills import SkillRegistry
+    from agentnexus.services.skill import SkillService
     from agentnexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ class ChatService:
         agent_factory: Callable[[str | None], Any],
         memory_factory_builder: Callable[[str], Callable[[], Any]],
         version_manager: "ConversationVersionManager | None" = None,
-        skill_service: "SkillRegistry | None" = None,
+        skill_service: "SkillService | None" = None,
         tool_executor: "ToolRegistry | None" = None,
         capability_runtime: "CapabilityRuntime | None" = None,
     ):
@@ -197,6 +197,7 @@ class ChatService:
         self._tool_executor = tool_executor
         self._capability_runtime = capability_runtime
         self._skill_service = skill_service
+        self._session_skill_services: dict[str, SkillService] = {}
         self._sessions: dict[str, SessionHandle] = {}
         self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
         self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
@@ -274,6 +275,23 @@ class ChatService:
         handle = self._sessions.get(session_id)
         return handle.workspace if handle else None
 
+    def session_skills(self, session_id: str) -> "SkillService | None":
+        """Return skills scoped to the session's workspace and agent."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        session = self._sessions[session_id]
+        if self._skill_service is None:
+            return None
+        agent = self._get_or_create_agent(session_id)
+        with self._get_session_lock(session_id):
+            if session_id not in self._session_skill_services:
+                self._session_skill_services[session_id] = self._skill_service.for_workspace(
+                    session.workspace, agent=agent,
+                )
+            service = self._session_skill_services[session_id]
+            service.synchronize()
+            return service
+
     def _get_session_lock(self, session_id: str) -> threading.Lock:
         """Get or create a per-session lock. Thread-safe creation via meta-lock."""
         with self._locks_lock:
@@ -305,6 +323,7 @@ class ChatService:
         with session_lock:
             self._agents.pop(session_id, None)
             self._memory_managers.pop(session_id, None)
+            self._session_skill_services.pop(session_id, None)
             self._token_buffers.pop(session_id, None)
             self._token_cursors.pop(session_id, None)
         with self._locks_lock:
@@ -933,7 +952,7 @@ class ChatService:
         agent: Any = None,
         memory_manager: Any = None,
     ) -> str:
-        service = self._skill_service
+        service = self.session_skills(session_id)
         agent = agent or getattr(self, "_agent", None)
         memory_manager = memory_manager or getattr(self, "_memory", None)
         if service is None:
@@ -941,9 +960,6 @@ class ChatService:
         session = self._sessions[session_id]
         if session.skill:
             service.use(session.skill)
-        if agent is not None and session.skill and hasattr(agent, "set_session_profile"):
-            agent.set_session_profile(session.skill)
-
         recommendations = service.get_recommendations(text)
 
         if agent is not None and hasattr(agent, "set_available_skill_context"):
@@ -953,6 +969,10 @@ class ChatService:
 
         if not session.skill:
             service.maybe_auto_select(text)
+
+        if agent is not None and hasattr(agent, "set_session_profile"):
+            profile = service.current.workflow.to_session_profile() if service.current is not None else None
+            agent.set_session_profile(profile)
 
         result = service.prepare_message(
             text,
@@ -987,8 +1007,8 @@ class ChatService:
                 session_id=session_id,
             ))
         workflow_ctx = getattr(result, "workflow_context", None)
-        if workflow_ctx and agent is not None and hasattr(agent, "set_workflow_context"):
-            agent.set_workflow_context(workflow_ctx)
+        if agent is not None and hasattr(agent, "set_workflow_context"):
+            agent.set_workflow_context(workflow_ctx or "")
         return result.enhanced_question
 
     def _install_agent_event_bridge(

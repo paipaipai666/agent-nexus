@@ -11,6 +11,20 @@ from agentnexus.server.error_handlers import APIError
 router = APIRouter(tags=["skills"])
 
 
+def get_skill_service(session_id: str | None = None, runtime=Depends(get_runtime)):
+    """Resolve the default skill catalog or a session's workspace catalog."""
+    if session_id is None:
+        service = runtime.skill
+    else:
+        try:
+            service = runtime.chat.session_skills(session_id)
+        except KeyError:
+            raise APIError(404, "not_found", f"Session '{session_id}' not found") from None
+    if service is None:
+        raise APIError(503, "unavailable", "Skill service is unavailable")
+    return service
+
+
 class UseSkillRequest(BaseModel):
     skill_id: str
 
@@ -20,8 +34,7 @@ class RecommendRequest(BaseModel):
 
 
 @router.get("")
-def list_skills(runtime=Depends(get_runtime)):
-    service = runtime.skill
+def list_skills(service=Depends(get_skill_service)):
     entries = service.list()
     return {
         "skills": [
@@ -41,17 +54,17 @@ def list_skills(runtime=Depends(get_runtime)):
 
 
 @router.get("/status")
-def skill_status(runtime=Depends(get_runtime)):
-    snapshot = runtime.skill.snapshot()
+def skill_status(service=Depends(get_skill_service)):
+    snapshot = service.snapshot()
     if hasattr(snapshot, "__dict__"):
         return snapshot.__dict__
     return snapshot
 
 
 @router.post("/use")
-def use_skill(req: UseSkillRequest, runtime=Depends(get_runtime)):
+def use_skill(req: UseSkillRequest, service=Depends(get_skill_service)):
     try:
-        entry = runtime.skill.use(req.skill_id)
+        entry = service.use(req.skill_id)
         return {
             "id": entry.qualified_id,
             "display_name": entry.display_name,
@@ -62,37 +75,20 @@ def use_skill(req: UseSkillRequest, runtime=Depends(get_runtime)):
 
 
 @router.post("/reset")
-def reset_skill(runtime=Depends(get_runtime)):
-    runtime.skill.reset()
+def reset_skill(service=Depends(get_skill_service)):
+    service.reset()
     return {"status": "reset"}
 
 
-@router.get("/{skill_id}")
-def get_skill(skill_id: str, runtime=Depends(get_runtime)):
-    service = runtime.skill
-    entry = service.registry.get(skill_id)
-    if entry is None:
-        raise APIError(404, "not_found", f"Skill '{skill_id}' not found")
-    return {
-        "id": entry.qualified_id,
-        "namespace": entry.namespace,
-        "workflow_id": entry.workflow_id,
-        "display_name": entry.display_name,
-        "description": entry.description,
-        "source_kind": entry.source_kind,
-        "enabled": service.is_enabled(entry),
-    }
-
-
 @router.post("/validate")
-def validate_skills(skill_id: str | None = None, runtime=Depends(get_runtime)):
-    errors = runtime.skill.validate(target=skill_id)
+def validate_skills(skill_id: str | None = None, service=Depends(get_skill_service)):
+    errors = service.validate(target=skill_id)
     return {"valid": len(errors) == 0, "errors": errors}
 
 
 @router.post("/refresh")
-def refresh_skills(runtime=Depends(get_runtime)):
-    entries = runtime.skill.refresh()
+def refresh_skills(service=Depends(get_skill_service)):
+    entries = service.refresh()
     return {"count": len(entries), "refreshed": True}
 
 
@@ -101,19 +97,18 @@ class BulkToggleRequest(BaseModel):
 
 
 @router.post("/bulk-toggle")
-def bulk_toggle_skills(req: BulkToggleRequest, runtime=Depends(get_runtime)):
-    runtime.skill.set_enabled_map(req.enabled)
+def bulk_toggle_skills(req: BulkToggleRequest, service=Depends(get_skill_service)):
+    service.set_enabled_map(req.enabled)
     return {"status": "updated", "count": len(req.enabled)}
 
 
 @router.get("/context")
-def get_skill_context(query: str | None = None, runtime=Depends(get_runtime)):
+def get_skill_context(query: str | None = None, service=Depends(get_skill_service)):
     """Skill catalog block for prompts.
 
     When ``query`` is set, rank skills for that text and inject a budget-bounded
     shortlist (same path as chat). Without query, returns the unranked catalog.
     """
-    service = runtime.skill
     recommendations = None
     if query and query.strip():
         recommendations = service.get_recommendations(query) or None
@@ -134,8 +129,8 @@ def get_skill_context(query: str | None = None, runtime=Depends(get_runtime)):
 
 
 @router.post("/recommend")
-def recommend_skill(req: RecommendRequest, runtime=Depends(get_runtime)):
-    routes = runtime.skill.get_recommendations(req.text)
+def recommend_skill(req: RecommendRequest, service=Depends(get_skill_service)):
+    routes = service.get_recommendations(req.text)
     return {
         "recommendations": [
             {
@@ -151,12 +146,31 @@ def recommend_skill(req: RecommendRequest, runtime=Depends(get_runtime)):
 
 
 @router.post("/{skill_id:path}/enable")
-def enable_skill(skill_id: str, runtime=Depends(get_runtime)):
-    runtime.skill.set_enabled(skill_id, True)
+def enable_skill(skill_id: str, service=Depends(get_skill_service)):
+    service.set_enabled(skill_id, True)
     return {"status": "enabled", "skill_id": skill_id}
 
 
 @router.post("/{skill_id:path}/disable")
-def disable_skill(skill_id: str, runtime=Depends(get_runtime)):
-    runtime.skill.set_enabled(skill_id, False)
+def disable_skill(skill_id: str, service=Depends(get_skill_service)):
+    service.set_enabled(skill_id, False)
     return {"status": "disabled", "skill_id": skill_id}
+
+
+@router.get("/{skill_id:path}")
+def get_skill(skill_id: str, service=Depends(get_skill_service)):
+    try:
+        entry = service.registry.get(skill_id)
+    except ValueError as exc:
+        raise APIError(409, "conflict", str(exc)) from exc
+    if entry is None:
+        raise APIError(404, "not_found", f"Skill '{skill_id}' not found")
+    return {
+        "id": entry.qualified_id,
+        "namespace": entry.namespace,
+        "workflow_id": entry.workflow_id,
+        "display_name": entry.display_name,
+        "description": entry.description,
+        "source_kind": entry.source_kind,
+        "enabled": service.is_enabled(entry),
+    }
