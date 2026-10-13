@@ -395,7 +395,7 @@ class TestWebSocketAgentStream:
 
         async def send_json(payload: dict):
             sent_events.append(payload)
-            if payload.get("type") == "error":
+            if payload.get("type") == "submission_rejected":
                 target_sent.set()
 
         ws = AsyncMock()
@@ -406,7 +406,7 @@ class TestWebSocketAgentStream:
         with patch("agentnexus.server.app._get_runtime", return_value=runtime):
             await ws_agent(ws, session.id)
 
-        errors = [e for e in sent_events if e.get("type") == "error"]
+        errors = [e for e in sent_events if e.get("type") == "submission_rejected"]
         assert any("附件不可用" in (e.get("message") or "") and dead_path in e.get("message", "") for e in errors)
         assert not any(e.get("type") == "run_started" for e in sent_events)
         agent.run.assert_not_called()

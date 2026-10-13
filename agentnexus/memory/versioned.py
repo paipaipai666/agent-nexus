@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
     ts REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS conversation_redo (
+    session_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, position)
+);
+
 CREATE INDEX IF NOT EXISTS idx_cp_session ON conversation_checkpoints(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON conversation_sessions(workspace_path, updated_at);
 CREATE INDEX IF NOT EXISTS idx_msg_session ON conversation_messages(session_id, id);
@@ -87,7 +94,6 @@ class ConversationVersionManager:
         self._conn.executescript(SCHEMA)
         self._migrate()
         self._conn.commit()
-        self._redo_stack: list[str] = []
         self._workspace_path = self.normalize_workspace_path(workspace_path) if workspace_path else ""
         self._profile = profile or ""
         if self._workspace_path:
@@ -113,7 +119,7 @@ class ConversationVersionManager:
             "session_id": self.session_id, "question": question,
         })
 
-        with self._lock:
+        with self._lock, self._conn:
             head = self._current_checkpoint()
             head_count = head.get("message_count") if head else None
             if head_count is not None:
@@ -149,8 +155,8 @@ class ConversationVersionManager:
             )
             self._set_head(cp_id)
             self._touch_session()
+            self._replace_redo([])
             self._conn.commit()
-            self._redo_stack.clear()
 
         hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
             "session_id": self.session_id, "cp_id": cp_id,
@@ -175,7 +181,7 @@ class ConversationVersionManager:
             "session_id": self.session_id, "question": question,
         })
 
-        with self._lock:
+        with self._lock, self._conn:
             cp_id = uuid.uuid4().hex[:8]
             parent_id = self._current_head_id()
 
@@ -187,9 +193,8 @@ class ConversationVersionManager:
 
             self._set_head(cp_id)
             self._touch_session()
+            self._replace_redo([])
             self._conn.commit()
-
-            self._redo_stack.clear()
 
         hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
             "session_id": self.session_id, "cp_id": cp_id,
@@ -571,7 +576,7 @@ class ConversationVersionManager:
                 "SELECT name FROM sqlite_master WHERE type='table'")}
             for table in ("conversation_messages", "conversation_checkpoints",
                           "conversation_sessions", "session_events",
-                          "context_snapshots", "session_todos"):
+                          "context_snapshots", "session_todos", "conversation_redo"):
                 if table in existing:
                     conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
             conn.commit()
@@ -606,7 +611,7 @@ class ConversationVersionManager:
 
     def undo(self) -> dict | None:
         """Move HEAD to parent checkpoint. Returns the new current checkpoint, or None."""
-        with self._lock:
+        with self._lock, self._conn:
             current = self._current_checkpoint()
             if current is None or current["parent_id"] is None:
                 return None
@@ -616,24 +621,25 @@ class ConversationVersionManager:
                 return None
 
             self._set_head(parent["id"])
+            self._replace_redo([*self._redo_ids(), current["id"]])
             self._conn.commit()
-
-            self._redo_stack.append(current["id"])
 
             return dict(parent)
 
     def redo(self) -> dict | None:
         """Re-apply a previously undone checkpoint."""
-        with self._lock:
-            if not self._redo_stack:
+        with self._lock, self._conn:
+            redo_ids = self._redo_ids()
+            if not redo_ids:
                 return None
 
-            cp_id = self._redo_stack.pop()
+            cp_id = redo_ids.pop()
             cp = self._get_checkpoint(cp_id)
             if cp is None:
                 return None
 
             self._set_head(cp_id)
+            self._replace_redo(redo_ids)
             self._conn.commit()
 
             return dict(cp)
@@ -647,7 +653,7 @@ class ConversationVersionManager:
         commit. Checkpoints from other sessions (or unknown ids) are rejected
         and leave HEAD untouched.
         """
-        with self._lock:
+        with self._lock, self._conn:
             target = self._get_checkpoint(cp_id)
             if target is None or target["session_id"] != self.session_id:
                 return None
@@ -659,13 +665,13 @@ class ConversationVersionManager:
             chain_ids = [r["id"] for r in self._ancestor_chain(head_id)]
             if cp_id in chain_ids:
                 idx = chain_ids.index(cp_id)
-                self._redo_stack.extend(chain_ids[:idx])
+                self._replace_redo([*self._redo_ids(), *chain_ids[:idx]])
                 self._set_head(cp_id)
                 self._conn.commit()
                 return dict(target)
 
-            if cp_id in self._redo_stack:
-                self._redo_stack.clear()
+            if cp_id in self._redo_ids():
+                self._replace_redo([])
                 self._set_head(cp_id)
                 self._conn.commit()
                 return dict(target)
@@ -693,7 +699,7 @@ class ConversationVersionManager:
                 "session_id": self.session_id,
                 "head": head if head else None,
                 "can_undo": head is not None and head.get("parent_id") is not None,
-                "can_redo": len(self._redo_stack) > 0,
+                "can_redo": bool(self._redo_ids()),
             }
 
     def get_head_stm(self) -> str:
@@ -741,7 +747,7 @@ class ConversationVersionManager:
 
     def reset(self):
         """Delete all checkpoints and journal messages for this session."""
-        with self._lock:
+        with self._lock, self._conn:
             self._conn.execute(
                 "DELETE FROM conversation_checkpoints WHERE session_id = ?",
                 (self.session_id,),
@@ -750,8 +756,17 @@ class ConversationVersionManager:
                 "DELETE FROM conversation_messages WHERE session_id = ?",
                 (self.session_id,),
             )
+            self._replace_redo([])
+            self._set_head(None)
             self._conn.commit()
-            self._redo_stack.clear()
+
+    def _redo_ids(self) -> list[str]:
+        rows = self._conn.execute("SELECT checkpoint_id FROM conversation_redo WHERE session_id = ? ORDER BY position", (self.session_id,)).fetchall()
+        return [row["checkpoint_id"] for row in rows]
+
+    def _replace_redo(self, checkpoint_ids: list[str]) -> None:
+        self._conn.execute("DELETE FROM conversation_redo WHERE session_id = ?", (self.session_id,))
+        self._conn.executemany("INSERT INTO conversation_redo (session_id, position, checkpoint_id) VALUES (?, ?, ?)", [(self.session_id, position, checkpoint_id) for position, checkpoint_id in enumerate(checkpoint_ids)])
 
     def _migrate(self):
         """Apply schema migrations for existing databases."""
@@ -783,7 +798,7 @@ class ConversationVersionManager:
             return None
         return row["head_checkpoint_id"]
 
-    def _set_head(self, cp_id: str):
+    def _set_head(self, cp_id: str | None):
         """Update the HEAD checkpoint ID in conversation_sessions."""
         self._conn.execute(
             "INSERT OR IGNORE INTO conversation_sessions (session_id, workspace_path, profile) "

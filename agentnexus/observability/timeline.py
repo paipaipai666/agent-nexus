@@ -1,12 +1,13 @@
 """会话时间线存储 — 追加式事件日志 + 每步上下文快照（SQLite）。
 
-事件在 ChatService._put_event 唯一收口处落盘；上下文快照由 agent
-在每次模型调用前上报。所有写入包在 try/except 里 —— 观测路径永远不
-阻塞 agent loop（写入失败只丢观测数据，不影响会话）。
+事件在 ChatService._put_event 落盘；上下文快照由 agent 在模型调用前上报。
+事件与快照写入失败可丢弃观测数据；发送回执与任务恢复记录必须持久化，
+失败时向调用方报告存储错误。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -99,8 +100,69 @@ class TimelineStore:
                 self._conn.row_factory = sqlite3.Row
                 self._conn.executescript(_SCHEMA)
             except Exception as e:
-                logger.warning("TimelineStore init failed (observability disabled): %s", e)
+                logger.warning("TimelineStore init failed (storage unavailable): %s", e)
+                if self._conn is not None:
+                    self._conn.close()
                 self._conn = None
+
+    @staticmethod
+    def submission_run_id(session_id: str, client_message_id: str) -> str:
+        """Assign the same task identity to every retry of one submission."""
+        digest = hashlib.sha256(json.dumps([session_id, client_message_id]).encode()).hexdigest()
+        return f"run_{digest[:24]}"
+
+    def claim_submission(self, session_id: str, client_message_id: str, content: str, attachments: list | None) -> tuple[str, bool]:
+        """Durably reserve a submission before any agent or tool executes."""
+        if self._conn is None:
+            raise OSError("无法记录发送回执，请检查存储空间后重试")
+        run_id = self.submission_run_id(session_id, client_message_id)
+        payload = {"client_message_id": client_message_id, "question": content, "attachments": attachments or []}
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO session_events (session_id, run_id, seq, ts, event_type, payload) VALUES (?, ?, -1, ?, 'submission_received', ?)",
+                (session_id, run_id, time.time(), json.dumps(payload, ensure_ascii=False)),
+            )
+            created = cursor.rowcount == 1
+            row = self._conn.execute("SELECT payload FROM session_events WHERE session_id = ? AND run_id = ? AND seq = -1", (session_id, run_id)).fetchone()
+            if json.loads(row["payload"]) != payload:
+                raise ValueError("提交 ID 已被其他内容使用，请恢复原提交或新建任务")
+        return run_id, created
+
+    def get_submission(self, session_id: str, client_message_id: str) -> dict | None:
+        """Look up the durable receipt without executing anything."""
+        if self._conn is None:
+            raise OSError("发送回执暂时不可用，请检查后端存储")
+        run_id = self.submission_run_id(session_id, client_message_id)
+        with self._lock:
+            row = self._conn.execute("SELECT payload FROM session_events WHERE session_id = ? AND run_id = ? AND seq = -1", (session_id, run_id)).fetchone()
+        return {**json.loads(row["payload"]), "run_id": run_id, "session_id": session_id} if row else None
+
+    def save_run_record(self, record: dict) -> None:
+        """Keep the latest recovery outcome in the existing event store."""
+        if self._conn is None:
+            raise OSError("无法保存任务恢复状态")
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO session_events (session_id, run_id, seq, ts, event_type, payload) VALUES (?, ?, -2, ?, 'run_recovery', ?) "
+                "ON CONFLICT(session_id, run_id, seq) DO UPDATE SET ts = excluded.ts, payload = excluded.payload",
+                (record["session_id"], record["run_id"], time.time(), json.dumps(record, ensure_ascii=False)),
+            )
+
+    def get_run_record(self, run_id: str) -> dict | None:
+        """Read the outcome after a backend restart."""
+        if self._conn is None:
+            raise OSError("任务恢复状态暂时不可用")
+        with self._lock:
+            row = self._conn.execute("SELECT payload FROM session_events WHERE run_id = ? AND event_type = 'run_recovery' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def latest_run_id(self, session_id: str) -> str | None:
+        """Find the most recently submitted or recorded task in a session."""
+        if self._conn is None:
+            raise OSError("任务恢复状态暂时不可用")
+        with self._lock:
+            row = self._conn.execute("SELECT run_id FROM session_events WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+        return row["run_id"] if row else None
 
     def record_event(
         self,
@@ -156,12 +218,12 @@ class TimelineStore:
         if self._conn is None:
             return []
         try:
-            scope = ""
+            scope = " AND event_type NOT IN ('submission_received', 'run_recovery')"
             params: list[Any] = [session_id, after_id]
             if agent_id == "main":
-                scope = " AND event_type != 'subagent_event'"
+                scope += " AND event_type != 'subagent_event'"
             elif agent_id is not None:
-                scope = " AND event_type = 'subagent_event' AND json_extract(payload, '$.subagent_id') = ?"
+                scope += " AND event_type = 'subagent_event' AND json_extract(payload, '$.subagent_id') = ?"
                 params.append(agent_id)
             params.append(limit)
             with self._lock:
@@ -245,6 +307,7 @@ class TimelineStore:
 
 
 _instances: dict[str, TimelineStore] = {}
+_instances_lock = threading.Lock()
 
 
 def get_timeline_store(db_path: str | None = None) -> TimelineStore:
@@ -252,11 +315,16 @@ def get_timeline_store(db_path: str | None = None) -> TimelineStore:
     if db_path is None:
         from agentnexus.core.config import get_settings
         db_path = get_settings().memory_db_path
-    if db_path not in _instances:
-        _instances[db_path] = TimelineStore(db_path)
-    return _instances[db_path]
+    with _instances_lock:
+        if db_path in _instances:
+            return _instances[db_path]
+        store = TimelineStore(db_path)
+        if store._conn is not None:
+            _instances[db_path] = store
+        return store
 
 
 def _reset_timeline_store() -> None:
     """Test helper: drop all singletons."""
-    _instances.clear()
+    with _instances_lock:
+        _instances.clear()

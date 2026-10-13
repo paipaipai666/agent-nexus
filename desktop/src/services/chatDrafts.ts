@@ -10,7 +10,7 @@ const storageKey = 'agentnexus.chat-drafts.v1'
 const emptyDraft: ChatDraft = { text: '', attachments: [] }
 const listeners = new Set<() => void>()
 
-function isAttachment(value: unknown): value is AttachmentRef {
+export function isAttachment(value: unknown): value is AttachmentRef {
   return typeof value === 'object' && value !== null
     && 'path' in value && typeof value.path === 'string'
     && 'name' in value && typeof value.name === 'string'

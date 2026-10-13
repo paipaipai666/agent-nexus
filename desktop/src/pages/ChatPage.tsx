@@ -20,6 +20,7 @@ import PlanReviewCard from '../components/chat/PlanReviewCard'
 import ToolGroup from '../components/chat/ToolGroup'
 import MessageBubble from '../components/chat/MessageBubble'
 import HudAction from '../components/chat/HudAction'
+import RecoveryPanel from '../components/chat/RecoveryPanel'
 
 const PLAN_REVIEW_MARKER = '[PLAN_REVIEW]'
 
@@ -219,6 +220,8 @@ export default function ChatPage() {
   const [creatingSession, setCreatingSession] = useState(false)
   const [hasNewContent, setHasNewContent] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
+  const [restoreState, setRestoreState] = useState<{ kind: 'idle' } | { kind: 'loading' } | { kind: 'failed'; message: string }>({ kind: 'idle' })
   const [literalMessage, setLiteralMessage] = useState(false)
   const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [commandNotice, setCommandNotice] = useState<{ tone: 'info' | 'error'; message: string } | null>(null)
@@ -243,7 +246,7 @@ export default function ChatPage() {
 
   const {
     sessionId, cwd, runtimeStatus: sessionRuntimeStatus, setSessionId: setGlobalSessionId, setRuntimeInfo, setCwd, setToolCount, setTodoCount,
-    messages, setMessages, isRunning, confirmRequest,
+    messages, setMessages, isRunning, pendingSubmission, stopState, confirmRequest,
     sendMessage, cancelRun, confirmToolCall, queueMessage, animatedIds, incrementMsgCounter, resetForSessionSwitch, getLiveDisplayMessages,
   } = useSession()
   const runtimeStatus = sessionId ? sessionRuntimeStatus : defaultRuntimeStatus
@@ -284,7 +287,10 @@ export default function ChatPage() {
 
   useLayoutEffect(() => () => {
     sendGeneration.current++
-    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+    if (scrollRafRef.current) {
+      cancelAnimationFrame(scrollRafRef.current)
+      scrollRafRef.current = 0
+    }
   }, [])
 
   const loadAndDisplayMessages = useCallback(async (options: { sessionId?: string; reload?: boolean } = {}) => {
@@ -380,6 +386,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     const isFirstMount = !didAutoRestoreLastSession
+    let cancelled = false
     didAutoRestoreLastSession = true
     const initRestore = (sid: string) => {
       console.log('[initRestore] Restoring session:', sid)
@@ -409,27 +416,20 @@ export default function ChatPage() {
         return
       }
       resetForSessionSwitch()
+      currentSessionIdRef.current = null
+      setGlobalSessionId(null)
+      setRestoreState({ kind: 'loading' })
       api.restoreSession(routeSessionId)
         .then(({ session_id, restored }) => {
+          if (cancelled) return
+          if (restored === false || session_id !== routeSessionId) throw new Error('请求的会话未能恢复，请检查会话列表')
           currentSessionIdRef.current = session_id
-          if (restored === false || session_id !== routeSessionId) {
-            navigate(`/chat/${session_id}`, { replace: true })
-            initNew(session_id)
-          } else {
-            initRestore(session_id)
-          }
+          setRestoreState({ kind: 'idle' })
+          initRestore(session_id)
         })
-        .catch(() => api.createSession().then(async ({ session_id }) => {
-          if (planModeArm.consume()) {
-            try { await api.setPlanMode(session_id, true) } catch {  }
-          }
-          const armedEffort = thinkingEffortArm.consume()
-          if (armedEffort !== null) {
-            try { await api.setThinkingEffort(session_id, armedEffort) } catch {  }
-          }
-          currentSessionIdRef.current = session_id; initNew(session_id)
-        }))
+        .catch(error => { if (!cancelled) setRestoreState({ kind: 'failed', message: `恢复会话失败：${errMsg(error) ?? '请检查后端连接'}。草稿已保留。` }) })
     } else {
+      setRestoreState({ kind: 'idle' })
       resetForSessionSwitch()
       currentSessionIdRef.current = null
       setGlobalSessionId(null)
@@ -438,14 +438,15 @@ export default function ChatPage() {
       if (isFirstMount) {
         api.getRecentSessions(5).then((d) => {
           const last = d.sessions?.find((s) => s.preview)
-          if (last && !currentSessionIdRef.current) {
+          if (!cancelled && last && !currentSessionIdRef.current) {
             navigate(`/chat/${last.session_id}`, { replace: true })
           }
         }).catch(() => {})
       }
     }
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSessionId])
+  }, [routeSessionId, restoreAttempt])
 
   useEffect(() => {
     if (pinnedToBottom.current) scrollToBottom()
@@ -515,8 +516,8 @@ export default function ChatPage() {
         if (isCurrent()) setCreatingSession(false)
       }
     } else {
-      sendMessage(text, atts)
-      if (getChatDraft(sourceKey) === sourceDraft) clearChatDraft(sourceKey)
+      const accepted = sendMessage(text, atts)
+      if (accepted && getChatDraft(sourceKey) === sourceDraft) clearChatDraft(sourceKey)
       if (location.pathname === '/') {
         navigate(`/chat/${currentSessionIdRef.current}`, { replace: true })
       }
@@ -575,6 +576,7 @@ export default function ChatPage() {
   }
 
   const handleSend = async (asMessage = false) => {
+    if (restoreState.kind !== 'idle') return
     if (submitting.current) return
     const sourceDraft = getChatDraft(draftKey)
     const generation = sendGeneration.current
@@ -855,6 +857,7 @@ export default function ChatPage() {
               plan={confirmRequest.summary.slice(PLAN_REVIEW_MARKER.length).trim()}
               onApprove={() => handleConfirm(true)}
               onDeny={() => handleConfirm(false)}
+              disabled={confirmRequest.status === 'timed-out' || confirmRequest.status === 'sending'}
             />
           </div>
         ) : (
@@ -874,9 +877,11 @@ export default function ChatPage() {
               </div>
               <pre className="text-[12.5px] rounded-xl p-3 mb-4 overflow-auto max-h-32 font-mono" style={{ background: 'var(--surface-2)', color: 'var(--fg-secondary)' }}>{confirmRequest.summary}</pre>
               <div className="flex gap-2.5">
-                <button onClick={() => handleConfirm(true)} className="btn-primary text-sm">批准执行</button>
-                <button onClick={() => handleConfirm(false)} className="btn-ghost text-sm">拒绝执行</button>
+                <button disabled={confirmRequest.status === 'timed-out' || confirmRequest.status === 'sending'} onClick={() => handleConfirm(true)} className="btn-primary text-sm">批准执行</button>
+                <button disabled={confirmRequest.status === 'timed-out' || confirmRequest.status === 'sending'} onClick={() => handleConfirm(false)} className="btn-ghost text-sm">拒绝执行</button>
               </div>
+              {confirmRequest.status === 'timed-out' && <p role="status">确认已过期或已处理，请查询任务状态。</p>}
+              {confirmRequest.status === 'sending' && <p role="status">正在等待确认回执…</p>}
             </div>
           </BorderBeam>
         </div>
@@ -886,6 +891,13 @@ export default function ChatPage() {
       {}
       <div className="px-6 pb-6 relative">
         <div className="max-w-[720px] mx-auto mb-2 space-y-2">
+          <RecoveryPanel />
+          {restoreState.kind === 'loading' && <p role="status">正在恢复会话…</p>}
+          {restoreState.kind === 'failed' && <div role="alert" className="space-y-2 text-sm">
+            <p>{restoreState.message}</p>
+            <button className="btn-ghost" onClick={() => setRestoreAttempt(value => value + 1)}>重试恢复会话</button>
+            <button className="btn-ghost" onClick={() => navigate('/')}>新建会话</button>
+          </div>}
           {commandNotice && <div className="max-h-44 overflow-auto"><InlineNotice message={commandNotice.message} tone={commandNotice.tone} onDismiss={() => setCommandNotice(null)} /></div>}
           <InlineNotice message={actionNotice} onDismiss={() => setActionNotice(null)} />
           <InlineNotice message={sendError} onDismiss={() => { setSendError(null); setLiteralMessage(false) }} />
@@ -1046,13 +1058,13 @@ export default function ChatPage() {
               rows={1}
             />
             {isRunning ? (
-              <button onClick={handleCancel} aria-label="停止任务" title="停止任务" className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
+              <button onClick={handleCancel} disabled={stopState === 'requesting'} aria-label="停止任务" title={stopState === 'requesting' ? '正在确认停止' : '停止任务'} className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}><Square size={14} /></button>
             ) : (
               <button
                 onClick={() => handleSend()}
                 aria-label="发送消息"
                 title="发送消息（Enter）；换行（Shift+Enter）"
-                disabled={creatingSession || (!input.trim() && attachments.length === 0)}
+                disabled={!!pendingSubmission || restoreState.kind !== 'idle' || creatingSession || (!input.trim() && attachments.length === 0)}
                 className="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 disabled:opacity-60"
                 style={{
                   background: 'var(--accent)',
@@ -1088,7 +1100,7 @@ export default function ChatPage() {
                 title="查看任务时间线与上下文"
                 onClick={() => sessionId && navigate(`/chat/${sessionId}/timeline`)} />
               <HudAction icon={Undo2} label="撤销" disabled={isRunning || versionBusy || !versionStatus?.can_undo}
-                title="撤销到上一个检查点" onClick={handleUndo} />
+                title="恢复上一个会话检查点，仅恢复对话上下文，不撤销文件修改" onClick={handleUndo} />
               <HudAction icon={Redo2} label="重做" disabled={isRunning || versionBusy || !versionStatus?.can_redo}
                 title="重做到下一个检查点" onClick={handleRedo} />
               <HudAction icon={History} label="检查点"
@@ -1112,6 +1124,7 @@ export default function ChatPage() {
             <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>检查点</span>
             <button onClick={() => setShowCheckpoints(false)} aria-label="关闭检查点" className="p-1 rounded-lg" style={{ color: 'var(--fg-faint)' }}><X size={12} /></button>
           </div>
+          <p className="px-4 py-2 text-xs" style={{ color: 'var(--fg-muted)' }}>检查点恢复会话上下文。工作区文件和外部操作不会随之回滚。</p>
           {checkpoints.length === 0 ? <p className="p-4 text-xs" style={{ color: 'var(--fg-muted)' }}>暂无检查点</p> : checkpoints.map(cp => (
             <div key={cp.id} className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border)', background: cp.is_head ? 'var(--accent-subtle)' : 'transparent' }}>
               <div className="flex items-center gap-2">

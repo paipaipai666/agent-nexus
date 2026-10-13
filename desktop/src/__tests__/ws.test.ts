@@ -131,9 +131,7 @@ describe('AgentWebSocket', () => {
 
       agentWs.sendMessage('hello world')
 
-      expect(ws.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'send_message', content: 'hello world' })
-      )
+      expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'hello world', client_message_id: expect.any(String) })
     })
 
     it('includes attachments when non-empty', () => {
@@ -143,20 +141,16 @@ describe('AgentWebSocket', () => {
 
       agentWs.sendMessage('see this', attachments)
 
-      expect(ws.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'send_message', content: 'see this', attachments })
-      )
+      expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'see this', attachments, client_message_id: expect.any(String) })
     })
 
-    it('omits attachments when empty — payload stays byte-identical', () => {
+    it('omits empty attachments and includes a submission id', () => {
       agentWs.connect('session-123')
       const ws = getWs('session-123')
 
       agentWs.sendMessage('hello world', [])
 
-      expect(ws.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'send_message', content: 'hello world' })
-      )
+      expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'hello world', client_message_id: expect.any(String) })
     })
   })
 
@@ -285,16 +279,16 @@ describe('AgentWebSocket', () => {
   })
 
   describe('error event', () => {
-    it('emits error event on WebSocket error', () => {
+    it('emits a connection error independently of task failures', () => {
       const errorHandler = vi.fn()
 
       agentWs.connect('session-123')
-      agentWs.on('error', errorHandler)
+      agentWs.on('connection_error', errorHandler)
 
       const ws = getWs('session-123')
       ws._error()
 
-      expect(errorHandler).toHaveBeenCalledWith({ message: 'WebSocket error' })
+      expect(errorHandler).toHaveBeenCalledWith({ message: '连接失败，正在尝试重新连接' })
     })
   })
 })

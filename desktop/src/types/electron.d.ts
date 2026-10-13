@@ -1,6 +1,7 @@
 interface BackendStatus {
   ready: boolean
   port: number
+  error?: string | null
 }
 interface ElectronProjectStore {
   projects: string[]
@@ -31,6 +32,7 @@ interface ElectronAPI {
   getPathForFile: (file: File) => string
 
   getBackendStatus: () => Promise<BackendStatus>
+  restartBackend?: () => Promise<BackendStatus>
   onBackendError: (callback: (message: string) => void) => () => void
 }
 

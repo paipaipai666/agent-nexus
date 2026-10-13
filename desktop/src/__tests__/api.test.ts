@@ -4,13 +4,8 @@ import { api } from '../services/api'
 const mockFetch = vi.fn()
 global.fetch = mockFetch
 
-function mockJsonResponse(data: any, ok = true, status = 200) {
-  return Promise.resolve({
-    ok,
-    status,
-    json: () => Promise.resolve(data),
-    statusText: 'OK',
-  } as Response)
+function mockJsonResponse(data: unknown, ok = true, status = 200) {
+  return Promise.resolve(new Response(JSON.stringify(data), { status: ok ? status : status === 200 ? 500 : status }))
 }
 
 describe('api service', () => {
@@ -188,12 +183,7 @@ describe('api service', () => {
   describe('error handling', () => {
     it('throws error with detail from response body', async () => {
       mockFetch.mockReturnValue(
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          json: () => Promise.resolve({ detail: 'Bad request' }),
-          statusText: 'Bad Request',
-        } as Response)
+        mockJsonResponse({ detail: 'Bad request' }, false, 400)
       )
 
       await expect(api.createSession()).rejects.toThrow('Bad request')
@@ -201,38 +191,23 @@ describe('api service', () => {
 
     it('throws error with error.message when detail is missing', async () => {
       mockFetch.mockReturnValue(
-        Promise.resolve({
-          ok: false,
-          status: 500,
-          json: () => Promise.resolve({ error: { message: 'Internal error' } }),
-          statusText: 'Internal Server Error',
-        } as Response)
+        mockJsonResponse({ error: { message: 'Internal error' } }, false, 500)
       )
 
       await expect(api.getConfig()).rejects.toThrow('Internal error')
     })
 
-    it('falls back to statusText when JSON parse fails', async () => {
+    it('reports HTTP status when the server returns an unreadable body', async () => {
       mockFetch.mockReturnValue(
-        Promise.resolve({
-          ok: false,
-          status: 502,
-          json: () => Promise.reject(new Error('parse error')),
-          statusText: 'Bad Gateway',
-        } as Response)
+        Promise.resolve(new Response('invalid json', { status: 502 }))
       )
 
-      await expect(api.getConfig()).rejects.toThrow('Bad Gateway')
+      await expect(api.getConfig()).rejects.toThrow('HTTP 502')
     })
 
     it('falls back to HTTP status code when no detail available', async () => {
       mockFetch.mockReturnValue(
-        Promise.resolve({
-          ok: false,
-          status: 404,
-          json: () => Promise.resolve({}),
-          statusText: 'Not Found',
-        } as Response)
+        mockJsonResponse({}, false, 404)
       )
 
       await expect(api.getConfig()).rejects.toThrow('HTTP 404')
@@ -246,7 +221,7 @@ describe('api service', () => {
       await api.getConfig()
 
       const [, options] = mockFetch.mock.calls[0]
-      expect(options.headers['Content-Type']).toBe('application/json')
+      expect(new Headers(options.headers).get('Content-Type')).toBe('application/json')
     })
   })
 })

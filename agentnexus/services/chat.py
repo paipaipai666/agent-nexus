@@ -221,6 +221,9 @@ class ChatService:
         self._subagents = SubagentRegistry()
         self._put_event_lock = threading.RLock()
         self._thinking_effort: dict[str, str | None] = {}
+        self._submission_lock = threading.Lock()
+        self._cancelled_submissions: set[str] = set()
+        self._recovery_save_errors: dict[str, str] = {}
 
     def set_plan_mode(self, session_id: str, enabled: bool) -> bool:
         if session_id not in self._sessions:
@@ -442,12 +445,43 @@ class ChatService:
         on_run_started: Callable[[RunHandle], None] | None = None,
         *,
         attachments: list[dict] | None = None,
+        client_message_id: str | None = None,
     ) -> RunHandle:
-        setup = self._prepare_run(session_id, text, attachments, on_run_started)
+        requested_run_id = None
+        if client_message_id:
+            with self._submission_lock:
+                if session_id not in self._sessions:
+                    raise KeyError(f"Unknown session_id: {session_id}")
+                receipt = get_timeline_store().get_submission(session_id, client_message_id)
+                if receipt is None and self.is_session_processing(session_id):
+                    raise ValueError("此会话仍在执行任务，请先停止任务或等待完成")
+                requested_run_id, created = get_timeline_store().claim_submission(session_id, client_message_id, text, attachments)
+                if created:
+                    self.mark_processing(True, session_id=session_id)
+            if not created:
+                return RunHandle(id=requested_run_id, session_id=session_id)
+        try:
+            setup = self._prepare_run(session_id, text, attachments, on_run_started, requested_run_id)
+        except Exception as exc:
+            self.mark_processing(False, session_id=session_id)
+            if requested_run_id:
+                get_timeline_store().save_run_record({
+                    "run_id": requested_run_id, "session_id": session_id, "question": text,
+                    "answer": "", "status": "failed", "reason": "任务未能开始", "detail": str(exc),
+                    "journal": [], "persisted": False, "save_error": "", "started": False,
+                })
+            raise
         agent, memory = setup.agent, setup.memory
         run, turn = setup.run, setup.turn
         wrapper_settled = False
         try:
+            if requested_run_id in self._cancelled_submissions:
+                turn.cancel("cancelled")
+                self._run_snapshots[run.id] = turn.record_snapshot
+                self._put_event(run.id, AgentEvent("run_interrupted", {**self.get_run_recovery(run.id), "error": "cancelled"}, run_id=run.id, session_id=session_id))
+                self._emit_save_result(turn)
+                wrapper_settled = True
+                raise AgentCancelled()
             agent_text, todo_list = self._wire_agent_for_run(setup, text)
             from agentnexus.observability.tracer import trace_manager as _tm
             _tm.start_trace(agent_text, metadata={
@@ -493,6 +527,7 @@ class ChatService:
             self._put_event(run.id, AgentEvent(
                 "run_finished",
                 {
+                    **self.get_run_recovery(run.id),
                     "answer": answer or "",
                     "status": record.status,
                     "error": llm_error,
@@ -502,10 +537,7 @@ class ChatService:
                 run_id=run.id,
                 session_id=session_id,
             ))
-            self._put_event(run.id, AgentEvent(
-                "run_persisted", {"status": record.status},
-                run_id=run.id, session_id=session_id,
-            ))
+            self._emit_save_result(turn)
             wrapper_settled = True
         except Exception as exc:
             already_settled = turn.record_snapshot.status != "running"
@@ -513,11 +545,13 @@ class ChatService:
                 record = turn.cancel("cancelled")
                 event_type = "run_interrupted"
             else:
-                record = turn.fail("Agent 执行错误", str(exc))
+                from agentnexus.core.failure import failure_advice
+                record = turn.fail(failure_advice(exc).message, str(exc))
                 event_type = "run_failed"
             self._run_snapshots[run.id] = record
             if not already_settled:
                 payload = {
+                    **self.get_run_recovery(run.id),
                     "error": str(exc),
                     "status": record.status,
                     "answer": record.answer,
@@ -527,10 +561,7 @@ class ChatService:
                     event_type, payload,
                     run_id=run.id, session_id=session_id,
                 ))
-                self._put_event(run.id, AgentEvent(
-                    "run_persisted", {"status": record.status},
-                    run_id=run.id, session_id=session_id,
-                ))
+                self._emit_save_result(turn)
             wrapper_settled = not already_settled
             raise
         finally:
@@ -543,6 +574,7 @@ class ChatService:
         text: str,
         attachments: list[dict] | None,
         on_run_started: Callable[[RunHandle], None] | None,
+        requested_run_id: str | None = None,
     ) -> _RunSetup:
         """Everything that must exist before the run's try scope: session
         resolution, attachment validation, workspace contextvar, token-buffer
@@ -584,7 +616,7 @@ class ChatService:
                 )
         except Exception as e:
             logger.debug("Failed to persist user question immediately: %s", e)
-        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory)
+        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory, run_id=requested_run_id)
         if on_run_started is not None:
             on_run_started(run)
         old_on_event = getattr(agent, "_on_event", None)
@@ -650,6 +682,11 @@ class ChatService:
         current_workspace.reset(setup.ws_token)
         unregister_attachment_paths(setup.attach_paths)
         self.mark_processing(False, session_id=session_id)
+        if setup.turn.record_snapshot.status != "running":
+            try:
+                get_timeline_store().save_run_record(self.get_run_recovery(run.id))
+            except Exception as exc:
+                logger.warning("Failed to update settled recovery state for %s: %s", run.id, exc)
         _bind_optional(agent, "set_cancel_checker", None)
         try:
             agent._on_event = setup.old_on_event
@@ -687,6 +724,88 @@ class ChatService:
             )
         return self._version_managers[session_id]
 
+    def _emit_save_result(self, turn: TurnRuntime) -> None:
+        record = turn.record_snapshot
+        recovery = self.get_run_recovery(record.run_id)
+        recovery.update(persisted=turn.persisted, save_error=turn.last_commit_error)
+        try:
+            get_timeline_store().save_run_record(recovery)
+            self._recovery_save_errors.pop(record.run_id, None)
+        except Exception as exc:
+            self._recovery_save_errors[record.run_id] = str(exc)
+            logger.warning("Failed to save recovery state for %s: %s", record.run_id, exc)
+        saved = turn.persisted and record.run_id not in self._recovery_save_errors
+        self._put_event(record.run_id, AgentEvent(
+            "run_persisted" if saved else "run_save_failed",
+            {"status": record.status, "persisted": saved, "save_error": turn.last_commit_error or self._recovery_save_errors.get(record.run_id, ""),
+             "execution_active": record.status == "interrupted" and self.is_session_processing(record.session_id)},
+            run_id=record.run_id, session_id=record.session_id,
+        ))
+
+    def get_run_recovery(self, run_id: str) -> dict | None:
+        """Return task outcome and save state for recovery clients."""
+        from dataclasses import asdict
+
+        record = self.get_run_snapshot(run_id)
+        if record is None:
+            stored = get_timeline_store().get_run_record(run_id)
+            if stored is not None:
+                stored["execution_active"] = False
+                if stored["status"] == "running":
+                    stored.update(status="interrupted", reason="server_restarted")
+            return stored
+        turn = self._turns.get(run_id)
+        from agentnexus.core.failure import failure_advice
+        advice = failure_advice(record.detail or record.reason) if record.status in ("failed", "empty_answer") else None
+        return {
+            **asdict(record),
+            "persisted": (turn.persisted if turn else True) and run_id not in self._recovery_save_errors,
+            "save_error": (turn.last_commit_error if turn else "") or self._recovery_save_errors.get(run_id, ""),
+            "started": True,
+            "execution_active": self.is_session_processing(record.session_id),
+            "failure_code": advice.code if advice else "",
+            "next_action": advice.action if advice else "",
+        }
+
+    def get_submission_receipt(self, session_id: str, client_message_id: str) -> dict | None:
+        """Resolve an uncertain send without repeating its side effects."""
+        receipt = get_timeline_store().get_submission(session_id, client_message_id)
+        if receipt is None:
+            return None
+        recovery = self.get_run_recovery(receipt["run_id"])
+        if recovery is None:
+            recovery = {
+                "run_id": receipt["run_id"], "session_id": session_id, "question": receipt["question"],
+                "status": "running" if self.is_session_processing(session_id) else "interrupted",
+                "answer": "", "reason": "" if self.is_session_processing(session_id) else "server_restarted",
+                "detail": "", "journal": [], "persisted": False, "save_error": "", "started": False,
+            }
+        return {**receipt, "recovery": recovery}
+
+    def get_session_recovery(self, session_id: str) -> dict | None:
+        """Return the latest task independently of whether the UI stayed open."""
+        run_id = self._session_last_run.get(session_id) or get_timeline_store().latest_run_id(session_id)
+        return self.get_run_recovery(run_id) if run_id else None
+
+    def request_submission_cancel(self, session_id: str, client_message_id: str) -> dict:
+        """Stop a submission even while its task identity is still unacknowledged."""
+        run_id = get_timeline_store().submission_run_id(session_id, client_message_id)
+        with self._submission_lock:
+            self._cancelled_submissions.add(run_id)
+        if self.is_run_active(run_id):
+            self.cancel_run(run_id, reason="cancelled")
+        return {"status": "requested", "run_id": run_id, "client_message_id": client_message_id}
+
+    def retry_run_save(self, run_id: str) -> dict:
+        """Retry only storage; never execute the task or tools again."""
+        with self._put_event_lock:
+            turn = self._turns.get(run_id)
+            if turn is None:
+                raise KeyError(run_id)
+            turn.persist_snapshot()
+            self._emit_save_result(turn)
+            return self.get_run_recovery(run_id)
+
     def restore_session_stm(self, session_id: str, snapshot: str) -> None:
         """Inject a checkpoint STM snapshot into the session's MemoryManager.
 
@@ -703,6 +822,27 @@ class ChatService:
         restored = ShortTermMemory.from_json(snapshot)
         memory.short_term._messages = restored._messages
         memory.short_term._summary = restored._summary
+
+    def session_version(self, session_id: str):
+        """Resolve version history without falling back to another session."""
+        if session_id not in self._sessions and not self.ensure_session_restored(session_id):
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return self._get_version_manager(session_id)
+
+    def session_memory(self, session_id: str):
+        """Resolve this session's memory independently of the process-global context."""
+        self.session_version(session_id)
+        return self._get_or_create_memory(session_id)
+
+    def restore_checkpoint_memory(self, session_id: str) -> None:
+        """Replace this session's context after an explicit history operation."""
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        version = self.session_version(session_id)
+        memory = self._get_or_create_memory(session_id)
+        snapshot = version.get_head_stm()
+        restored = ShortTermMemory.from_json(snapshot) if snapshot else ShortTermMemory()
+        memory.short_term.restore(restored)
 
     def ensure_session_restored(self, session_id: str) -> bool:
         """Register a DB-backed session (if unknown) and inject its head STM.
@@ -735,10 +875,13 @@ class ChatService:
             self.restore_session_stm(session_id, snapshot)
         return True
 
-    def begin_turn(self, session_id: str, text: str, memory_manager: Any = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
+    def begin_turn(self, session_id: str, text: str, memory_manager: Any = None, *, run_id: str | None = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
         prev_run = self._session_last_run.get(session_id)
+        previous_turn = self._turns.get(prev_run)
+        if previous_turn and (previous_turn.last_commit_error or prev_run in self._recovery_save_errors) and not self.get_run_recovery(prev_run)["persisted"]:
+            raise ValueError("上一轮结果尚未保存，请先重试保存并保留结果副本")
         if prev_run:
             self._run_events.pop(prev_run, None)
             self._async_run_events.pop(prev_run, None)
@@ -747,7 +890,7 @@ class ChatService:
             self._run_event_seq.pop(prev_run, None)
             self._run_token_seq.pop(prev_run, None)
             self._run_snapshots.pop(prev_run, None)
-        run = RunHandle(id=f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
+        run = RunHandle(id=run_id or f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
         events: queue.Queue[AgentEvent | None] = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
         async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue(maxsize=_EVENT_QUEUE_MAX)
         self._run_events[run.id] = events
@@ -1060,21 +1203,18 @@ class ChatService:
 
     def _cancel_run_locked(self, run_id: str, reason: str = "cancelled") -> None:
         turn = self._turns.get(run_id)
+        if turn is not None and turn.record_snapshot.status != "running":
+            return
         if turn is not None:
             record = turn.cancel(reason)
             self._run_snapshots[run_id] = record
             self._put_event(run_id, AgentEvent(
                 "run_interrupted",
-                {"error": reason, "status": record.status, "answer": record.answer, "reason": record.reason},
+                {**self.get_run_recovery(run_id), "error": reason},
                 run_id=run_id,
                 session_id=record.session_id,
             ))
-            self._put_event(run_id, AgentEvent(
-                "run_persisted",
-                {"status": record.status},
-                run_id=run_id,
-                session_id=record.session_id,
-            ))
+            self._emit_save_result(turn)
         else:
             self._put_event(run_id, AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
         sync_q = self._run_events.get(run_id)

@@ -165,20 +165,53 @@ function parseKnowledgeModels(value: unknown): KnowledgeModels {
   }
 }
 
-async function request<T>(path: string, options: RequestInit & { query?: Record<string, string> } = {}): Promise<T> {
-  const { query, headers: optsHeaders, ...rest } = options
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(optsHeaders as Record<string, string>),
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code: string, public readonly retryAfter: number | null = null) {
+    super(message)
+    this.name = 'ApiError'
   }
-  const qs = query ? `?${new URLSearchParams(query).toString()}` : ''
+}
 
-  const res = await fetch(`${BASE_URL}${path}${qs}`, { ...rest, headers })
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
-  }
-  return res.json()
+function errorAdvice(status: number): string {
+  if (status === 401 || status === 403) return '请检查提供商凭据或访问权限，再重新提交。'
+  if (status === 429) return '请按等待时间稍后重试，或切换可用模型。'
+  if (status === 404) return '请检查原会话或资源是否仍存在。'
+  if (status === 409) return '请先查询当前任务状态，等待结束后再操作。'
+  if (status === 400 || status === 422) return '请检查输入与配置后重试。'
+  return '请检查后端连接并查询任务状态，再决定是否重试。'
+}
+
+async function fetchJson<T>(url: string, options: RequestInit, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal
+    const res = await fetch(url, { ...options, signal })
+    if (!res.ok) {
+      const payload: unknown = await res.json().catch(() => null)
+      const error = isObject(payload) && isObject(payload.error) ? payload.error : null
+      const message = isObject(payload) && typeof payload.detail === 'string' ? payload.detail : typeof error?.message === 'string' ? error.message : `请求失败（HTTP ${res.status}）`
+      const code = typeof error?.code === 'string' ? error.code : `http_${res.status}`
+      const retryHeader = res.headers.get('Retry-After')
+      const retrySeconds = retryHeader === null ? NaN : /^\d+$/.test(retryHeader) ? Number(retryHeader) : Math.max(0, (Date.parse(retryHeader) - Date.now()) / 1000)
+      const retryAfter = Number.isFinite(retrySeconds) ? retrySeconds : null
+      throw new ApiError(`${message}。${retryAfter !== null ? `请等待 ${Math.ceil(retryAfter)} 秒。` : ''}${errorAdvice(res.status)}`, res.status, code, retryAfter)
+    }
+    return await res.json()
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (controller.signal.aborted) throw new ApiError('请求超时，执行状态尚未确认。请查询任务状态后再决定是否重试。', 0, 'request_timeout')
+    if (options.signal?.aborted) throw new ApiError('请求已取消，请查询任务状态。', 0, 'request_cancelled')
+    throw new ApiError('无法连接后端，请恢复连接并查询任务状态。', 0, 'connection_error')
+  } finally { clearTimeout(timer) }
+}
+
+async function request<T>(path: string, options: RequestInit & { query?: Record<string, string>; timeoutMs?: number } = {}): Promise<T> {
+  const { query, headers: optsHeaders, timeoutMs = 15000, ...rest } = options
+  const headers = new Headers(optsHeaders)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const qs = query ? `?${new URLSearchParams(query).toString()}` : ''
+  return fetchJson<T>(`${BASE_URL}${path}${qs}`, { ...rest, headers: Object.fromEntries(headers.entries()) }, timeoutMs)
 }
 
 async function uploadRequest<T>(path: string, file: File, query?: Record<string, string>): Promise<T> {
@@ -186,18 +219,18 @@ async function uploadRequest<T>(path: string, file: File, query?: Record<string,
   formData.append('file', file)
   const qs = query ? `?${new URLSearchParams(query).toString()}` : ''
 
-  const res = await fetch(`${BASE_URL}${path}${qs}`, {
+  return fetchJson<T>(`${BASE_URL}${path}${qs}`, {
     method: 'POST',
     body: formData,
-  })
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || error.error?.message || `HTTP ${res.status}`)
-  }
-  return res.json()
+  }, 120000)
 }
 
 export const api = {
+  cancelSubmission: (sessionId: string, id: string) => request<{ status: string; run_id: string }>(`/api/session/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  getRunRecovery: (runId: string) => request<unknown>(`/api/chat/${encodeURIComponent(runId)}/snapshot`),
+  getSessionRecovery: (sessionId: string) => request<{ recovery: unknown }>(`/api/session/${encodeURIComponent(sessionId)}/recovery`),
+  getSubmissionReceipt: (sessionId: string, id: string) => request<{ run_id: string; recovery: unknown }>(`/api/session/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}`),
+  retryRunSave: (runId: string) => request<unknown>(`/api/chat/${encodeURIComponent(runId)}/retry-save`, { method: 'POST' }),
   createSession: (skill?: string, workspace?: string | null) =>
     request<{ session_id: string; workspace: string | null }>('/api/session', {
       method: 'POST',

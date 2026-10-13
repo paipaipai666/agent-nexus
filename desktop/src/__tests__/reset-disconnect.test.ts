@@ -62,9 +62,7 @@ describe('React useEffect timing — resetForSessionSwitch disconnect fix', () =
     agentWs.on('answer', () => events.push('answer'))
 
     agentWs.sendMessage('new question')
-    expect(wsB.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: 'send_message', content: 'new question' })
-    )
+    expect(JSON.parse(wsB.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'new question', client_message_id: expect.any(String) })
 
     wsB._receive({ type: 'answer', content: 'new response' })
     expect(events).toEqual(['answer'])

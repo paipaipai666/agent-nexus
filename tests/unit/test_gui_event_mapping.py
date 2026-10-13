@@ -19,17 +19,17 @@ class TestGuiEventMapping:
     def test_run_finished_maps_to_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": "final answer", "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": "final answer", "error": "", "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": "final answer", "answer": "final answer", "status": "finished", "error": "", "run_id": None, "seq": 0}
 
     def test_run_finished_with_empty_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": "", "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": "", "error": "", "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": "", "answer": "", "status": "finished", "error": "", "run_id": None, "seq": 0}
 
     def test_run_finished_with_none_answer(self):
         event = AgentEvent(type="run_finished", payload={"answer": None, "status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "answer", "content": None, "error": "", "run_id": None, "seq": 0}
+        assert result == {"type": "answer", "content": None, "answer": None, "status": "finished", "error": "", "run_id": None, "seq": 0}
 
     def test_run_finished_passes_through_error(self):
         """空答案 + 错误（限流/配额）必须透传给前端渲染错误提示。"""
@@ -40,17 +40,17 @@ class TestGuiEventMapping:
     def test_run_persisted_maps_to_done(self):
         event = AgentEvent(type="run_persisted", payload={"status": "finished"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "done", "run_id": None, "seq": 0}
+        assert result == {"type": "done", "status": "finished", "run_id": None, "seq": 0}
 
     def test_run_failed_maps_to_error(self):
         event = AgentEvent(type="run_failed", payload={"error": "something broke"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "error", "message": "something broke", "run_id": None, "seq": 0}
+        assert result == {"type": "error", "message": "something broke", "error": "something broke", "run_id": None, "seq": 0}
 
     def test_run_interrupted_maps_to_error(self):
         event = AgentEvent(type="run_interrupted", payload={"error": "cancelled"})
         result = _map_to_gui_event(event, MagicMock(), 0)
-        assert result == {"type": "error", "message": "cancelled", "run_id": None, "seq": 0}
+        assert result == {"type": "error", "message": "cancelled", "error": "cancelled", "run_id": None, "seq": 0}
 
     def test_run_finished_preserves_run_id(self):
         event = AgentEvent(type="run_finished", payload={"answer": "done", "status": "finished"}, run_id="run_456")

@@ -134,6 +134,8 @@ export default function SubagentPage() {
   const [found, setFound] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [cancelRequested, setCancelRequested] = useState(false)
+  const [loadErrors, setLoadErrors] = useState<{ metadata: string | null; trajectory: string | null }>({ metadata: null, trajectory: null })
+  const [retryAttempt, setRetryAttempt] = useState(0)
   const idCounter = useRef(0)
   const nextId = () => `se-${++idCounter.current}`
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -148,6 +150,8 @@ export default function SubagentPage() {
   useEffect(() => {
     if (!sessionId || !subagentId) return
     let cancelled = false
+    setLoadErrors({ metadata: null, trajectory: null })
+    setLoaded(false)
 
     api.getSubagents(sessionId).then(d => {
       if (cancelled) return
@@ -157,7 +161,9 @@ export default function SubagentPage() {
         setStatus(info.status)
         setFound(true)
       }
-    }).catch(() => {})
+    }).catch(error => {
+      if (!cancelled) setLoadErrors(previous => ({ ...previous, metadata: error instanceof Error ? error.message : '请检查连接' }))
+    })
 
     api.getSessionEvents(sessionId, 0, subagentId, 'trajectory').then(d => {
       if (cancelled) return
@@ -185,7 +191,12 @@ export default function SubagentPage() {
         if (sawStarted) setEntries(acc)
       }
       setLoaded(true)
-    }).catch(() => setLoaded(true))
+    }).catch(error => {
+      if (!cancelled) {
+        setLoadErrors(previous => ({ ...previous, trajectory: error instanceof Error ? error.message : '请检查连接' }))
+        setLoaded(true)
+      }
+    })
 
     const unsub = wsPool.on(sessionId, 'subagent_event', (data: SubagentEventPayload) => {
       if (cancelled || data?.subagent_id !== subagentId) return
@@ -204,7 +215,7 @@ export default function SubagentPage() {
 
     return () => { cancelled = true; unsub() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, subagentId])
+  }, [sessionId, subagentId, retryAttempt])
 
   const storeMeta = sessionId ? getLiveSessionState(sessionId)?.subagents.get(subagentId) : undefined
   const name = storeMeta?.name || meta?.name || subagentId
@@ -275,7 +286,15 @@ export default function SubagentPage() {
       {}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <div className="max-w-[720px] mx-auto space-y-2">
-          {!found && loaded && (
+          {loadErrors.metadata && <div role="alert" className="text-sm space-y-2">
+            <p>子任务信息加载失败：{loadErrors.metadata}</p>
+            <button className="btn-ghost" onClick={() => setRetryAttempt(value => value + 1)}>重试子任务信息</button>
+          </div>}
+          {loadErrors.trajectory && <div role="alert" className="text-sm space-y-2">
+            <p>子任务过程加载失败：{loadErrors.trajectory}。已读取的内容保留在下方。</p>
+            <button className="btn-ghost" onClick={() => setRetryAttempt(value => value + 1)}>重试子任务过程</button>
+          </div>}
+          {!found && loaded && !loadErrors.metadata && !loadErrors.trajectory && (
             <p className="text-xs py-8 text-center" style={{ color: 'var(--fg-muted)' }}>
               未找到该子代理（可能来自更早的服务进程）
             </p>

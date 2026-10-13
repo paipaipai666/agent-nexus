@@ -187,12 +187,18 @@ test('多行输入自动增高，超出上限后保留完整内容', async ({ pa
 test('阅读历史时保持滚动位置，用户可回到最新输出', async ({ page }) => {
   await page.getByRole('textbox', { name: '消息输入' }).fill('输出长文')
   await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, '__mockWsSent'))).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'send_message', content: '输出长文' }),
+  ]))
+  await expect(page.getByText('正在等待发送回执…')).toBeVisible()
+  await emit(page, { type: 'run_started', run_id: 'scroll-run', seq: 0 })
   await expect(page.getByRole('button', { name: '停止任务' })).toBeVisible()
-  await emit(page, { type: 'token', content: Array.from({ length: 100 }, (_, i) => `内容 ${i}\n\n`).join('') })
+  await emit(page, { type: 'token', run_id: 'scroll-run', seq: 1, content: Array.from({ length: 100 }, (_, i) => `内容 ${i}\n\n`).join('') })
   const scroll = page.getByTestId('chat-scroll')
-  await expect(page.getByText('内容 99', { exact: true })).toBeVisible()
+  await expect(page.getByText('内容 99', { exact: true })).toBeInViewport()
   await scroll.evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')) })
-  await emit(page, { type: 'token', content: '\n\n新的内容' })
+  await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBe(0)
+  await emit(page, { type: 'token', run_id: 'scroll-run', seq: 2, content: '\n\n新的内容' })
   await expect(page.getByRole('button', { name: '回到最新消息' })).toBeVisible()
   expect(await scroll.evaluate(element => element.scrollTop)).toBe(0)
   await page.getByRole('button', { name: '回到最新消息' }).click()

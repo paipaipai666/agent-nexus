@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, act, waitFor, screen } from '@testing-library/react'
+import { render, act, waitFor, screen, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { useEffect } from 'react'
@@ -123,10 +123,48 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   delete window.electronAPI
+  vi.unstubAllGlobals()
 })
 
 describe('ChatPage attachments', () => {
+  it('shows a todo load failure and retries instead of presenting an empty list', async () => {
+    vi.stubGlobal('innerWidth', 1440)
+    apiOverrides.restoreSession = vi.fn().mockResolvedValue({ session_id: 'todo-recovery', restored: true })
+    apiOverrides.getTodos = vi.fn().mockRejectedValue(new Error('offline'))
+    await renderChat('/chat/todo-recovery', { messages: [], isRunning: false })
+    await screen.findByText(/待办列表加载失败/)
+    apiOverrides.getTodos = vi.fn().mockResolvedValue({ items: [{ id: 1, description: 'recovered task', status: 'pending' }] })
+    await userEvent.click(screen.getByRole('button', { name: '重试待办列表' }))
+    await screen.findByText('recovered task')
+    expect(screen.queryByText(/待办列表加载失败/)).not.toBeInTheDocument()
+  }, 15000)
+  it('shows an unacknowledged send as pending and retains its original prompt', async () => {
+    apiOverrides.restoreSession = vi.fn().mockResolvedValue({ session_id: 'pending-visible', restored: true })
+    const probe: ProbeState = { messages: [], isRunning: false }
+    await renderChat('/chat/pending-visible', probe)
+    await userEvent.type(messageInput(), 'retain pending prompt')
+    await userEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByText('正在等待发送回执…')
+    expect(screen.getByRole('button', { name: '查询发送状态' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制原请求' })).toBeInTheDocument()
+    expect(probe.isRunning).toBe(false)
+  })
+  it('preserves the requested session and draft when restore fails and retries it explicitly', async () => {
+    apiOverrides.restoreSession = vi.fn().mockRejectedValueOnce(new Error('backend offline')).mockResolvedValue({ session_id: 'restore-failure', restored: true })
+    apiOverrides.createSession = vi.fn().mockResolvedValue({ session_id: 'unexpected-new' })
+    const probe: ProbeState = { messages: [], isRunning: false }
+    await renderChat('/chat/restore-failure', probe)
+    await screen.findByText(/恢复会话失败/)
+    await userEvent.type(messageInput(), 'keep this draft')
+    await userEvent.click(screen.getByRole('button', { name: '重试恢复会话' }))
+    await waitFor(() => expect(apiOverrides.restoreSession).toHaveBeenCalledTimes(2))
+    expect(messageInput().value).toBe('keep this draft')
+    expect(apiOverrides.createSession).not.toHaveBeenCalled()
+    expect(MockWebSocket.instances.map(socket => socket.url)).toEqual(['ws://127.0.0.1:18765/api/ws/agent/restore-failure'])
+  })
+
   it('keeps edits made while attachment validation is pending', async () => {
     mockBridge()
     apiOverrides.restoreSession = vi.fn().mockResolvedValue({ session_id: 'validation-draft', restored: true })
@@ -248,6 +286,7 @@ describe('ChatPage attachments', () => {
     await screen.findByRole('textbox', { name: '消息输入' })
 
     await userEvent.click(screen.getByTestId('send-warmup'))
+    await act(async () => { lastWs()._receive({ type: 'run_started', run_id: 'warmup-run', seq: 0 }) })
     await waitFor(() => expect(probe.isRunning).toBe(true))
 
     await userEvent.click(await screen.findByTitle('添加附件（本地文件，按路径引用）'))

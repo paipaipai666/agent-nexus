@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { checkBackendHealth } from '../services/backend'
+import BackendRecoveryControls from './BackendRecoveryControls'
 
 const HEALTH_CHECK_INTERVAL_MS = 1000
 const MAX_RETRIES = 30
@@ -6,17 +8,6 @@ const MAX_RETRIES = 30
 interface LoadingScreenProps {
   onReady: () => void
   backendPort?: number
-}
-
-async function checkHealth(port: number): Promise<boolean> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: AbortSignal.timeout(2000),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
 }
 
 export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingScreenProps) {
@@ -28,7 +19,7 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
 
     const poll = async () => {
       if (cancelled) return
-      const healthy = await checkHealth(backendPort)
+      const healthy = await checkBackendHealth(backendPort)
       if (cancelled) return
       if (healthy) {
         onReady()
@@ -36,7 +27,7 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
         setRetries((prev) => {
           const next = prev + 1
           if (next >= MAX_RETRIES) {
-            setError('Backend failed to start. Ensure AgentNexus is running: nexus serve')
+            setError('后端尚未启动，可以重试连接或重启后端。')
           }
           return next
         })
@@ -53,6 +44,7 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
       clearTimeout(timeoutId)
     }
   }, [onReady, backendPort])
+  useEffect(() => window.electronAPI?.onBackendError?.(setError), [])
 
   return (
     <div className="startup-screen" aria-label="Starting AgentNexus">
@@ -64,12 +56,12 @@ export default function LoadingScreen({ onReady, backendPort = 18765 }: LoadingS
         <>
           <div className="startup-spinner" aria-hidden="true" />
           <p className="startup-status" role="status">
-            Connecting to backend... ({retries})
+            正在连接后端… ({retries})
           </p>
         </>
       )}
       {error && (
-        <p className="startup-error" role="alert">{error}</p>
+        <div className="space-y-3 text-center"><p className="startup-error" role="alert">{error}</p><BackendRecoveryControls port={backendPort} onRecovered={onReady} /></div>
       )}
       {window.electronAPI && (
         <button className="startup-close" type="button" aria-label="Close AgentNexus" onClick={() => window.electronAPI?.close()}>

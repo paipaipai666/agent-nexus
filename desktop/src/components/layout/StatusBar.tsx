@@ -3,7 +3,7 @@ import { Folder, Wrench, ListTodo } from 'lucide-react'
 import ContextMeter from './ContextMeter'
 
 export default function StatusBar() {
-  const { sessionId, runtimeStatus, cwd, toolCount, todoCount } = useSession()
+  const { sessionId, connectionState, runtimeStatus, cwd, toolCount, todoCount } = useSession()
   const usage = runtimeStatus?.total_usage
 
   return (
@@ -20,9 +20,9 @@ export default function StatusBar() {
       <StatusItem>
         <span
           className="w-[6px] h-[6px] rounded-full animate-pulse"
-          style={{ background: sessionId ? 'var(--green)' : 'var(--fg-faint)' }}
+          style={{ background: connectionState === 'connected' ? 'var(--green)' : 'var(--fg-faint)' }}
         />
-        {sessionId ? 'connected' : 'disconnected'}
+        {connectionState === 'connected' ? '已连接' : sessionId && connectionState === 'connecting' ? '正在连接' : '未连接'}
       </StatusItem>
       <Sep />
 

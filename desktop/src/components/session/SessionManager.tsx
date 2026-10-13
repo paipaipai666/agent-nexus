@@ -1,11 +1,15 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { wsPool } from '../../services/ws'
 import type { AttachmentRef, RuntimeStatus } from '../../services/api'
+import { api } from '../../services/api'
+import { getChatDraft, saveChatDraft } from '../../services/chatDrafts'
+import { getPendingSubmission, savePendingSubmission, getRecoveryCopy, saveRecoveryCopy, parseRecovery, type PendingSubmission, type RunRecovery } from '../../services/recovery'
 
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  runId?: string
   toolName?: string
   toolCallId?: string
   toolStatus?: 'running' | 'done' | 'error'
@@ -33,13 +37,21 @@ export interface SubagentMeta {
   currentTool?: string
 }
 
+interface ConfirmationRequest {
+  summary: string
+  id: string
+  runId: string
+  expiresAt: number
+  status: 'awaiting' | 'sending' | 'timed-out' | 'failed'
+}
+
 interface SessionState {
   sessionId: string
   messages: Message[]
   step: { process: Message[]; answer: Message | null } | null
   isRunning: boolean
   currentRunId: string | null
-  confirmRequest: { summary: string; status: 'awaiting' | 'timed-out' } | null
+  confirmRequest: ConfirmationRequest | null
   msgCounter: number
   currentAssistantId: string | null
   currentReasoningId: string | null
@@ -53,6 +65,11 @@ interface SessionState {
   subagents: Map<string, SubagentMeta>
   animatedIds: Set<string>
   messageQueue: QueuedMessage[]
+  pendingSubmission: PendingSubmission | null
+  recovery: RunRecovery | null
+  recoveryNotice: string | null
+  connectionState: 'connecting' | 'connected' | 'disconnected'
+  stopState: 'idle' | 'requesting' | 'unknown'
 }
 
 function commitStep(
@@ -88,6 +105,11 @@ function createEmptySession(sessionId: string): SessionState {
     subagents: new Map(),
     animatedIds: new Set(),
     messageQueue: [],
+    pendingSubmission: getPendingSubmission(sessionId),
+    recovery: getRecoveryCopy(sessionId),
+    recoveryNotice: null,
+    connectionState: 'connecting',
+    stopState: 'idle',
   }
 }
 
@@ -110,11 +132,19 @@ export interface SessionManagerContextType {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   isRunning: boolean
   currentRunId: string | null
-  confirmRequest: { summary: string } | null
+  confirmRequest: ConfirmationRequest | null
   msgCounter: number
   incrementMsgCounter: () => number
 
-  sendMessage: (text: string, attachments?: AttachmentRef[]) => void
+  sendMessage: (text: string, attachments?: AttachmentRef[]) => boolean
+  pendingSubmission: PendingSubmission | null
+  recovery: RunRecovery | null
+  recoveryNotice: string | null
+  connectionState: SessionState['connectionState']
+  retrySubmission: () => void
+  refreshRecovery: () => void
+  retrySave: () => void
+  stopState: SessionState['stopState']
   cancelRun: () => void
   confirmToolCall: (approved: boolean) => void
   processQueue: () => void
@@ -155,7 +185,15 @@ const SessionContext = createContext<SessionManagerContextType>({
   msgCounter: 0,
   incrementMsgCounter: () => 0,
 
-  sendMessage: () => {},
+  sendMessage: () => false,
+  pendingSubmission: null,
+  recovery: null,
+  recoveryNotice: null,
+  connectionState: 'disconnected',
+  retrySubmission: () => {},
+  refreshRecovery: () => {},
+  retrySave: () => {},
+  stopState: 'idle',
   cancelRun: () => {},
   confirmToolCall: () => {},
   processQueue: () => {},
@@ -194,6 +232,11 @@ export default function SessionManager({ children }: { children: ReactNode }) {
   const stepAnswerIds = useRef<Map<string, string | null>>(new Map())
   const currentReasoningIds = useRef<Map<string, string | null>>(new Map())
   const msgCounters = useRef<Map<string, number>>(new Map())
+  const pendingSubmissions = useRef(new Map<string, PendingSubmission>())
+  const submissionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const queueTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const confirmationTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const recoveryGenerations = useRef(new Map<string, number>())
 
 
   const updateSession = useCallback((sessionId: string, updater: (prev: SessionState) => SessionState) => {
@@ -259,10 +302,102 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return sessions.get(sessionId)?.isRunning ?? false
   }, [sessions])
 
+  const clearSubmissionTimer = useCallback((sid: string) => {
+    const timer = submissionTimers.current.get(sid)
+    if (timer) clearTimeout(timer)
+    submissionTimers.current.delete(sid)
+  }, [])
 
-  const sendMessageInternal = useCallback((text: string, attachments?: AttachmentRef[]) => {
-    if (!activeSessionId) return
-    const sid = activeSessionId
+  const setPending = useCallback((sid: string, pending: PendingSubmission | null) => {
+    savePendingSubmission(sid, pending)
+    if (pending) pendingSubmissions.current.set(sid, pending)
+    else { pendingSubmissions.current.delete(sid); clearSubmissionTimer(sid) }
+    updateSession(sid, prev => ({ ...prev, pendingSubmission: pending }))
+  }, [updateSession, clearSubmissionTimer])
+
+  const sendPending = useCallback((sid: string, pending: PendingSubmission) => {
+    clearSubmissionTimer(sid)
+    const connected = wsPool.isConnected(sid)
+    const next: PendingSubmission = connected ? { ...pending, phase: 'waiting_ack', delivery: 'sent' } : { ...pending, phase: 'waiting_connection' }
+    setPending(sid, next)
+    if (next.phase === 'waiting_ack' && !wsPool.sendMessage(sid, next.text, next.attachments, next.id)) {
+      setPending(sid, { ...next, phase: 'unknown', message: '发送回执未确认，原文和附件已保留。请查询发送状态。' })
+      return
+    }
+    submissionTimers.current.set(sid, setTimeout(() => {
+      const current = pendingSubmissions.current.get(sid)
+      if (current?.id !== next.id) return
+      setPending(sid, { ...current, phase: next.phase === 'waiting_connection' ? 'rejected' : 'unknown', message: next.phase === 'waiting_connection' ? '连接等待超时，消息尚未发送。可以重新连接后重试。' : '等待发送回执超时，请先查询发送状态，原文和附件已保留。' })
+    }, 15000))
+  }, [clearSubmissionTimer, setPending])
+
+  const applyRecovery = useCallback((sid: string, recovery: RunRecovery, reconcile = false) => {
+    if (recovery.session_id !== sid) throw new Error('任务恢复信息属于其他会话')
+    let storageNotice: string | null = null
+    try { saveRecoveryCopy(recovery) } catch { storageNotice = '无法保存本地副本，请复制当前结果并检查磁盘空间。' }
+    if (reconcile && !recovery.execution_active) {
+      tokenBuffers.current.delete(sid)
+      const frame = tokenFlushRefs.current.get(sid)
+      if (frame) { cancelAnimationFrame(frame); tokenFlushRefs.current.delete(sid) }
+      stepAnswerIds.current.set(sid, null)
+      currentReasoningIds.current.set(sid, null)
+    }
+    updateSession(sid, prev => {
+      let next = prev
+      if (reconcile && !recovery.execution_active) {
+        next = commitStep(prev, { answerContent: recovery.answer || undefined })
+        let lastUser = -1
+        for (let index = next.messages.length - 1; index >= 0; index--) {
+          if (next.messages[index].role === 'user') { lastUser = index; break }
+        }
+        const answerIndex = next.messages.findIndex(message => message.runId === recovery.run_id || message.id === `recovered-${recovery.run_id}`)
+        if (answerIndex >= 0 && recovery.answer) next = { ...next, messages: next.messages.map((message, index) => index === answerIndex ? { ...message, content: recovery.answer } : message) }
+        else if (recovery.answer && !next.messages.slice(lastUser + 1).some(message => message.role === 'assistant' && message.content === recovery.answer)) {
+          next = { ...next, messages: [...next.messages, { id: `recovered-${recovery.run_id}`, runId: recovery.run_id, role: 'assistant', content: recovery.answer, timestamp: new Date() }] }
+        }
+        next = { ...next, messages: next.messages.map(message => message.role === 'tool' && message.toolStatus === 'running' ? { ...message, toolStatus: recovery.status === 'finished' ? 'done' : 'error' } : message) }
+      }
+      return { ...next, recovery, recoveryNotice: storageNotice, isRunning: recovery.execution_active,
+      currentRunId: recovery.execution_active ? recovery.run_id : null,
+      stopState: recovery.execution_active ? prev.stopState : 'idle',
+      confirmRequest: recovery.execution_active ? prev.confirmRequest : null,
+      pendingConfirm: recovery.execution_active && prev.pendingConfirm,
+      }
+    })
+  }, [updateSession])
+
+  const refreshSessionRecovery = useCallback(async (sid: string) => {
+    const generation = recoveryGenerations.current.get(sid) ?? 0
+    try {
+      const pending = pendingSubmissions.current.get(sid)
+      if (pending) {
+        const receipt = await api.getSubmissionReceipt(sid, pending.id)
+        if ((recoveryGenerations.current.get(sid) ?? 0) !== generation || pendingSubmissions.current.get(sid)?.id !== pending.id) return
+        const recovery = parseRecovery(receipt.recovery)
+        applyRecovery(sid, recovery, true)
+        setPending(sid, null)
+      } else {
+        const result = await api.getSessionRecovery(sid)
+        if ((recoveryGenerations.current.get(sid) ?? 0) !== generation || result.recovery == null) return
+        applyRecovery(sid, parseRecovery(result.recovery), true)
+      }
+    } catch (error) {
+      if ((recoveryGenerations.current.get(sid) ?? 0) !== generation) return
+      updateSession(sid, prev => ({ ...prev, recoveryNotice: error instanceof Error ? error.message : '任务状态查询失败，请重试' }))
+    }
+  }, [applyRecovery, setPending, updateSession])
+
+
+  const sendMessageInternal = useCallback((text: string, attachments?: AttachmentRef[], targetSessionId = activeSessionId) => {
+    if (!targetSessionId) return false
+    const sid = targetSessionId
+    if (pendingSubmissions.current.has(sid) || sessionsRef.current.get(sid)?.isRunning) return false
+    const pending: PendingSubmission = { id: crypto.randomUUID(), text, attachments: attachments ?? [], phase: 'waiting_connection', delivery: 'unsent' }
+    try { sendPending(sid, pending) } catch {
+      updateSession(sid, prev => ({ ...prev, recoveryNotice: '无法保留待发送消息，草稿未清除。请检查磁盘空间后重试。' }))
+      return false
+    }
+    recoveryGenerations.current.set(sid, (recoveryGenerations.current.get(sid) ?? 0) + 1)
 
     currentReasoningIds.current.set(sid, null)
     stepAnswerIds.current.set(sid, null)
@@ -271,27 +406,35 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       ...prev,
       step: null,
       messages: [...prev.messages, { id: `u-${getSessionCounter(sid)}`, role: 'user', content: text, attachments, timestamp: new Date() }],
-      isRunning: true,
+      isRunning: false,
+      recovery: null,
+      recoveryNotice: null,
     }))
 
-    if (wsPool.isConnected(sid)) {
-      wsPool.sendMessage(sid, text, attachments)
-    } else {
-      const checkAndSend = () => {
-        if (wsPool.isConnected(sid)) {
-          wsPool.sendMessage(sid, text, attachments)
-        } else {
-          setTimeout(checkAndSend, 50)
-        }
-      }
-      checkAndSend()
-    }
     window.dispatchEvent(new Event('session-updated'))
-  }, [activeSessionId, updateSession, getSessionCounter])
+    return true
+  }, [activeSessionId, updateSession, getSessionCounter, sendPending])
 
   const sendMessage = useCallback((text: string, attachments?: AttachmentRef[]) => {
-    sendMessageInternal(text, attachments)
+    return sendMessageInternal(text, attachments)
   }, [sendMessageInternal])
+
+  const retrySubmission = useCallback(() => {
+    const sid = activeSessionIdRef.current
+    const pending = sid ? pendingSubmissions.current.get(sid) : null
+    if (sid && pending) {
+      try { sendPending(sid, pending) } catch { updateSession(sid, prev => ({ ...prev, recoveryNotice: '无法保留发送状态，请检查存储空间' })) }
+    }
+  }, [sendPending, updateSession])
+
+  const refreshRecovery = useCallback(() => { if (activeSessionIdRef.current) void refreshSessionRecovery(activeSessionIdRef.current) }, [refreshSessionRecovery])
+  const retrySave = useCallback(async () => {
+    const sid = activeSessionIdRef.current
+    const recovery = sid ? sessionsRef.current.get(sid)?.recovery : null
+    if (!sid || !recovery) return
+    try { applyRecovery(sid, parseRecovery(await api.retryRunSave(recovery.run_id))) }
+    catch (error) { updateSession(sid, prev => ({ ...prev, recoveryNotice: error instanceof Error ? error.message : '重试保存失败，请复制结果' })) }
+  }, [applyRecovery, updateSession])
 
   const queueMessage = useCallback((text: string, attachments?: AttachmentRef[]) => {
     if (!activeSessionId) return
@@ -305,27 +448,53 @@ export default function SessionManager({ children }: { children: ReactNode }) {
 
   const cancelRun = useCallback(() => {
     if (!activeSessionId) return
-    const state = sessionsRef.current.get(activeSessionId)
-    if (state?.currentRunId) wsPool.cancel(activeSessionId, state.currentRunId)
-  }, [activeSessionId])
+    const sid = activeSessionId
+    const state = sessionsRef.current.get(sid)
+    const pending = pendingSubmissions.current.get(sid)
+    if (pending?.delivery === 'unsent') {
+      const key = `session:${sid}`
+      const draft = getChatDraft(key)
+      saveChatDraft(key, { text: [draft.text, pending.text].filter(Boolean).join('\n\n'), attachments: [...draft.attachments, ...pending.attachments.filter(file => !draft.attachments.some(existing => existing.path === file.path))] })
+      setPending(sid, null)
+      updateSession(sid, prev => ({ ...prev, recoveryNotice: '已取消待发送请求，原文和附件已恢复到草稿。' }))
+      return
+    }
+    if (!pending && !state?.currentRunId) return
+    updateSession(sid, prev => ({ ...prev, stopState: 'requesting', recoveryNotice: '正在请求停止，待当前工具结束后确认结果。' }))
+    if (!wsPool.cancel(sid, state?.currentRunId ?? null, pending?.id)) {
+      if (pending) void api.cancelSubmission(sid, pending.id).then(() => refreshSessionRecovery(sid)).catch(() => updateSession(sid, prev => ({ ...prev, stopState: 'unknown', recoveryNotice: '停止回执未确认，请查询任务状态。' })))
+      else updateSession(sid, prev => ({ ...prev, stopState: 'unknown', recoveryNotice: '连接已断开，请重连后查询任务状态。' }))
+    }
+    clearSubmissionTimer(sid)
+    submissionTimers.current.set(sid, setTimeout(() => {
+      updateSession(sid, prev => ({ ...prev, stopState: prev.isRunning || prev.pendingSubmission ? 'unknown' : 'idle' }))
+      void refreshSessionRecovery(sid)
+    }, 5000))
+  }, [activeSessionId, setPending, updateSession, clearSubmissionTimer, refreshSessionRecovery])
 
   const confirmToolCall = useCallback((approved: boolean) => {
     if (!activeSessionId) return
     const state = sessionsRef.current.get(activeSessionId)
-    if (state?.currentRunId) wsPool.confirm(activeSessionId, state.currentRunId, approved)
-    updateSession(activeSessionId, prev => ({ ...prev, confirmRequest: null, pendingConfirm: false }))
+    const request = state?.confirmRequest
+    if (!request || request.status === 'sending' || request.status === 'timed-out') return
+    if (Date.now() >= request.expiresAt) {
+      updateSession(activeSessionId, prev => ({ ...prev, confirmRequest: { ...request, status: 'timed-out' }, pendingConfirm: false }))
+      return
+    }
+    const sent = wsPool.confirm(activeSessionId, request.runId, approved, request.id)
+    updateSession(activeSessionId, prev => ({ ...prev, confirmRequest: { ...request, status: sent ? 'sending' : 'failed' }, recoveryNotice: sent ? '确认已发送，正在等待服务端回执。' : '确认未发送，请恢复连接后重试。' }))
   }, [activeSessionId, updateSession])
 
-  const processQueue = useCallback(() => {
-    if (!activeSessionId) return
-    const state = sessionsRef.current.get(activeSessionId)
+  const processQueue = useCallback((targetSessionId = activeSessionId) => {
+    if (!targetSessionId) return
+    const state = sessionsRef.current.get(targetSessionId)
     if (state && state.messageQueue.length > 0) {
       const next = state.messageQueue[0]
-      updateSession(activeSessionId, prev => ({
+      if (!sendMessageInternal(next.text, next.attachments, targetSessionId)) return
+      updateSession(targetSessionId, prev => ({
         ...prev,
         messageQueue: prev.messageQueue.slice(1),
       }))
-      setTimeout(() => sendMessageInternal(next.text, next.attachments), 100)
     }
   }, [activeSessionId, updateSession, sendMessageInternal])
 
@@ -357,16 +526,42 @@ export default function SessionManager({ children }: { children: ReactNode }) {
   }, [updateSession])
 
 
-  const subscribedSessionsRef = useRef(new Set<string>())
+  const subscribedSessionsRef = useRef(new Map<string, () => void>())
   const processQueueRef = useRef(processQueue)
   processQueueRef.current = processQueue
 
   const subscribeSession = useCallback((sid: string) => {
+    const restoredPending = sessionsRef.current.get(sid)?.pendingSubmission
+    if (restoredPending) pendingSubmissions.current.set(sid, restoredPending)
     if (!wsPool.hasConnection(sid)) {
       wsPool.connect(sid)
     }
 
     const unsubs = [
+      wsPool.on(sid, 'connected', () => {
+        updateSession(sid, prev => ({ ...prev, connectionState: 'connected' }))
+        const pending = pendingSubmissions.current.get(sid)
+        if (pending?.phase === 'waiting_connection') sendPending(sid, pending)
+        else void refreshSessionRecovery(sid)
+      }),
+      wsPool.on(sid, 'disconnected', () => {
+        updateSession(sid, prev => ({ ...prev, connectionState: 'disconnected', recoveryNotice: prev.isRunning ? '连接已断开，服务端将停止任务。重连后请查询已完成的工作。' : prev.recoveryNotice }))
+      }),
+      wsPool.on(sid, 'connection_error', data => updateSession(sid, prev => ({ ...prev, connectionState: 'disconnected', recoveryNotice: data.message }))),
+      wsPool.on(sid, 'submission_rejected', data => {
+        const pending = pendingSubmissions.current.get(sid)
+        if (!pending || (data.client_message_id && pending.id !== data.client_message_id)) return
+        clearSubmissionTimer(sid)
+        setPending(sid, { ...pending, phase: 'rejected', message: data.message || '提交未被接收，原文和附件已保留' })
+      }),
+      wsPool.on(sid, 'message_ack', data => {
+        const pending = pendingSubmissions.current.get(sid)
+        if (pending && data.client_message_id === pending.id && data.recovery) {
+          applyRecovery(sid, parseRecovery(data.recovery), true)
+          setPending(sid, null)
+        }
+      }),
+      wsPool.on(sid, 'cancelled', () => { void refreshSessionRecovery(sid) }),
       wsPool.on(sid, 'thinking', (data) => {
         const thought = (data.content || '').trim()
         if (!thought) return
@@ -506,7 +701,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             ...prev,
             step: {
               process: prev.step?.process ?? [],
-              answer: { id: nid, role: 'assistant' as const, content: data.content, timestamp: new Date() },
+              answer: { id: nid, role: 'assistant' as const, runId: data.run_id, content: data.content, timestamp: new Date() },
             },
           }))
         }
@@ -533,6 +728,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         }
       }),
       wsPool.on(sid, 'answer', (data) => {
+        if (data.status && data.session_id) applyRecovery(sid, parseRecovery(data))
         const flushRef = tokenFlushRefs.current.get(sid)
         if (flushRef) { cancelAnimationFrame(flushRef); tokenFlushRefs.current.delete(sid) }
         tokenBuffers.current.delete(sid)
@@ -571,15 +767,16 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             ...prev,
             messages: messages.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m),
             step: null,
-            isRunning: false,
-            currentRunId: null,
+            isRunning: data.execution_active === true,
+            currentRunId: data.execution_active === true ? data.run_id : null,
+            stopState: data.execution_active === true ? 'unknown' : 'idle',
             unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
           }
         })
-        processQueueRef.current()
         }
       }),
       wsPool.on(sid, 'error', (data) => {
+        if (data.status && data.session_id) applyRecovery(sid, parseRecovery(data))
         const isCancelled = data.message === 'cancelled'
         const label = isCancelled ? '⏹ Agent cancelled' : `Error: ${data.message}`
         currentReasoningIds.current.set(sid, null)
@@ -597,26 +794,43 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
           }
         })
-        processQueueRef.current()
       }),
-      wsPool.on(sid, 'done', () => {
+      wsPool.on(sid, 'done', (data) => {
         currentReasoningIds.current.set(sid, null)
         stepAnswerIds.current.set(sid, null)
         updateSession(sid, prev => {
           const next = commitStep(prev)
+          const recovery = prev.recovery && (!data.run_id || prev.recovery.run_id === data.run_id)
+            ? { ...prev.recovery, persisted: true, save_error: '', execution_active: data.execution_active === true } : prev.recovery
+          if (recovery) { try { saveRecoveryCopy(recovery) } catch { } }
           return {
             ...next,
+            recovery,
+            confirmRequest: null,
+            pendingConfirm: false,
             messages: next.messages.map(m => m.role === 'tool' && m.toolStatus === 'running' ? { ...m, toolStatus: 'done' as const } : m),
-            isRunning: false,
-            currentRunId: null,
+            isRunning: data.execution_active === true,
+            currentRunId: data.execution_active === true ? data.run_id : null,
+            stopState: data.execution_active === true ? 'unknown' : 'idle',
             unreadCount: sid !== activeSessionIdRef.current ? prev.unreadCount + 1 : prev.unreadCount,
           }
         })
-        processQueueRef.current()
+        if (!data.execution_active) queueTimers.current.set(sid, setTimeout(() => { queueTimers.current.delete(sid); processQueueRef.current(sid) }, 0))
+      }),
+      wsPool.on(sid, 'save_failed', data => {
+        updateSession(sid, prev => {
+          const recovery = prev.recovery ? { ...prev.recovery, persisted: false, save_error: data.save_error || '结果尚未保存', execution_active: false } : null
+          if (recovery) { try { saveRecoveryCopy(recovery) } catch { } }
+          return { ...prev, recovery, isRunning: false, currentRunId: null, confirmRequest: null, pendingConfirm: false }
+        })
       }),
       wsPool.on(sid, 'run_started', (data) => {
+        const pending = pendingSubmissions.current.get(sid)
+        if (pending && data.client_message_id && pending.id !== data.client_message_id) return
+        if (pending) setPending(sid, null)
+        recoveryGenerations.current.set(sid, (recoveryGenerations.current.get(sid) ?? 0) + 1)
         if (data.run_id) {
-          updateSession(sid, prev => ({ ...prev, currentRunId: data.run_id }))
+          updateSession(sid, prev => ({ ...prev, currentRunId: data.run_id, isRunning: true }))
         }
         window.dispatchEvent(new Event('session-updated'))
       }),
@@ -643,16 +857,30 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         })
       }),
       wsPool.on(sid, 'confirm_request', (data) => {
+        const id = typeof data.confirmation_id === 'string' ? data.confirmation_id : ''
+        const runId = typeof data.run_id === 'string' ? data.run_id : sessionsRef.current.get(sid)?.currentRunId ?? ''
+        const expiresAt = typeof data.expires_at === 'number' ? data.expires_at : Date.now()
         updateSession(sid, prev => ({
           ...prev,
-          confirmRequest: { summary: data.summary, status: 'awaiting' },
+          confirmRequest: { summary: data.summary, id, runId, expiresAt, status: id && expiresAt > Date.now() ? 'awaiting' : 'timed-out' },
           pendingConfirm: true,
         }))
+        const previousTimer = confirmationTimers.current.get(sid)
+        if (previousTimer) clearTimeout(previousTimer)
+        confirmationTimers.current.set(sid, setTimeout(() => {
+          updateSession(sid, prev => prev.confirmRequest && prev.confirmRequest.id === id ? { ...prev, confirmRequest: { ...prev.confirmRequest, status: 'timed-out' }, pendingConfirm: false } : prev)
+        }, Math.max(0, expiresAt - Date.now())))
+      }),
+      wsPool.on(sid, 'confirm_result', data => {
+        updateSession(sid, prev => prev.confirmRequest && prev.confirmRequest.id === data.confirmation_id ? {
+          ...prev, confirmRequest: data.status === 'accepted' ? null : { ...prev.confirmRequest, status: 'timed-out' },
+          pendingConfirm: false, recoveryNotice: data.status === 'accepted' ? null : data.message,
+        } : prev)
       }),
       wsPool.on(sid, 'confirm_timeout', (data) => {
         updateSession(sid, prev => ({
           ...prev,
-          confirmRequest: prev.confirmRequest ? { ...prev.confirmRequest, status: 'timed-out' } : null,
+          confirmRequest: prev.confirmRequest && (!data.confirmation_id || prev.confirmRequest.id === data.confirmation_id) ? { ...prev.confirmRequest, status: 'timed-out' } : prev.confirmRequest,
           pendingConfirm: false,
           messages: [...prev.messages, {
             id: `ct-${getSessionCounter(sid)}`,
@@ -690,15 +918,22 @@ export default function SessionManager({ children }: { children: ReactNode }) {
     return () => {
       unsubs.forEach(u => u())
     }
-  }, [updateSession, getSessionCounter])
+  }, [updateSession, getSessionCounter, applyRecovery, setPending, sendPending, refreshSessionRecovery, clearSubmissionTimer])
 
   useEffect(() => {
     for (const sid of sessions.keys()) {
       if (subscribedSessionsRef.current.has(sid)) continue
-      subscribedSessionsRef.current.add(sid)
-      subscribeSession(sid)
+      subscribedSessionsRef.current.set(sid, subscribeSession(sid))
     }
   }, [sessions, subscribeSession])
+
+  useEffect(() => () => {
+    for (const timer of submissionTimers.current.values()) clearTimeout(timer)
+    for (const timer of queueTimers.current.values()) clearTimeout(timer)
+    for (const timer of confirmationTimers.current.values()) clearTimeout(timer)
+    for (const [sid, unsubscribe] of subscribedSessionsRef.current) { unsubscribe(); wsPool.disconnect(sid) }
+    for (const frame of tokenFlushRefs.current.values()) cancelAnimationFrame(frame)
+  }, [])
 
 
   const handleSetSessionId = useCallback((id: string | null) => {
@@ -771,7 +1006,13 @@ export default function SessionManager({ children }: { children: ReactNode }) {
       setMessages: handleSetMessages,
       isRunning: activeState?.isRunning ?? false,
       currentRunId: activeState?.currentRunId ?? null,
-      confirmRequest: activeState?.confirmRequest ? { summary: activeState.confirmRequest.summary } : null,
+      pendingSubmission: activeState?.pendingSubmission ?? null,
+      recovery: activeState?.recovery ?? null,
+      recoveryNotice: activeState?.recoveryNotice ?? null,
+      connectionState: activeState?.connectionState ?? 'disconnected',
+      stopState: activeState?.stopState ?? 'idle',
+      retrySubmission, refreshRecovery, retrySave,
+      confirmRequest: activeState?.confirmRequest ?? null,
       msgCounter: activeState?.msgCounter ?? 0,
       incrementMsgCounter,
       sendMessage, cancelRun, confirmToolCall, processQueue, queueMessage,

@@ -344,8 +344,6 @@ describe('Bug: 页面导航后 agent 回答内容丢失', () => {
     expect(receivedTokens).toEqual(['Follow-up ', 'response'])
 
     agentWs.sendMessage('Follow-up question')
-    expect(latestWs.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: 'send_message', content: 'Follow-up question' })
-    )
+    expect(JSON.parse(latestWs.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'Follow-up question', client_message_id: expect.any(String) })
   })
 })

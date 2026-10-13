@@ -43,11 +43,16 @@ interface MCPServer {
   tool_names: string[]
 }
 
+type PanelLoad = { kind: 'loading'; updatedAt: number | null } | { kind: 'ready'; updatedAt: number } | { kind: 'failed'; updatedAt: number | null; message: string }
+const PANEL_LABELS: Record<string, string> = { todos: '待办列表', skills: '技能列表', mcp: 'MCP 状态', subagents: '子任务列表' }
+
 export default function InfoPanel() {
   const [todos, setTodos] = useState<Todo[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [restSubagents, setRestSubagents] = useState<SubagentInfo[]>([])
+  const [loadStates, setLoadStates] = useState<Record<string, PanelLoad>>({})
+  const reloaders = useRef(new Map<string, () => void>())
   const navigate = useNavigate()
   const { sessionId, getLiveSessionState } = useSession()
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -59,17 +64,35 @@ export default function InfoPanel() {
 
   useEffect(() => {
     if (!sessionId) return
-
-    const fetchData = () => {
-      api.getTodos(sessionId).then(d => setTodos(d.items || [])).catch(() => {})
-      api.listSkills().then(d => setSkills(d.skills || [])).catch(() => {})
-      api.getMcpStatus().then(d => setMcpServers(d.servers || [])).catch(() => {})
-      api.getSubagents(sessionId).then(d => setRestSubagents(d.subagents || [])).catch(() => {})
+    let cancelled = false
+    setTodos([])
+    setRestSubagents([])
+    setLoadStates({})
+    const track = <T,>(key: string, load: () => Promise<T>, receive: (value: T) => void) => {
+      let pending = false
+      const refresh = () => {
+        if (cancelled || pending) return
+        pending = true
+        setLoadStates(previous => ({ ...previous, [key]: { kind: 'loading', updatedAt: previous[key]?.updatedAt ?? null } }))
+        void load().then(value => {
+          if (cancelled) return
+          receive(value)
+          setLoadStates(previous => ({ ...previous, [key]: { kind: 'ready', updatedAt: Date.now() } }))
+        }).catch(error => {
+          if (cancelled) return
+          setLoadStates(previous => ({ ...previous, [key]: { kind: 'failed', updatedAt: previous[key]?.updatedAt ?? null, message: error instanceof Error ? error.message : '请检查连接' } }))
+        }).finally(() => { pending = false })
+      }
+      reloaders.current.set(key, refresh)
     }
-
+    track('todos', () => api.getTodos(sessionId), d => setTodos(d.items || []))
+    track('skills', () => api.listSkills(), d => setSkills(d.skills || []))
+    track('mcp', () => api.getMcpStatus(), d => setMcpServers(d.servers || []))
+    track('subagents', () => api.getSubagents(sessionId), d => setRestSubagents(d.subagents || []))
+    const fetchData = () => reloaders.current.forEach(refresh => refresh())
     fetchData()
     const interval = setInterval(fetchData, 10000)
-    return () => clearInterval(interval)
+    return () => { cancelled = true; clearInterval(interval); reloaders.current.clear() }
   }, [sessionId])
 
   const toggleSection = (key: string) => {
@@ -99,6 +122,11 @@ export default function InfoPanel() {
       collapsed={infoPanelCollapsed}
       onToggleCollapse={toggleInfoPanel}
     >
+      {Object.entries(loadStates).map(([key, state]) => state.kind === 'failed' ? <div key={key} role="alert" className="text-xs space-y-1 mb-3">
+        <p>{PANEL_LABELS[key]}加载失败：{state.message}</p>
+        <p>{state.updatedAt ? `当前显示上次成功读取的数据，更新于 ${new Date(state.updatedAt).toLocaleTimeString('zh-CN')}` : '数据尚未读取，不能判断是否为空。'}</p>
+        <button className="btn-ghost" onClick={() => reloaders.current.get(key)?.()}>重试{PANEL_LABELS[key]}</button>
+      </div> : state.kind === 'loading' && !state.updatedAt ? <p key={key} role="status" className="text-xs mb-2">正在读取{PANEL_LABELS[key]}…</p> : null)}
       {}
       {mergedSubagents.size > 0 && (
         <Section
@@ -160,7 +188,7 @@ export default function InfoPanel() {
       >
         <div className="space-y-1.5">
           {todos.length === 0 ? (
-            <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>No todos</p>
+            loadStates.todos?.kind === 'ready' ? <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>暂无待办</p> : null
           ) : (
             todos.map(todo => (
               <div

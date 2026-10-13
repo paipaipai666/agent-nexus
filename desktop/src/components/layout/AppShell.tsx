@@ -5,6 +5,7 @@ import SettingsNav from './SettingsNav'
 import StatusBar from './StatusBar'
 import Titlebar from '../titlebar/Titlebar'
 import CommandPalette from '../palette/CommandPalette'
+import BackendRecoveryBanner from '../BackendRecoveryBanner'
 import { useUIStore } from '../../services/ui'
 
 interface AppShellProps {
@@ -21,6 +22,7 @@ export default function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--surface-0)' }}>
       <Titlebar />
+      <BackendRecoveryBanner />
       <div className="flex flex-1 overflow-hidden">
         <div
           id="navigation-sidebar"

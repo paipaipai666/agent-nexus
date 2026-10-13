@@ -385,7 +385,7 @@ async def test_websocket_delivers_real_child_path_confirmation(
     async def send_json(payload):
         sent.append(payload)
         if payload.get("type") == "confirm_request":
-            await incoming.put({"type": "confirm", "approved": approved})
+            await incoming.put({"type": "confirm", "approved": approved, "run_id": payload["run_id"], "confirmation_id": payload["confirmation_id"]})
         elif payload.get("type") in {"done", "error"}:
             await incoming.put(WebSocketDisconnect())
 

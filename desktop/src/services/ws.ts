@@ -8,6 +8,7 @@ class SessionConnection {
   reconnectTimer: ReturnType<typeof setTimeout> | null = null
   lastCursor: number = 0
   lastEventSeq: number = 0
+  runId: string | null = null
 }
 
 
@@ -28,6 +29,8 @@ class WebSocketPool {
 
     const conn = new SessionConnection()
     conn.lastEventSeq = prevEventSeq
+    conn.lastCursor = existing?.lastCursor ?? 0
+    conn.runId = existing?.runId ?? null
     this.connections.set(sessionId, conn)
 
     let url = `${this.baseUrl}/api/ws/agent/${sessionId}`
@@ -35,7 +38,8 @@ class WebSocketPool {
     if (options?.resumeFrom != null && options.resumeFrom > 0) {
       params.push(`resumeFrom=${options.resumeFrom}`)
     }
-    if (prevEventSeq > 0) {
+    if (conn.runId) {
+      params.push(`resumeRunId=${encodeURIComponent(conn.runId)}`)
       params.push(`resumeEventsFrom=${prevEventSeq}`)
     }
     if (params.length > 0) {
@@ -50,11 +54,19 @@ class WebSocketPool {
     conn.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        if ((data.type === 'run_started' || data.type === 'message_ack') && typeof data.run_id === 'string') {
+          if (conn.runId !== data.run_id) {
+            conn.lastEventSeq = 0
+            conn.lastCursor = 0
+            conn.runId = data.run_id
+          }
+        } else if (data.run_id && conn.runId && data.run_id !== conn.runId) {
+          return
+        }
         if (typeof data.seq === 'number' && data.seq > conn.lastEventSeq) {
           conn.lastEventSeq = data.seq
         }
         this.emit(sessionId, data.type, data)
-        this.emit(sessionId, '*', data)
       } catch (e) {
         console.error('WS parse error:', e)
       }
@@ -66,7 +78,7 @@ class WebSocketPool {
     }
 
     conn.ws.onerror = () => {
-      this.emit(sessionId, 'error', { message: 'WebSocket error' })
+      this.emit(sessionId, 'connection_error', { message: '连接失败，正在尝试重新连接' })
     }
   }
 
@@ -87,31 +99,28 @@ class WebSocketPool {
     this.handlers.clear()
   }
 
-  send(sessionId: string, data: any): void {
+  send(sessionId: string, data: any): boolean {
     const conn = this.connections.get(sessionId)
     if (conn?.ws?.readyState === WebSocket.OPEN) {
-      conn.ws.send(JSON.stringify(data))
+      try { conn.ws.send(JSON.stringify(data)); return true } catch { return false }
     }
+    return false
   }
 
-  sendMessage(sessionId: string, content: string, attachments?: AttachmentRef[]): void {
-    if (attachments && attachments.length > 0) {
-      this.send(sessionId, { type: 'send_message', content, attachments })
-    } else {
-      this.send(sessionId, { type: 'send_message', content })
-    }
+  sendMessage(sessionId: string, content: string, attachments?: AttachmentRef[], clientMessageId: string = crypto.randomUUID()): boolean {
+    return this.send(sessionId, { type: 'send_message', content, attachments: attachments?.length ? attachments : undefined, client_message_id: clientMessageId })
   }
 
-  cancel(sessionId: string, runId: string): void {
-    this.send(sessionId, { type: 'cancel', run_id: runId })
+  cancel(sessionId: string, runId: string | null, clientMessageId?: string): boolean {
+    return this.send(sessionId, { type: 'cancel', run_id: runId, client_message_id: clientMessageId })
   }
 
   cancelSubagent(sessionId: string, subagentId: string): void {
     this.send(sessionId, { type: 'cancel_subagent', subagent_id: subagentId })
   }
 
-  confirm(sessionId: string, runId: string, approved: boolean): void {
-    this.send(sessionId, { type: 'confirm', run_id: runId, approved })
+  confirm(sessionId: string, runId: string, approved: boolean, confirmationId?: string): boolean {
+    return this.send(sessionId, { type: 'confirm', run_id: runId, approved, confirmation_id: confirmationId })
   }
 
   on(sessionId: string, event: string, handler: EventHandler): () => void {
@@ -152,6 +161,8 @@ class WebSocketPool {
     if (conn.ws) {
       conn.ws.onclose = null
       conn.ws.onerror = null
+      conn.ws.onmessage = null
+      conn.ws.onopen = null
       conn.ws.close()
       conn.ws = null
     }

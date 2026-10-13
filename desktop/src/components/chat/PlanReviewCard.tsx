@@ -8,9 +8,10 @@ interface PlanReviewCardProps {
   plan: string
   onApprove: () => void
   onDeny: () => void
+  disabled?: boolean
 }
 
-export default function PlanReviewCard({ plan, onApprove, onDeny }: PlanReviewCardProps) {
+export default function PlanReviewCard({ plan, onApprove, onDeny, disabled = false }: PlanReviewCardProps) {
   const { theme } = useTheme()
   const reducedMotion = usePrefersReducedMotion()
 
@@ -41,8 +42,8 @@ export default function PlanReviewCard({ plan, onApprove, onDeny }: PlanReviewCa
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{plan}</ReactMarkdown>
       </div>
       <div className="px-5 pb-4 flex gap-2.5">
-        <button onClick={onApprove} className="btn-primary">批准并执行</button>
-        <button onClick={onDeny} className="btn-ghost">拒绝</button>
+        <button disabled={disabled} onClick={onApprove} className="btn-primary">批准并执行</button>
+        <button disabled={disabled} onClick={onDeny} className="btn-ghost">拒绝</button>
       </div>
     </div>
     </BorderBeam>

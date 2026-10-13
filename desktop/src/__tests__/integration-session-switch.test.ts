@@ -81,9 +81,7 @@ describe('Integration: session switch during streaming', () => {
 
     agentWs.sendMessage('new question on session B')
 
-    expect(wsB.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: 'send_message', content: 'new question on session B' })
-    )
+    expect(JSON.parse(wsB.send.mock.calls.at(-1)?.[0] ?? '{}')).toEqual({ type: 'send_message', content: 'new question on session B', client_message_id: expect.any(String) })
     expect(wsA.send).not.toHaveBeenCalled()
 
     wsB._receive({ type: 'token', content: 'New ' })

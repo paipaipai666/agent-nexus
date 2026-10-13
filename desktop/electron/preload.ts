@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),
+  restartBackend: () => ipcRenderer.invoke('restart-backend'),
   onBackendError: (callback: (message: string) => void) => {
     const listener = (_event: IpcRendererEvent, message: string) => callback(message)
     ipcRenderer.on('backend-error', listener)

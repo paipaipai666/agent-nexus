@@ -22,6 +22,7 @@ const fixture = vi.hoisted(() => {
     construct,
     exists: vi.fn(() => false),
     spawn: vi.fn(() => child),
+    health: [503],
   }
 })
 
@@ -37,7 +38,7 @@ vi.mock('child_process', () => ({ spawn: fixture.spawn, default: { spawn: fixtur
 vi.mock('http', () => ({
   default: {
     get: (_url: string, callback: (response: { statusCode: number; resume: () => void }) => void) => {
-      callback({ statusCode: 200, resume: () => {} })
+      callback({ statusCode: fixture.health.length > 1 ? fixture.health.shift() ?? 503 : fixture.health[0], resume: () => {} })
       return { on: vi.fn(), setTimeout: vi.fn(), destroy: vi.fn() }
     },
   },
@@ -60,6 +61,7 @@ describe('Desktop initial window', () => {
     vi.stubEnv('VITE_DEV_SERVER_URL', '')
     fixture.listeners.clear()
     fixture.exists.mockReturnValue(false)
+    fixture.health = [503]
     fixture.window.isDestroyed.mockReturnValue(false)
     fixture.window.loadFile.mockResolvedValue()
   })
@@ -80,11 +82,12 @@ describe('Desktop initial window', () => {
 
     expect(fixture.window.show).toHaveBeenCalledOnce()
     expect(fixture.window.webContents.send).toHaveBeenCalledWith('backend-error', expect.any(String))
-    expect(fixture.window.loadFile).toHaveBeenCalledOnce()
+    expect(fixture.window.loadFile.mock.calls.map(([file]) => file.split(/[\\/]/).pop())).toEqual(['loading.html', 'index.html'])
   })
 
   it('loads the application after backend health succeeds', async () => {
     fixture.exists.mockReturnValue(true)
+    fixture.health = [503, 200]
     await import('../../electron/main')
     await flush()
     expect(fixture.spawn).not.toHaveBeenCalled()

@@ -110,7 +110,7 @@ class TestChatService:
         with pytest.raises(KeyError, match="Unknown run_id"):
             next(service.stream_events("nonexistent"))
 
-    def test_cancel_run_emits_run_failed_with_cancelled_error(self):
+    def test_cancelling_a_finished_run_keeps_its_successful_outcome(self):
         agent = MagicMock()
         agent.run.return_value = "answer"
         service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
@@ -119,11 +119,9 @@ class TestChatService:
         events_before = list(service.stream_events(run.id))
         assert len(events_before) == 4
         service.cancel_run(run.id)
-        events_after = list(service.stream_events(run.id))
-        assert len(events_after) == 2
-        assert events_after[0].type == "run_interrupted"
-        assert events_after[0].payload["error"] == "cancelled"
-        assert events_after[1].type == "run_persisted"
+        record = service.get_run_snapshot(run.id)
+        assert record.status == "finished"
+        assert record.answer == "answer"
 
     def test_cancel_run_unknown_run_id_is_noop(self):
         service = ChatService(agent_factory=lambda _sid=None: MagicMock(), memory_factory_builder=lambda _sid: lambda: MagicMock())
