@@ -41,6 +41,23 @@ CREATE TABLE IF NOT EXISTS context_snapshots (
     messages      TEXT NOT NULL,
     PRIMARY KEY (session_id, run_id, step_id)
 );
+CREATE TABLE IF NOT EXISTS collaboration_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    subagent_id TEXT NOT NULL,
+    child_run_id TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    delivery TEXT NOT NULL DEFAULT 'queued',
+    step_id INTEGER NOT NULL DEFAULT 0,
+    question_state TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    ts REAL NOT NULL,
+    UNIQUE(session_id, run_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collaboration_session ON collaboration_messages(session_id, id);
 """
 
 
@@ -110,6 +127,121 @@ class TimelineStore:
         """Assign the same task identity to every retry of one submission."""
         digest = hashlib.sha256(json.dumps([session_id, client_message_id]).encode()).hexdigest()
         return f"run_{digest[:24]}"
+
+    @staticmethod
+    def _collaboration_row(row) -> dict:
+        return {**json.loads(row["envelope"]), **{key: row[key] for key in
+                ("id", "delivery", "step_id", "question_state", "reason", "revision", "ts")}}
+
+    def create_collaboration_message(self, envelope: dict) -> dict:
+        """Commit a message before its receiver is notified; retries are idempotent."""
+        if self._conn is None:
+            raise OSError("协作消息存储不可用")
+        serialized = json.dumps(envelope, ensure_ascii=False, sort_keys=True)
+        request_key = json.dumps([envelope["sender"], envelope["request_id"]])
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO collaboration_messages (session_id, run_id, request_id, subagent_id, child_run_id, envelope, question_state, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (envelope["session_id"], envelope["run_id"], request_key, envelope["subagent_id"], envelope["child_run_id"], serialized,
+                 "open" if envelope["kind"] == "question" else "", time.time()),
+            )
+            row = self._conn.execute("SELECT * FROM collaboration_messages WHERE session_id = ? AND run_id = ? AND request_id = ?",
+                                     (envelope["session_id"], envelope["run_id"], request_key)).fetchone()
+            if row["envelope"] != serialized:
+                raise ValueError("消息 ID 已用于其他内容")
+            if envelope["kind"] == "reply" and row["revision"] == 1:
+                self._conn.execute("UPDATE collaboration_messages SET question_state = 'answered', revision = revision + 1 WHERE id = ? AND session_id = ? AND run_id = ? AND child_run_id = ? AND question_state = 'open'",
+                                   (envelope["question_id"], envelope["session_id"], envelope["run_id"], envelope["child_run_id"]))
+            return self._collaboration_row(row)
+
+    def list_collaboration_messages(self, session_id: str, subagent_id: str | None = None, after_id: int = 0, limit: int = 500, *, run_id: str | None = None) -> list[dict]:
+        """Read durable communication, including updated delivery receipts."""
+        if self._conn is None:
+            raise OSError("协作消息存储不可用")
+        query = "SELECT * FROM collaboration_messages WHERE session_id = ? AND id > ?"
+        params: list = [session_id, after_id]
+        if subagent_id is not None:
+            query += " AND subagent_id = ?"
+            params.append(subagent_id)
+        if run_id is not None:
+            query += " AND run_id = ?"
+            params.append(run_id)
+        with self._lock:
+            rows = self._conn.execute(query + " ORDER BY id LIMIT ?", [*params, limit]).fetchall()
+        return [self._collaboration_row(row) for row in rows]
+
+    def apply_collaboration_messages(self, ids: list[int], step_id: int) -> None:
+        """Record successful context consumption as a strict transaction."""
+        if self._conn is None:
+            raise OSError("无法保存协作消息回执")
+        with self._lock, self._conn:
+            self._conn.executemany("UPDATE collaboration_messages SET delivery = 'applied', step_id = ?, revision = revision + 1 WHERE id = ? AND delivery = 'queued'", [(step_id, mid) for mid in ids])
+
+    def close_collaboration(self, session_id: str | None, run_id: str | None, reason: str, child_run_id: str | None = None) -> None:
+        """Close unfinished deliveries and questions without removing history."""
+        if self._conn is None:
+            raise OSError("无法关闭协作消息")
+        filters, params = [], []
+        for column, value in (("session_id", session_id), ("run_id", run_id), ("child_run_id", child_run_id)):
+            if value is not None:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        where = " AND ".join(filters) or "1 = 1"
+        delivery_filter = "delivery = 'queued'"
+        if child_run_id is not None:
+            delivery_filter += " AND json_extract(envelope, '$.recipient') != 'parent'"
+        with self._lock, self._conn:
+            self._conn.execute(f"UPDATE collaboration_messages SET delivery = CASE WHEN {delivery_filter} THEN 'rejected' ELSE delivery END, question_state = CASE WHEN question_state = 'open' THEN 'closed' ELSE question_state END, reason = ?, revision = revision + 1 WHERE ({where}) AND (({delivery_filter}) OR question_state = 'open')", [reason, *params])
+
+    def expire_collaboration_question(self, message_id: int) -> None:
+        """Expire an unanswered question at its attempt deadline."""
+        if self._conn is None:
+            raise OSError("无法保存问题超时")
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE collaboration_messages SET question_state = 'expired', revision = revision + 1 WHERE id = ? AND question_state = 'open'", (message_id,))
+
+    def list_subagent_summaries(self, session_id: str) -> list[dict]:
+        """Recover child metadata from structural history after a process restart."""
+        if self._conn is None:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "WITH children AS (SELECT json_extract(payload, '$.subagent_id') AS child, MIN(id) AS first_id, MAX(id) AS last_id FROM session_events WHERE session_id = ? AND event_type = 'subagent_event' GROUP BY child) SELECT a.payload AS first_payload, b.payload AS last_payload, a.ts AS started_at, b.ts AS updated_at, b.run_id FROM children JOIN session_events a ON a.id = first_id JOIN session_events b ON b.id = last_id",
+                (session_id,),
+            ).fetchall()
+        summaries = []
+        for row in rows:
+            first, last = json.loads(row["first_payload"]), json.loads(row["last_payload"])
+            status = last.get("status", "interrupted")
+            status = status if status in ("completed", "failed", "interrupted") else "interrupted"
+            summaries.append({"subagent_id": last["subagent_id"], "name": last.get("name", first.get("name", "")),
+                              "role": last.get("role", first.get("role", "")), "task": last.get("task", first.get("task", "")),
+                              "status": status, "current_tool": "", "started_at": row["started_at"], "finished_at": row["updated_at"],
+                              "steps_used": last.get("steps_used", last.get("step_id", 0)), "error": last.get("error", ""),
+                              "run_id": row["run_id"], "child_run_id": last.get("child_run_id", ""), "updated_at": row["updated_at"],
+                              "latest_progress": last.get("latest_progress", ""), "waiting_questions": 0, "collaborative": last.get("collaborative", False)})
+        return summaries
+
+    def recover_collaboration(self) -> None:
+        """Append interrupted states once and close inboxes belonging to the old process."""
+        if self._conn is None:
+            raise OSError("无法恢复协作历史")
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE collaboration_messages SET delivery = CASE WHEN delivery = 'queued' THEN 'rejected' ELSE delivery END, question_state = CASE WHEN question_state = 'open' THEN 'closed' ELSE question_state END, reason = 'backend_restarted', revision = revision + 1 WHERE delivery = 'queued' OR question_state = 'open'")
+            rows = self._conn.execute(
+                "WITH children AS (SELECT session_id, run_id, json_extract(payload, '$.subagent_id') AS child, MIN(id) AS first_id, MAX(id) AS last_id FROM session_events WHERE event_type = 'subagent_event' GROUP BY session_id, run_id, child) SELECT a.payload AS first_payload, b.* FROM children JOIN session_events a ON a.id = first_id JOIN session_events b ON b.id = last_id",
+            ).fetchall()
+            now = time.time()
+            for row in rows:
+                first, last = json.loads(row["first_payload"]), json.loads(row["payload"])
+                if last.get("status") not in ("thinking", "tool_calling", "waiting", "cancelling"):
+                    continue
+                minimum = self._conn.execute("SELECT MIN(seq) FROM session_events WHERE session_id = ? AND run_id = ?", (row["session_id"], row["run_id"])).fetchone()[0]
+                payload = {key: last.get(key, first.get(key, "")) for key in ("subagent_id", "name", "role", "task", "child_run_id")}
+                payload.update(kind="finished", status="interrupted", error="后端重启，子任务已中断", summary="", finished_at=now, updated_at=now,
+                               steps_used=last.get("steps_used", row["step_id"]))
+                self._conn.execute("INSERT INTO session_events (session_id, run_id, seq, ts, event_type, step_id, payload) VALUES (?, ?, ?, ?, 'subagent_event', ?, ?)",
+                                   (row["session_id"], row["run_id"], min(minimum or 0, -2) - 1, now, row["step_id"], json.dumps(payload, ensure_ascii=False)))
 
     def claim_submission(self, session_id: str, client_message_id: str, content: str, attachments: list | None) -> tuple[str, bool]:
         """Durably reserve a submission before any agent or tool executes."""
@@ -320,6 +452,7 @@ def get_timeline_store(db_path: str | None = None) -> TimelineStore:
             return _instances[db_path]
         store = TimelineStore(db_path)
         if store._conn is not None:
+            store.recover_collaboration()
             _instances[db_path] = store
         return store
 

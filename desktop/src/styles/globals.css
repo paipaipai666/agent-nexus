@@ -373,6 +373,12 @@ html.theme-anim * {
   }
 }
 
+.collaboration-workspace input::placeholder,
+.collaboration-workspace textarea::placeholder {
+  color: var(--fg-secondary);
+  opacity: 1;
+}
+
 .markdown-body {
   font-family: var(--font-sans);
   font-size: 15px;

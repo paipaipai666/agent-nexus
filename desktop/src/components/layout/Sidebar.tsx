@@ -134,7 +134,7 @@ export default function Sidebar() {
       return { id: '', preview: '', isNew: true }
     }
     if (location.pathname.startsWith('/chat/')) {
-      const sid = location.pathname.slice('/chat/'.length)
+      const sid = location.pathname.split('/')[2]
       if (!sid || recentSessions.some(s => s.session_id === sid)) return null
       const firstUser = sessions.get(sid)?.messages.find(m => m.role === 'user')
       return { id: sid, preview: firstUser?.content ?? '', isNew: false }
@@ -172,7 +172,7 @@ export default function Sidebar() {
     await deleteSession(sessionId)
   }
 
-  const isActiveSession = (sid: string) => location.pathname === `/chat/${sid}`
+  const isActiveSession = (sid: string) => location.pathname === `/chat/${sid}` || location.pathname.startsWith(`/chat/${sid}/`)
   const selectedKey = selected ? workspaceKey(selected) : null
 
   return (

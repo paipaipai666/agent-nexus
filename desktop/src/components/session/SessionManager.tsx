@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useRef, useCallback, useEffect, ty
 import { wsPool } from '../../services/ws'
 import type { AttachmentRef, RuntimeStatus } from '../../services/api'
 import { api } from '../../services/api'
+import { parseSubagentEvent, type SubagentStatus } from '../../services/subagentWorkspace'
+import { useCollaborationStore } from '../../services/collaborationStore'
 import { getChatDraft, saveChatDraft } from '../../services/chatDrafts'
 import { getPendingSubmission, savePendingSubmission, getRecoveryCopy, saveRecoveryCopy, parseRecovery, type PendingSubmission, type RunRecovery } from '../../services/recovery'
 
@@ -33,8 +35,10 @@ export interface SubagentMeta {
   name: string
   role: string
   task: string
-  status: 'thinking' | 'tool_calling' | 'interrupted' | 'completed' | 'failed'
+  status: SubagentStatus
   currentTool?: string
+  updatedAt?: number
+  latestProgress?: string
 }
 
 interface ConfirmationRequest {
@@ -835,6 +839,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
         window.dispatchEvent(new Event('session-updated'))
       }),
       wsPool.on(sid, 'subagent_event', (data) => {
+        try { useCollaborationStore.getState().ingest(sid, [parseSubagentEvent(data)]) } catch { return }
         const id = data?.subagent_id
         if (!id) return
         if (data.kind === 'token' || data.kind === 'reasoning') return
@@ -850,6 +855,7 @@ export default function SessionManager({ children }: { children: ReactNode }) {
             role: data.role || cur.role,
             task: data.kind === 'started' ? (data.task || cur.task) : cur.task,
             status: data.status || cur.status,
+            updatedAt: data.updated_at ?? cur.updatedAt,
             currentTool: data.kind === 'tool_call' ? data.tool_name
               : (data.status === 'tool_calling' ? cur.currentTool : undefined),
           })

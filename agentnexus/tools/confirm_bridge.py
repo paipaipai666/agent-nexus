@@ -61,39 +61,32 @@ class ConfirmBridge:
 
 
 class CancelBridge:
-    """Publish the parent agent's cancel checker to subagent tool closures.
-
-    The checker is a plain Callable[[], bool] — safe to share across threads.
-    Subagents cannot spawn their own subagents, so a single slot per registry
-    suffices (no per-thread routing needed, unlike ConfirmBridge).
-    """
+    """Bind cancellation to the run context inherited by worker threads."""
 
     def __init__(self):
-        self._checker: Callable[[], bool] | None = None
+        self._checker: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextVar(
+            "agentnexus_cancel_checker", default=None,
+        )
 
     def set_checker(self, checker: Callable[[], bool] | None) -> None:
-        self._checker = checker
+        self._checker.set(checker)
 
     def check(self) -> bool:
         """Return True when the parent run has been cancelled."""
-        return bool(self._checker and self._checker())
+        checker = self._checker.get()
+        return bool(checker and checker())
 
 
 class SubagentBridge:
-    """Publish the active run's subagent context to subagent_run closures.
-
-    Same single-slot tradeoff as CancelBridge: sessions sharing one registry
-    share this slot — the last run to start wins (see the comment at
-    re_act_agent.py where cancel_bridge.set_checker runs). The context exposes
-    the run/session identity and the emit path the subagent tool forwards
-    child-agent events through.
-    """
+    """Bind child execution to its parent run without cross-session sharing."""
 
     def __init__(self):
-        self._ctx = None
+        self._ctx: contextvars.ContextVar = contextvars.ContextVar(
+            "agentnexus_subagent_context", default=None,
+        )
 
     def set_context(self, ctx) -> None:
-        self._ctx = ctx
+        self._ctx.set(ctx)
 
     def get_context(self):
-        return self._ctx
+        return self._ctx.get()

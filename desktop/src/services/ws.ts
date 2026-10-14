@@ -115,8 +115,8 @@ class WebSocketPool {
     return this.send(sessionId, { type: 'cancel', run_id: runId, client_message_id: clientMessageId })
   }
 
-  cancelSubagent(sessionId: string, subagentId: string): void {
-    this.send(sessionId, { type: 'cancel_subagent', subagent_id: subagentId })
+  cancelSubagent(sessionId: string, subagentId: string): boolean {
+    return this.send(sessionId, { type: 'cancel_subagent', subagent_id: subagentId })
   }
 
   confirm(sessionId: string, runId: string, approved: boolean, confirmationId?: string): boolean {

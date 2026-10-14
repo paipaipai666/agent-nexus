@@ -30,6 +30,7 @@ EXPECTED_READ_ONLY = {
     "history_search", "memory_search", "memory_project_status",
     "todo_list",
     "express_reaction",
+    "subagent_send", "subagent_wait",
 }
 
 

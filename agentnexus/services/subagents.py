@@ -1,13 +1,4 @@
-"""Subagent visibility registry — named subagents, live status, per-subagent cancel.
-
-Subagents spawned by the ``subagent_run`` tool execute on dispatcher lane-pool
-threads, so they cannot reach the per-run event machinery of ChatService
-directly. ChatService publishes a per-run ``SubagentRunContext`` on the shared
-registry's ``subagent_bridge`` (same single-slot pattern as ``CancelBridge``);
-the subagent tool closure forwards child-agent events through that context
-into the parent run's queues, and individual cancellation rides a
-``threading.Event`` stored on each entry.
-"""
+"""Named child tasks, live status and per-run execution ownership."""
 
 from __future__ import annotations
 
@@ -44,6 +35,11 @@ class SubagentEntry:
     finished_at: float | None = None
     steps_used: int = 0
     error: str = ""
+    child_run_id: str = ""
+    latest_progress: str = ""
+    waiting_questions: int = 0
+    collaborative: bool = False
+    updated_at: float = field(default_factory=time.time)
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
@@ -96,10 +92,13 @@ class SubagentRegistry:
 
     def update(self, entry: SubagentEntry, **fields) -> None:
         with self._lock:
+            entry.updated_at = time.time()
             for key, value in fields.items():
                 if value is None:
                     continue
                 setattr(entry, key, value)
+            if entry.cancel_event.is_set() and entry.status not in TERMINAL_STATUSES:
+                entry.status = "cancelling"
             if entry.status in TERMINAL_STATUSES and entry.finished_at is None:
                 entry.finished_at = time.time()
 
@@ -110,6 +109,8 @@ class SubagentRegistry:
             if entry is None or entry.status in TERMINAL_STATUSES:
                 return False
             entry.cancel_event.set()
+            entry.status = "cancelling"
+            entry.updated_at = time.time()
             return True
 
     @staticmethod
@@ -125,6 +126,12 @@ class SubagentRegistry:
             "finished_at": entry.finished_at,
             "steps_used": entry.steps_used,
             "error": entry.error,
+            "run_id": entry.run_id,
+            "child_run_id": entry.child_run_id,
+            "latest_progress": entry.latest_progress,
+            "waiting_questions": entry.waiting_questions,
+            "collaborative": entry.collaborative,
+            "updated_at": entry.updated_at,
         }
 
 
@@ -139,6 +146,7 @@ class SubagentRunContext:
         self._service = service
         self._session_id = session_id
         self._run_id = run_id
+        self.collaboration = None
 
     def started(self, name_hint: object, role: str, task: str) -> SubagentEntry:
         entry = self._service._subagents.register(

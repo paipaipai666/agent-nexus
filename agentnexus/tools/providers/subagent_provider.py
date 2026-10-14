@@ -12,14 +12,13 @@ class SubagentToolProvider:
         return ProviderSpec("subagent", description="Delegation tool for controlled child ReAct agents.")
 
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
-        if not context.enable_subagent or not context.want("subagent_run"):
+        if not context.enable_subagent or not any(context.want(name) for name in ("subagent_run", "subagent_start", "subagent_send", "subagent_wait")):
             return
 
         from agentnexus.tools.subagent import make_subagent_run
 
         before = set(executor.list_tools())
-        executor.register(
-            ToolMeta(
+        metadata = ToolMeta(
                 name="subagent_run",
                 description="将一个明确、可独立完成、输入充分的子任务委派给子代理执行。默认是 Explorer"
                             "（阅读、检索、归纳）；使用 executor 时可在受控条件下运行 Python 片段验证结果。"
@@ -47,14 +46,20 @@ class SubagentToolProvider:
                 concurrency_safe=True,
                 lane="subagent",
                 timeout_sec=get_settings().subagent_timeout_sec,
-            ),
-            make_subagent_run(
-                parent_llm=context.llm_client,
-                non_interactive=context.non_interactive,
-                subagent_confirm=context.subagent_confirm,
-                mcp_manager=context.mcp_manager,
-                cancel_bridge=executor.cancel_bridge,
-                subagent_bridge=getattr(executor, "subagent_bridge", None),
-            ),
         )
+        if context.want("subagent_run"):
+            executor.register(
+                metadata,
+                make_subagent_run(
+                    parent_llm=context.llm_client,
+                    non_interactive=context.non_interactive,
+                    subagent_confirm=context.subagent_confirm,
+                    mcp_manager=context.mcp_manager,
+                    cancel_bridge=executor.cancel_bridge,
+                    subagent_bridge=executor.subagent_bridge,
+                ),
+            )
+        from agentnexus.tools.collaboration import register_parent_collaboration
+
+        register_parent_collaboration(executor, context, metadata.param_schema)
         context.mark_registered(executor, before)

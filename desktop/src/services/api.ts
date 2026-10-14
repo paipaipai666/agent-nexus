@@ -1,6 +1,7 @@
 const BASE_URL = 'http://127.0.0.1:18765'
 
 import { parseRuntimeStatus } from './runtime-status'
+import { parseCommunication, type SubagentStatus } from './subagentWorkspace'
 export type { ContextCategory, RuntimeStatus } from './runtime-status'
 
 export interface AttachmentRef {
@@ -53,12 +54,18 @@ export interface SubagentInfo {
   name: string
   role: string
   task: string
-  status: 'thinking' | 'tool_calling' | 'interrupted' | 'completed' | 'failed'
+  status: SubagentStatus
   current_tool: string
   started_at: number
   finished_at: number | null
   steps_used: number
   error: string
+  run_id?: string
+  child_run_id?: string
+  latest_progress?: string
+  waiting_questions?: number
+  collaborative?: boolean
+  updated_at?: number
 }
 
 export interface ModelOverride {
@@ -273,9 +280,19 @@ export const api = {
     ),
 
   getSubagents: (sessionId: string) =>
-    request<{ session_id: string; subagents: SubagentInfo[] }>(
+    request<{ session_id: string; subagents: SubagentInfo[]; collaboration_enabled?: boolean }>(
       `/api/session/${sessionId}/subagents`
     ),
+
+  getSubagentMessages: (sessionId: string, subagentId: string, after = 0) =>
+    request<{ messages: unknown[]; last_id: number; count: number }>(`/api/session/${sessionId}/subagents/${subagentId}/messages?after=${after}`)
+      .then(data => ({ ...data, messages: data.messages.map(parseCommunication) })),
+
+  sendSubagentMessage: (sessionId: string, subagentId: string, input: { content: string; request_id: string; child_run_id: string; question_id?: number }) =>
+    request<unknown>(`/api/session/${sessionId}/subagents/${subagentId}/messages`, { method: 'POST', body: JSON.stringify(input) }).then(parseCommunication),
+
+  cancelSubagent: (sessionId: string, subagentId: string) =>
+    request<{ accepted: boolean; subagent_id: string; subagent?: SubagentInfo | null }>(`/api/session/${sessionId}/subagents/${subagentId}/cancel`, { method: 'POST' }),
 
   getSessionEvents: (sessionId: string, after = 0, agentId?: string, view: 'timeline' | 'trajectory' = 'timeline') =>
     request<{ session_id: string; events: TimelineEvent[]; last_id: number; count: number }>(

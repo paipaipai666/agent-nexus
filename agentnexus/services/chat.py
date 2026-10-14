@@ -220,6 +220,7 @@ class ChatService:
         self._version_managers: dict[str, Any] = {}
         self._plan_mode = PlanModeManager()
         self._subagents = SubagentRegistry()
+        self._collaborations: dict[str, Any] = {}
         self._put_event_lock = threading.RLock()
         self._thinking_effort: dict[str, str | None] = {}
         self._submission_lock = threading.Lock()
@@ -420,15 +421,23 @@ class ChatService:
             updates["status"] = status
         if kind == "tool_call":
             updates["current_tool"] = fields.get("tool_name", "")
+        elif status is not None and status != "tool_calling":
+            updates["current_tool"] = ""
         if kind == "finished":
             updates["steps_used"] = fields.get("steps_used", 0)
             updates["error"] = fields.get("error", "")
+        if fields.get("step_id"):
+            updates["steps_used"] = fields["step_id"]
+        if kind == "communication":
+            updates["waiting_questions"] = fields.get("waiting_questions", 0)
+            progress = [m for m in fields.get("messages", []) if m["kind"] == "progress"]
+            if progress:
+                updates["latest_progress"] = progress[-1]["content"]
         if updates:
             self._subagents.update(entry, **updates)
         self._put_event(entry.run_id, AgentEvent(
             "subagent_event",
-            {"subagent_id": entry.subagent_id, "name": entry.name,
-             "kind": kind, "status": entry.status, **fields},
+            {**SubagentRegistry.to_dict(entry), "kind": kind, **fields},
             run_id=entry.run_id, session_id=entry.session_id,
             step_id=fields.get("step_id", 0),
         ), persist=kind not in ("token", "reasoning"))
@@ -437,11 +446,31 @@ class ChatService:
         entry = self._subagents.get(subagent_id)
         if entry is None or entry.session_id != session_id:
             return False
-        return self._subagents.cancel(subagent_id)
+        accepted = self._subagents.cancel(subagent_id)
+        if accepted:
+            self._subagent_emit(entry, "cancelling", status="cancelling")
+        return accepted
 
     def list_subagents(self, session_id: str) -> list[dict]:
-        return [SubagentRegistry.to_dict(e)
-                for e in self._subagents.list_for_session(session_id)]
+        summaries = {s["subagent_id"]: s for s in get_timeline_store().list_subagent_summaries(session_id)}
+        summaries.update({e.subagent_id: SubagentRegistry.to_dict(e) for e in self._subagents.list_for_session(session_id)})
+        return list(summaries.values())
+
+    def send_subagent_message(self, session_id: str, subagent_id: str, content: str, request_id: str, child_run_id: str, question_id: int | None = None) -> dict:
+        """Users supplement the current child attempt through its durable inbox."""
+        receipts = get_timeline_store().list_collaboration_messages(session_id, subagent_id)
+        receipt = next((m for m in receipts if m["sender"] == "user" and m["request_id"] == request_id), None)
+        if receipt is not None:
+            if receipt["content"] != content or receipt["child_run_id"] != child_run_id or receipt["question_id"] != (question_id or ""):
+                raise ValueError("消息 ID 已用于其他内容")
+            return receipt
+        entry = self._subagents.get(subagent_id)
+        if entry is None or entry.session_id != session_id:
+            raise ValueError("子任务不属于当前会话")
+        collaboration = self._collaborations.get(entry.run_id)
+        if collaboration is None:
+            raise ValueError("父运行已结束，无法追加消息")
+        return collaboration.send(subagent_id, content, request_id, question_id, child_run_id=child_run_id, sender="user")
 
     def _evaluate_run_alerts(self) -> None:
         """Feed recent run metrics into the alert pipeline (non-fatal)."""
@@ -642,7 +671,17 @@ class ChatService:
         old_output = getattr(agent, "_output", None)
         subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
         if subagent_bridge is not None:
-            subagent_bridge.set_context(SubagentRunContext(self, session_id, run.id))
+            context = SubagentRunContext(self, session_id, run.id)
+            from agentnexus.core.config import get_settings
+            from agentnexus.services.collaboration import CollaborationRun
+
+            settings = get_settings()
+            if settings.subagent_collaboration_enabled:
+                context.collaboration = CollaborationRun(context, get_timeline_store(), self._tool_executor.get_lane_pool("subagent"), turn.cancel_checker,
+                                                         max_tasks=settings.subagent_max_concurrent * 4, timeout=settings.subagent_timeout_sec)
+                self._collaborations[run.id] = context.collaboration
+                _bind_optional(agent, "set_collaboration", context.collaboration.parent)
+            subagent_bridge.set_context(context)
         return _RunSetup(
             session_id=session_id, agent=agent, memory=memory, run=run, turn=turn,
             events=events, images=images, attach_paths=attach_paths,
@@ -696,6 +735,13 @@ class ChatService:
             unregister_attachment_paths,
         )
         agent, run, session_id = setup.agent, setup.run, setup.session_id
+        collaboration = self._collaborations.pop(run.id, None)
+        if collaboration is not None:
+            try:
+                collaboration.close("parent_finished")
+            except Exception as exc:
+                logger.error("Failed to close collaboration for %s: %s", run.id, exc)
+        _bind_optional(agent, "set_collaboration", None)
         if setup.subagent_bridge is not None:
             setup.subagent_bridge.set_context(None)
         current_workspace.reset(setup.ws_token)

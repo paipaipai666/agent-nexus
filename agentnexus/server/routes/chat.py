@@ -11,7 +11,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentnexus.server.deps import get_runtime
 from agentnexus.server.error_handlers import APIError
@@ -415,7 +415,44 @@ def list_subagents(session_id: str, runtime=Depends(get_runtime)):
         subagents = runtime.chat.list_subagents(session_id)
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
-    return {"session_id": session_id, "subagents": subagents}
+    from agentnexus.core.config import get_settings
+
+    return {"session_id": session_id, "subagents": subagents, "collaboration_enabled": get_settings().subagent_collaboration_enabled}
+
+
+class CollaborationMessageInput(BaseModel):
+    content: str = Field(min_length=1, max_length=16000)
+    request_id: str = Field(min_length=1, max_length=128)
+    child_run_id: str = Field(min_length=1, max_length=128)
+    question_id: int | None = Field(default=None, ge=1)
+
+
+@router.get("/session/{session_id}/subagents/{subagent_id}/messages")
+def list_collaboration_messages(session_id: str, subagent_id: str, after: int = Query(default=0, ge=0), limit: int = Query(default=500, ge=1, le=500)):
+    """Durable communication history and current delivery receipts."""
+    from agentnexus.observability.timeline import get_timeline_store
+
+    messages = get_timeline_store().list_collaboration_messages(session_id, subagent_id, after, limit)
+    return {"messages": messages, "last_id": messages[-1]["id"] if messages else after, "count": len(messages)}
+
+
+@router.post("/session/{session_id}/subagents/{subagent_id}/messages")
+def send_collaboration_message(session_id: str, subagent_id: str, body: CollaborationMessageInput, runtime=Depends(get_runtime)):
+    """Acknowledge only messages committed for the current owned attempt."""
+    try:
+        return runtime.chat.send_subagent_message(session_id, subagent_id, body.content, body.request_id, body.child_run_id, body.question_id)
+    except ValueError as exc:
+        raise APIError(409, "collaboration_conflict", str(exc)) from exc
+
+
+@router.post("/session/{session_id}/subagents/{subagent_id}/cancel")
+def cancel_subagent(session_id: str, subagent_id: str, runtime=Depends(get_runtime)):
+    """Return acceptance separately from the worker's eventual terminal status."""
+    accepted = runtime.chat.cancel_subagent(session_id, subagent_id)
+    entry = runtime.chat._subagents.get(subagent_id)
+    from agentnexus.services.subagents import SubagentRegistry
+
+    return {"accepted": accepted, "subagent_id": subagent_id, "subagent": SubagentRegistry.to_dict(entry) if accepted else None}
 
 
 @router.get("/session/{session_id}/events")
@@ -790,8 +827,8 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
             elif msg_type == "cancel_subagent":
                 sub_id = data.get("subagent_id", "")
                 if sub_id:
-                    chat.cancel_subagent(session_id, sub_id)
-                    await ws.send_json({"type": "subagent_cancel_requested", "subagent_id": sub_id})
+                    accepted = chat.cancel_subagent(session_id, sub_id)
+                    await ws.send_json({"type": "subagent_cancel_requested", "subagent_id": sub_id, "accepted": accepted})
 
             elif msg_type == "confirm":
                 with confirmation_lock:

@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from enum import Enum
@@ -108,6 +108,7 @@ class ToolMeta:
     concurrency_safe: bool = False
     lane: str = ""
     read_only: bool = False
+    requires_subagent_context: bool = False
 
 
 @dataclass
@@ -139,6 +140,9 @@ class ToolRegistry:
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._rate_lock = threading.Lock()
         self._lane_pools: dict[str, ThreadPoolExecutor] = {}
+        self._lane_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._pending_futures: set[Future] = set()
         from agentnexus.tools.confirm_bridge import CancelBridge, SubagentBridge
         self.cancel_bridge = CancelBridge()
         self.subagent_bridge = SubagentBridge()
@@ -172,7 +176,7 @@ class ToolRegistry:
             mcp_sigs.pop(name, None)
         return existed
 
-    def close(self) -> None:
+    def close(self, wait: bool = False) -> None:
         """Shut down this registry's thread pools.
 
         Only for short-lived registries (e.g. per-attempt subagent children):
@@ -180,9 +184,18 @@ class ToolRegistry:
         never exit. The session-scoped registry lives for the process and
         must NOT be closed.
         """
-        self._executor.shutdown(wait=False)
+        self._executor.shutdown(wait=wait)
         for pool in self._lane_pools.values():
-            pool.shutdown(wait=False)
+            pool.shutdown(wait=wait)
+
+    def has_pending_work(self) -> bool:
+        """Include timed-out tools whose underlying worker has not exited."""
+        with self._pending_lock:
+            return any(not future.done() for future in self._pending_futures)
+
+    def _forget_future(self, future: Future) -> None:
+        with self._pending_lock:
+            self._pending_futures.discard(future)
 
     def get_meta(self, name: str) -> ToolMeta | None:
         """Return ToolMeta for a registered tool, or None if not found."""
@@ -196,16 +209,17 @@ class ToolRegistry:
         default to 2 workers. Pool size IS the concurrency cap — excess
         submissions queue instead of erroring.
         """
-        pool = self._lane_pools.get(lane)
-        if pool is None:
-            if lane == "subagent":
-                from agentnexus.core.config import get_settings
-                workers = max(1, get_settings().subagent_max_concurrent)
-            else:
-                workers = 2
-            pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"lane-{lane}")
-            self._lane_pools[lane] = pool
-        return pool
+        with self._lane_lock:
+            pool = self._lane_pools.get(lane)
+            if pool is None:
+                if lane == "subagent":
+                    from agentnexus.core.config import get_settings
+                    workers = max(1, get_settings().subagent_max_concurrent)
+                else:
+                    workers = 2
+                pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"lane-{lane}")
+                self._lane_pools[lane] = pool
+            return pool
 
     def unregister_where(self, predicate: Callable[[ToolMeta], bool]) -> list[str]:
         """Unregister every tool whose meta satisfies predicate."""
@@ -262,6 +276,8 @@ class ToolRegistry:
                 )
             if not meta.enabled:
                 raise PermissionError(f"Tool '{name}' is disabled")
+            if meta.requires_subagent_context and not self._has_collaboration():
+                raise PermissionError("当前入口不支持异步子代理协作")
 
             if not filter_tool_meta(name, meta, tool_policy):
                 raise PermissionError(
@@ -321,6 +337,9 @@ class ToolRegistry:
             }
             with trace_manager.span("tool", span_input) as span:
                 future = self._executor.submit(contextvars.copy_context().run, func, **params)
+                with self._pending_lock:
+                    self._pending_futures.add(future)
+                future.add_done_callback(self._forget_future)
                 try:
                     result = future.result(timeout=meta.timeout_sec)
                 except FutureTimeout:
@@ -380,7 +399,7 @@ class ToolRegistry:
         lines = []
         for name, (meta, _) in self._tools.items():
             allowed = "*" in meta.allowed_agents or agent in meta.allowed_agents
-            if meta.enabled and allowed and filter_tool_meta(name, meta, tool_policy):
+            if meta.enabled and allowed and (not meta.requires_subagent_context or self._has_collaboration()) and filter_tool_meta(name, meta, tool_policy):
                 risk_tag = f"[{meta.risk_level.value}]"
                 lines.append(f"- {name}: {meta.description} {risk_tag}")
         return "\n".join(lines) if lines else "(no tools available)"
@@ -401,6 +420,8 @@ class ToolRegistry:
         tools = []
         for name, (meta, _) in self._tools.items():
             if not meta.enabled:
+                continue
+            if meta.requires_subagent_context and not self._has_collaboration():
                 continue
             if "*" not in meta.allowed_agents and agent not in meta.allowed_agents:
                 continue
@@ -425,6 +446,10 @@ class ToolRegistry:
                 },
             })
         return tools
+
+    def _has_collaboration(self) -> bool:
+        context = self.subagent_bridge.get_context()
+        return context is not None and context.collaboration is not None
 
     def get_audit_log(self) -> list[AuditEntry]:
         return list(self._audit_log)

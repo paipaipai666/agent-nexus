@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight, CheckCircle, Circle, Clock, Wrench, Server, Zap, ListTodo, PanelRightOpen, PanelRightClose, Bot, Square } from 'lucide-react'
 import { api, type SubagentInfo } from '../../services/api'
-import { wsPool } from '../../services/ws'
+import { useCollaborationStore } from '../../services/collaborationStore'
 import { useUIStore } from '../../services/ui'
 import { useSession, type SubagentMeta } from '../session/SessionManager'
 
@@ -12,6 +12,8 @@ const SUBAGENT_STATUS_LABEL: Record<string, string> = {
   interrupted: '已中断',
   completed: '已完成',
   failed: '失败',
+  waiting: '等待答复',
+  cancelling: '取消中',
 }
 
 const SUBAGENT_STATUS_COLOR: Record<string, string> = {
@@ -20,9 +22,11 @@ const SUBAGENT_STATUS_COLOR: Record<string, string> = {
   interrupted: 'var(--red)',
   completed: 'var(--green)',
   failed: 'var(--red)',
+  waiting: 'var(--accent)',
+  cancelling: 'var(--amber)',
 }
 
-const SUBAGENT_ACTIVE: Record<string, true> = { thinking: true, tool_calling: true }
+const SUBAGENT_ACTIVE: Record<string, true> = { thinking: true, tool_calling: true, waiting: true }
 
 interface Todo {
   id: number
@@ -53,7 +57,6 @@ export default function InfoPanel() {
   const [restSubagents, setRestSubagents] = useState<SubagentInfo[]>([])
   const [loadStates, setLoadStates] = useState<Record<string, PanelLoad>>({})
   const reloaders = useRef(new Map<string, () => void>())
-  const navigate = useNavigate()
   const { sessionId, getLiveSessionState } = useSession()
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     todos: true,
@@ -88,7 +91,10 @@ export default function InfoPanel() {
     track('todos', () => api.getTodos(sessionId), d => setTodos(d.items || []))
     track('skills', () => api.listSkills(), d => setSkills(d.skills || []))
     track('mcp', () => api.getMcpStatus(), d => setMcpServers(d.servers || []))
-    track('subagents', () => api.getSubagents(sessionId), d => setRestSubagents(d.subagents || []))
+    track('subagents', () => api.getSubagents(sessionId), d => {
+      setRestSubagents(d.subagents || [])
+      useCollaborationStore.getState().reconcile(sessionId, d.subagents || [])
+    })
     const fetchData = () => reloaders.current.forEach(refresh => refresh())
     fetchData()
     const interval = setInterval(fetchData, 10000)
@@ -110,10 +116,14 @@ export default function InfoPanel() {
     mergedSubagents.set(s.subagent_id, {
       id: s.subagent_id, name: s.name, role: s.role, task: s.task,
       status: s.status, currentTool: s.current_tool,
+      updatedAt: s.updated_at, latestProgress: s.latest_progress,
     })
   }
   if (storeSubagents) {
-    for (const [id, meta] of storeSubagents) mergedSubagents.set(id, meta)
+    for (const [id, meta] of storeSubagents) {
+      const rest = mergedSubagents.get(id)
+      if (!rest || (meta.updatedAt ?? 0) >= (rest.updatedAt ?? 0)) mergedSubagents.set(id, meta)
+    }
   }
 
   return (
@@ -142,13 +152,12 @@ export default function InfoPanel() {
               return (
                 <div
                   key={s.id}
-                  className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors hover:bg-[var(--surface-2)]"
+                  className="flex items-center gap-2 px-2 py-2 rounded transition-colors hover:bg-[var(--surface-2)]"
                   style={{ background: 'var(--surface-3)' }}
                   title={s.task || s.name}
-                  onClick={() => sessionId && navigate(`/chat/${sessionId}/subagent/${s.id}`)}
                 >
                   <Bot size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                  <span className="text-[12.5px] truncate" style={{ color: 'var(--fg)' }}>{s.name}</span>
+                  <Link to={`/chat/${sessionId}/subagent/${s.id}`} className="min-w-0 flex-1" style={{ color: 'var(--fg)' }}><span className="text-[12.5px] block truncate">{s.name}</span><span className="text-[11px] block line-clamp-2 mt-1" style={{ color: 'var(--fg-secondary)' }}>{s.latestProgress || s.task}</span></Link>
                   <span className="ml-auto flex items-center gap-1.5 shrink-0">
                     <span
                       className="w-1.5 h-1.5 rounded-full"
@@ -160,9 +169,20 @@ export default function InfoPanel() {
                     </span>
                     {active && (
                       <button
-                        onClick={e => {
+                        onClick={async e => {
                           e.stopPropagation()
-                          if (sessionId) wsPool.cancelSubagent(sessionId, s.id)
+                          if (!sessionId) return
+                          try {
+                            const result = await api.cancelSubagent(sessionId, s.id)
+                            if (!result.accepted) throw new Error('子任务已结束，请刷新状态')
+                            if (result.subagent) {
+                              const agent = result.subagent
+                              setRestSubagents(previous => previous.map(item => item.subagent_id === s.id ? agent : item))
+                              useCollaborationStore.getState().reconcile(sessionId, [agent])
+                            }
+                          } catch (error) {
+                            setLoadStates(previous => ({ ...previous, subagents: { kind: 'failed', updatedAt: Date.now(), message: error instanceof Error ? error.message : '中断请求失败' } }))
+                          }
                         }}
                         className="p-0.5 rounded"
                         style={{ color: 'var(--red)' }}

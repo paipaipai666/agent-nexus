@@ -210,6 +210,7 @@ class Settings(BaseSettings):
     max_agent_steps: int = Field(default=50, ge=1, le=200)
     subagent_max_concurrent: int = Field(default=3, ge=1, le=8)
     subagent_timeout_sec: int = Field(default=1800, ge=1)
+    subagent_collaboration_enabled: bool = True
     append_system_prompt: str = Field(default="")
 
     hooks: list[HookConfig] = Field(default_factory=list)

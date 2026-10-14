@@ -1,3 +1,4 @@
+import contextvars
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -183,7 +184,7 @@ def test_parallel_children_keep_separate_timelines_after_reopening_store(timelin
     bridge.set_context(SubagentRunContext(service, "s1", "parent"))
     tool = make_subagent_run(non_interactive=True, subagent_bridge=bridge)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(tool, task=f"Parallel {name}", name=name) for name in ("A", "B")]
+        futures = [pool.submit(contextvars.copy_context().run, tool, task=f"Parallel {name}", name=name) for name in ("A", "B")]
         children = [json.loads(future.result(timeout=10)) for future in futures]
     reopened = TimelineStore(store._db_path)
     monkeypatch.setattr(timeline, "get_timeline_store", lambda: reopened)
