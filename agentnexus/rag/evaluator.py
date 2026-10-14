@@ -593,7 +593,7 @@ class RAGEvaluator:
 
         Uses embedding similarity (not keyword overlap) for semantic relevance.
         """
-        if not retrieved:
+        if not retrieved or not query.strip():
             return 0.0
         try:
             from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model

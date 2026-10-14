@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentnexus.rag.evaluator import (
     EvalRun,
     EvalSample,
@@ -115,28 +117,51 @@ class TestIsRefusal:
 
 
 class TestRAGEvaluatorScoreContextRelevancy:
-    def test_empty_retrieved_returns_zero(self):
+    @pytest.fixture()
+    def encode_calls(self, monkeypatch):
+        vectors = {
+            "hello world": [1.0, 0.0],
+            "hello world chunk": [1.0, 0.0],
+            "hello world foo": [1.0, 0.0],
+            "hello bar": [0.6, 0.8],
+            "abc": [1.0, 0.0],
+            "xyz": [0.0, 1.0],
+        }
+        calls: list[str] = []
+
+        class FakeModel:
+            def encode(self, text, normalize_embeddings=True):
+                calls.append(text)
+                return vectors[text]
+
+        monkeypatch.setattr("agentnexus.rag.embeddings.get_embedding_model", FakeModel)
+        return calls
+
+    def test_empty_retrieved_returns_zero(self, encode_calls):
         evaluator = RAGEvaluator([], [])
         assert evaluator._score_context_relevancy("query", []) == 0.0
+        assert encode_calls == []
 
-    def test_empty_query_returns_zero(self):
+    def test_empty_query_returns_zero(self, encode_calls):
         evaluator = RAGEvaluator([], [])
         assert evaluator._score_context_relevancy("", ["chunk"]) == 0.0
+        assert evaluator._score_context_relevancy("   ", ["chunk"]) == 0.0
+        assert encode_calls == []
 
-    def test_full_match(self):
+    def test_full_match(self, encode_calls):
         evaluator = RAGEvaluator([], [])
         score = evaluator._score_context_relevancy("hello world", ["hello world chunk"])
-        assert score > 0.0
+        assert score == 1.0
 
-    def test_no_match(self):
+    def test_no_match(self, encode_calls):
         evaluator = RAGEvaluator([], [])
         score = evaluator._score_context_relevancy("abc", ["xyz"])
         assert score == 0.0
 
-    def test_partial_match(self):
+    def test_partial_match(self, encode_calls):
         evaluator = RAGEvaluator([], [])
         score = evaluator._score_context_relevancy("hello world foo", ["hello bar"])
-        assert 0.0 < score < 1.0
+        assert score == pytest.approx(0.6)
 
 
 class TestRAGEvaluatorChunkAll:
