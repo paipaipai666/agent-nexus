@@ -43,10 +43,10 @@ def register_parent_collaboration(executor, context, task_schema):
         return json.dumps(active_run().wait(timeout), ensure_ascii=False)
 
     definitions = [
-        ("subagent_start", "启动后台子任务并立即返回身份。主代理可以继续工作，子代理可汇报和提问；用 subagent_wait 等待结果。", task_schema, start, 30),
-        ("subagent_send", "向本运行的子代理追加指令，或用 question_id 回答其问题。request_id 用于重试幂等。", {
+        ("subagent_start", "启动后台子任务并立即返回身份。主代理可以继续工作，子代理可汇报和提问；用 subagent_wait 等待结果。[不适用] 简单单步任务(直接用具体工具), 需要本轮同步拿到结果才能继续的任务(用subagent_run)。", task_schema, start, 30),
+        ("subagent_send", "向本运行的子代理追加指令，或用 question_id 回答其问题。request_id 用于重试幂等。[不适用] 首次发起子任务(用subagent_start), 目标子代理已结束或不存在。", {
             "type": "object", "properties": {"subagent_id": {"type": "string"}, "content": {"type": "string", "maxLength": 16000}, "question_id": {"type": "integer", "minimum": 1}, "request_id": {"type": "string", "maxLength": 128}}, "required": ["subagent_id", "content"]}, send, 30),
-        ("subagent_wait", "等待子代理的新消息或完成状态，返回后下一轮会自动读入消息。等待不调用模型。", {
+        ("subagent_wait", "等待子代理的新消息或完成状态，返回后下一轮会自动读入消息。等待不调用模型。[不适用] 尚无运行中的子代理, 或等待期间仍有其他工作可推进(子代理完成会自动汇报)。", {
             "type": "object", "properties": {"timeout": {"type": "number", "minimum": 0, "maximum": 60}}}, wait, 65),
     ]
     for name, description, schema, function, timeout in definitions:
