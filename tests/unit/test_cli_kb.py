@@ -309,6 +309,55 @@ class TestKbPersistence:
         assert set(deleted_ids) == {old_artifacts.chunks[0].chunk_id}
         assert recorded_ids[-1] == [new_artifacts.chunks[0].chunk_id]
 
+    def test_persist_wrapper_does_not_mutate_kb_service_globals(self):
+        import agentnexus.rag.kb_service as kb_service
+        from agentnexus.cli import kb as kb_cli
+
+        original_upsert = kb_service.upsert_documents
+        original_delete = kb_service.delete_documents
+        captured: dict = {}
+
+        def fake_persist(artifacts, namespace, **kwargs):
+            captured.update(kwargs)
+            return {"written_chunks": 0, "replaced_chunks": 0}
+
+        def fake_upsert(*args, **kwargs):
+            return []
+
+        def fake_delete(**kwargs):
+            return None
+
+        with patch("agentnexus.rag.kb_service.persist_ingested_document", fake_persist), \
+             patch("agentnexus.cli.kb.upsert_documents", fake_upsert), \
+             patch("agentnexus.cli.kb.delete_documents", fake_delete):
+            kb_cli._persist_ingested_document(object(), "default")
+
+        assert captured["upsert_documents_fn"] is fake_upsert
+        assert captured["delete_documents_fn"] is fake_delete
+        assert kb_service.upsert_documents is original_upsert
+        assert kb_service.delete_documents is original_delete
+
+    def test_delete_wrapper_does_not_mutate_kb_service_globals(self):
+        import agentnexus.rag.kb_service as kb_service
+        from agentnexus.cli import kb as kb_cli
+
+        original_delete = kb_service.delete_documents
+        captured: dict = {}
+
+        def fake_delete_existing(namespace, source_id, **kwargs):
+            captured.update(kwargs)
+            return 0
+
+        def fake_delete(**kwargs):
+            return None
+
+        with patch("agentnexus.rag.kb_service.delete_existing_source_versions", fake_delete_existing), \
+             patch("agentnexus.cli.kb.delete_documents", fake_delete):
+            kb_cli._delete_existing_source_versions("default", "src_x")
+
+        assert captured["delete_documents_fn"] is fake_delete
+        assert kb_service.delete_documents is original_delete
+
     def test_add_records_ingestion_run(self, temp_agentnexus_home):
         from agentnexus.rag.store import get_knowledge_base_catalog
 

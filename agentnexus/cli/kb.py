@@ -88,20 +88,20 @@ def _default_kb_record(namespace: str) -> KnowledgeBaseRecord:
 
 
 def _delete_existing_source_versions(namespace: str, source_id: str) -> int:
-    from agentnexus.rag import kb_service
     from agentnexus.rag.kb_service import delete_existing_source_versions
 
-    kb_service.delete_documents = delete_documents
-    return delete_existing_source_versions(namespace, source_id)
+    return delete_existing_source_versions(namespace, source_id, delete_documents_fn=delete_documents)
 
 
 def _persist_ingested_document(artifacts: IngestedDocument, namespace: str) -> dict[str, int]:
-    from agentnexus.rag import kb_service
     from agentnexus.rag.kb_service import persist_ingested_document
 
-    kb_service.delete_documents = delete_documents
-    kb_service.upsert_documents = upsert_documents
-    return persist_ingested_document(artifacts, namespace)
+    return persist_ingested_document(
+        artifacts,
+        namespace,
+        upsert_documents_fn=upsert_documents,
+        delete_documents_fn=delete_documents,
+    )
 
 
 def _start_ingestion_run(namespace: str, source_uri: str) -> IngestionRunRecord:

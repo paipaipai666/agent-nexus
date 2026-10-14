@@ -121,6 +121,73 @@ class TestPersistIngestedDocument:
 
         assert stats["replaced_chunks"] >= 0
 
+    def test_injected_fns_take_precedence_over_module_globals(self, temp_agentnexus_home):
+        _reset_knowledge_base_catalog()
+        from agentnexus.rag.kb_service import persist_ingested_document
+
+        doc_v1 = SourceDocument(
+            document_id="doc_inject",
+            kb_id="",
+            source_id="src_inject",
+            source_uri="inject.md",
+            document_version="v1",
+            content="old content",
+        )
+        chunks_v1 = [
+            ChunkRecord(
+                chunk_id="chunk_inject_old",
+                kb_id="",
+                document_id="doc_inject",
+                document_version="v1",
+                chunk_index=0,
+                text="old chunk",
+            ),
+        ]
+        with patch("agentnexus.rag.kb_service.upsert_documents"):
+            with patch("agentnexus.rag.kb_service.delete_documents"):
+                persist_ingested_document(IngestedDocument(document=doc_v1, chunks=chunks_v1), "inject_ns")
+
+        calls = {"upsert": 0, "delete": 0}
+
+        def upsert_fn(texts, metadatas=None, ids=None, **kwargs):
+            calls["upsert"] += 1
+            return ids or []
+
+        def delete_fn(**kwargs):
+            calls["delete"] += 1
+
+        doc_v2 = SourceDocument(
+            document_id="doc_inject",
+            kb_id="",
+            source_id="src_inject",
+            source_uri="inject.md",
+            document_version="v2",
+            content="new content",
+        )
+        chunks_v2 = [
+            ChunkRecord(
+                chunk_id="chunk_inject_new",
+                kb_id="",
+                document_id="doc_inject",
+                document_version="v2",
+                chunk_index=0,
+                text="new chunk",
+            ),
+        ]
+        with patch("agentnexus.rag.kb_service.upsert_documents") as global_upsert:
+            with patch("agentnexus.rag.kb_service.delete_documents") as global_delete:
+                persist_ingested_document(
+                    IngestedDocument(document=doc_v2, chunks=chunks_v2),
+                    "inject_ns",
+                    upsert_documents_fn=upsert_fn,
+                    delete_documents_fn=delete_fn,
+                )
+
+        assert calls["upsert"] == 1
+        assert calls["delete"] >= 1
+        global_upsert.assert_not_called()
+        global_delete.assert_not_called()
+
 
 class TestIngestionRunLifecycle:
     def test_start_and_finish_ingestion_run(self, temp_agentnexus_home):

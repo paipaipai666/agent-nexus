@@ -130,12 +130,13 @@ class DeleteIncompleteError(Exception):
         self.cause = cause
 
 
-def _delete_vectors(namespace: str, ids: list[str]) -> None:
-    delete_documents(ids=ids, namespace=namespace)
+def _delete_vectors(namespace: str, ids: list[str], delete_fn=None) -> None:
+    delete_fn = delete_fn or delete_documents
+    delete_fn(ids=ids, namespace=namespace)
     kb = get_knowledge_base_catalog().get_knowledge_base(namespace)
     if kb is not None:
         for name in kb.metadata.get("retired_collections", []):
-            delete_documents(ids=ids, name=name)
+            delete_fn(ids=ids, name=name)
 
 
 def _delete_catalog_with_retry(catalog, document_id: str,
@@ -234,7 +235,7 @@ def rollback_failed_deletion(log_id: int) -> dict:
 
 
 @_locked_kb_operation
-def delete_existing_source_versions(namespace: str, source_id: str) -> int:
+def delete_existing_source_versions(namespace: str, source_id: str, *, delete_documents_fn=None) -> int:
     catalog = get_knowledge_base_catalog()
     kb_record = default_kb_record(namespace)
     catalog.upsert_knowledge_base(kb_record)
@@ -248,13 +249,13 @@ def delete_existing_source_versions(namespace: str, source_id: str) -> int:
         chunks = catalog.list_chunks(document.document_id)
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         if chunk_ids:
-            _delete_vectors(namespace, chunk_ids)
+            _delete_vectors(namespace, chunk_ids, delete_documents_fn)
             deleted_chunks += len(chunk_ids)
         catalog.delete_document(document.document_id)
     return deleted_chunks
 
 
-def persist_ingested_document(artifacts: IngestedDocument, namespace: str, *, prepared_embedding=None) -> dict:
+def persist_ingested_document(artifacts: IngestedDocument, namespace: str, *, prepared_embedding=None, upsert_documents_fn=None, delete_documents_fn=None) -> dict:
     """持久化摄入产物。内容未变更时整体跳过（增量第一层）。
 
     相同版本只有在 catalog 与向量索引完整时才跳过，避免失败的批量
@@ -264,6 +265,7 @@ def persist_ingested_document(artifacts: IngestedDocument, namespace: str, *, pr
     from agentnexus.rag.model_assets import prepare_embedding
 
     model, identity = prepared_embedding or prepare_embedding()
+    upsert_fn = upsert_documents_fn or upsert_documents
     with index_lock(namespace):
         collection_name = ensure_embedding_index(namespace, model, identity)
         kb_record = default_kb_record(namespace)
@@ -282,14 +284,14 @@ def persist_ingested_document(artifacts: IngestedDocument, namespace: str, *, pr
                 if indexed_ids == stored_ids:
                     return {"replaced_chunks": 0, "written_chunks": 0, "skipped": True}
 
-        replaced_chunks = delete_existing_source_versions(namespace, artifacts.document.source_id)
+        replaced_chunks = delete_existing_source_versions(namespace, artifacts.document.source_id, delete_documents_fn=delete_documents_fn)
         catalog.upsert_document(artifacts.document)
 
         for chunk in artifacts.chunks:
             chunk.kb_id = kb_record.kb_id
         catalog.upsert_chunks(artifacts.chunks)
 
-        upsert_documents(
+        upsert_fn(
             [chunk.indexed_text or chunk.text for chunk in artifacts.chunks],
             metadatas=[chunk_metadata_to_chroma(chunk) for chunk in artifacts.chunks],
             ids=[chunk.chunk_id for chunk in artifacts.chunks],
