@@ -1,5 +1,6 @@
 """Tests for shell execution backend functions in agentnexus.tools.shell."""
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -674,7 +675,8 @@ class TestWindowsNativeSandboxReal:
     def test_runs_at_low_integrity(self, tmp_path):
         from agentnexus.tools.shell import _execute_windows_native
 
-        result = _execute_windows_native('whoami /groups | findstr /i "Mandatory"', str(tmp_path), 30)
+        whoami = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")
+        result = _execute_windows_native(f"{whoami} /groups | findstr /i \"Mandatory\"", str(tmp_path), 30)
         assert "Low Mandatory Level" in result
         assert "exit_code: 0" in result
 

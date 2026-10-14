@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -71,6 +72,7 @@ class TestLLMEffortOverride:
         )
         llm._session_tracker = MagicMock()
         llm._session_tracker.is_available = MagicMock(return_value=True)
+        llm._call_state = threading.local()
         llm.model = "m"
         llm.api_key = "k"
         llm.base_url = "http://x"

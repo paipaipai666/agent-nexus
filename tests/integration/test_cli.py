@@ -211,11 +211,11 @@ class TestCliKnowledgeBase:
 
         fake_collection = FakeCollection()
 
-        def fake_write_documents(texts, metadatas=None, ids=None, name=None, namespace=None, metadata=None):
+        def fake_write_documents(texts, metadatas=None, ids=None, name=None, **_kwargs):
             captured["texts"] = texts
             captured["metadatas"] = metadatas
             captured["ids"] = ids
-            captured["namespace"] = namespace
+            captured["name"] = name
             fake_collection.count_value = len(texts)
             return ids or [f"generated-{index}" for index in range(len(texts))]
 
@@ -250,7 +250,8 @@ class TestCliKnowledgeBase:
                 assert chunks[0].metadata["heading_path"] == ["Guide"]
 
                 assert captured["ids"] == [chunks[0].chunk_id]
-                assert captured["namespace"] == "default"
+                expected_collection = catalog.get_knowledge_base("default").collection_name
+                assert captured["name"] == expected_collection
                 metadatas = captured["metadatas"]
                 assert isinstance(metadatas, list)
                 assert metadatas[0]["heading_path_text"] == "Guide"
