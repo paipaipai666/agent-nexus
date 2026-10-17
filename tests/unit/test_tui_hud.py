@@ -47,23 +47,23 @@ class TestHudBuildText:
         hud._strategy = "JSON模式"
         text = hud._build_text()
         assert "JSON模式" in text
-        assert "🧠" in text
+        assert "思考" in text
 
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=None)
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_compact_indicator(self, mock_settings, mock_ctx):
-        """Compact indicator (⚙) appears when _compacting is True."""
+        """Show a readable compression state without a symbol font."""
         _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud._compacting = True
         text = hud._build_text()
-        assert "⚙" in text
+        assert "compact 压缩中" in text
 
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=128000)
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_context_bar_when_ctx_max_known(self, mock_settings, mock_ctx):
-        """Context bar with filled/empty blocks appears when ctx_max is set."""
+        """Context usage includes the known limit and percentage."""
         _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
@@ -73,8 +73,6 @@ class TestHudBuildText:
         assert "128k" in text
         assert "32k" in text
         assert "25%" in text
-        assert "█" in text
-        assert "░" in text
 
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=None)
     @patch("agentnexus.tui.widgets.hud.get_settings")
@@ -190,10 +188,10 @@ class TestHudBuildText:
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=10000)
     @patch("agentnexus.tui.widgets.hud.get_settings")
     def test_context_bar_saturation(self, mock_settings, mock_ctx):
-        """Context bar shows full blocks when ctx_used >= ctx_max."""
+        """Overflowing context still produces a bounded readable percentage."""
         _settings_with_profile(mock_settings, "model")
         mock_settings.return_value.llm_base_url = ""
         hud = HUD()
         hud.current_tokens = 99999
         text = hud._build_text()
-        assert "██████████" in text
+        assert "ctx 100k/10k 999%" in text

@@ -62,7 +62,10 @@ include = ["agentnexus*"]
 exclude = ["blog*"]
 
 [tool.setuptools.package-data]
+"agentnexus" = ["eval_tasks/**/*.yaml"]
 "agentnexus.eval.memory" = ["data/*.jsonl"]
+"agentnexus.tui" = ["styles/*.tcss"]
+"agentnexus.skills" = ["builtin/**/*.yaml"]
 
 [tool.ruff]
 line-length = 120

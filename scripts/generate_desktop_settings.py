@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from agentnexus.core.config import Settings
-from agentnexus.server.routes.config import SETTABLE_KEYS
+from agentnexus.services.configuration import SETTABLE_KEYS
 
 
 def generate():

@@ -1,5 +1,6 @@
 """Chat message widget — role-colored left border, code-block rendering."""
 
+from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.widget import Widget
@@ -50,6 +51,8 @@ class ChatMessage(Widget):
     def compose(self) -> ComposeResult:
         if self._rich_markup:
             yield Static(self.content, id="msg-content")
+        elif "assistant" in self.classes:
+            yield Static(Markdown(self.content), id="msg-content")
         else:
             yield Static(_safe(self.content), id="msg-content")
 
@@ -58,27 +61,8 @@ class ChatMessage(Widget):
             self._render_code_blocks()
 
     def _render_code_blocks(self):
-        """Replace generic content with segmented text/code rendering."""
-        content_widget = self.query_one("#msg-content", Static)
-        content_widget.remove()
-
-        parts = self.content.split("```")
-        for i, part in enumerate(parts):
-            if not part.strip():
-                continue
-            if i % 2 == 0:
-                w = Static(_safe(part), classes="msg-text")
-                w.styles.height = "auto"
-                self.mount(w)
-            else:
-                code = part
-                lines = part.split("\n", 1)
-                if len(lines) > 1:
-                    code = lines[1]
-                code = code.rstrip("\n")
-                w = Static(_safe(code), classes="msg-code")
-                w.styles.height = "auto"
-                self.mount(w)
+        """Render Markdown without replacing the streaming message target."""
+        self.query_one("#msg-content", Static).update(Markdown(self.content))
 
     def attach_reaction(self, emoji: str, comment: str = ""):
         """Mount a small emoji reaction row under this message (user bubbles).
@@ -92,36 +76,63 @@ class ChatMessage(Widget):
         self.mount(Static(_safe(f"{emoji}{quip}"), classes="msg-reaction"))
 
 
-class ToolCall(Widget):
-    """Inline tool call display — warm orange border, tool name + result."""
+class ToolCall(Widget, can_focus=True):
+    """A compact execution row with keyboard-accessible result details."""
 
-    def __init__(self, tool_name: str, result: str = "", duration_ms: float = 0, **kwargs):
+    BINDINGS = [("enter", "toggle_details", "展开结果"), ("space", "toggle_details", "展开结果"), ("d", "full_output", "完整输出")]
+
+    def __init__(self, tool_name: str, result: str = "", duration_ms: float = 0, *, raw_result: str | None = None, detail: str = "", **kwargs):
         super().__init__(**kwargs)
         self.tool_name = tool_name
         self.result = result
         self.duration_ms = duration_ms
+        self.raw_result = result if raw_result is None else raw_result
+        self.detail = detail
+        self.expanded = False
+
+    def _header(self):
+        marker = "▾" if self.expanded else "▸"
+        state = " · 执行中" if self.result == "executing..." else ""
+        duration = f" · {self.duration_ms:.0f}ms" if self.duration_ms else ""
+        detail = f" · {self.detail}" if self.detail else ""
+        return Text(f"{marker} {self.tool_name}{detail}{state}{duration}")
 
     def compose(self) -> ComposeResult:
-        yield Label(f"{self.tool_name}", id="tool-name")
-        yield Static(_safe(str(self.result) if self.result else ""), id="tool-result")
-        if self.duration_ms:
-            yield Label(f"→ {self.duration_ms:.0f}ms", id="tool-meta")
+        yield Label(self._header(), id="tool-name")
+        result = Static(_safe(str(self.result) if self.result else ""), id="tool-result")
+        result.display = self.expanded
+        yield result
+        hint = Label("D 完整输出 · Enter 收起", id="tool-hint")
+        hint.display = self.expanded
+        yield hint
 
     def on_mount(self):
         self.query_one("#tool-result", Static).styles.height = "auto"
 
-    def update_result(self, result: str, duration_ms: float = 0, *, markup: bool = False):
+    def action_toggle_details(self):
+        self.expanded = not self.expanded
+        self.query_one("#tool-result").display = self.expanded
+        self.query_one("#tool-hint").display = self.expanded
+        self.query_one("#tool-name", Label).update(self._header())
+
+    def on_click(self, event):
+        if event.widget.id == "tool-name":
+            self.focus()
+            self.action_toggle_details()
+
+    def action_full_output(self):
+        from agentnexus.tui.screens.interactions import RecordScreen
+
+        self.app.push_screen(RecordScreen(self.tool_name + " · 完整输出", self.raw_result))
+
+    def update_result(self, result: str, duration_ms: float = 0, *, markup: bool = False, raw_result: str | None = None):
         self.result = result
+        self.raw_result = result if raw_result is None else raw_result
         self.duration_ms = duration_ms
+        self.query_one("#tool-name", Label).update(self._header())
         widget = self.query_one("#tool-result", Static)
         if markup:
             widget.update(result or "")
         else:
             widget.update(_safe(result or ""))
         widget.styles.height = "auto"
-        if duration_ms:
-            try:
-                meta = self.query_one("#tool-meta", Label)
-                meta.update(f"→ {duration_ms:.0f}ms")
-            except Exception:
-                self.mount(Label(f"→ {duration_ms:.0f}ms", id="tool-meta"))

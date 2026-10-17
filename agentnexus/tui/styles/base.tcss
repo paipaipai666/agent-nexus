@@ -1,43 +1,17 @@
-/* ===== Palette ===== */
-$bg: #14161a;
-$surface: #191c21;
-$elevated: #20242b;
-$sidepanel: #171a1f;
-$text: #d9dde5;
-$text-dim: #8c93a1;
-$muted: #606774;
-$primary: #d59f5f;
-$secondary: #70a6e8;
-$accent: #9d8fe8;
-$success: #75c990;
-$error: #e06c75;
-$warning: #d6a25d;
-$assistant: #70a6e8;
-$user: #9d8fe8;
-$tool: #d6a25d;
-$border: #2b3038;
-
-/* ===== Base ===== */
 Screen {
-    background: $bg;
-    color: $text;
+    background: $background;
+    color: $foreground;
 }
-
-/* ===== Scrollbar ===== */
 Scrollbar {
     background: transparent;
-    color: $muted;
+    color: $foreground 35%;
 }
 Scrollbar:hover {
-    color: $secondary;
+    color: $primary;
 }
-
-/* ===== Loading ===== */
 LoadingIndicator {
     color: $primary;
 }
-
-/* For any widget without custom background */
 Widget {
     background: transparent;
 }

@@ -27,6 +27,20 @@ class ConfirmTestApp(App):
 
 
 class TestConfirmDialogPilot:
+    async def test_long_plan_can_be_reviewed_in_full(self):
+        from textual.containers import VerticalScroll
+
+        text = "[PLAN_REVIEW]\n" + "review line\n" * 100 + "final approval condition"
+        app = ConfirmTestApp("plan", text)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            preview = app.screen.query_one("#confirm-preview", VerticalScroll)
+            assert app.screen.query_one("#confirm-content", Static).content == text
+            await pilot.press("end")
+            await pilot.pause()
+            assert preview.scroll_y == preview.max_scroll_y
+            assert preview.scroll_y > 0
+
     async def test_compose_buttons_present(self):
         """Both confirm and cancel buttons are rendered."""
         app = ConfirmTestApp("test_tool", "some params")
@@ -112,7 +126,7 @@ class TestConfirmDialogPilot:
         app = ConfirmTestApp("t", "param content here")
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            preview = app.screen.query_one("#confirm-preview", Static)
+            preview = app.screen.query_one("#confirm-content", Static)
             assert "param content here" in preview.content
 
     async def test_title_label_present(self):
@@ -138,6 +152,21 @@ class HUDTestApp(App):
 
 
 class TestHUDWidgetPilot:
+    async def test_model_change_updates_the_existing_status_bar(self):
+        with patch("agentnexus.tui.widgets.hud.get_settings") as settings:
+            _settings_with_profile(settings, "old-model")
+            app = HUDTestApp()
+            async with app.run_test(size=(100, 24)) as pilot:
+                from agentnexus.tui.widgets.hud import HUD
+
+                hud = app.query_one("#test-hud", HUD)
+                hud.update_model("provider/new-model", "", workspace="D:/work/selected-project")
+                await pilot.pause()
+                text = app.query_one("#hud-text", Static).content
+                assert "new-model" in text
+                assert "old-model" not in text
+                assert hud._cwd_display == "selected-project"
+
     async def test_compose_shows_model_name(self):
         """HUD displays the short model name from settings."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
@@ -162,7 +191,7 @@ class TestHUDWidgetPilot:
                 await pilot.pause()
                 text = app.query_one("#hud-text", Static)
                 assert "原生工具" in text.content
-                assert "🧠" in text.content
+                assert "思考" in text.content
 
     async def test_update_context_updates_display(self):
         """Calling update_context changes token display."""
@@ -179,7 +208,7 @@ class TestHUDWidgetPilot:
                 assert "5.0k" in text.content
 
     async def test_compacting_indicator_shows(self):
-        """Setting compacting flag shows the gear indicator."""
+        """Setting compacting flag shows the compression status."""
         with patch("agentnexus.tui.widgets.hud.get_settings") as mock_settings:
             _settings_with_profile(mock_settings, "model")
             app = HUDTestApp()
@@ -190,7 +219,7 @@ class TestHUDWidgetPilot:
                 hud.set_compacting(True)
                 await pilot.pause()
                 text = app.query_one("#hud-text", Static)
-                assert "⚙" in text.content
+                assert "compact 压缩中" in text.content
 
     async def test_version_info_updates(self):
         """update_version changes the version segment in rendered text."""
@@ -275,7 +304,7 @@ class TestAgentNexusTUIPilot:
                 chat_input = app.screen.query_one("#chat-input", Input)
                 assert chat_input is not None
                 assert chat_input.styles.height.value == 1
-                assert app.screen.query_one("#input-area").styles.height.value == 3
+                assert app.screen.query_one("#input-area").styles.height.value == 5
                 assert app.screen.query_one("#command-palette", VerticalScroll) is not None
 
     async def test_app_has_hud(self):

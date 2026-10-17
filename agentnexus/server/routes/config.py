@@ -1,387 +1,108 @@
-"""Config API routes."""
-
-from __future__ import annotations
-
-from typing import Any
+"""HTTP adapter for shared configuration operations."""
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 
 from agentnexus.server.deps import get_runtime
 from agentnexus.server.error_handlers import APIError
+from agentnexus.services import configuration
+from agentnexus.services.configuration import (
+    _SECURITY_BLOCKED_KEYS as _SECURITY_BLOCKED_KEYS,
+)
+from agentnexus.services.configuration import (
+    SETTABLE_KEYS as SETTABLE_KEYS,
+)
+from agentnexus.services.configuration import (
+    ActiveProviderRequest as ActiveProviderRequest,
+)
+from agentnexus.services.configuration import (
+    ConfigUpdateRequest as ConfigUpdateRequest,
+)
+from agentnexus.services.configuration import (
+    DiscoverRequest as DiscoverRequest,
+)
+from agentnexus.services.configuration import (
+    ModelEntryInput as ModelEntryInput,
+)
+from agentnexus.services.configuration import (
+    ModelOverrideInput as ModelOverrideInput,
+)
+from agentnexus.services.configuration import (
+    PersonaProjectUpdate as PersonaProjectUpdate,
+)
+from agentnexus.services.configuration import (
+    PersonaUpdateRequest as PersonaUpdateRequest,
+)
+from agentnexus.services.configuration import (
+    ProviderInput as ProviderInput,
+)
+from agentnexus.services.configuration import (
+    ProvidersUpdateRequest as ProvidersUpdateRequest,
+)
+from agentnexus.services.configuration import (
+    _apply_active_llm as _apply_active_llm,
+)
+from agentnexus.services.configuration import (
+    _mask_provider as _mask_provider,
+)
+from agentnexus.services.configuration import (
+    _reset_settings_cache as _reset_settings_cache,
+)
+from agentnexus.services.configuration import (
+    _validate_providers as _validate_providers,
+)
 
 router = APIRouter(tags=["config"])
 
 
-class ConfigUpdateRequest(BaseModel):
-    key: str
-    value: str
+def _call(operation, *args):
+    try:
+        return operation(*args)
+    except configuration.ConfigurationError as exc:
+        raise APIError(exc.status_code, exc.code, str(exc)) from exc
 
-class PersonaProjectUpdate(BaseModel):
-    name: str
-    focus: str = "进行中"
-
-
-class PersonaUpdateRequest(BaseModel):
-    agent_name: str = ""
-    identity: str = ""
-    tone: str = ""
-    projects: list[PersonaProjectUpdate] = []
-
-
-SETTABLE_KEYS = {
-    "llm_api_key", "llm_model_id", "llm_base_url", "llm_timeout",
-    "active_model", "judge_model",
-    "model_tool_calling", "model_json_mode", "model_thinking", "model_thinking_effort",
-    "judge_api_key", "judge_model_id", "judge_base_url",
-    "max_agent_steps",
-    "tavily_api_key",
-    "enable_contextual_retrieval", "enable_query_rewrite", "enable_multi_query",
-    "enable_hyde", "hyde_question_only", "enable_context_expansion",
-    "rag_multi_query_count", "rag_context_window", "rag_context_max_chunks",
-    "embedding_model", "reranker_model", "rag_default_namespace", "rag_collection_prefix",
-    "max_memories", "memory_ttl_days", "memory_llm_gate",
-    "autocompact_buffer_tokens", "large_result_threshold",
-    "offload_enabled", "snip_enabled", "time_microcompact_interval",
-    "post_compact_max_files", "post_compact_token_per_file", "post_compact_token_budget",
-    "transcript_enabled",
-    "mcp_enabled", "mcp_startup_timeout",
-    "shell_enabled", "shell_confirm", "shell_timeout",
-    "shell_execution_backend", "shell_execution_memory_mb",
-    "shell_execution_docker_image",
-    "file_read_max_mb",
-    "skills_default_namespace", "default_skill",
-    "skill_auto_route", "skill_auto_route_llm_fallback",
-    "skill_auto_route_min_score", "skill_auto_route_margin",
-    "skill_context_token_ratio", "skill_context_max_tokens",
-    "runtime_profile",
-    "trace_retention_days",
-    "budget_simple_max_tokens", "budget_complex_max_tokens",
-    "budget_high_value_max_tokens", "budget_exceed_strategy",
-}
-
-_SECURITY_BLOCKED_KEYS = {
-    "shell_blacklist",
-}
-
-
-@router.get("")
+@router.get('')
 def get_config():
-    from agentnexus.core.config import get_settings
-
-    settings = get_settings()
-    config: dict[str, Any] = {}
-    for name in type(settings).model_fields:
-        value = getattr(settings, name)
-        if hasattr(value, "get_secret_value"):
-            value = "****"
-        config[name] = value
-    persona = settings.persona
-    config["persona"] = {
-        "agent_name": persona.agent_name,
-        "identity": persona.identity,
-        "tone": persona.tone,
-        "projects": [{"name": p.name, "focus": p.focus} for p in persona.projects],
-    }
-    from pathlib import Path
-    config["cwd"] = str(Path.cwd())
-    config["llm_providers"] = [_mask_provider(p) for p in settings.llm_providers]
-    return config
+    return _call(configuration.get_config)
 
 
-class ModelOverrideInput(BaseModel):
-    context_length: int | None = None
-    max_output_tokens: int | None = None
-    supports_vision: bool | None = None
-    supports_tool_calling: bool | None = None
-    supports_json_mode: bool | None = None
-    supports_json_schema: bool | None = None
-    supports_thinking: bool | None = None
-    supports_parallel_tool_calls: bool | None = None
-
-
-class ModelEntryInput(BaseModel):
-    model_id: str
-    override: ModelOverrideInput | None = None
-
-
-class ProviderInput(BaseModel):
-    name: str
-    models: list[ModelEntryInput] = []
-    model_id: str | None = None
-    base_url: str
-    api_key: str | None = None
-    timeout: int = 60
-
-
-class ProvidersUpdateRequest(BaseModel):
-    providers: list[ProviderInput]
-
-
-class ActiveProviderRequest(BaseModel):
-    name: str
-
-
-class DiscoverRequest(BaseModel):
-    base_url: str
-    api_key: str | None = None
-    provider: str | None = None
-
-
-def _mask_provider(p: Any) -> dict[str, Any]:
-    return {
-        "name": p.name,
-        "models": [
-            {"model_id": m.model_id, "override": m.override.model_dump() if m.override else None}
-            for m in p.models
-        ],
-        "base_url": p.base_url,
-        "api_key": "****" if p.api_key.get_secret_value() else "",
-        "timeout": p.timeout,
-    }
-
-
-def _validate_providers(providers: list[ProviderInput]) -> list[dict[str, Any]]:
-    """Validate/normalize provider entries. Raises ValueError on bad input."""
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for p in providers:
-        name = p.name.strip()
-        if not name:
-            raise ValueError("provider name is required")
-        if name in seen:
-            raise ValueError(f"duplicate provider name: {name}")
-        seen.add(name)
-        if not p.base_url.startswith(("http://", "https://")):
-            raise ValueError(f"provider '{name}': base_url must start with http(s)://")
-        models: list[dict[str, Any]] = []
-        raw_models = p.models or ([ModelEntryInput(model_id=p.model_id)] if p.model_id else [])
-        for m in raw_models:
-            mid = m.model_id.strip()
-            if not mid:
-                raise ValueError(f"provider '{name}': model_id is required")
-            if any(x["model_id"] == mid for x in models):
-                raise ValueError(f"provider '{name}': duplicate model_id: {mid}")
-            models.append({
-                "model_id": mid,
-                "override": m.override.model_dump() if m.override else None,
-            })
-        out.append({
-            "name": name,
-            "models": models,
-            "base_url": p.base_url.strip(),
-            "api_key": p.api_key,
-            "timeout": p.timeout,
-        })
-    return out
-
-
-def _apply_active_llm(runtime: Any, settings: Any) -> None:
-    """Push the active provider profile into the shared LLM client (live switch —
-    every per-session agent holds this same instance)."""
-    model_id, base_url, api_key, timeout = settings.get_active_llm_profile()
-    llm = getattr(runtime, "llm", None)
-    if llm is not None and hasattr(llm, "configure"):
-        llm.configure(model=model_id, base_url=base_url, api_key=api_key.get_secret_value(), timeout=timeout)
-
-
-def _reset_settings_cache() -> None:
-    import agentnexus.core.config as cfg
-    if hasattr(cfg, "_settings_cache"):
-        cfg._settings_cache = None
-
-
-@router.get("/extensions")
+@router.get('/extensions')
 def get_extensions():
-    """Discovered plugins/extensions load report.
-
-    The desktop polls this on chat mount and in the Plugins page. There is no
-    ExtensionManager in the runtime yet (docs describe a planned one) — report
-    the honest current state instead of 404ing: discovery on, zero plugins.
-    """
-    from agentnexus.core.config import get_settings
-
-    settings = get_settings()
-    return {
-        "enabled": bool(getattr(settings, "extensions_enabled", True)),
-        "discovered": [],
-        "load_report": {"loaded": [], "disabled": [], "failed": []},
-    }
+    return _call(configuration.get_extensions)
 
 
-@router.get("/llm/providers")
+@router.get('/llm/providers')
 def list_llm_providers():
-    from agentnexus.core.config import get_settings
-
-    settings = get_settings()
-    return {
-        "providers": [_mask_provider(p) for p in settings.llm_providers],
-        "active": settings.active_model or settings.active_provider,
-        "active_model": settings.active_model,
-        "judge_model": settings.judge_model,
-        "legacy": {
-            "model_id": settings.llm_model_id,
-            "base_url": settings.llm_base_url,
-            "has_api_key": bool(settings.llm_api_key.get_secret_value()),
-        },
-    }
+    return _call(configuration.list_llm_providers)
 
 
-@router.put("/llm/providers")
+@router.put('/llm/providers')
 def update_llm_providers(req: ProvidersUpdateRequest):
-    from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml
     from agentnexus.server.app import _get_runtime
-
-    try:
-        validated = _validate_providers(req.providers)
-    except ValueError as e:
-        raise APIError(400, "bad_request", str(e))
-
-    data = load_config_yaml()
-    stored = {p.get("name"): p for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
-    for entry in validated:
-        if not entry["api_key"] or entry["api_key"] == "****":
-            entry["api_key"] = (stored.get(entry["name"]) or {}).get("api_key", "")
-    data["llm_providers"] = validated
-    write_config_yaml(data)
-    _reset_settings_cache()
-
-    _apply_active_llm(_get_runtime(), get_settings())
-    return {"status": "updated", "count": len(validated)}
+    return _call(configuration.update_llm_providers, req, _get_runtime())
 
 
-@router.post("/llm/active")
+@router.post('/llm/active')
 def set_active_llm_provider(req: ActiveProviderRequest):
-    from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml
     from agentnexus.server.app import _get_runtime
-
-    data = load_config_yaml()
-    stored = {p.get("name"): p for p in (data.get("llm_providers") or []) if isinstance(p, dict)}
-    selector = req.name.strip()
-    if selector:
-        pname, _, mid = selector.partition("/")
-        provider = stored.get(pname)
-        if provider is None:
-            raise APIError(404, "not_found", f"Unknown provider: {pname}")
-        model_ids = [m.get("model_id") for m in (provider.get("models") or []) if isinstance(m, dict)]
-        if mid and mid not in model_ids:
-            raise APIError(404, "not_found", f"Unknown model: {selector}")
-        if not mid and not model_ids:
-            raise APIError(404, "not_found", f"Provider '{pname}' has no models")
-    data["active_model"] = selector
-    data["active_provider"] = selector.partition("/")[0] if selector else ""
-    write_config_yaml(data)
-    _reset_settings_cache()
-
-    settings = get_settings()
-    _apply_active_llm(_get_runtime(), settings)
-    return {"status": "updated", "active": selector, "model_id": settings.get_active_llm_profile()[0]}
+    return _call(configuration.set_active_llm_provider, req, _get_runtime())
 
 
-@router.post("/llm/discover")
+@router.post('/llm/discover')
 def discover_models(req: DiscoverRequest):
-    """Proxy the provider's GET /models endpoint — feeds the model-picker import UI.
-
-    The api_key is used for this request only; it is never persisted or logged.
-    """
-    base_url = (req.base_url or "").strip().rstrip("/")
-    if not base_url.startswith(("http://", "https://")):
-        raise APIError(400, "bad_request", "base_url must start with http(s)://")
-    api_key = req.api_key or ""
-    if not api_key and req.provider:
-        from agentnexus.core.config import get_settings
-        for p in get_settings().llm_providers:
-            if p.name == req.provider:
-                api_key = p.api_key.get_secret_value()
-                break
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key or "not-needed", base_url=base_url, timeout=20)
-        out = []
-        for m in client.models.list():
-            ctx = getattr(m, "context_length", None)
-            out.append({"id": m.id, "context_length": ctx if isinstance(ctx, int) else None})
-        out.sort(key=lambda x: x["id"])
-        return {"models": out}
-    except Exception as e:
-        raise APIError(502, "upstream_error", f"拉取模型列表失败: {type(e).__name__}: {e}")
+    return _call(configuration.discover_models, req)
 
 
-@router.get("/llm/capabilities")
+@router.get('/llm/capabilities')
 def get_llm_capabilities(runtime=Depends(get_runtime)):
-    """Detected capabilities of the active LLM profile.
+    return _call(configuration.get_llm_capabilities, runtime)
 
-    ``source`` tells the caller how the flags were determined:
-    ``probe`` (live endpoint probe), ``config`` (explicit user override),
-    or ``unknown`` (conservative defaults, not yet probed).
-    """
-    llm = runtime.llm
-    caps = llm.capabilities
-    settings = runtime.settings
-    overridden = settings.model_tool_calling is not None or settings.model_json_mode is not None
-    if overridden:
-        source = "config"
-    elif caps.from_default_fallback:
-        source = "unknown"
-    else:
-        source = "probe"
-    return {
-        "model": llm.model,
-        "base_url": llm.base_url,
-        "source": source,
-        "tool_calling": caps.supports_tool_calling,
-        "json_mode": caps.supports_json_mode,
-        "json_schema": caps.supports_json_schema,
-        "thinking": caps.supports_thinking,
-        "vision": caps.supports_vision,
-        "parallel_tool_calls": caps.supports_parallel_tool_calls,
-        "max_context_tokens": caps.max_context_tokens,
-        "max_output_tokens": caps.max_output_tokens,
-        "session_disabled": sorted(llm.session_tracker.disabled_features),
-    }
 
-@router.put("")
+@router.put('')
 def update_config(req: ConfigUpdateRequest):
-    from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml
-
-    if req.key not in SETTABLE_KEYS:
-        raise APIError(400, "bad_request", f"Key '{req.key}' is not settable")
-
-    if req.key in _SECURITY_BLOCKED_KEYS:
-        raise APIError(403, "forbidden", f"Key '{req.key}' is security-sensitive and cannot be modified via API")
-
-    data = load_config_yaml()
-    data[req.key] = req.value
-    write_config_yaml(data)
-
-    _reset_settings_cache()
-
-    if req.key in ("llm_model_id", "llm_base_url", "llm_api_key", "llm_timeout", "active_model"):
-        from agentnexus.server.app import _get_runtime
-        _apply_active_llm(_get_runtime(), get_settings())
-    elif req.key in ("model_thinking", "model_thinking_effort"):
-        from agentnexus.server.app import _get_runtime
-        llm = getattr(_get_runtime(), "llm", None)
-        if llm is not None and hasattr(llm, "_capabilities"):
-            llm._capabilities = None
-
-    return {"status": "updated", "key": req.key}
+    from agentnexus.server.app import _get_runtime
+    return _call(configuration.update_config, req, _get_runtime())
 
 
-@router.put("/persona")
+@router.put('/persona')
 def update_persona(req: PersonaUpdateRequest):
-    from agentnexus.core.config import load_config_yaml, write_config_yaml
-
-    data = load_config_yaml()
-    persona_data: dict[str, Any] = {
-        "agent_name": req.agent_name,
-        "identity": req.identity,
-        "tone": req.tone,
-        "projects": [{"name": p.name, "focus": p.focus} for p in req.projects],
-    }
-    data["persona"] = persona_data
-    write_config_yaml(data)
-
-    _reset_settings_cache()
-
-    return {"status": "updated", "persona": persona_data}
+    return _call(configuration.update_persona, req)

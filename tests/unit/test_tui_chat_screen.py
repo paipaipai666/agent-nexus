@@ -1,10 +1,7 @@
 """Tests for ChatScreen static methods, MCP formatting, and command helpers."""
 
-import inspect
 import json
-from unittest.mock import MagicMock, patch
-
-from textual.events import Key
+from unittest.mock import MagicMock
 
 from agentnexus.skills.registry import SkillEntry, SkillRegistry
 from agentnexus.skills.workflow import Workflow
@@ -872,8 +869,8 @@ class TestSkillCommandHelpers:
         handled = screen._handle_dynamic_skill_command("/docx-skill", "生成一份word文档")
 
         assert handled is True
-        service.use.assert_called_once_with("default/docx")
-        screen._run_agent.assert_called_once_with("生成一份word文档")
+        service.use.assert_not_called()
+        screen._run_agent.assert_called_once_with(session_id=screen._chat_session.id, text="生成一份word文档", skill_id="default/docx", attachments=None)
 
     def test_handle_short_dynamic_skill_command_runs_instruction(self):
         workflow = Workflow.model_validate({
@@ -903,8 +900,8 @@ class TestSkillCommandHelpers:
         handled = screen._handle_dynamic_skill_command("/pdf", "提取表格", short_form=True)
 
         assert handled is True
-        service.use.assert_called_once_with("default/pdf")
-        screen._run_agent.assert_called_once_with("提取表格")
+        service.use.assert_not_called()
+        screen._run_agent.assert_called_once_with(session_id=screen._chat_session.id, text="提取表格", skill_id="default/pdf", attachments=None)
 
     def test_handle_dynamic_skill_command_without_instruction_shows_usage(self):
         screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
@@ -973,14 +970,13 @@ class TestSkillCommandHelpers:
 
 
 class TestExitAndInterruptCommands:
-    def test_double_escape_interrupts_agent(self):
+    def test_stop_action_cancels_the_active_run(self):
         agent = MagicMock()
         screen = ChatScreen(agent=agent, memory=None, version=None)
         screen._chat_area = MagicMock()
         screen._side_panel = MagicMock()
         screen._stop_spinner = MagicMock()
         screen.action_focus_input = MagicMock()
-        screen._last_escape_at = 100.0
         screen._current_run_id = "run_1"
         screen._chat_service = MagicMock()
         screen._chat_service.get_run_snapshot.return_value = MagicMock(
@@ -988,19 +984,14 @@ class TestExitAndInterruptCommands:
             question="question",
         )
 
-        event = MagicMock(spec=Key)
-        event.key = "escape"
-
-        with patch("agentnexus.tui.screens.chat.time.monotonic", return_value=100.2):
-            screen.on_key(event)
+        screen.action_stop_task()
 
         screen._chat_service.cancel_run.assert_called_once_with(
             screen._current_run_id,
-            reason="用户双击 ESC 强制中断",
+            reason="用户请求停止",
         )
         screen._stop_spinner.assert_called_once()
         screen.action_focus_input.assert_not_called()
-        event.stop.assert_called_once()
 
     def test_tui_no_longer_owns_turn_persistence(self):
         screen = ChatScreen(agent=MagicMock(), memory=MagicMock(), version=MagicMock())
@@ -1008,12 +999,3 @@ class TestExitAndInterruptCommands:
         assert not hasattr(screen, "_turn_journal")
         assert not hasattr(screen, "_persist_interrupted_turn")
         assert not hasattr(screen, "_build_interrupted_answer")
-
-    def test_tui_delegates_journal_recording_to_chat_service(self):
-        run_source = inspect.getsource(ChatScreen._run_agent.__wrapped__)
-        prepare_source = inspect.getsource(ChatScreen._prepare_agent_question)
-
-        assert "record_agent_event" in run_source
-        assert "record_workflow_event" in prepare_source
-        assert "turn.record(" not in run_source
-        assert "turn.record(" not in prepare_source

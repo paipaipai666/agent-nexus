@@ -135,7 +135,6 @@ class AppRuntime:
             build-time workspace).
             """
             _restore = cls._restore_memory_from_version if restore_session else None
-            _version_for_restore = version
             def factory() -> MemoryManager:
                 ws = workspace_path
                 if workspace_resolver is not None:
@@ -144,8 +143,11 @@ class AppRuntime:
                     except Exception:
                         pass
                 mm = MemoryManager(session_id, llm=llm, workspace_path=ws)
-                if _restore is not None and _version_for_restore is not None:
-                    _restore(mm, _version_for_restore)
+                if _restore is not None:
+                    session_version = version if session_id == version.session_id else ConversationVersionManager(
+                        session_id, settings.memory_db_path, workspace_path=ws,
+                    )
+                    _restore(mm, session_version)
                 return mm
             return factory
 
@@ -208,6 +210,13 @@ class AppRuntime:
             skill_service=skill_service,
             tool_executor=executor,
             capability_runtime=capability_runtime,
+        )
+
+        from agentnexus.services.chat import SessionHandle
+
+        chat_service.attach_session(
+            SessionHandle(session_id, profile=profile, workspace=workspace_path),
+            agent=build_agent, memory=memory, version=version,
         )
 
         try:

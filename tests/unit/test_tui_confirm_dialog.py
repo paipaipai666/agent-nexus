@@ -13,11 +13,11 @@ class TestConfirmDialog:
         assert dialog._params_summary == "some params"
         assert dialog._risk_level == "medium"
 
-    def test_params_truncated_at_500(self):
-        """Params summary is truncated to 500 characters."""
+    def test_full_params_are_preserved_for_review(self):
+        """The approval preview retains the complete operation."""
         long_text = "x" * 1000
         dialog = ConfirmDialog("t", long_text)
-        assert len(dialog._params_summary) == 500
+        assert dialog._params_summary == long_text
 
     def test_default_risk_level(self):
         """Default risk level is 'high'."""

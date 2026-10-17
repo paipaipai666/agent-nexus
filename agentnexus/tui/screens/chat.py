@@ -1,47 +1,41 @@
 """ChatScreen — main chat interface with real ReActAgent backend."""
 
 import asyncio
+import json
 import logging
-import threading
-import time
-from itertools import cycle
+from functools import partial
+from types import SimpleNamespace
 
-from rich.markdown import Markdown
-from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.events import Key
+from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Input, Label, Static
-from textual.worker import get_current_worker
+from textual.widgets import Button, Input, Label, Static
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.config import get_settings
 from agentnexus.core.text_utils import collapse_and_truncate
 from agentnexus.memory.short_term import ShortTermMemory
-from agentnexus.observability.tracer import trace_manager
-from agentnexus.services.chat import ChatService
+from agentnexus.services.chat import ChatService, SessionHandle
 from agentnexus.skills import (
     SkillEntry,
     SkillRegistry,
     format_tool_policy_summary,
     validate_session_profile,
 )
-from agentnexus.tools.result_format import (
-    condense_fetch_result,
-    condense_file_result,
-    condense_search_result,
-    extract_diff_parts,
-    format_subagent_result,
-    summarize_tool_result,
-)
+from agentnexus.tui.commands import COMMAND_HELP, TerminalCommands
+from agentnexus.tui.execution import ChatExecution
+from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
-from agentnexus.tui.widgets.message import ChatMessage, ToolCall, render_diff_with_colors
+from agentnexus.tui.widgets.message import ChatMessage, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
+from agentnexus.tui.widgets.welcome import Welcome
+from agentnexus.tui.workspace import ChatWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -77,35 +71,77 @@ class ChatArea(Widget):
     }
     """
 
+    class OutputPending(Message):
+        """Signal that new output arrived while the user reads earlier messages."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.following_output = True
+
+    def compose(self):
+        yield Welcome(id="welcome")
+        tree = CollaborationTree(id="collaboration-tree")
+        tree.display = False
+        yield tree
+
+    def watch_scroll_y(self, old_value, new_value):
+        super().watch_scroll_y(old_value, new_value)
+        if new_value < old_value and new_value < self.max_scroll_y:
+            self.following_output = False
+        elif new_value >= self.max_scroll_y:
+            self.following_output = True
+
+    def follow_output(self):
+        if self.following_output:
+            self.call_after_refresh(lambda: self.scroll_end(animate=False) if self.following_output else None)
+        else:
+            self.post_message(self.OutputPending())
+
+    def resume_output(self):
+        self.following_output = True
+        self.call_after_refresh(lambda: self.scroll_end(animate=False))
+
+    def dismiss_welcome(self):
+        self.query_one("#welcome").display = False
+
     def add_message(self, role: str, content: str):
+        if self.is_mounted:
+            self.dismiss_welcome()
         widget = ChatMessage(role, content)
         self.mount(widget)
-        self.call_after_refresh(self.scroll_end)
+        self.follow_output()
         return widget
 
     def add_system(self, text: str):
+        if self.is_mounted:
+            self.dismiss_welcome()
         self.mount(ChatMessage("system", text, markup=True))
-        self.call_after_refresh(self.scroll_end)
+        self.follow_output()
 
     def add_tool_call(self, name: str, result: str = "", duration_ms: float = 0):
         self.mount(ToolCall(name, result, duration_ms))
-        self.call_after_refresh(self.scroll_end)
+        self.follow_output()
 
     def clear_all(self):
-        self.remove_children()
+        self.query("ChatMessage, ToolCall").remove()
+        self.following_output = True
 
 
-class ChatScreen(Screen):
-    """AgentNexus chat interface — OpenCode warm theme."""
+class ChatScreen(ChatWorkspace, ChatExecution, Screen):
+    """A terminal-first conversation and collaboration workspace."""
 
     BINDINGS = [
+        Binding("ctrl+p", "command_menu", "操作", priority=True),
+        Binding("f2", "session_menu", "会话", priority=True),
+        Binding("f3", "toggle_inspector", "任务", priority=True),
+        Binding("f4", "edit_message", "多行", priority=True),
+        Binding("ctrl+c", "stop_task", "停止", priority=True),
+        Binding("ctrl+end", "latest_output", "最新输出", priority=True),
         ("ctrl+l", "clear_screen", "清屏"),
         ("ctrl+h", "show_help", "帮助"),
     ]
 
-    ESC_DOUBLE_TAP_SECONDS = 0.6
-
-    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None, capability_runtime=None):
+    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None, capability_runtime=None, *, chat_service=None, session_id=None, runtime=None):
         super().__init__()
         self._agent = agent
         self._memory = memory
@@ -124,12 +160,12 @@ class ChatScreen(Screen):
         self._skill_registry: SkillRegistry | None = None
         self._current_skill: SkillEntry | None = None
         self._skill_status = "idle"
-        self._last_escape_at = 0.0
         self._agent_worker = None
         self._streaming_msg_widget = None
         self._streaming_buffer = ""
         self._last_stream_update = 0.0
-        self._chat_service = ChatService(
+        self._runtime = runtime
+        self._chat_service = chat_service if chat_service is not None else ChatService(
             agent_factory=lambda _sid=None: agent,
             memory_factory_builder=lambda _sid: lambda: memory,
             version_manager=version,
@@ -137,12 +173,41 @@ class ChatScreen(Screen):
             tool_executor=getattr(agent, "tool_executor", None),
             capability_runtime=capability_runtime,
         )
-        self._chat_session = self._chat_service.start_session()
-        self._chat_service.mark_processing(False)
+        if session_id is not None:
+            self._chat_session = self._chat_service.get_session_snapshot(session_id)["session"]
+            self._skill_service = self._chat_service.session_skills(session_id)
+        else:
+            existing_id = getattr(version, "session_id", None)
+            if isinstance(existing_id, str) and existing_id:
+                self._chat_session = SessionHandle(existing_id, profile="tui")
+            else:
+                self._chat_session = self._chat_service.start_session()
+            self._chat_service.attach_session(self._chat_session, agent=agent, memory=memory, version=version)
         self._current_run_id: str = ""
         self._current_turn = None
+        self._closing = False
+        self._active_runs = {}
+        self._running_sessions = set()
+        self._compacting_sessions = set()
+        self._queued_messages = {}
+        self._submissions = {}
+        self._attachments = {}
+        self._drafts = {}
+        self._tool_widgets = {}
+        self._seen_collaboration_messages = set()
+        command_runtime = runtime if runtime is not None else SimpleNamespace(
+            chat=self._chat_service, agent=agent, memory_manager=memory, version_manager=version,
+            llm=getattr(agent, "llm_client", None), mcp_manager=mcp_manager,
+            capability_runtime=capability_runtime, wiki_service=None,
+        )
+        self._terminal = TerminalCommands(command_runtime)
+        self._terminal.load_draft(self._chat_session.id)
+        self._drafts = self._terminal.inputs
+        self._attachments = self._terminal.attachments
+        self._submissions = self._terminal.submissions
+        self._command_results = {}
         if self._memory:
-            self._memory._on_compact = self._on_compact_event
+            self._memory._on_compact = partial(self._on_compact_event, session_id=self._chat_session.id)
 
     def compose(self) -> ComposeResult:
         yield Static(self._render_top_bar(), id="top-bar")
@@ -154,48 +219,69 @@ class ChatScreen(Screen):
         self._command_palette_content = Static("", id="command-palette-content")
         with VerticalScroll(id="command-palette"):
             yield self._command_palette_content
+        latest = Button("有新输出 · Ctrl+End 跳到最新", id="new-output")
+        latest.display = False
+        yield latest
+        with Horizontal(id="task-strip"):
+            yield Static("", id="task-summary")
+            yield Button("撤销", id="undo-checkpoint")
+            yield Button("重做", id="redo-checkpoint")
+            yield Button("记录", id="open-task-record")
         self._chat_input = InputBar(id="input-area")
         yield self._chat_input
         self._hud = HUD(id="hud")
         yield self._hud
 
     def _render_top_bar(self) -> str:
-        model = getattr(self._agent, "model_id", "v4-flash") if self._agent else "v4-flash"
         branch = self._version.status().get("branch", "main") if self._version else "main"
+        from pathlib import Path
 
-        left = "[#6ba5f2]AgentNexus[/] [dim]workspace[/]"
-        center = f"[dim]branch[/] {branch}  [dim]model[/] [#6ba5f2]{model}[/]"
-        right = "[dim]^H help  ^L clear  Esc focus[/]"
+        from rich.markup import escape
 
-        return f"{left}  {center}  {right}"
+        workspace = self._chat_session.workspace or str(Path.cwd())
+        return f"[bold]AgentNexus[/]  [dim]{escape(workspace)}  ·  {escape(str(branch))}[/]"
 
     def on_mount(self):
-        self._chat_area.add_system("[#6ba5f2]AgentNexus ready[/] [dim]Ask a question or type /help.[/]")
         self._render_restored_history()
+        self._update_welcome()
+        self.query_one("#chat-input", Input).value = self._drafts.get(self._chat_session.id, "")
         self._init_skill_registry()
         self._refresh_version_display()
         if hasattr(self, "_side_panel"):
             self._refresh_skill_panel()
             self._refresh_model_panel()
+            self._refresh_todo_panel()
             self._refresh_tools_panel()
             self._refresh_mcp_panel()
         if hasattr(self, '_hud') and self._agent:
             try:
-                caps = self._agent.llm_client.capabilities
-                strategy = "原生工具" if caps.supports_tool_calling else "JSON模式"
-                self._hud.update_capabilities(
-                    supports_thinking=caps.supports_thinking,
-                    strategy=strategy,
-                )
+                self._refresh_session_metrics()
             except Exception as e:
                 logger.debug("Failed to update HUD capabilities: %s", e)
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
+        self.call_after_refresh(self._refresh_workspace)
+        self.set_interval(1, self._refresh_workspace)
+        self._load_recent_session()
+
+    def _update_welcome(self):
+        welcome = self._chat_area.query_one("#welcome", Welcome)
+        welcome.model = str(getattr(self._agent, "model_id", "未配置"))
+        welcome.workspace = self._chat_session.workspace or ""
+        welcome.thinking = self._chat_service.get_thinking_effort(self._chat_session.id) or "默认"
+        welcome.display = not bool(self._chat_area.query(ChatMessage))
+        welcome.refresh(layout=True)
 
     def _render_restored_history(self):
-        if not self._memory or not getattr(self._memory, "short_term", None):
-            return
+        messages = None
+        if self._version is not None:
+            history = self._version.get_messages_with_answers(limit=0)
+            if isinstance(history, list) and history:
+                messages = history
         try:
-            messages = self._memory.short_term.get_all()
+            if messages is None:
+                if not self._memory or not getattr(self._memory, "short_term", None):
+                    return
+                messages = self._memory.short_term.get_all()
         except Exception as e:
             logger.debug("Failed to get messages for history restore: %s", e)
             return
@@ -219,7 +305,7 @@ class ChatScreen(Screen):
                         bracket_idx = action_part.find("[")
                         if bracket_idx > 0:
                             tool_name = action_part[len("Action: "):bracket_idx].strip()
-                self._chat_area.add_tool_call(tool_name or "tool", tool_result[:500])
+                self._chat_area.add_tool_call(tool_name or "tool", tool_result)
             elif role == "system":
                 self._chat_area.add_system(content)
             else:
@@ -229,31 +315,52 @@ class ChatScreen(Screen):
         text = event.text
         inp = self.query_one("#chat-input", Input)
         inp.value = ""
+        self._terminal.save_draft(self._chat_session.id, text="")
+        if self._terminal.drafts.get(self._chat_session.id) == text:
+            self._terminal.drafts.pop(self._chat_session.id, None)
         self._update_command_suggestions("")
-        self._last_user_msg_widget = self._chat_area.add_message("user", text)
+        display_text = text
+        setting = text.split(maxsplit=3)
+        if len(setting) == 4 and setting[:2] == ["/settings", "set"] and setting[2].endswith("_api_key"):
+            display_text = f"/settings set {setting[2]} ****"
+        self._last_user_msg_widget = self._chat_area.add_message("user", display_text)
         if text.startswith("/"):
             self._handle_command(text)
-        elif self._chat_service.is_processing:
-            self._chat_service.enqueue_message(self._chat_session.id, text)
         else:
-            self._chat_service.mark_processing(True)
-            self._run_agent(text)
+            sid = self._chat_session.id
+            self._submit_session_message({"text": text, "attachments": self._attachments.pop(sid, None)}, sid)
+        self._refresh_workspace()
 
     def on_input_bar_app_input_changed(self, event: InputBar.AppInputChanged):
         self._update_command_suggestions(event.text)
+        self._terminal.save_draft(self._chat_session.id, text=event.text)
 
     def on_key(self, event: Key):
         if event.key != "escape":
             return
-        now = time.monotonic()
-        if now - self._last_escape_at <= self.ESC_DOUBLE_TAP_SECONDS:
-            event.stop()
-            self._last_escape_at = 0.0
-            self._force_interrupt_agent()
-            return
-        self._last_escape_at = now
+        self.remove_class("has-inspector")
+        self._update_command_suggestions("")
         event.stop()
         self.action_focus_input()
+
+    def action_stop_task(self):
+        self._force_interrupt_agent()
+
+    def on_chat_area_output_pending(self):
+        if not self._chat_area.following_output:
+            self.query_one("#new-output").display = True
+
+    def action_latest_output(self):
+        self.query_one("#new-output").display = False
+        self._chat_area.resume_output()
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "new-output":
+            self.action_latest_output()
+        elif event.button.id in {"open-task-record", "open-collaboration", "open-inspector"}:
+            self.action_task_record()
+        elif event.button.id in {"undo-checkpoint", "redo-checkpoint"}:
+            self._handle_command("/undo" if event.button.id == "undo-checkpoint" else "/redo")
 
     def action_clear_screen(self):
         self._chat_area.clear_all()
@@ -266,6 +373,7 @@ class ChatScreen(Screen):
             "default <id>|validate [id]|reset]\n"
             "       /mcp [status|tools|resources|prompts|failures|retry|enable|disable|reload]"
         )
+        self._chat_area.add_message("system", "\n".join(f"{command} {usage}" for command, usage in COMMAND_HELP.items()))
 
     def action_focus_input(self):
         try:
@@ -279,9 +387,7 @@ class ChatScreen(Screen):
             return
         snapshot = self._version.get_head_stm()
         if snapshot and self._memory:
-            new_stm = ShortTermMemory.from_json(snapshot)
-            self._memory.short_term._messages = new_stm._messages
-            self._memory.short_term._summary = new_stm._summary
+            self._memory.short_term = ShortTermMemory.from_json(snapshot)
 
     def _commit_if_answered(self, question: str, answer: str):
         """Auto-commit after a successful answer."""
@@ -319,34 +425,26 @@ class ChatScreen(Screen):
         cmd = parts[0]
         arg = parts[1] if len(parts) > 1 else ""
 
+        if cmd == "/theme":
+            if arg in {"nexus-dark", "nexus-light", "ansi-dark", "ansi-light"}:
+                self.app.theme = arg
+            else:
+                self._chat_area.add_message("system", "主题: nexus-dark / nexus-light / ansi-dark / ansi-light")
+            return
+
+        if cmd in COMMAND_HELP:
+            self._run_terminal_command(cmd, arg, self._chat_session.id)
+            return
+
         if cmd == "/help":
             self.action_show_help()
         elif cmd == "/exit":
             self.app.exit()
         elif cmd == "/clear":
             if arg.strip() == "--all" and self._version:
-                self._version.reset()
-                self._chat_area.clear_all()
-                self._chat_area.add_system("[dim]已清除所有检查点和对话。[/]")
-                self._refresh_version_display()
+                self._run_terminal_command("/reset", "", self._chat_session.id)
             else:
                 self._chat_area.clear_all()
-        elif cmd == "/undo" and self._version:
-            prev = self._version.undo()
-            if prev:
-                self._restore_stm_from_version()
-                self._chat_area.add_system(f"[dim]已回退至 [{prev['id']}][/]")
-            else:
-                self._chat_area.add_system("[dim]无可回退[/]")
-            self._refresh_version_display()
-        elif cmd == "/redo" and self._version:
-            cp = self._version.redo()
-            if cp:
-                self._restore_stm_from_version()
-                self._chat_area.add_system(f"[dim]已重做至 [{cp['id']}][/]")
-            else:
-                self._chat_area.add_system("[dim]无可重做[/]")
-            self._refresh_version_display()
         elif cmd == "/log" and self._version:
             entries = self._version.log()
             if entries:
@@ -366,17 +464,6 @@ class ChatScreen(Screen):
             ]
             self._chat_area.add_system("\n".join(lines))
             self._refresh_version_display()
-        elif cmd == "/compact" and self._memory:
-            tokens_before = self._memory.estimate_stm_tokens()
-            saved = self._memory.maybe_compact(custom_instructions=arg, is_auto=False)
-            if saved > 0:
-                self._chat_area.add_system(
-                    f"[dim]已压缩对话上下文 (释放 {saved} tokens, 压缩前 {tokens_before} tokens)[/]"
-                )
-            else:
-                self._chat_area.add_system("[dim]当前上下文未达到压缩阈值[/]")
-        elif cmd == "/stats":
-            self._chat_area.add_system(self._hud._build_text())
         elif cmd == "/sessions":
             self._handle_sessions()
         elif cmd == "/switch":
@@ -428,37 +515,97 @@ class ChatScreen(Screen):
         self._chat_area.add_system("\n[dim]使用 /switch <session_id> 切换会话[/]")
 
     def _handle_switch(self, arg: str):
-        """Switch to a different session."""
-        session_id = arg.strip()
-        if not session_id:
+        """Switch every session-owned resource together."""
+        if not arg.strip():
             self._chat_area.add_system("[red]用法: /switch <session_id>[/]")
             return
-
-        if not self._version:
+        if self._version is None:
             self._chat_area.add_system("[red]版本管理未启用[/]")
             return
+        try:
+            result = self._terminal.run("/session", "switch " + arg.strip(), self._chat_session.id)
+            self._activate_session(result.session_id)
+            self._chat_area.add_message("system", f"已切换到会话: {result.session_id}")
+        except (KeyError, ValueError) as exc:
+            self._chat_area.add_message("system", str(exc))
 
-        from pathlib import Path
+    @work(group="terminal-commands")
+    async def _run_terminal_command(self, command, args, sid):
+        try:
+            if self._terminal.requires_confirmation(command, args):
+                approved = await self.app.push_screen_wait(ConfirmDialog(command, f"会话 {sid}\n{command} {args}", risk_level="high"))
+                if not approved:
+                    self._chat_area.add_message("system", "操作已取消")
+                    return
+            result = await asyncio.to_thread(self._terminal.run, command, args, sid)
+            rendered = json.dumps(result.value, ensure_ascii=False, indent=2, default=str)
+            self._command_results.setdefault(sid, []).append(rendered)
+            if result.draft is not None:
+                self._terminal.save_draft(sid, text=result.draft)
+            if result.submission is not None:
+                submission = dict(result.submission)
+                if sid == self._chat_session.id:
+                    self._chat_area.add_message("user", submission["text"])
+                self._submit_session_message(submission, sid)
+            if sid != self._chat_session.id:
+                self.app.notify(f"会话 {sid} 的 {command} 已完成")
+                return
+            if command in {"/undo", "/redo", "/reset"}:
+                self._chat_area.clear_all()
+                self._render_restored_history()
+                self._refresh_version_display()
+            self._chat_area.add_message("system", rendered)
+            if result.session_id is not None:
+                self._activate_session(result.session_id)
+            if result.draft is not None:
+                self.query_one("#chat-input", Input).value = result.draft
+            self._refresh_model_panel()
+            self._refresh_workspace()
+        except Exception as exc:
+            failure = f"{command} 失败: {exc}"
+            if sid == self._chat_session.id:
+                self._chat_area.add_message("system", failure)
+            else:
+                self._command_results.setdefault(sid, []).append(failure)
+                self.app.notify(f"会话 {sid} 的 {command} 失败")
 
-        from agentnexus.core.config import get_settings
-        from agentnexus.memory.versioned import ConversationVersionManager
-
-        settings = get_settings()
-        workspace = str(Path.cwd())
-
-        if not ConversationVersionManager.session_belongs_to_workspace(
-            settings.memory_db_path, session_id, workspace
-        ):
-            self._chat_area.add_system(f"[red]会话不存在:[/red] {session_id}")
-            return
-
-        self._version.session_id = session_id
-        self._restore_stm_from_version()
-
+    def _activate_session(self, session_id):
+        old_id = self._chat_session.id
+        self._drafts[old_id] = self.query_one("#chat-input", Input).value
+        self._terminal.save_draft(old_id)
+        self._terminal.load_draft(session_id)
+        self._chat_session = self._chat_service.get_session_snapshot(session_id)["session"]
+        self._agent = self._chat_service.session_agent(session_id)
+        self._memory = self._chat_service.session_memory(session_id)
+        self._version = self._chat_service.session_version(session_id)
+        self._skill_service = self._chat_service.session_skills(session_id)
+        self._current_skill = None
+        self._skill_status = "idle"
+        self._current_run_id = self._active_runs.get(session_id, "")
+        self._streaming_msg_widget = None
+        self._streaming_buffer = ""
+        self._last_user_msg_widget = None
+        self._turn_tool_names = []
+        self._turn_thought_count = 0
+        if self._memory:
+            self._memory._on_compact = partial(self._on_compact_event, session_id=session_id)
+        self._hud.set_compacting(session_id in self._compacting_sessions)
         self._chat_area.clear_all()
-        self._chat_area.add_system(f"[green]已切换到会话:[/] {session_id}")
         self._render_restored_history()
+        self.call_after_refresh(self._update_welcome)
+        self._load_recent_session()
+        self.query_one("#new-output").display = False
+        self._side_panel.update_timeline([])
+        self.query_one("#chat-input", Input).value = self._drafts.get(session_id, "")
+        self._init_skill_registry()
         self._refresh_version_display()
+        self._refresh_model_panel()
+        self._refresh_skill_panel()
+        self._refresh_todo_panel()
+        self._refresh_session_metrics()
+        for output in self._command_results.pop(session_id, []):
+            self._chat_area.add_message("system", output)
+        self._refresh_workspace()
 
     def _update_command_suggestions(self, text: str):
         suggestions = self._match_command_suggestions(text)
@@ -492,6 +639,7 @@ class ChatScreen(Screen):
 
     def _command_catalog(self) -> list[tuple[str, str, tuple[str, ...]]]:
         commands = [(command, description, ()) for command, description in COMMAND_DEFINITIONS]
+        commands.extend((command, usage, ()) for command, usage in COMMAND_HELP.items() if command not in {item[0] for item in commands})
         for command, subcommands in COMMAND_SUBCOMMANDS.items():
             for subcommand in subcommands:
                 commands.append((f"{command} {subcommand}", "子命令", (subcommand.lower(),)))
@@ -581,6 +729,17 @@ class ChatScreen(Screen):
                     "selected" if self._current_skill is not None else "idle"
                 )
                 self._refresh_skill_panel()
+            elif subcmd in {"search", "show"}:
+                if subcmd == "show":
+                    entry = registry.get(rest.strip())
+                    if entry is None:
+                        raise ValueError(f"未找到 skill: {rest}")
+                    value = {"id": entry.qualified_id, "path": str(entry.path), "workflow": entry.workflow.model_dump()}
+                else:
+                    needle = rest.casefold()
+                    value = [{"id": entry.qualified_id, "name": entry.display_name, "description": entry.description}
+                             for entry in registry.list() if needle in f"{entry.qualified_id} {entry.display_name} {entry.description}".casefold()]
+                self._chat_area.add_message("system", json.dumps(value, ensure_ascii=False, indent=2, default=str))
             elif subcmd == "validate":
                 if self._skill_service is not None:
                     self._skill_service.refresh()
@@ -926,33 +1085,20 @@ class ChatScreen(Screen):
             return True
         if entry is None:
             return False
-        if self._skill_service is not None:
-            try:
-                self._skill_service.use(entry.qualified_id)
-                self._skill_status = self._skill_service.snapshot().status
-                self._current_skill = entry
-            except Exception as exc:
-                self._skill_status = "error"
-                self._refresh_skill_panel()
-                self._chat_area.add_system(f"[dim]Skill 命令失败: {exc}[/]")
-                return True
-        else:
+        sid = self._chat_session.id
+        submission = {"text": instruction, "skill_id": entry.qualified_id, "attachments": self._attachments.pop(sid, None)}
+        if self._skill_service is None:
             profile = entry.workflow.to_session_profile()
             try:
                 validate_session_profile(profile)
-                if hasattr(self._agent, "set_session_profile"):
-                    self._agent.set_session_profile(profile)
             except Exception as exc:
                 self._skill_status = "error"
                 self._refresh_skill_panel()
                 self._chat_area.add_system(f"[dim]Skill 命令失败: {exc}[/]")
                 return True
-            self._current_skill = entry
-            self._skill_status = "selected"
-        self._refresh_skill_panel()
-        self._chat_area.add_system(f"[green]已使用 skill[/] {entry.qualified_id} [dim]执行指令。[/]")
-        self._chat_service.mark_processing(True)
-        self._run_agent(instruction)
+            submission["session_profile"] = profile
+        self._chat_area.add_system(f"[green]Skill 指令已提交[/] {entry.qualified_id}")
+        self._submit_session_message(submission, sid)
         return True
 
     def _resolve_dynamic_skill(self, target: str) -> SkillEntry | None:
@@ -1088,6 +1234,11 @@ class ChatScreen(Screen):
             if caps and hasattr(caps, "max_context_tokens"):
                 ctx = f"{caps.max_context_tokens // 1000}k" if caps.max_context_tokens else "?"
             self._side_panel.update_model(model, ctx, strategy)
+            if hasattr(self, "_hud"):
+                llm = getattr(self._agent, "llm_client", None)
+                base_url = getattr(llm, "base_url", "")
+                if isinstance(model, str) and isinstance(base_url, str):
+                    self._hud.update_model(model, base_url, workspace=self._chat_session.workspace)
         except Exception as e:
             logger.debug("Failed to refresh model panel: %s", e)
 
@@ -1097,6 +1248,7 @@ class ChatScreen(Screen):
         try:
             todo_list = getattr(self._agent, '_todo_list', None)
             if todo_list is None:
+                self._side_panel.update_todo([])
                 return
             items = todo_list.list_items()
             self._side_panel.update_todo([
@@ -1196,26 +1348,15 @@ class ChatScreen(Screen):
 
     def _force_interrupt_agent(self):
         if self._current_run_id:
-            self._chat_service.cancel_run(self._current_run_id, reason="用户双击 ESC 强制中断")
-        worker = getattr(self, "_agent_worker", None)
-        if worker is not None:
-            try:
-                worker.cancel()
-            except Exception as e:
-                logger.debug("Failed to cancel agent worker: %s", e)
-        self._chat_service.mark_processing(False)
+            self._chat_service.cancel_run(self._current_run_id, reason="用户请求停止")
         self._stop_spinner()
         self._current_tool_widget = None
-        try:
-            self._chat_area.query_one("#loading-indicator").remove()
-        except Exception as e:
-            logger.debug("Failed to remove loading indicator: %s", e)
         try:
             snapshot = self._chat_service.get_run_snapshot(self._current_run_id) if self._current_run_id else None
             answer = snapshot.answer if snapshot is not None else ""
             question = snapshot.question if snapshot is not None else "interrupted turn"
-            self._chat_area.add_system("[#e5c07b]已强制中断当前 Agent 活动，并记录中断摘要。[/]")
-            self._side_panel.add_timeline_event("error", "Agent interrupted by double Escape")
+            self._chat_area.add_message("system", "已请求停止当前任务，等待执行结束。")
+            self._side_panel.add_timeline_event("error", "用户请求停止")
             self._record_turn_summary(question, answer)
         except Exception as e:
             logger.debug("Failed to record interrupt summary: %s", e)
@@ -1341,12 +1482,19 @@ class ChatScreen(Screen):
                 lines.append(f"failed: {name} -> {reason}")
         return "\n".join(lines)
 
-    def _on_compact_event(self, event: dict):
+    def _on_compact_event(self, event: dict, *, session_id=None):
         """Called from agent thread — forward to main thread for UI update."""
-        self.app.call_from_thread(self._apply_compact_event, event)
+        self.app.call_from_thread(self._apply_compact_event, event, session_id)
 
-    def _apply_compact_event(self, event: dict):
+    def _apply_compact_event(self, event: dict, session_id=None):
+        session_id = session_id or self._chat_session.id
         e = event["event"]
+        if e == "start":
+            self._compacting_sessions.add(session_id)
+        else:
+            self._compacting_sessions.discard(session_id)
+        if session_id != self._chat_session.id:
+            return
         if e == "start":
             tokens = event.get("tokens_before", 0)
             self._hud.set_compacting(True)
@@ -1374,333 +1522,6 @@ class ChatScreen(Screen):
             self._hud.set_compacting(False)
             self._chat_area.add_system("[green]✓ 熔断器已重置[/] 恢复正常压缩能力")
 
-    @work(exclusive=True)
-    async def _run_agent(self, text: str):
-        self._agent_worker = get_current_worker()
-        self._streaming_msg_widget = None
-        self._streaming_buffer = ""
-        self._last_stream_update = 0.0
-        run, _events, turn = self._chat_service.begin_turn(self._chat_session.id, text)
-        self._current_run_id = run.id
-        self._current_turn = turn
-        if hasattr(self._agent, "set_cancel_checker"):
-            self._agent.set_cancel_checker(turn.cancel_checker)
-        if self._capability_runtime is not None:
-            self._capability_runtime.refresh_if_stale()
-            self._refresh_tools_panel()
-            self._refresh_mcp_panel()
-            self._refresh_skill_panel()
-
-        def _tui_confirm(params_summary: str) -> bool:
-            event = threading.Event()
-            result_holder = [False]
-
-            def _show_dialog():
-                dialog = ConfirmDialog(
-                    self._current_tool_name,
-                    params_summary,
-                    risk_level="high",
-                )
-                self.app.push_screen(dialog, callback=lambda confirmed: _on_result(confirmed))
-
-            def _on_result(confirmed: bool):
-                result_holder[0] = bool(confirmed)
-                event.set()
-
-            self.app.call_from_thread(_show_dialog)
-            while not event.wait(0.05):
-                if turn.cancel_checker():
-                    return False
-            return result_holder[0]
-
-        self._agent._confirm = _tui_confirm
-        bridge = getattr(self.app, "_subagent_confirm", None)
-        if bridge is not None:
-            bridge.set_target(_tui_confirm)
-
-        loading = Static("[#fab283]● Working...[/]", id="loading-indicator")
-        self._chat_area.mount(loading)
-        self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-
-        def _on_agent_event(event, from_state, to_state):
-            """Structured FSM event → TUI dispatch (non-blocking)."""
-            self.app.call_from_thread(_apply_event, event, from_state, to_state)
-
-        STRATEGY_LABELS = {
-            "NATIVE_TOOLS": "原生工具",
-            "JSON_MODE": "JSON模式",
-            "PROMPT_JSON": "提示词JSON",
-            "PLAIN_TEXT": "纯文本",
-        }
-
-        def _apply_event(event, from_state, to_state):
-            if turn.cancel_checker():
-                return
-            self._chat_service.record_agent_event(run.id, event)
-            from agentnexus.agents.react_types import ReActEventType as E
-            etype = event.type
-            strategy = event.payload.get("strategy")
-            if strategy:
-                try:
-                    caps = self._agent.llm_client.capabilities
-                    self._hud.update_capabilities(
-                        supports_thinking=caps.supports_thinking,
-                        strategy=STRATEGY_LABELS.get(strategy, strategy),
-                    )
-                    self._refresh_model_panel(STRATEGY_LABELS.get(strategy, strategy))
-                except Exception as e:
-                    logger.debug("Failed to update HUD capabilities on strategy change: %s", e)
-            if etype == E.STREAM_TOKEN:
-                token = event.payload.get("token", "")
-                if not self._streaming_msg_widget:
-                    msg = ChatMessage("assistant", "")
-                    self._chat_area.mount(msg)
-                    self._streaming_msg_widget = msg
-                    self._streaming_buffer = ""
-                    self._last_stream_update = 0.0
-                self._streaming_buffer += token
-                now = time.monotonic()
-                if now - self._last_stream_update >= 0.05:
-                    content_w = self._streaming_msg_widget.query_one("#msg-content", Static)
-                    content_w.update(Text(self._streaming_buffer))
-                    self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-                    self._last_stream_update = now
-            elif etype == E.TOOLS_FOUND:
-                if self._streaming_msg_widget:
-                    self._streaming_msg_widget.remove()
-                    self._streaming_msg_widget = None
-                    self._streaming_buffer = ""
-                thought = event.payload.get("thought")
-                if thought:
-                    self._chat_area.add_system(
-                        f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
-                    self._turn_thought_count += 1
-            elif etype == E.ANSWER_THOUGHT:
-                if self._streaming_msg_widget:
-                    self._streaming_msg_widget.remove()
-                    self._streaming_msg_widget = None
-                    self._streaming_buffer = ""
-                thought = event.payload.get("thought")
-                if thought:
-                    self._chat_area.add_system(
-                        f"[#a78bfa]Thought:[/] [italic dim]{thought}[/]")
-                    self._turn_thought_count += 1
-            elif etype == E.TOOL_START:
-                self._stop_spinner()
-                tool_name = event.payload.get("name", "")
-                if tool_name == "express_reaction":
-                    from agentnexus.tools.user_reaction import (
-                        REACTION_EMOJI,
-                        parse_reaction_arguments,
-                    )
-                    name, comment = parse_reaction_arguments(
-                        event.payload.get("arguments", {}))
-                    emoji = REACTION_EMOJI.get(name, "")
-                    if self._last_user_msg_widget is not None:
-                        try:
-                            self._last_user_msg_widget.attach_reaction(emoji, comment)
-                        except Exception as e:
-                            logger.debug("attach_reaction failed: %s", e)
-                    self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-                    return
-                self._current_tool_name = tool_name
-                self._turn_tool_names.append(tool_name)
-                self._current_tool_started_at = time.monotonic()
-                widget = ToolCall(tool_name, result="executing...")
-                self._chat_area.mount(widget)
-                self._current_tool_widget = widget
-                self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-                self._spinner_frames = cycle(
-                    ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                self._spinner_timer = self.set_interval(0.12, self._tick_spinner)
-            elif etype == E.TOOL_DONE:
-                self._stop_spinner()
-                if event.payload.get("name", "") == "express_reaction":
-                    return
-                result = event.payload.get("result", "")
-                if self._current_tool_started_at:
-                    self._current_tool_started_at = 0.0
-                if self._current_tool_widget:
-                    tool_lower = self._current_tool_widget.tool_name.strip().lower()
-                    use_markup = False
-                    if tool_lower == "web_search":
-                        result = condense_search_result(result)
-                    elif tool_lower == "web_fetch":
-                        result = condense_fetch_result(result)
-                    elif tool_lower == "file_read":
-                        result = condense_file_result(result)
-                    elif tool_lower == "subagent_run":
-                        result = format_subagent_result(result)
-                    else:
-                        diff_parts = extract_diff_parts(result)
-                        if diff_parts:
-                            message, diff_text = diff_parts
-                            colored_diff = render_diff_with_colors(diff_text)
-                            result = f"{message}\n\n[dim]Diff preview:[/dim]\n{colored_diff}"
-                            use_markup = True
-                        else:
-                            result = summarize_tool_result(result)
-                    self._current_tool_widget.update_result(result, markup=use_markup)
-                    self._current_tool_widget = None
-                if tool_lower in ("todo_add", "todo_update"):
-                    self._refresh_todo_panel()
-                if self._memory:
-                    stm_tokens = self._memory.estimate_stm_tokens()
-                    self._hud.update_context(current_tokens=stm_tokens)
-            elif etype == E.THOUGHT_MISSING:
-                self._chat_area.add_system(
-                    "[#e5c07b][!] 模型未输出 Thought，要求重新思考…[/]")
-            elif etype == E.RETRIES_LEFT:
-                self._chat_area.add_system(
-                    f"[#e5c07b][重试] {event.payload.get('reason', '')}[/]")
-            elif etype == E.DEGRADED:
-                self._stop_spinner()
-                self._current_tool_widget = None
-                label = STRATEGY_LABELS.get(strategy, strategy or "?")
-                self._chat_area.add_system(f"[#e5c07b][策略降级] → {label}[/]")
-                self._refresh_model_panel(label)
-
-        self._agent._on_event = _on_agent_event
-
-        def _run_with_trace():
-            """Run agent in a traced context — each user input is its own trace."""
-            trace_manager.configure(get_settings().traces_dir)
-            trace_manager.start_trace(text, metadata={
-                "user_goal": text,
-                "model_version": self._agent.llm_client.model,
-                "agent_id": self._agent.agent_id,
-                "max_steps": self._agent.max_steps,
-            })
-            try:
-                agent_question = self._prepare_agent_question(text)
-                if turn.cancel_checker():
-                    raise AgentCancelled("cancelled")
-                result = self._agent.run(agent_question, memory_manager=self._memory)
-                if turn.cancel_checker():
-                    raise AgentCancelled("cancelled")
-                return result.answer
-            finally:
-                trace_manager.end_trace()
-                try:
-                    from agentnexus.observability.alerting import evaluate_stats
-                    from agentnexus.observability.stats import compute_stats
-
-                    evaluate_stats(compute_stats(get_settings().traces_dir, days=1))
-                except Exception as alert_exc:
-                    logger.debug("Post-run alert evaluation failed: %s", alert_exc)
-
-        try:
-            answer = await asyncio.to_thread(_run_with_trace)
-        except Exception as e:
-            self._stop_spinner()
-            self._current_tool_widget = None
-            if self._streaming_msg_widget:
-                self._streaming_msg_widget.remove()
-                self._streaming_msg_widget = None
-                self._streaming_buffer = ""
-            try:
-                self._chat_area.query_one("#loading-indicator").remove()
-            except Exception as e2:
-                logger.debug("Failed to remove loading indicator on error: %s", e2)
-            if isinstance(e, AgentCancelled):
-                reason = "用户中断或取消信号"
-                record = turn.cancel(reason)
-                answer = record.answer
-                self._chat_area.add_system("[#e5c07b]Agent 活动已中断，中断摘要已写入会话。[/]")
-            else:
-                reason = "Agent 执行错误"
-                record = turn.fail(reason, str(e))
-                answer = record.answer
-                self._chat_area.add_system(f"[#e06c75]错误: {e}[/]\n[dim]已记录失败摘要。[/]")
-            try:
-                self._side_panel.add_timeline_event("error", collapse_and_truncate(str(e), 80))
-            except Exception as e2:
-                logger.debug("Failed to add error timeline event: %s", e2)
-            self._record_turn_summary(text, answer)
-            self._chat_service.mark_processing(False)
-            self._agent_worker = None
-            self._current_turn = None
-            self._current_run_id = ""
-            if hasattr(self._agent, "set_cancel_checker"):
-                self._agent.set_cancel_checker(None)
-            self._refresh_todo_panel()
-            self._drain_message_queue()
-            return
-
-        if turn.cancel_checker():
-            if self._streaming_msg_widget:
-                self._streaming_msg_widget.remove()
-                self._streaming_msg_widget = None
-                self._streaming_buffer = ""
-            self._chat_service.mark_processing(False)
-            self._agent_worker = None
-            self._current_turn = None
-            self._current_run_id = ""
-            if hasattr(self._agent, "set_cancel_checker"):
-                self._agent.set_cancel_checker(None)
-            self._drain_message_queue()
-            return
-
-        try:
-            self._chat_area.query_one("#loading-indicator").remove()
-        except Exception as e:
-            logger.debug("Failed to remove loading indicator: %s", e)
-
-        if answer:
-            loop = asyncio.get_running_loop()
-            if self._streaming_msg_widget:
-                content_w = self._streaming_msg_widget.query_one("#msg-content", Static)
-                rendered = await loop.run_in_executor(None, Markdown, answer)
-                content_w.update(rendered)
-                self._streaming_msg_widget = None
-                self._streaming_buffer = ""
-            else:
-                msg_widget = ChatMessage("assistant", "")
-                await self._chat_area.mount(msg_widget)
-                self._chat_area.call_after_refresh(self._chat_area.scroll_end)
-
-                msg_content = msg_widget.query_one("#msg-content", Static)
-
-                THROTTLE_MS = 0.05
-                displayed = ""
-                last_update = 0.0
-                for char in answer:
-                    displayed += char
-                    now = time.monotonic()
-                    if now - last_update >= THROTTLE_MS and char in ".!?。！？\n":
-                        msg_content.update(Text(displayed))
-                        last_update = now
-                        await asyncio.sleep(0.01)
-                if displayed:
-                    msg_content.update(Text(displayed))
-
-                rendered = await loop.run_in_executor(None, Markdown, answer)
-                msg_content.update(rendered)
-
-            stm_tokens = self._memory.estimate_stm_tokens() if self._memory else 0
-            usage = getattr(self._agent, "total_usage", None)
-            if usage:
-                self._hud.update_context(
-                    current_tokens=stm_tokens,
-                    total_input=usage.get("input_tokens", 0),
-                    total_output=usage.get("output_tokens", 0),
-                )
-            self._commit_if_answered(text, answer)
-            self._record_turn_summary(text, answer)
-            self._refresh_todo_panel()
-            self._chat_service.mark_processing(False)
-            self._agent_worker = None
-        else:
-            answer = turn.finish("").answer
-            self._chat_area.add_system("[dim]Agent 未能得出答案，已记录本轮执行摘要。[/]")
-            self._record_turn_summary(text, answer)
-            self._chat_service.mark_processing(False)
-            self._agent_worker = None
-        self._current_turn = None
-        self._current_run_id = ""
-        if hasattr(self._agent, "set_cancel_checker"):
-            self._agent.set_cancel_checker(None)
-        self._drain_message_queue()
 
     def _drain_message_queue(self) -> None:
         """Process the next queued message if available."""

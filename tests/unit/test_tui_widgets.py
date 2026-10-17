@@ -184,12 +184,12 @@ class TestTruncate:
 
 
 class TestConfirmDialog:
-    def test_init_truncates_params(self):
+    def test_init_preserves_full_params(self):
         from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 
         long_params = "x" * 1000
         dialog = ConfirmDialog("tool", long_params, "high")
-        assert len(dialog._params_summary) == 500
+        assert dialog._params_summary == long_params
 
     def test_init_stores_risk_level(self):
         from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
@@ -678,7 +678,7 @@ class TestHUDBuildText:
         hud = HUD()
         hud._supports_thinking = True
         text = hud._build_text()
-        assert "🧠" in text
+        assert "思考" in text
 
     @patch("agentnexus.tui.widgets.hud.resolve_ctx_max", return_value=128000)
     @patch("agentnexus.tui.widgets.hud.get_settings")

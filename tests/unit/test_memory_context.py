@@ -801,6 +801,8 @@ class TestReActAgentConversationMode:
 class TestChatScreenAnswerRender:
     def test_answer_render_waits_until_msg_content_exists(self):
         from agentnexus.agents.react_types import ReActEvent, ReActEventType
+        from agentnexus.core.config import get_settings
+        from agentnexus.memory.versioned import ConversationVersionManager
         from agentnexus.tui.app import AgentNexusTUI
         from agentnexus.tui.widgets.input_bar import InputBar
         from agentnexus.tui.widgets.message import ChatMessage, ToolCall
@@ -885,30 +887,20 @@ class TestChatScreenAnswerRender:
             def estimate_stm_tokens(self):
                 return 123
 
-        class FakeVersion:
-            def status(self):
-                return {"head": None, "can_undo": False, "can_redo": False}
-
-            def commit(self, *args, **kwargs):
-                return None
-
-            def get_message_count(self):
-                return 0
-
-            def append_messages(self, *args, **kwargs):
-                return None
-
         async def scenario():
-            app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=FakeVersion())
-            async with app.run_test():
+            version = ConversationVersionManager("render-session", get_settings().memory_db_path)
+            app = AgentNexusTUI(agent=FakeAgent(), memory=FakeMemory(), version=version)
+            async with app.run_test() as pilot:
                 await asyncio.sleep(0.2)
                 screen = app.screen
                 screen.on_input_bar_app_submit(InputBar.AppSubmit("latest ai news"))
 
                 for _ in range(100):
-                    if not screen._running:
+                    recovery = screen._chat_service.get_session_recovery("render-session")
+                    if recovery and recovery["status"] != "running":
                         break
                     await asyncio.sleep(0.05)
+                await pilot.pause()
 
                 chat_area = screen.query_one("#chat-area")
                 messages = [w for w in chat_area.walk_children() if isinstance(w, ChatMessage)]
@@ -921,7 +913,7 @@ class TestChatScreenAnswerRender:
                 assert any("The tool result is enough to answer now." in m.content for m in thought_messages)
                 assert "[1] Example title" in tools[-1].result
                 assert "Body snippet that should be hidden" not in tools[-1].result
-                assert any(getattr(m, "content", "") == "" for m in messages)
+                assert any(getattr(m, "content", "") == "Final answer" for m in messages)
 
         asyncio.run(scenario())
 

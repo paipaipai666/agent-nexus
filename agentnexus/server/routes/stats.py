@@ -23,61 +23,18 @@ def get_stats(days: int = 7):
 
 @router.get("/logs")
 def list_logs(days: int = 7):
-    import json
-    from pathlib import Path
+    """Read daily and rotated trace files within the selected range."""
+    from agentnexus.services.inspection import list_logs as inspect_logs
 
-    from agentnexus.core.config import get_settings
-
-    settings = get_settings()
-    traces_dir = Path(settings.traces_dir)
-    traces = []
-
-    for f in sorted(traces_dir.glob("*.jsonl"), reverse=True):
-        if not f.name[0].isdigit():
-            continue
-        spans = []
-        try:
-            for line in f.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    spans.append(json.loads(line))
-        except Exception:
-            continue
-        if spans:
-            trace_ids = set(s.get("trace_id", "") for s in spans)
-            for tid in trace_ids:
-                trace_spans = [s for s in spans if s.get("trace_id") == tid]
-                traces.append({
-                    "trace_id": tid,
-                    "date": f.stem,
-                    "span_count": len(trace_spans),
-                    "spans": trace_spans,
-                })
-
-    return {"traces": traces[:50], "total": len(traces)}
+    return inspect_logs(days)
 
 
 @router.get("/logs/{trace_id}")
 def get_trace(trace_id: str):
-    import json
-    from pathlib import Path
+    """Read a trace through the shared inspection operation."""
+    from agentnexus.services.inspection import get_trace as inspect_trace
 
-    from agentnexus.core.config import get_settings
-
-    settings = get_settings()
-    traces_dir = Path(settings.traces_dir)
-    spans = []
-
-    for f in traces_dir.glob("*.jsonl"):
-        try:
-            for line in f.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    span = json.loads(line)
-                    if span.get("trace_id") == trace_id:
-                        spans.append(span)
-        except Exception:
-            continue
-
-    return {"trace_id": trace_id, "spans": spans}
+    return inspect_trace(trace_id)
 
 
 @router.get("/eval/reports")

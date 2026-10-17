@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.widget import Widget
-from textual.widgets import Label, Static
+from textual.widgets import Button, Label, Static
 
 from agentnexus.core.text_utils import collapse_and_truncate
 
@@ -40,6 +41,12 @@ class SidePanel(Widget):
     def update_version(self, head: str, can_undo: bool, can_redo: bool):
         self._version_info = (head, can_undo, can_redo)
         self._refresh_section("version-card", self._render_version())
+
+    def update_collaboration(self, children):
+        from agentnexus.tui.widgets.collaboration import child_label
+
+        text = Text("\n".join(child_label(child) for child in children) or "当前没有子任务")
+        self._refresh_section("collaboration-card", text)
 
     def update_timeline(self, items: list[dict]):
         self._timeline_items = list(items)[-8:]
@@ -228,7 +235,10 @@ class SidePanel(Widget):
         return "\n".join(lines)
 
     def compose(self) -> ComposeResult:
-        yield Label("RUN", classes="panel-eyebrow")
+        yield Label("任务详情 · F3 关闭", classes="panel-eyebrow")
+        yield Label("协作", classes="section-title")
+        yield Static("当前没有子任务", id="collaboration-card", classes="section-body")
+        yield Button("打开协作与执行记录", id="open-inspector")
         yield Label("Model", classes="section-title")
         yield Static(self._render_model(), id="model-card", classes="section-body")
         yield Label("Task Timeline", classes="section-title")

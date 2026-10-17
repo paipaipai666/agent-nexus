@@ -98,5 +98,4 @@ class TestToolCall:
         assert children[0].id == "tool-name"
         assert isinstance(children[1], Static)
         assert children[1].id == "tool-result"
-        assert isinstance(children[2], Label)
-        assert children[2].id == "tool-meta"
+        assert "150ms" in str(children[0].content)

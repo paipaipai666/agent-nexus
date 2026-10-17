@@ -17,7 +17,7 @@ class TestInputBar:
         with patch("agentnexus.tui.widgets.input_bar.Horizontal") as mock_h:
             mock_h.return_value.__enter__.return_value = None
             children = list(bar.compose())
-        assert len(children) == 2
+        assert {child.id for child in children} == {"composer-meta", "input-prompt", "chat-input", "composer-hints"}
         assert isinstance(children[0], Static)
         assert isinstance(bar._inp, Input)
 

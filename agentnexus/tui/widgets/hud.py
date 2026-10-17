@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
@@ -53,6 +54,16 @@ class HUD(Widget):
         self._strategy = strategy
         self._refresh()
 
+    def update_model(self, model: str, base_url: str = "", *, workspace: str | None = None):
+        """Refresh model and workspace values for the active session."""
+        self.model = model
+        self._display_model = model.rsplit("/", 1)[-1]
+        self.ctx_max = resolve_ctx_max(model, base_url)
+        if workspace:
+            path = Path(workspace)
+            self._cwd_display = path.name or str(path)
+        self._refresh()
+
     def update_context(self, current_tokens: int, total_input: int = 0, total_output: int = 0):
         """Update HUD with current context size and cumulative totals."""
         self.current_tokens = current_tokens
@@ -90,20 +101,17 @@ class HUD(Widget):
 
         if self.ctx_max is not None:
             ratio = ctx_used / max(self.ctx_max, 1)
-            bar_len = 10
-            filled = min(bar_len, int(ratio * bar_len))
-            bar = f"[#fab283]{'█' * filled}[/][dim]{'░' * (bar_len - filled)}[/]"
             pct = min(999, int(ratio * 100))
-            ctx_seg = f"ctx {_format_k(ctx_used)}/{_format_k(self.ctx_max)} {pct:02d}% {bar}"
+            ctx_seg = f"ctx {_format_k(ctx_used)}/{_format_k(self.ctx_max)} {pct:02d}%"
         else:
             ctx_seg = f"ctx {_format_k(ctx_used)}/[dim]?[/]"
 
-        caps = ["[#a78bfa]\U0001f9e0[/]"] if self._supports_thinking else []
+        caps = ["思考"] if self._supports_thinking else []
         if self._strategy:
             caps.append(self._strategy)
         caps_seg = f" [dim]({' '.join(caps)})[/]" if caps else ""
 
-        compact_indicator = " [#fab283]\u2699 compact[/]" if self._compacting else ""
+        compact_indicator = " · compact 压缩中" if self._compacting else ""
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head
         version_actions = []
@@ -115,11 +123,10 @@ class HUD(Widget):
         version_seg = f"{head_short}{actions_seg}"
 
         parts = [
-            f"[#6ba5f2]{self._display_model}[/]{caps_seg}",
+            f"{escape(self._display_model)}{caps_seg}",
             f"[dim]\u2502[/] {ctx_seg}",
             f"[dim]\u2502[/] in:{_format_k(self.total_input)} out:{_format_k(self.total_output)}",
             f"[dim]\u2502[/] {version_seg}",
-            f"[dim]\u2502[/] {self._cwd_display}",
             compact_indicator,
         ]
         return " ".join(parts)

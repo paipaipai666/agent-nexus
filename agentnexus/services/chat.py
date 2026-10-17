@@ -276,6 +276,25 @@ class ChatService:
         handle = self._sessions.get(session_id)
         return handle.workspace if handle else None
 
+    def attach_session(self, handle: SessionHandle, *, agent=None, memory=None, version=None) -> SessionHandle:
+        """Adopt a runtime's initial session without creating a second identity."""
+        if self.is_session_processing(handle.id):
+            raise ValueError("无法替换正在执行的会话")
+        self._sessions[handle.id] = handle
+        if agent is not None:
+            self._agents[handle.id] = agent
+        if memory is not None:
+            self._memory_managers[handle.id] = memory
+        if version is not None:
+            self._version_managers[handle.id] = version
+        return handle
+
+    def session_agent(self, session_id: str):
+        """Resolve the agent belonging to a registered session."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return self._get_or_create_agent(session_id)
+
     def session_skills(self, session_id: str) -> "SkillService | None":
         """Return skills scoped to the session's workspace and agent."""
         if session_id not in self._sessions:
@@ -1149,6 +1168,7 @@ class ChatService:
                         "name": payload.get("name", ""),
                         "arguments": payload.get("arguments", {}),
                         "result": collapse_and_truncate(payload.get("result", ""), 300),
+                        "raw_result": str(payload.get("result", "")),
                         "id": payload.get("id", ""),
                         "duration_ms": payload.get("duration_ms", 0),
                         "risk_level": payload.get("risk_level", ""),
@@ -1199,7 +1219,7 @@ class ChatService:
         elif event_type == "DEGRADED":
             turn.record("degraded", payload.get("strategy", ""))
 
-    def stream_events(self, run_id: str, timeout: float = 30.0) -> Iterator[AgentEvent]:
+    def stream_events(self, run_id: str, timeout: float | None = 30.0) -> Iterator[AgentEvent]:
         events = self._run_events.get(run_id)
         if events is None:
             raise KeyError(f"Unknown run_id: {run_id}")

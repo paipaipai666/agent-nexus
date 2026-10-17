@@ -24,8 +24,10 @@ def list_long_term_memories(limit: int = 20, ltm=Depends(get_ltm)):
 
 @router.post("/search")
 def search_memories(req: SearchMemoryRequest, ltm=Depends(get_ltm)):
+    from agentnexus.services.memories import search_memories as query_memories
+
     try:
-        results = ltm.search(query_text=req.query, limit=req.limit)
+        results = query_memories(ltm, req.query, req.limit)
         return {"results": results, "query": req.query}
     except Exception as e:
         raise APIError(500, "internal_error", str(e))

@@ -1,13 +1,9 @@
-"""AgentNexus TUI — Textual-based terminal-native chat interface.
-
-Catppuccin Mocha theme, powered by real ReActAgent backend.
-
-Usage: nexus tui
-"""
+"""AgentNexus terminal workspace backed by the shared application runtime."""
 
 from pathlib import Path
 
 from textual.app import App
+from textual.theme import Theme
 
 _STYLES = Path(__file__).parent / "styles"
 
@@ -25,9 +21,29 @@ class AgentNexusTUI(App):
         str(_STYLES / "hud.tcss"),
     ]
     TITLE = "AgentNexus"
+    ENABLE_COMMAND_PALETTE = False
 
-    def __init__(self, agent, memory, version, mcp_manager=None, skill_service=None, capability_runtime=None):
+    def __init__(self, agent=None, memory=None, version=None, mcp_manager=None, skill_service=None, capability_runtime=None, *, runtime=None):
         super().__init__()
+        self.register_theme(Theme(
+            name="nexus-dark", primary="#dda0b0", secondary="#8bc4d6", accent="#dda0b0",
+            background="#141414", surface="#1b1b1b", panel="#202020", foreground="#e4e4e4",
+            success="#8bc69c", warning="#e1bd84", error="#ef8996", dark=True,
+            variables={"text-muted": "#a3a3a3"},
+        ))
+        self.register_theme(Theme(
+            name="nexus-light", primary="#953a56", secondary="#246578", accent="#953a56",
+            background="#fafafa", surface="#eeeeee", panel="#e5e5e5", foreground="#242424",
+            success="#286a40", warning="#805307", error="#a52838", dark=False,
+            variables={"text-muted": "#626262"},
+        ))
+        self.theme = "nexus-dark"
+        self._runtime = runtime
+        if runtime is not None:
+            agent, memory, version = runtime.agent, runtime.memory_manager, runtime.version_manager
+            mcp_manager, skill_service = runtime.mcp_manager, runtime.skill
+            capability_runtime = runtime.capability_runtime
+            self._subagent_confirm = getattr(runtime, "subagent_confirm", None)
         self._agent = agent
         self._memory = memory
         self._version = version
@@ -44,6 +60,9 @@ class AgentNexusTUI(App):
             self._mcp_manager,
             skill_service=self._skill_service,
             capability_runtime=self._capability_runtime,
+            chat_service=self._runtime.chat if self._runtime is not None else None,
+            session_id=self._runtime.session_id if self._runtime is not None else None,
+            runtime=self._runtime,
         ))
 
     def action_quit(self):

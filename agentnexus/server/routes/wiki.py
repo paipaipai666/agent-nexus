@@ -272,45 +272,13 @@ def process_overdue_reviews(service=Depends(get_wiki_service)):
 
 @router.post("/backfill")
 def wiki_backfill(namespace: str = "default", service=Depends(get_wiki_service)):
-    """Rebuild wiki from scratch: delete all existing pages, then regenerate from RAG."""
-    from agentnexus.rag.store import get_knowledge_base_catalog
-    from agentnexus.wiki.store import get_wiki_store
+    """Rebuild wiki using the shared management operation."""
+    from agentnexus.services.wiki import backfill_wiki
 
-    catalog = get_knowledge_base_catalog()
-    wiki_store = get_wiki_store()
-
-    kb = catalog.get_knowledge_base(namespace)
-    if not kb:
-        raise APIError(404, "not_found", f"No RAG knowledge base for namespace '{namespace}'")
-
-    docs = catalog.list_documents(kb.kb_id)
-    if not docs:
-        return {"created": 0, "deleted": 0, "message": "No documents in RAG"}
-
-    existing_pages = wiki_store.list_pages(source_namespace=namespace)
-    for p in existing_pages:
-        wiki_store.delete_page(p.page_id)
-    deleted = len(existing_pages)
-
-    created = 0
-    errors = []
-
-    for doc in docs:
-        source_text = doc.raw_text or doc.indexed_text or doc.content
-        if not source_text.strip():
-            continue
-
-        try:
-            service.ingest_source(
-                source_text=source_text,
-                source_uri=doc.source_uri,
-                source_namespace=namespace,
-            )
-            created += 1
-        except Exception as e:
-            errors.append({"source": doc.source_uri, "error": str(e)})
-
-    return {"created": created, "deleted": deleted, "errors": errors}
+    try:
+        return backfill_wiki(service, namespace)
+    except ValueError as exc:
+        raise APIError(404, "not_found", str(exc)) from exc
 
 
 @router.get("/calibration")
