@@ -32,7 +32,7 @@ from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import InputBar
-from agentnexus.tui.widgets.message import ChatMessage, ToolCall
+from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
 from agentnexus.tui.widgets.welcome import Welcome
 from agentnexus.tui.workspace import ChatWorkspace
@@ -101,6 +101,10 @@ class ChatArea(Widget):
         self.following_output = True
         self.call_after_refresh(lambda: self.scroll_end(animate=False))
 
+    def scroll_home(self, *args, **kwargs):
+        self.following_output = False
+        return super().scroll_home(*args, **kwargs)
+
     def dismiss_welcome(self):
         self.query_one("#welcome").display = False
 
@@ -123,7 +127,7 @@ class ChatArea(Widget):
         self.follow_output()
 
     def clear_all(self):
-        self.query("ChatMessage, ToolCall").remove()
+        self.query("ChatMessage, ToolCall, ReasoningBlock").remove()
         self.following_output = True
 
 
@@ -163,6 +167,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._agent_worker = None
         self._streaming_msg_widget = None
         self._streaming_buffer = ""
+        self._reasoning_widget = None
+        self._run_transcripts = {}
         self._last_stream_update = 0.0
         self._runtime = runtime
         self._chat_service = chat_service if chat_service is not None else ChatService(
@@ -294,7 +300,11 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             content = str(msg.get("content", "") or "")
             if not content:
                 continue
-            if role == "tool":
+            if role == "system" and content.startswith("[思考过程]"):
+                self._chat_area.mount(ReasoningBlock(content.removeprefix("[思考过程]").strip()))
+            elif role == "system" and content.startswith("[最终答案]"):
+                self._chat_area.add_message("assistant", content.removeprefix("[最终答案]").strip())
+            elif role == "tool":
                 tool_name = ""
                 tool_result = content
                 if content.startswith("Action: "):
@@ -584,6 +594,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._current_run_id = self._active_runs.get(session_id, "")
         self._streaming_msg_widget = None
         self._streaming_buffer = ""
+        self._reasoning_widget = None
         self._last_user_msg_widget = None
         self._turn_tool_names = []
         self._turn_thought_count = 0
@@ -592,6 +603,13 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._hud.set_compacting(session_id in self._compacting_sessions)
         self._chat_area.clear_all()
         self._render_restored_history()
+        if session_id in self._running_sessions:
+            question = self._submissions.get(session_id, {}).get("text", "")
+            user_messages = list(self._chat_area.query("ChatMessage.user"))
+            if question and (not user_messages or user_messages[-1].content != question):
+                self._chat_area.add_message("user", question)
+            for event in self._run_transcripts.get(session_id, []):
+                self._apply_service_event(event, replay=True)
         self.call_after_refresh(self._update_welcome)
         self._load_recent_session()
         self.query_one("#new-output").display = False

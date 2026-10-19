@@ -21,7 +21,7 @@ from agentnexus.tools.result_format import (
     summarize_tool_result,
 )
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
-from agentnexus.tui.widgets.message import ChatMessage, ToolCall, render_diff_with_colors
+from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall, render_diff_with_colors
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class ChatExecution:
         if session_profile is not None:
             submission["session_profile"] = session_profile
         self._submissions[sid] = submission
+        self._run_transcripts[sid] = []
         self._running_sessions.add(sid)
         loop = asyncio.get_running_loop()
         ready = asyncio.Event()
@@ -100,6 +101,7 @@ class ChatExecution:
                     self._current_run_id = run.id
                     self._streaming_msg_widget = None
                     self._streaming_buffer = ""
+                    self._reasoning_widget = None
                     self._refresh_workspace()
                 results = await asyncio.gather(running, asyncio.to_thread(consume, run), return_exceptions=True)
                 for result in results:
@@ -117,6 +119,7 @@ class ChatExecution:
         finally:
             waiting.cancel()
             self._running_sessions.discard(sid)
+            self._run_transcripts.pop(sid, None)
             if not self._closing:
                 if sid == self._chat_session.id:
                     self._remove_loading()
@@ -148,12 +151,28 @@ class ChatExecution:
     def _remove_loading(self):
         self._stop_spinner()
 
-    def _apply_service_event(self, event):
+    def _finish_reasoning(self):
+        if self._reasoning_widget is not None:
+            self._reasoning_widget.finish()
+            self._reasoning_widget = None
+
+    def _finish_streaming_message(self):
+        if self._streaming_msg_widget is not None:
+            widget = self._streaming_msg_widget
+            widget.content = self._streaming_buffer
+            self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Markdown(widget.content)) if widget.is_mounted else None)
+            self._streaming_msg_widget = None
+            self._streaming_buffer = ""
+
+    def _apply_service_event(self, event, *, replay=False):
+        if not replay and event.session_id in self._running_sessions:
+            self._run_transcripts.setdefault(event.session_id, []).append(event)
         if event.session_id != self._chat_session.id or self._closing:
             return
         payload = event.payload
         kind = event.type
         if kind == "stream_token":
+            self._finish_reasoning()
             if self._streaming_msg_widget is None:
                 self._streaming_msg_widget = ChatMessage("assistant", "")
                 self._chat_area.mount(self._streaming_msg_widget)
@@ -162,6 +181,7 @@ class ChatExecution:
             widget, content = self._streaming_msg_widget, self._streaming_buffer
             self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Text(content)) if widget.is_mounted else None)
         elif kind == "tool_start":
+            self._finish_reasoning()
             name = payload.get("name", "tool")
             if name == "express_reaction":
                 from agentnexus.tools.user_reaction import REACTION_EMOJI, parse_reaction_arguments
@@ -170,8 +190,7 @@ class ChatExecution:
                 if self._last_user_msg_widget is not None:
                     self._last_user_msg_widget.attach_reaction(REACTION_EMOJI.get(reaction, ""), comment)
                 return
-            self._streaming_msg_widget = None
-            self._streaming_buffer = ""
+            self._finish_streaming_message()
             arguments = payload.get("arguments", {})
             detail = ""
             if isinstance(arguments, dict):
@@ -209,12 +228,21 @@ class ChatExecution:
         elif kind == "turn_journal":
             thought = payload.get("thought")
             if thought:
-                self._chat_area.add_message("system", f"Thought: {thought}")
+                self._finish_reasoning()
+                self._finish_streaming_message()
+                self._chat_area.mount(ReasoningBlock(str(thought)))
                 self._turn_thought_count += 1
             elif payload.get("event") in {"DEGRADED", "RETRIES_LEFT", "FAULT"}:
                 self._chat_area.add_message("system", str(payload.get("reason") or payload.get("strategy") or payload.get("event")))
         elif kind == "stream_reasoning":
-            self._side_panel.add_timeline_event("thought", payload.get("token", ""))
+            token = payload.get("token", "")
+            if token:
+                if self._reasoning_widget is None:
+                    self._finish_streaming_message()
+                    self._reasoning_widget = ReasoningBlock(active=True)
+                    self._chat_area.mount(self._reasoning_widget)
+                    self._turn_thought_count += 1
+                self._reasoning_widget.append_token(token)
         elif kind in {"workflow_step", "skill_auto_selected"}:
             self._side_panel.add_timeline_event("run", str(payload.get("summary") or payload.get("skill") or payload.get("status") or kind))
         elif kind == "subagent_event":
@@ -235,6 +263,7 @@ class ChatExecution:
         elif kind == "todo_change":
             self._refresh_todo_panel()
         elif kind in {"run_finished", "run_failed", "run_interrupted"}:
+            self._finish_reasoning()
             self._remove_loading()
             answer = payload.get("answer", "")
             if self._streaming_msg_widget is not None:
@@ -250,7 +279,7 @@ class ChatExecution:
         elif kind == "run_save_failed":
             self._chat_area.add_message("system", f"结果尚未保存: {payload.get('save_error', '')}。使用 /recover save 重试保存。")
         self._chat_area.follow_output()
-        if kind != "stream_token":
+        if kind not in {"stream_token", "stream_reasoning"} and not replay:
             self._refresh_workspace()
 
     def _drain_session_queue(self, sid):

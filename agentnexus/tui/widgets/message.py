@@ -1,4 +1,4 @@
-"""Chat message widget — role-colored left border, code-block rendering."""
+"""Conversation messages, model reasoning and inspectable tool results."""
 
 from rich.markdown import Markdown
 from rich.text import Text
@@ -74,6 +74,69 @@ class ChatMessage(Widget):
             return
         quip = f" {comment}" if comment else ""
         self.mount(Static(_safe(f"{emoji}{quip}"), classes="msg-reaction"))
+
+
+class ReasoningBlock(Widget, can_focus=True):
+    """Model-provided reasoning, visible while streaming and readable afterward."""
+
+    BINDINGS = [("enter", "toggle_details", "折叠思考"), ("space", "toggle_details", "折叠思考"), ("d", "full_output", "思考全文")]
+    DEFAULT_CSS = """
+    ReasoningBlock { height: auto; margin: 0 0 1 0; padding: 0 1; background: $surface; }
+    ReasoningBlock:focus { background: $primary 8%; }
+    .reasoning-heading { height: 1; width: 100%; color: $primary; text-wrap: nowrap; text-overflow: ellipsis; }
+    .reasoning-content { height: auto; max-height: 8; overflow-y: auto; scrollbar-size-vertical: 1; color: $text-muted; }
+    """
+
+    def __init__(self, content="", *, active=False, **kwargs):
+        super().__init__(**kwargs)
+        self.content = content
+        self.active = active
+        self.expanded = True
+        self._update_pending = False
+
+    def _heading(self):
+        marker = "▾" if self.expanded else "▸"
+        status = "正在思考" if self.active else "思考结束"
+        return Text(f"{marker} {status} · {len(self.content)} 字 · Enter 折叠 / 展开 · D 全文")
+
+    def compose(self):
+        yield Label(self._heading(), classes="reasoning-heading")
+        yield Static(Text(self.content), classes="reasoning-content")
+
+    def append_token(self, token):
+        self.content += token
+        if not self._update_pending:
+            self._update_pending = True
+            self.set_timer(0.05, self._flush)
+
+    def _flush(self):
+        self._update_pending = False
+        if self.is_mounted:
+            self.query_one(".reasoning-heading", Label).update(self._heading())
+            body = self.query_one(".reasoning-content", Static)
+            following = body.scroll_y >= body.max_scroll_y
+            body.update(Text(self.content))
+            if following and self.active:
+                body.call_after_refresh(lambda: body.scroll_end(animate=False))
+
+    def finish(self):
+        self.active = False
+        self._flush()
+
+    def action_toggle_details(self):
+        self.expanded = not self.expanded
+        self.query_one(".reasoning-content").display = self.expanded
+        self._flush()
+
+    def on_click(self, event):
+        if event.widget.has_class("reasoning-heading"):
+            self.focus()
+            self.action_toggle_details()
+
+    def action_full_output(self):
+        from agentnexus.tui.screens.interactions import RecordScreen
+
+        self.app.push_screen(RecordScreen("模型思考 · 全文", self.content))
 
 
 class ToolCall(Widget, can_focus=True):

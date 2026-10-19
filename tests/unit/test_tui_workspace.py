@@ -58,6 +58,111 @@ async def settle(pilot, predicate):
 
 
 @pytest.mark.asyncio
+async def test_reasoning_stream_is_visible_and_keeps_tool_order(workspace_runtime):
+    import threading
+
+    from agentnexus.agents.react_types import ReActEvent, ReActEventType
+    from agentnexus.tui.widgets.message import ReasoningBlock, ToolCall
+
+    runtime, _ = workspace_runtime
+    release = threading.Event()
+
+    def execute(*_args, **_kwargs):
+        def emit(kind, **payload):
+            runtime.agent._on_event(ReActEvent(kind, payload), None, None)
+
+        emit(ReActEventType.STREAM_REASONING, token="先检查 [入口]，")
+        emit(ReActEventType.STREAM_REASONING, token="再验证行为。")
+        release.wait(5)
+        emit(ReActEventType.TOOL_START, id="read", name="file_read", arguments={"path": "app.py"})
+        emit(ReActEventType.TOOL_DONE, id="read", name="file_read", result="source", duration_ms=10)
+        emit(ReActEventType.STREAM_REASONING, token="工具结果已确认。")
+        emit(ReActEventType.STREAM_TOKEN, token="完成。")
+        return SimpleNamespace(answer="完成。")
+
+    runtime.agent.run.side_effect = execute
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.screen.query_one("#chat-input", Input).value = "检查入口"
+        await pilot.press("enter")
+        try:
+            await settle(pilot, lambda: bool(app.screen.query(ReasoningBlock)))
+            reasoning = app.screen.query_one(ReasoningBlock)
+            await settle(pilot, lambda: "先检查 [入口]，再验证行为。" in str(reasoning.query_one(".reasoning-content").render()))
+            assert reasoning.query_one(".reasoning-content").display
+            assert "先检查 [入口]，再验证行为。" in str(reasoning.query_one(".reasoning-content").render())
+            reasoning.focus()
+            await pilot.press("enter")
+            assert not reasoning.query_one(".reasoning-content").display
+            await pilot.press("enter")
+            assert reasoning.query_one(".reasoning-content").display
+            await pilot.press("d")
+            assert "先检查 [入口]，再验证行为。" in app.screen.query_one("#record-content").text
+            await pilot.press("escape")
+        finally:
+            release.set()
+        await settle(pilot, lambda: not runtime.chat.is_processing)
+        await pilot.pause()
+        blocks = list(app.screen.query("ReasoningBlock, ToolCall"))
+        assert [type(block) for block in blocks] == [ReasoningBlock, ToolCall, ReasoningBlock]
+        assert "工具结果已确认。" in str(blocks[-1].query_one(".reasoning-content").render())
+        assert "思考结束" in str(reasoning.query_one(".reasoning-heading").render())
+
+
+@pytest.mark.asyncio
+async def test_history_restores_reasoning_and_final_answer_as_distinct_content(workspace_runtime):
+    from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock
+
+    runtime, _ = workspace_runtime
+    runtime.memory_manager.short_term.append("user", "历史任务")
+    runtime.memory_manager.short_term.append("system", "[思考过程] 保留历史思考。")
+    runtime.memory_manager.short_term.append("system", "[最终答案] **历史结果**")
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        block = app.screen.query_one(ReasoningBlock)
+        assert "保留历史思考。" in str(block.query_one(".reasoning-content").render())
+        answers = app.screen.query("ChatMessage.assistant")
+        assert len(answers) == 1
+        assert answers.first(ChatMessage).content == "**历史结果**"
+
+
+@pytest.mark.asyncio
+async def test_running_reasoning_survives_switching_sessions(workspace_runtime):
+    import threading
+
+    from agentnexus.agents.react_types import ReActEvent, ReActEventType
+    from agentnexus.tui.widgets.message import ReasoningBlock
+
+    runtime, _ = workspace_runtime
+    release = threading.Event()
+
+    def execute(*_args, **_kwargs):
+        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "此任务仍在分析。"}), None, None)
+        release.wait(8)
+        return SimpleNamespace(answer="完成")
+
+    runtime.agent.run.side_effect = execute
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.screen.query_one("#chat-input", Input).value = "长任务"
+        await pilot.press("enter")
+        try:
+            await settle(pilot, lambda: bool(app.screen.query(ReasoningBlock)))
+            app.screen.query_one("#chat-input", Input).value = "/session new"
+            await pilot.press("enter")
+            await settle(pilot, lambda: app.screen._chat_session.id != "workspace")
+            assert not app.screen.query(ReasoningBlock)
+            app.screen.query_one("#chat-input", Input).value = "/session switch workspace"
+            await pilot.press("enter")
+            await settle(pilot, lambda: app.screen._chat_session.id == "workspace")
+            assert "此任务仍在分析。" in str(app.screen.query_one(".reasoning-content").render())
+        finally:
+            release.set()
+        await settle(pilot, lambda: not runtime.chat.is_processing)
+
+
+@pytest.mark.asyncio
 async def test_empty_session_shows_project_logo_and_full_width_chat(workspace_runtime):
     runtime, _ = workspace_runtime
     app = AgentNexusTUI(runtime=runtime)
@@ -291,6 +396,7 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
             assert app.screen.query_one("#message-editor", TextArea).text == "尚未发送的补充"
             await pilot.press("escape")
             for count in (3, 4):
+                await settle(pilot, lambda: not app.screen.query_one("#child-send").has_class("-active"))
                 await pilot.click("#child-send")
                 app.screen.query_one("#message-editor", TextArea).load_text("继续检查")
                 await pilot.press("f4")
