@@ -1,39 +1,76 @@
-"""Input bar — styled prompt + text input + send button."""
+"""Inline terminal composition with explicit send and multiline modes."""
 
+from math import ceil
+
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Static, TextArea
 
 
-class TerminalInput(Input):
-    """Route multiline paste to the draft editor before it can be submitted."""
+class Composer(TextArea):
+    """Keep typed and pasted messages in one buffer with predictable submission."""
 
-    async def _on_paste(self, event: events.Paste):
-        if "\n" in event.text or "\r" in event.text:
-            start, end = sorted(self.selection)
-            text = event.text.replace("\r\n", "\n").replace("\r", "\n")
-            self.post_message(InputBar.EditorRequested(self.value[:start] + text + self.value[end:]))
-            event.stop()
+    BINDINGS = [
+        Binding("enter", "enter", "发送 / 换行", priority=True),
+        Binding("ctrl+s", "submit", "发送", priority=True),
+        Binding("shift+enter,alt+enter,ctrl+j", "newline", "换行", priority=True),
+    ]
+
+    class Submitted(Message):
+        """Submit the complete buffer exactly once."""
+
+        def __init__(self, text):
+            super().__init__()
+            self.text = text
+
+    def __init__(self, **kwargs):
+        super().__init__(soft_wrap=True, show_line_numbers=False, tab_behavior="focus", **kwargs)
+        self.multiline = False
+
+    @property
+    def value(self):
+        """Expose the complete pending message to session draft persistence."""
+        return self.text
+
+    @value.setter
+    def value(self, text):
+        self.load_text(text)
+        self.move_cursor(self.document.end)
+        self.multiline = "\n" in text
+
+    def action_enter(self):
+        if self.multiline:
+            self.action_newline()
         else:
-            await super()._on_paste(event)
+            self.action_submit()
+
+    def action_newline(self):
+        self.multiline = True
+        self.insert("\n")
+
+    def action_submit(self):
+        if self.text.strip():
+            self.post_message(self.Submitted(self.text))
+
+    def _on_paste(self, event: events.Paste):
+        if "\n" in event.text or "\r" in event.text:
+            self.multiline = True
+        event.stop()
 
 
 class InputBar(Widget):
-    """Bottom input area with prompt, text input, and send button."""
-
-    DEFAULT_CSS = """
-    InputBar {
-        height: auto;
-    }
-    """
+    """Task buffer, current configuration and terminal-safe action shortcuts."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.compose_draft_text = ""
+        self._queued = False
+        self._queue_size = 0
 
     class AppSubmit(Message):
         def __init__(self, text: str):
@@ -45,53 +82,74 @@ class InputBar(Widget):
             super().__init__()
             self.text = text
 
-    class EditorRequested(Message):
-        def __init__(self, text: str):
+    class ActionRequested(Message):
+        def __init__(self, action):
             super().__init__()
-            self.text = text
+            self.action = action
 
     def compose(self) -> ComposeResult:
-        self._inp = TerminalInput(
-            placeholder="输入任务，或按 Ctrl+P 查找操作",
-            id="chat-input",
-        )
+        with Horizontal(id="composer-actions"):
+            yield Button("模型", id="choose-model")
+            yield Button("思考", id="choose-thinking")
+            yield Button("计划", id="toggle-plan")
+            yield Button("附件", id="choose-attachment")
         yield Static("", id="composer-meta")
         with Horizontal(id="input-row"):
             yield Static("›", id="input-prompt")
+            self._inp = Composer(id="chat-input", placeholder="描述任务，或按 Ctrl+P 选择操作")
             yield self._inp
-        yield Static("Enter 发送 · F4 多行 · Ctrl+P 操作 · F2 会话 · F3 任务", id="composer-hints")
+        yield Static("", id="composer-hints")
 
-    def update_state(self, *, model, thinking, plan, attachments, draft, queued):
-        self.compose_draft_text = draft
-        meta = Text(model, style="bold")
-        meta.append(f" · 思考 {thinking}", "dim")
-        if plan:
-            meta.append(" · 计划模式")
+    def update_state(self, *, model, thinking, plan, attachments, draft, queued, queue_size=0):
+        self._queued = queued
+        self._queue_size = queue_size
+        if draft and not self._inp.text:
+            self._inp.value = draft
+        meta = Text()
         if attachments:
-            meta.append(" · 附件 " + ", ".join(item["name"] for item in attachments))
-        if draft:
-            meta.append(f" · 草稿 {len(draft.splitlines())} 行")
+            meta.append("附件 " + ", ".join(item["name"] for item in attachments))
         self.query_one("#composer-meta", Static).update(meta)
-        send = "Enter 排队 · Ctrl+C 停止" if queued else "Enter 发送"
-        self.query_one("#composer-hints", Static).update(f"{send} · F4 多行 · Ctrl+P 操作 · F2 会话 · F3 任务")
+        self.query_one("#composer-meta").display = bool(attachments)
+        for selector, label in [("choose-model", model), ("choose-thinking", f"思考 {thinking}"),
+                                ("toggle-plan", "计划 开" if plan else "计划 关"), ("choose-attachment", f"附件 {len(attachments)}")]:
+            self.query_one(f"#{selector}", Button).label = Text(label)
+        self._update_hints()
+
+    def toggle_multiline(self):
+        self._inp.multiline = not self._inp.multiline
+        self._update_size()
+        self._update_hints()
+        self._inp.focus()
+
+    def _update_hints(self):
+        send = "排队" if self._queued else "发送"
+        mode = "Enter 换行" if self._inp.multiline else f"Enter {send}"
+        stop = " · Ctrl+C 停止" if self._queued else ""
+        waiting = f" · 已排队 {self._queue_size} 条" if self._queue_size else ""
+        self.query_one("#composer-hints", Static).update(f"{mode} · Ctrl+S {send} · F4 多行{waiting}{stop}")
+
+    def _update_size(self):
+        width = max(1, self._inp.size.width - 1)
+        rows = sum(max(1, ceil(cell_len(line) / width)) for line in self._inp.text.split("\n"))
+        self._inp.styles.height = min(6, max(3 if self._inp.multiline else 1, rows))
+
+    def on_resize(self):
+        self._update_size()
 
     def on_mount(self):
-        self.call_after_refresh(self._focus_input)
+        self._update_hints()
+        self.call_after_refresh(self._inp.focus)
 
-    def _focus_input(self):
-        try:
-            self.query_one("#chat-input", Input).focus()
-        except Exception:
-            pass
+    def on_composer_submitted(self, event: Composer.Submitted):
+        event.stop()
+        self.post_message(self.AppSubmit(event.text))
 
-    def on_input_submitted(self, event: Input.Submitted):
-        text = event.value.strip() or self.compose_draft_text
-        if text.strip():
-            self.post_message(self.AppSubmit(text))
-
-    def on_input_changed(self, event: Input.Changed):
-        self.post_message(self.AppInputChanged(event.value))
+    def on_text_area_changed(self, event: TextArea.Changed):
+        event.stop()
+        self._update_size()
+        self._update_hints()
+        self.post_message(self.AppInputChanged(event.text_area.text))
 
     def on_button_pressed(self, event: Button.Pressed):
-        if self._inp.value.strip():
-            self.post_message(self.AppSubmit(self._inp.value.strip()))
+        event.stop()
+        self.post_message(self.ActionRequested(event.button.id))

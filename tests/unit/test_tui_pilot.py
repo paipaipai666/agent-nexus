@@ -7,6 +7,8 @@ from pydantic import SecretStr
 from textual.app import App
 from textual.widgets import Button, Label, Static
 
+from agentnexus.tui.widgets.input_bar import Composer
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -300,11 +302,10 @@ class TestAgentNexusTUIPilot:
             async with app.run_test(size=(80, 24)) as pilot:
                 await pilot.pause()
                 from textual.containers import VerticalScroll
-                from textual.widgets import Input
-                chat_input = app.screen.query_one("#chat-input", Input)
+                chat_input = app.screen.query_one("#chat-input", Composer)
                 assert chat_input is not None
                 assert chat_input.styles.height.value == 1
-                assert app.screen.query_one("#input-area").styles.height.value == 5
+                assert app.screen.query_one("#input-area").region.height <= 6
                 assert app.screen.query_one("#command-palette", VerticalScroll) is not None
 
     async def test_app_has_hud(self):

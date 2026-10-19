@@ -1,2 +1,2 @@
-#hud { height: 2; border-top: solid $foreground 20%; padding: 0 1; color: $text-muted; }
+#hud { height: 1; padding: 0 2; color: $text-muted; }
 #hud-text { height: 1; text-wrap: nowrap; text-overflow: ellipsis; }

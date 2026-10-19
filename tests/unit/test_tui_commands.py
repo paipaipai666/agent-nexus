@@ -233,6 +233,8 @@ def test_sending_a_draft_consumes_an_independent_attachment_snapshot(terminal, t
     first = commands.run("/draft", "send", sid)
     commands.run("/attach", "clear", sid)
     assert first.submission["attachments"] == [{"path": str(attachment), "name": "context.txt", "mime": "text/plain", "size": 7}]
+    assert commands.run("/draft", "show", sid).value == {"draft": ""}
+    commands.drafts[sid] = "second request"
     assert commands.run("/draft", "send", sid).submission["attachments"] is None
 
 

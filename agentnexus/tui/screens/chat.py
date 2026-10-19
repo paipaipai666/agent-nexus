@@ -14,7 +14,7 @@ from textual.events import Key
 from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Label, Static
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.text_utils import collapse_and_truncate
@@ -31,7 +31,7 @@ from agentnexus.tui.execution import ChatExecution
 from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
-from agentnexus.tui.widgets.input_bar import InputBar
+from agentnexus.tui.widgets.input_bar import Composer, InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
 from agentnexus.tui.widgets.welcome import Welcome
@@ -235,7 +235,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             yield Button("记录", id="open-task-record")
         self._chat_input = InputBar(id="input-area")
         yield self._chat_input
-        self._hud = HUD(id="hud")
+        self._hud = HUD(id="hud", compact=True)
         yield self._hud
 
     def _render_top_bar(self) -> str:
@@ -245,12 +245,13 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         from rich.markup import escape
 
         workspace = self._chat_session.workspace or str(Path.cwd())
-        return f"[bold]AgentNexus[/]  [dim]{escape(workspace)}  ·  {escape(str(branch))}[/]"
+        name = Path(workspace).name or workspace
+        return f"[bold]AgentNexus[/]  [dim]{escape(name)} · {escape(str(branch))} · 会话 {escape(self._chat_session.id[:8])}[/]"
 
     def on_mount(self):
         self._render_restored_history()
         self._update_welcome()
-        self.query_one("#chat-input", Input).value = self._drafts.get(self._chat_session.id, "")
+        self.query_one("#chat-input", Composer).value = self._drafts.get(self._chat_session.id, "")
         self._init_skill_registry()
         self._refresh_version_display()
         if hasattr(self, "_side_panel"):
@@ -264,7 +265,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
                 self._refresh_session_metrics()
             except Exception as e:
                 logger.debug("Failed to update HUD capabilities: %s", e)
-        self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
+        self.call_after_refresh(lambda: self.query_one("#chat-input", Composer).focus())
         self.call_after_refresh(self._refresh_workspace)
         self.set_interval(1, self._refresh_workspace)
         self._load_recent_session()
@@ -323,7 +324,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def on_input_bar_app_submit(self, event: InputBar.AppSubmit):
         text = event.text
-        inp = self.query_one("#chat-input", Input)
+        inp = self.query_one("#chat-input", Composer)
         inp.value = ""
         self._terminal.save_draft(self._chat_session.id, text="")
         if self._terminal.drafts.get(self._chat_session.id) == text:
@@ -387,7 +388,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def action_focus_input(self):
         try:
-            self.query_one("#chat-input", Input).focus()
+            self.query_one("#chat-input", Composer).focus()
         except Exception as e:
             logger.debug("Failed to focus chat input: %s", e)
 
@@ -581,7 +582,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             if result.session_id is not None:
                 self._activate_session(result.session_id)
             if result.draft is not None:
-                self.query_one("#chat-input", Input).value = result.draft
+                self.query_one("#chat-input", Composer).value = result.draft
             self._refresh_model_panel()
             self._refresh_workspace()
         except Exception as exc:
@@ -594,7 +595,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def _activate_session(self, session_id):
         old_id = self._chat_session.id
-        self._drafts[old_id] = self.query_one("#chat-input", Input).value
+        self._drafts[old_id] = self.query_one("#chat-input", Composer).value
         self._terminal.save_draft(old_id)
         self._terminal.load_draft(session_id)
         self._chat_session = self._chat_service.get_session_snapshot(session_id)["session"]
@@ -627,7 +628,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._load_recent_session()
         self.query_one("#new-output").display = False
         self._side_panel.update_timeline([])
-        self.query_one("#chat-input", Input).value = self._drafts.get(session_id, "")
+        self.query_one("#chat-input", Composer).value = self._drafts.get(session_id, "")
         self._init_skill_registry()
         self._refresh_version_display()
         self._refresh_model_panel()

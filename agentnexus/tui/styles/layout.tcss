@@ -3,7 +3,7 @@ Screen {
 }
 
 #top-bar {
-    height: 2;
+    height: 1;
 }
 
 #middle {
@@ -29,11 +29,7 @@ Screen {
 }
 
 #hud {
-    height: 2;
-}
-
-.has-inspector #side-panel {
-    display: block;
+    height: 1;
 }
 
 #welcome {
@@ -88,8 +84,4 @@ Screen {
 #command-palette-content {
     width: 100%;
     height: auto;
-}
-
-#input-area {
-    height: 5;
 }

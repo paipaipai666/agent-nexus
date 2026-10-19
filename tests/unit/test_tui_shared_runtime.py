@@ -7,6 +7,7 @@ import pytest
 
 from agentnexus.services.chat import ChatService, SessionHandle
 from agentnexus.tui.app import AgentNexusTUI
+from agentnexus.tui.widgets.input_bar import Composer
 
 
 @pytest.fixture
@@ -47,9 +48,8 @@ def interactive_runtime(tmp_path):
 
 
 async def submit_command(app, pilot, text):
-    from textual.widgets import Input
 
-    app.screen.query_one("#chat-input", Input).value = text
+    app.screen.query_one("#chat-input", Composer).value = text
     await pilot.press("enter")
 
 
@@ -124,9 +124,8 @@ async def test_submitted_message_uses_shared_execution_and_saved_recovery(tmp_pa
     app = AgentNexusTUI(runtime=runtime)
     with patch.object(chat, "send_message", wraps=chat.send_message) as send:
         async with app.run_test(size=(100, 30)) as pilot:
-            from textual.widgets import Input
 
-            app.screen.query_one("#chat-input", Input).value = "hello"
+            app.screen.query_one("#chat-input", Composer).value = "hello"
             await pilot.press("enter")
             for _ in range(100):
                 await pilot.pause(0.02)
@@ -439,8 +438,6 @@ async def test_background_command_errors_stay_with_their_source_session(interact
 async def test_queue_drain_preserves_a_new_unsent_draft(interactive_runtime):
     import threading
 
-    from textual.widgets import Input
-
     from agentnexus.tui.commands import TerminalCommands
 
     runtime, agents = interactive_runtime
@@ -459,7 +456,7 @@ async def test_queue_drain_preserves_a_new_unsent_draft(interactive_runtime):
             await submit_command(app, pilot, "first")
             await wait_until(pilot, entered.is_set)
             await submit_command(app, pilot, "queued")
-            app.screen.query_one("#chat-input", Input).value = "not submitted yet"
+            app.screen.query_one("#chat-input", Composer).value = "not submitted yet"
             await pilot.pause()
             release.set()
             await wait_until(pilot, lambda: agents["initial"].run.call_count == 2 and not app.screen._running_sessions)

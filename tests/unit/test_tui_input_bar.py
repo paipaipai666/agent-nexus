@@ -1,85 +1,102 @@
-"""Tests for InputBar widget."""
+"""Composer behavior through the same keys and paste events used in a terminal."""
 
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
-from textual.widgets import Button, Input, Static
+import pytest
+from textual.app import App
+from textual.events import Paste
 
-from agentnexus.tui.widgets.input_bar import InputBar
+from agentnexus.tui.widgets.input_bar import Composer, InputBar
 
 
-class TestInputBar:
-    def test_init(self):
-        bar = InputBar()
-        assert isinstance(bar, InputBar)
+class ComposerApp(App):
+    AUTO_FOCUS = "#chat-input"
+    CSS_PATH = str(Path(__file__).parents[2] / "agentnexus/tui/styles/input_area.tcss")
+    BINDINGS = [("f4", "multiline", "多行")]
 
-    def test_compose(self):
-        bar = InputBar()
-        with patch("agentnexus.tui.widgets.input_bar.Horizontal") as mock_h:
-            mock_h.return_value.__enter__.return_value = None
-            children = list(bar.compose())
-        assert {child.id for child in children} == {"composer-meta", "input-prompt", "chat-input", "composer-hints"}
-        assert isinstance(children[0], Static)
-        assert isinstance(bar._inp, Input)
+    def __init__(self):
+        super().__init__()
+        self.submissions = []
+        self.changes = []
 
-    def test_app_submit_message(self):
-        msg = InputBar.AppSubmit("hello")
-        assert msg.text == "hello"
+    def compose(self):
+        yield InputBar(id="input-area")
 
-    def test_app_submit_empty(self):
-        msg = InputBar.AppSubmit("")
-        assert msg.text == ""
+    def action_multiline(self):
+        self.query_one(InputBar).toggle_multiline()
 
-    def test_app_input_changed_message(self):
-        msg = InputBar.AppInputChanged("/d")
-        assert msg.text == "/d"
+    def on_input_bar_app_submit(self, event):
+        self.submissions.append(event.text)
 
-    def test_on_input_submitted(self):
-        bar = InputBar()
-        bar._inp = MagicMock()
-        bar._inp.value = "hello"
-        posted = []
-        bar.post_message = lambda m: posted.append(m)
-        bar.on_input_submitted(Input.Submitted(bar._inp, "hello"))
-        assert len(posted) == 1
-        assert posted[0].text == "hello"
+    def on_input_bar_app_input_changed(self, event):
+        self.changes.append(event.text)
 
-    def test_on_input_submitted_empty(self):
-        bar = InputBar()
-        bar._inp = MagicMock()
-        bar._inp.value = "   "
-        posted = []
-        bar.post_message = lambda m: posted.append(m)
-        bar.on_input_submitted(Input.Submitted(bar._inp, "   "))
-        assert len(posted) == 0
 
-    def test_on_input_changed_posts_message(self):
-        bar = InputBar()
-        bar._inp = MagicMock()
-        posted = []
-        bar.post_message = lambda m: posted.append(m)
-        bar.on_input_changed(Input.Changed(bar._inp, "/d"))
-        assert len(posted) == 1
-        assert posted[0].text == "/d"
+@pytest.mark.asyncio
+async def test_enter_sends_the_complete_buffer_once():
+    app = ComposerApp()
+    async with app.run_test() as pilot:
+        app.query_one(Composer).value = "  保留代码缩进"
+        await pilot.press("enter")
+        assert app.submissions == ["  保留代码缩进"]
+        assert app.changes[-1] == "  保留代码缩进"
 
-    def test_focus_input_ignores_error(self):
-        bar = InputBar()
-        bar._focus_input()
 
-    def test_on_button_pressed(self):
-        bar = InputBar()
-        bar._inp = MagicMock()
-        bar._inp.value = "cmd"
-        posted = []
-        bar.post_message = lambda m: posted.append(m)
-        bar.on_button_pressed(Button.Pressed(button=MagicMock()))
-        assert len(posted) == 1
-        assert posted[0].text == "cmd"
+@pytest.mark.asyncio
+async def test_blank_messages_are_not_submitted():
+    app = ComposerApp()
+    async with app.run_test() as pilot:
+        app.query_one(Composer).value = " \n "
+        await pilot.press("ctrl+s")
+        assert app.submissions == []
 
-    def test_on_button_pressed_empty(self):
-        bar = InputBar()
-        bar._inp = MagicMock()
-        bar._inp.value = ""
-        posted = []
-        bar.post_message = lambda m: posted.append(m)
-        bar.on_button_pressed(Button.Pressed(button=MagicMock()))
-        assert len(posted) == 0
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "\r"])
+async def test_paste_is_inserted_once_and_waits_for_explicit_send(separator):
+    app = ComposerApp()
+    async with app.run_test() as pilot:
+        composer = app.query_one(Composer)
+        composer.post_message(Paste("第一行" + separator + "第二行"))
+        await pilot.pause()
+        assert composer.text == "第一行\n第二行"
+        assert app.submissions == []
+        await pilot.press("ctrl+s")
+        assert app.submissions == ["第一行\n第二行"]
+
+
+@pytest.mark.asyncio
+async def test_multiline_mode_keeps_enter_for_newlines_and_ctrl_s_for_send():
+    app = ComposerApp()
+    async with app.run_test() as pilot:
+        composer = app.query_one(Composer)
+        composer.value = "first"
+        await pilot.press("f4", "enter", "s", "e", "c", "o", "n", "d")
+        assert composer.text == "first\nsecond"
+        assert app.submissions == []
+        assert "Enter 换行" in str(app.query_one("#composer-hints").render())
+        await pilot.press("ctrl+s")
+        assert app.submissions == ["first\nsecond"]
+
+
+@pytest.mark.asyncio
+async def test_shift_enter_inserts_a_newline_in_send_mode():
+    app = ComposerApp()
+    async with app.run_test() as pilot:
+        app.query_one(Composer).value = "first"
+        await pilot.press("shift+enter")
+        assert app.query_one(Composer).text == "first\n"
+        assert app.submissions == []
+
+
+@pytest.mark.asyncio
+async def test_long_drafts_remain_bounded_and_resizable():
+    app = ComposerApp()
+    async with app.run_test(size=(60, 20)) as pilot:
+        composer = app.query_one(Composer)
+        composer.value = "很长的中文消息\n" * 15
+        await pilot.pause()
+        assert composer.region.height == 6
+        await pilot.resize_terminal(40, 16)
+        assert composer.region.width > 20
+        assert composer.text == "很长的中文消息\n" * 15

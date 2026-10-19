@@ -1,11 +1,12 @@
 ChatMessage { width: 100%; height: auto; padding: 0; margin: 0 0 1 0; border: none; }
-ChatMessage.user { color: $foreground; text-style: bold; border-left: solid $primary; padding-left: 1; }
-ChatMessage.assistant { padding-left: 2; }
+ChatMessage.user { color: $foreground; padding: 0 1; background: $surface; }
+ChatMessage.assistant { padding: 0 1; }
+.message-role { height: 1; color: $primary; text-style: bold; }
 ChatMessage.system { color: $text-muted; }
 #msg-content { height: auto; }
 .msg-text, .msg-code, .msg-reaction { height: auto; }
 .msg-code { padding: 0 1; background: $surface; }
-ToolCall { width: 100%; height: auto; padding: 0 0 0 2; margin: 0; border: none; }
+ToolCall { width: 100%; height: auto; padding: 0 1; margin: 0; border: none; }
 ToolCall:focus { background: $primary 8%; }
 #tool-name { height: 1; width: 100%; color: $foreground; text-overflow: ellipsis; text-wrap: nowrap; }
 #tool-result { height: auto; padding: 0 0 0 2; color: $text-muted; }

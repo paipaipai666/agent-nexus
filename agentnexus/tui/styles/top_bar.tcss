@@ -1,7 +1,6 @@
 #top-bar {
-  height: 2;
+  height: 1;
   padding: 0 1;
-  border-bottom: solid $foreground 20%;
   color: $text-muted;
   text-wrap: nowrap;
   text-overflow: ellipsis;

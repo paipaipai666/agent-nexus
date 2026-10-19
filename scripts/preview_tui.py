@@ -28,22 +28,32 @@ def save_screenshot(app, path, title):
 
 async def preview(output, size, theme):
     """Capture welcome, task and inspector states without an LLM request."""
-    from textual.widgets import Input
-
+    from agentnexus.agents.react_types import ReActEvent, ReActEventType
     from agentnexus.core.config import get_settings
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.memory.versioned import ConversationVersionManager
     from agentnexus.services.chat import ChatService, SessionHandle
     from agentnexus.tui.app import AgentNexusTUI
+    from agentnexus.tui.widgets.input_bar import Composer
 
-    answer = "已检查入口与测试。\n\n- 对话保持单列，任务详情按需展开。\n- 终端缩放后保留输入和会话。\n- 工具结果可用 Tab 选择，再按 Enter 展开。\n\n下一步可以继续检查协作流程。"
+    answer = "已检查终端入口。思考、工具和回答按顺序显示，任务详情使用统一入口。"
     agent = MagicMock()
     agent.agent_id, agent.model_id, agent.max_steps = "main", "demo-model", 5
     agent.llm_client.model = "demo-model"
     agent.llm_client.base_url = ""
     agent.llm_client.capabilities = SimpleNamespace(supports_thinking=True, supports_tool_calling=True, max_context_tokens=128000)
     agent._on_event, agent._todo_list, agent._total_usage, agent.total_usage, agent._step_count = None, None, {}, {}, 0
-    agent.run.return_value = SimpleNamespace(answer=answer)
+    def execute(*_args, **_kwargs):
+        def emit(kind, **payload):
+            agent._on_event(ReActEvent(kind, payload), None, None)
+
+        emit(ReActEventType.STREAM_REASONING, token="先检查会话入口和按键绑定，确认多行输入与会话切换如何交互。")
+        emit(ReActEventType.TOOL_START, id="read", name="file_read", arguments={"path": "agentnexus/tui/screens/chat.py"})
+        emit(ReActEventType.TOOL_DONE, id="read", name="file_read", result="示例源码结果\nfrom textual.screen import Screen", duration_ms=18)
+        emit(ReActEventType.STREAM_TOKEN, token=answer)
+        return SimpleNamespace(answer=answer)
+
+    agent.run.side_effect = execute
     memory = SimpleNamespace(short_term=ShortTermMemory(), estimate_stm_tokens=lambda: 0)
     workspace = str(Path.cwd())
     version = ConversationVersionManager("preview", get_settings().memory_db_path, workspace_path=workspace)
@@ -57,7 +67,7 @@ async def preview(output, size, theme):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         save_screenshot(app, output / "welcome.svg", "AgentNexus · welcome")
-        app.screen.query_one("#chat-input", Input).value = "检查终端布局和协作流程"
+        app.screen.query_one("#chat-input", Composer).value = "检查终端布局和协作流程"
         await pilot.press("enter")
         for _ in range(200):
             if chat.get_session_recovery("preview") and not chat.is_processing:
@@ -67,7 +77,6 @@ async def preview(output, size, theme):
         chat._subagents.update(child, status="completed", latest_progress="入口与窗口缩放已检查", steps_used=3)
         child = chat._subagents.register("preview", "demo-parent", "交互检查", "reviewer", "检查键盘操作与工具展开")
         chat._subagents.update(child, status="waiting", latest_progress="需要确认多行输入快捷键", waiting_questions=1)
-        app.screen._chat_area.add_tool_call("file_read · agentnexus/tui/screens/chat.py", "示例源码结果\nfrom textual.screen import Screen", 18)
         app.screen._refresh_workspace()
         await pilot.pause()
         app.screen._chat_area.scroll_home(animate=False)
@@ -75,7 +84,11 @@ async def preview(output, size, theme):
         save_screenshot(app, output / "conversation.svg", "AgentNexus · offline demo")
         await pilot.press("ctrl+p")
         save_screenshot(app, output / "commands.svg", "AgentNexus · actions")
-        await pilot.press("escape", "f3")
+        await pilot.press("escape", "f4")
+        app.screen.query_one(Composer).value = "继续检查以下操作：\n1. 切换模型与思考强度\n2. 附件与草稿恢复"
+        await pilot.pause()
+        save_screenshot(app, output / "composer.svg", "AgentNexus · inline composer")
+        await pilot.press("f3")
         save_screenshot(app, output / "inspector.svg", "AgentNexus · task inspector")
     print(f"Actual Textual screenshots: {output}")
     version._conn.close()

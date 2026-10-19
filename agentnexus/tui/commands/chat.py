@@ -53,7 +53,8 @@ def run(context, command, args, sid):
             if not text.strip():
                 raise ValueError("草稿为空")
             attachments = [dict(item) for item in context.attachments.pop(sid, [])]
-            return CommandResult({"status": "提交草稿"}, submission={"text": text, "attachments": attachments or None})
+            context.drafts.pop(sid, None)
+            return CommandResult({"status": "提交草稿"}, draft="", submission={"text": text, "attachments": attachments or None})
         elif action != "show":
             raise ValueError(f"用法: {command} {COMMAND_HELP[command]}")
         return {"draft": context.drafts.get(sid, "")}

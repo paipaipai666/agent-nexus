@@ -49,6 +49,8 @@ class ChatMessage(Widget):
         self._rich_markup = markup
 
     def compose(self) -> ComposeResult:
+        if "user" in self.classes or "assistant" in self.classes:
+            yield Static("你" if "user" in self.classes else "AgentNexus", classes="message-role")
         if self._rich_markup:
             yield Static(self.content, id="msg-content")
         elif "assistant" in self.classes:

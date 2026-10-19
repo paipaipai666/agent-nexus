@@ -29,6 +29,7 @@ class ChoiceScreen(ModalScreen[Choice | None]):
     ChoiceScreen > Vertical { width: 90%; max-width: 100; height: 80%; background: $surface; border: solid $primary; padding: 0 1; }
     ChoiceScreen Label { height: 1; color: $text-muted; }
     ChoiceScreen Input { height: 3; background: transparent; }
+    ChoiceScreen Input .input--placeholder { color: $text-muted; }
     ChoiceScreen OptionList { height: 1fr; border: none; background: transparent; }
     """
 
@@ -58,7 +59,7 @@ class ChoiceScreen(ModalScreen[Choice | None]):
         for index, choice in enumerate(self.visible_choices):
             text = Text(choice.label)
             if choice.description:
-                text.append("\n" + choice.description, "dim")
+                text.append("\n" + choice.description)
             options.add_option(Option(text, id=str(index)))
         selected = next((i for i, choice in enumerate(self.visible_choices) if choice.value == self.selected_value), 0)
         options.highlighted = selected if self.visible_choices else None
@@ -127,7 +128,7 @@ class ParameterScreen(ModalScreen[str | None]):
 class MessageEditor(ModalScreen[tuple[str, str]]):
     """Edit a multiline draft without sending on ordinary Enter or paste."""
 
-    BINDINGS = [("f4", "send", "发送"), ("escape", "save", "保留草稿")]
+    BINDINGS = [("ctrl+s", "send", "发送"), ("escape", "save", "保留草稿")]
     DEFAULT_CSS = """
     MessageEditor { align: center middle; }
     MessageEditor > Vertical { width: 94%; height: 85%; background: $surface; border: solid $primary; padding: 0 1; }
@@ -143,7 +144,7 @@ class MessageEditor(ModalScreen[tuple[str, str]]):
         with Vertical():
             yield Label(self.heading)
             yield TextArea(self.text, id="message-editor", soft_wrap=True)
-            yield Label("Enter 换行 · F4 发送 · Esc 保留草稿并返回")
+            yield Label("Enter 换行 · Ctrl+S 发送 · Esc 保留草稿并返回")
 
     def on_mount(self):
         self.query_one(TextArea).focus()

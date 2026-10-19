@@ -30,8 +30,9 @@ class HUD(Widget):
     }
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, compact=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.compact = compact
         settings = get_settings()
         full_id, base_url, _key, _timeout = settings.get_active_llm_profile()
         self.model = full_id
@@ -112,6 +113,10 @@ class HUD(Widget):
         caps_seg = f" [dim]({' '.join(caps)})[/]" if caps else ""
 
         compact_indicator = " · compact 压缩中" if self._compacting else ""
+
+        if self.compact:
+            thinking = " · 思考" if self._supports_thinking else ""
+            return f"{ctx_seg} · in:{_format_k(self.total_input)} out:{_format_k(self.total_output)}{thinking}{compact_indicator} · F2 会话 · F3 任务 · Ctrl+P 操作"
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head
         version_actions = []

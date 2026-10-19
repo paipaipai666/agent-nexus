@@ -2,12 +2,12 @@
 
 import asyncio
 
+from rich.text import Text
 from textual import work
-from textual.widgets import Input
 
 from agentnexus.tui.commands import COMMAND_HELP
 from agentnexus.tui.screens.inspector import InspectorScreen, task_summary
-from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, MessageEditor, ParameterScreen
+from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, ParameterScreen
 from agentnexus.tui.widgets.input_bar import InputBar
 
 
@@ -135,28 +135,16 @@ class ChatWorkspace:
         if event.size.width < 112:
             self.remove_class("has-inspector")
 
-    @work(group="message-editor", exclusive=True)
-    async def action_edit_message(self, text=None):
-        sid = self._chat_session.id
-        inp = self.query_one("#chat-input", Input)
-        initial = text if text is not None else inp.value or self._terminal.drafts.get(sid, "")
-        outcome, draft = await self.app.push_screen_wait(MessageEditor(initial))
-        if outcome == "send":
-            self._terminal.drafts.pop(sid, None)
-            if sid == self._chat_session.id:
-                self.on_input_bar_app_submit(InputBar.AppSubmit(draft))
-            else:
-                self._submit_session_message({"text": draft, "attachments": self._attachments.pop(sid, None)}, sid)
-        else:
-            self._terminal.drafts[sid] = draft
-            if sid == self._chat_session.id:
-                inp.value = ""
-        self._terminal.save_draft(sid)
-        self._refresh_workspace()
-        self.action_focus_input()
+    def action_edit_message(self):
+        self._chat_input.toggle_multiline()
 
-    def on_input_bar_editor_requested(self, event):
-        self.action_edit_message(event.text)
+    def on_input_bar_action_requested(self, event: InputBar.ActionRequested):
+        actions = {"choose-model": "@models", "choose-thinking": "@thinking", "choose-attachment": "@attachments"}
+        if event.action == "toggle-plan":
+            enabled = self._chat_service.is_plan_mode(self._chat_session.id)
+            self._choose_workspace_action(Choice("计划模式", "/plan off" if enabled else "/plan on"))
+        else:
+            self._choose_workspace_action(Choice("", actions[event.action]))
 
     def _refresh_workspace(self):
         if not self.is_mounted:
@@ -167,15 +155,24 @@ class ChatWorkspace:
             thinking=self._chat_service.get_thinking_effort(sid) or "默认",
             plan=self._chat_service.is_plan_mode(sid), attachments=self._attachments.get(sid, []),
             draft=self._terminal.drafts.get(sid, ""), queued=sid in self._running_sessions,
+            queue_size=len(self._queued_messages.get(sid, [])),
         )
         children = self._chat_service.list_subagents(sid)
         self.query_one("#collaboration-tree").update_children(children)
         self._side_panel.update_collaboration(children)
-        recovery = self._chat_service.get_session_recovery(sid)
-        self.query_one("#task-strip").display = bool(recovery)
-        self.query_one("#task-summary").update(task_summary(recovery))
+        failure = ""
+        try:
+            recovery = self._chat_service.get_session_recovery(sid)
+        except OSError as exc:
+            recovery, failure = None, str(exc)
+        self.query_one("#task-strip").display = bool(recovery or failure or children)
+        summary = Text(f"任务状态不可用 · {failure}") if failure else task_summary(recovery)
         if recovery and sid in self._running_sessions:
-            self.query_one("#task-summary").update(task_summary({**recovery, "status": "running" if recovery.get("status") != "interrupted" else "interrupted"}))
+            summary = task_summary({**recovery, "status": "running" if recovery.get("status") != "interrupted" else "interrupted"})
+        waiting = sum(child.get("waiting_questions", 0) for child in children)
+        queued = len(self._queued_messages.get(sid, []))
+        prefix = (f"待答复 {waiting} · " if waiting else "") + (f"排队 {queued} · " if queued else "")
+        self.query_one("#task-summary").update(Text(prefix) + summary)
         for action in ("undo", "redo"):
             self.query_one(f"#{action}-checkpoint").disabled = sid in self._running_sessions or not getattr(self._hud, f"_can_{action}")
 

@@ -68,7 +68,13 @@ async def smoke(target):
                 await pilot.press("ctrl+p")
                 app.screen.query_one("#palette-search")
                 await pilot.press("escape", "f4")
-                app.screen.query_one("#message-editor")
+                from agentnexus.tui.widgets.input_bar import Composer
+
+                composer = app.screen.query_one("#chat-input", Composer)
+                if not composer.multiline or not app.screen.query_one("#chat-area").display:
+                    raise SystemExit("Multiline editing must stay inside the conversation")
+                await pilot.press("f3")
+                app.screen.query_one("#task-detail")
                 await pilot.press("escape")
         version._conn.close()
         if timeline._conn is not None:
