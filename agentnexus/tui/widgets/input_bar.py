@@ -13,6 +13,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Static, TextArea
 
 from agentnexus.tui.actions import CONTROL_ACTIONS, ContextFooter
+from agentnexus.tui.widgets.activity import ActivityStatus
 
 
 class Composer(TextArea):
@@ -159,6 +160,7 @@ class InputBar(Widget):
             self._inp = Composer(id="chat-input", placeholder="描述任务，或按 Ctrl+P 选择操作")
             yield self._inp
         with Horizontal(id="composer-footer"):
+            yield ActivityStatus(id="agent-activity")
             yield ContextFooter("", id="composer-hints")
             if self._hud is not None:
                 yield self._hud

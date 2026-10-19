@@ -8,6 +8,7 @@ from rich.text import Text
 from textual import work
 
 from agentnexus.tui.actions import CONTROL_IDS
+from agentnexus.tui.activity import session_activity
 from agentnexus.tui.commands import COMMAND_HELP
 from agentnexus.tui.screens.inspector import InspectorScreen, task_summary
 from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, ParameterScreen
@@ -200,13 +201,17 @@ class ChatWorkspace:
             plan=self._chat_service.is_plan_mode(sid), attachments=self._attachments.get(sid, []),
             draft=self._terminal.drafts.get(sid, ""), queued=sid in self._running_sessions,
         )
-        children = self._chat_service.list_subagents(sid)
-        self._side_panel.update_collaboration(children)
         failure = ""
+        children, recovery = [], None
+        try:
+            children = self._chat_service.list_subagents(sid)
+        except (OSError, StorageError) as exc:
+            failure = str(exc)
         try:
             recovery = self._chat_service.get_session_recovery(sid)
         except (OSError, StorageError) as exc:
-            recovery, failure = None, str(exc)
+            failure = str(exc)
+        self._side_panel.update_collaboration(children)
         status = self.query_one("#task-summary")
         status.display = bool(recovery or failure or children)
         summary = Text(f"任务状态不可用 · {failure}") if failure else task_summary(recovery)
@@ -220,7 +225,19 @@ class ChatWorkspace:
         status.update(label)
         status.tooltip = label.plain + " · F3 查看任务与协作"
         status.set_class(bool(waiting or failure), "needs-attention")
+        self._activity_children, self._activity_recovery, self._activity_failure = children, recovery, failure
+        self._refresh_activity()
         self._refresh_action_hints()
+
+    def _refresh_activity(self):
+        sid = self._chat_session.id
+        active = sid in self._running_sessions or self._chat_service.is_session_processing(sid)
+        activity = session_activity(
+            active=active, progress=self._activity_runs.get(sid),
+            children=getattr(self, "_activity_children", ()), recovery=getattr(self, "_activity_recovery", None),
+            failure=getattr(self, "_activity_failure", ""), compacting=sid in self._compacting_sessions,
+        )
+        self.query_one("#agent-activity").update_activity(activity)
 
     def action_task_record(self):
         sid = self._chat_session.id

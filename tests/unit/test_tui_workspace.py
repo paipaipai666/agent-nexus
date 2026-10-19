@@ -155,14 +155,17 @@ async def test_running_reasoning_survives_switching_sessions(workspace_runtime):
         await pilot.press("enter")
         try:
             await settle(pilot, lambda: bool(app.screen.query(ReasoningBlock)))
+            assert "工作中" in str(app.screen.query_one("#agent-activity").render())
             app.screen.query_one("#chat-input", Composer).value = "/session new"
             await pilot.press("enter")
             await settle(pilot, lambda: app.screen._chat_session.id != "workspace")
             assert not app.screen.query(ReasoningBlock)
+            assert "空闲" in str(app.screen.query_one("#agent-activity").render())
             app.screen.query_one("#chat-input", Composer).value = "/session switch workspace"
             await pilot.press("enter")
             await settle(pilot, lambda: app.screen._chat_session.id == "workspace")
             assert "此任务仍在分析。" in str(app.screen.query_one(".reasoning-content").render())
+            assert "思考" in str(app.screen.query_one("#agent-activity").render())
         finally:
             release.set()
         await settle(pilot, lambda: not runtime.chat.is_processing)

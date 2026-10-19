@@ -259,6 +259,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._closing = False
         self._active_runs = {}
         self._running_sessions = set()
+        self._activity_runs = {}
         self._compacting_sessions = set()
         self._queued_messages = {}
         self._submissions = {}

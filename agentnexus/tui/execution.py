@@ -20,6 +20,7 @@ from agentnexus.tools.result_format import (
     format_subagent_result,
     summarize_tool_result,
 )
+from agentnexus.tui.activity import RunActivity
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall, render_diff_with_colors
 
@@ -51,6 +52,9 @@ class ChatExecution:
         self._submissions[sid] = submission
         self._run_transcripts[sid] = []
         self._running_sessions.add(sid)
+        self._activity_runs[sid] = RunActivity()
+        if sid == self._chat_session.id:
+            self._refresh_workspace()
         loop = asyncio.get_running_loop()
         ready = asyncio.Event()
         started = []
@@ -96,6 +100,7 @@ class ChatExecution:
             await asyncio.wait((running, waiting), return_when=asyncio.FIRST_COMPLETED)
             if started:
                 run = started[0]
+                self._activity_runs[sid].run_id = run.id
                 self._active_runs[sid] = run.id
                 if sid == self._chat_session.id:
                     self._current_run_id = run.id
@@ -119,6 +124,7 @@ class ChatExecution:
         finally:
             waiting.cancel()
             self._running_sessions.discard(sid)
+            self._activity_runs.pop(sid, None)
             self._run_transcripts.pop(sid, None)
             if not self._closing:
                 if sid == self._chat_session.id:
@@ -138,15 +144,27 @@ class ChatExecution:
         dialog = ConfirmDialog(f"会话 {sid}", summary, risk_level="high")
 
         def done(approved):
+            self._set_confirmation_activity(sid, False)
             result[0] = bool(approved)
             completed.set()
 
-        self.app.call_from_thread(lambda: self.app.push_screen(dialog, callback=done))
+        def show_confirmation():
+            self._set_confirmation_activity(sid, True)
+            self.app.push_screen(dialog, callback=done)
+
+        self.app.call_from_thread(show_confirmation)
         while not completed.wait(0.05):
             if self._closing or (started and not self._chat_service.is_run_active(started[0].id)):
                 self.app.call_from_thread(lambda: dialog.dismiss(False) if self.app.screen is dialog else None)
                 return False
         return result[0]
+
+    def _set_confirmation_activity(self, sid, active):
+        progress = self._activity_runs.get(sid)
+        if progress is not None:
+            progress.confirming = active
+        if sid == self._chat_session.id:
+            self._refresh_workspace()
 
     def _remove_loading(self):
         self._stop_spinner()
@@ -165,12 +183,16 @@ class ChatExecution:
             self._streaming_buffer = ""
 
     def _apply_service_event(self, event, *, replay=False):
+        if not replay and event.session_id in self._activity_runs:
+            self._activity_runs[event.session_id].observe(event)
         if not replay and event.session_id in self._running_sessions:
             self._run_transcripts.setdefault(event.session_id, []).append(event)
         if event.session_id != self._chat_session.id or self._closing:
             return
         payload = event.payload
         kind = event.type
+        if not replay and kind in {"stream_token", "stream_reasoning"}:
+            self._refresh_activity()
         if kind == "stream_token":
             self._finish_reasoning()
             if self._streaming_msg_widget is None:
