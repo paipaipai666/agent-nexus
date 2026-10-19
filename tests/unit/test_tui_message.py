@@ -33,16 +33,14 @@ class TestChatMessage:
     def test_compose_no_code(self):
         msg = ChatMessage("user", "simple text")
         children = list(msg.compose())
-        assert len(children) == 2
-        assert str(children[0].content) == "你"
-        assert children[1].id == "msg-content"
+        assert len(children) == 1
+        assert children[0].id == "msg-content"
 
     def test_compose_with_code(self):
         msg = ChatMessage("assistant", "text```python\nprint('hi')\n```more")
         children = list(msg.compose())
-        assert len(children) == 2
-        assert str(children[0].content) == "AgentNexus"
-        assert children[1].id == "msg-content"
+        assert len(children) == 1
+        assert children[0].id == "msg-content"
 
 
 class TestAttachReaction:

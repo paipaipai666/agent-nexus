@@ -181,6 +181,8 @@ async def test_empty_session_shows_project_logo_and_full_width_chat(workspace_ru
         assert not app.screen.query_one("#side-panel").display
         assert app.screen.query_one("#chat-area").region.width == 80
         assert app.screen.query_one("#chat-input", Composer).has_focus
+        assert app.screen.query_one("#input-area").region.height == 3
+        assert app.screen.query_one("#hud").region.y == app.screen.query_one("#composer-hints").region.y
 
 
 @pytest.mark.asyncio
@@ -551,7 +553,7 @@ async def test_theme_selection_preserves_a_usable_narrow_composer(workspace_runt
         assert app.screen.query_one("#chat-area").region.width == 60
         assert app.screen.query_one("#chat-input", Composer).region.width > 40
         await pilot.press("f4")
-        assert app.screen.query_one("#chat-input").region.height >= 3
+        assert app.screen.query_one("#chat-input").region.height == 1
         assert app.screen.query_one("#chat-area").region.height >= 7
 
 

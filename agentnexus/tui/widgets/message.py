@@ -41,7 +41,7 @@ def render_diff_with_colors(diff_text: str) -> str:
 
 
 class ChatMessage(Widget):
-    """A single chat message with colored left border."""
+    """Message content with role-specific styling."""
 
     def __init__(self, role: str, content: str, *, markup: bool = False, **kwargs):
         super().__init__(classes=role, **kwargs)
@@ -49,8 +49,6 @@ class ChatMessage(Widget):
         self._rich_markup = markup
 
     def compose(self) -> ComposeResult:
-        if "user" in self.classes or "assistant" in self.classes:
-            yield Static("你" if "user" in self.classes else "AgentNexus", classes="message-role")
         if self._rich_markup:
             yield Static(self.content, id="msg-content")
         elif "assistant" in self.classes:

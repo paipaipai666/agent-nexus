@@ -155,7 +155,6 @@ class ChatWorkspace:
             thinking=self._chat_service.get_thinking_effort(sid) or "默认",
             plan=self._chat_service.is_plan_mode(sid), attachments=self._attachments.get(sid, []),
             draft=self._terminal.drafts.get(sid, ""), queued=sid in self._running_sessions,
-            queue_size=len(self._queued_messages.get(sid, [])),
         )
         children = self._chat_service.list_subagents(sid)
         self.query_one("#collaboration-tree").update_children(children)

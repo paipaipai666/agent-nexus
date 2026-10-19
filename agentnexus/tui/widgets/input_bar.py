@@ -67,10 +67,10 @@ class Composer(TextArea):
 class InputBar(Widget):
     """Task buffer, current configuration and terminal-safe action shortcuts."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, hud=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self._hud = hud
         self._queued = False
-        self._queue_size = 0
 
     class AppSubmit(Message):
         def __init__(self, text: str):
@@ -98,11 +98,13 @@ class InputBar(Widget):
             yield Static("›", id="input-prompt")
             self._inp = Composer(id="chat-input", placeholder="描述任务，或按 Ctrl+P 选择操作")
             yield self._inp
-        yield Static("", id="composer-hints")
+        with Horizontal(id="composer-footer"):
+            yield Static("", id="composer-hints")
+            if self._hud is not None:
+                yield self._hud
 
-    def update_state(self, *, model, thinking, plan, attachments, draft, queued, queue_size=0):
+    def update_state(self, *, model, thinking, plan, attachments, draft, queued):
         self._queued = queued
-        self._queue_size = queue_size
         if draft and not self._inp.text:
             self._inp.value = draft
         meta = Text()
@@ -123,15 +125,14 @@ class InputBar(Widget):
 
     def _update_hints(self):
         send = "排队" if self._queued else "发送"
-        mode = "Enter 换行" if self._inp.multiline else f"Enter {send}"
-        stop = " · Ctrl+C 停止" if self._queued else ""
-        waiting = f" · 已排队 {self._queue_size} 条" if self._queue_size else ""
-        self.query_one("#composer-hints", Static).update(f"{mode} · Ctrl+S {send} · F4 多行{waiting}{stop}")
+        mode = f"Enter 换行 · Ctrl+S {send}" if self._inp.multiline else f"Enter {send}"
+        action = "Ctrl+C 停止" if self._queued else "F4 单行" if self._inp.multiline else "F4 多行"
+        self.query_one("#composer-hints", Static).update(f"{mode} · {action}")
 
     def _update_size(self):
         width = max(1, self._inp.size.width - 1)
         rows = sum(max(1, ceil(cell_len(line) / width)) for line in self._inp.text.split("\n"))
-        self._inp.styles.height = min(6, max(3 if self._inp.multiline else 1, rows))
+        self._inp.styles.height = min(6, max(1, rows))
 
     def on_resize(self):
         self._update_size()

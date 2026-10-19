@@ -1,7 +1,6 @@
 ChatMessage { width: 100%; height: auto; padding: 0; margin: 0 0 1 0; border: none; }
 ChatMessage.user { color: $foreground; padding: 0 1; background: $surface; }
 ChatMessage.assistant { padding: 0 1; }
-.message-role { height: 1; color: $primary; text-style: bold; }
 ChatMessage.system { color: $text-muted; }
 #msg-content { height: auto; }
 .msg-text, .msg-code, .msg-reaction { height: auto; }

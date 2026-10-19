@@ -233,10 +233,9 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             yield Button("撤销", id="undo-checkpoint")
             yield Button("重做", id="redo-checkpoint")
             yield Button("记录", id="open-task-record")
-        self._chat_input = InputBar(id="input-area")
-        yield self._chat_input
         self._hud = HUD(id="hud", compact=True)
-        yield self._hud
+        self._chat_input = InputBar(id="input-area", hud=self._hud)
+        yield self._chat_input
 
     def _render_top_bar(self) -> str:
         branch = self._version.status().get("branch", "main") if self._version else "main"

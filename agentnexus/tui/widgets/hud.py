@@ -116,7 +116,7 @@ class HUD(Widget):
 
         if self.compact:
             thinking = " · 思考" if self._supports_thinking else ""
-            return f"{ctx_seg} · in:{_format_k(self.total_input)} out:{_format_k(self.total_output)}{thinking}{compact_indicator} · F2 会话 · F3 任务 · Ctrl+P 操作"
+            return f"{ctx_seg} · in:{_format_k(self.total_input)} out:{_format_k(self.total_output)}{thinking}{compact_indicator}"
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head
         version_actions = []
