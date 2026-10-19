@@ -150,6 +150,9 @@ class InputBar(Widget):
             yield Button("思考", id="choose-thinking")
             yield Button("计划", id="toggle-plan")
             yield Button("附件", id="choose-attachment")
+            status = Static("", id="task-summary")
+            status.display = False
+            yield status
         yield Static("", id="composer-meta")
         with Horizontal(id="input-row"):
             yield Static("›", id="input-prompt")

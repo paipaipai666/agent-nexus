@@ -225,8 +225,10 @@ async def test_restored_history_skips_the_large_welcome_logo(workspace_runtime):
         await pilot.pause()
         assert not app.screen.query_one("#welcome").display
         assert "ctx 4.0k/" in app.screen.query_one("#hud-text").content
-        assert "in:1.2k out:567" in app.screen.query_one("#hud-text").content
         assert "恢复的任务" in str(app.screen.query_one("#todo-card").render())
+        await pilot.press("f1")
+        assert "累计输入 1234" in app.screen.query_one("#record-content").text
+        assert "累计输出 567" in app.screen.query_one("#record-content").text
 
 
 @pytest.mark.asyncio
@@ -399,21 +401,18 @@ async def test_inspector_adapts_to_terminal_width_and_resize(workspace_runtime):
 
 
 @pytest.mark.asyncio
-async def test_collaboration_tree_displays_actual_progress_and_waiting_state(workspace_runtime):
+async def test_task_summary_opens_actual_collaboration_progress(workspace_runtime):
     runtime, _ = workspace_runtime
     child = runtime.chat._subagents.register("workspace", "parent", "检查源码", "explorer", "检查入口")
     runtime.chat._subagents.update(child, status="waiting", latest_progress="找到两个入口", waiting_questions=1, child_run_id="attempt")
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        tree = app.screen.query_one("#collaboration-tree")
-        assert tree.display
-        text = str(tree.query_one("#collaboration-summary").render())
-        assert "检查源码" in text
-        assert "待答复" in text
-        assert "找到两个入口" in text
+        assert "待答复 1" in str(app.screen.query_one("#task-summary").render())
         await pilot.press("f3")
         assert "检查入口" in app.screen.query_one("#child-detail").text
+        assert "检查源码" in app.screen.query_one("#child-detail").text
+        assert "找到两个入口" in app.screen.query_one("#child-detail").text
 
 
 @pytest.mark.asyncio
@@ -500,7 +499,7 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
             assert reply["child_run_id"] == "attempt"
             assert reply["content"] == "是的，使用 Markdown。 rixl"
             assert reply["delivery"] == "queued"
-            assert "queued" in app.screen.query_one("#child-detail", TextArea).text
+            assert "待送达" in app.screen.query_one("#child-detail", TextArea).text
             await click_ready(app, pilot, "#child-send")
             app.screen.query_one("#message-editor", TextArea).load_text("尚未发送的补充")
             await pilot.press("escape", "escape", "f3")
@@ -593,8 +592,9 @@ async def test_session_switch_replaces_timeline_todos_usage_and_capabilities(wor
         await pilot.press("enter")
         await settle(pilot, lambda: runtime.chat.get_session_recovery("workspace") is not None and not runtime.chat.is_processing)
         await pilot.pause()
-        assert "in:1.2k" in app.screen.query_one("#hud-text").content
-        await pilot.press("f3")
+        await pilot.press("f1")
+        assert "累计输入 1234" in app.screen.query_one("#record-content").text
+        await pilot.press("escape", "f3")
         assert "旧会话任务" in str(app.screen.query_one("#task-todos").render())
         await pilot.press("escape", "f2")
         await settle(pilot, lambda: bool(app.screen.query("#palette-search")))
@@ -605,7 +605,9 @@ async def test_session_switch_replaces_timeline_todos_usage_and_capabilities(wor
         assert "old session task" not in str(app.screen.query_one("#timeline-card").render())
         text = app.screen.query_one("#hud-text").content
         assert "ctx 0/" in text
-        assert "in:0 out:0" in text
-        assert "思考" in text
-        await pilot.press("f3")
+        await pilot.press("f1")
+        assert "累计输入 0" in app.screen.query_one("#record-content").text
+        assert "累计输出 0" in app.screen.query_one("#record-content").text
+        assert "思考能力 支持" in app.screen.query_one("#record-content").text
+        await pilot.press("escape", "f3")
         assert "旧会话任务" not in str(app.screen.query_one("#task-todos").render())

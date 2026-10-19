@@ -91,9 +91,11 @@ class TestToolCall:
     def test_compose(self):
         tc = ToolCall("bash", "ok", 150)
         children = list(tc.compose())
-        assert len(children) == 3
+        assert len(children) == 2
         assert isinstance(children[0], Label)
         assert children[0].id == "tool-name"
         assert isinstance(children[1], Static)
         assert children[1].id == "tool-result"
         assert "150ms" in str(children[0].content)
+        assert str(children[1].content) == "ok"
+        assert not children[1].display

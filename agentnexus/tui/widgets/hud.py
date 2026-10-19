@@ -33,6 +33,8 @@ class HUD(Widget):
     def __init__(self, *args, compact=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.compact = compact
+        if compact:
+            self.tooltip = "F1 查看用量与按键"
         settings = get_settings()
         full_id, base_url, _key, _timeout = settings.get_active_llm_profile()
         self.model = full_id
@@ -97,6 +99,16 @@ class HUD(Widget):
     def compose(self) -> ComposeResult:
         yield Static(self._build_text(), id="hud-text")
 
+    async def on_click(self):
+        if self.compact:
+            await self.screen.action_perform("help")
+
+    def describe_usage(self):
+        """Expose full session metrics without expanding the terminal status row."""
+        return (f"模型 {self.model}\n上下文 {self.current_tokens} / {self.ctx_max if self.ctx_max is not None else '未报告上限'}\n"
+                f"累计输入 {self.total_input}\n累计输出 {self.total_output}\n"
+                f"思考能力 {'支持' if self._supports_thinking else '不支持'}\n工具策略 {self._strategy or '未报告'}\n检查点 {self._head}")
+
     def _build_text(self) -> str:
         ctx_used = self.current_tokens
 
@@ -115,8 +127,7 @@ class HUD(Widget):
         compact_indicator = " · compact 压缩中" if self._compacting else ""
 
         if self.compact:
-            thinking = " · 思考" if self._supports_thinking else ""
-            return f"{ctx_seg} · in:{_format_k(self.total_input)} out:{_format_k(self.total_output)}{thinking}{compact_indicator}"
+            return "压缩中 · " + ctx_seg if self._compacting else ctx_seg
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head
         version_actions = []

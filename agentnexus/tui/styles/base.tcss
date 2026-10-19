@@ -15,3 +15,11 @@ LoadingIndicator {
 Widget {
     background: transparent;
 }
+
+ContextFooter {
+    link-style: none;
+    link-color: $text-muted;
+    link-background: transparent;
+    link-style-hover: bold;
+    link-color-hover: $primary;
+}

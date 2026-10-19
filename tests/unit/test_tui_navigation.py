@@ -90,6 +90,8 @@ async def test_context_help_and_direct_action_restore_the_same_draft(workspace_r
         help_text = app.screen.query_one("#record-content").text
         assert "Alt+M" in help_text
         assert "PageUp" in help_text
+        assert "Enter  换行" not in help_text.splitlines()
+        assert "Shift+Enter" in help_text
         await pilot.press("escape", "alt+t")
         assert app.screen.query_one("#palette-search").has_focus
         await pilot.press("escape")
@@ -187,3 +189,16 @@ async def test_slash_candidates_accept_keyboard_and_mouse_selection(workspace_ru
         assert "选择思考强度" in str(app.screen.query_one("Label").render())
         await pilot.press("escape")
         assert runtime.agent.run.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_browsing_can_select_new_records_after_clearing(workspace_runtime):
+    runtime, _ = workspace_runtime
+    runtime.memory_manager.short_term.append("assistant", "之前的回答")
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("tab", "ctrl+l")
+        app.screen.query_one("#chat-area").add_message("assistant", "新的输出")
+        await pilot.pause()
+        await pilot.press("up", "enter")
+        assert app.screen.query_one("#record-content").text == "新的输出"

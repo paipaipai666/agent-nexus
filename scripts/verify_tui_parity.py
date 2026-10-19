@@ -65,8 +65,24 @@ async def smoke(target):
                     raise SystemExit("The inspector must be hidden until requested")
                 if "AgentNexus" not in str(app.screen.query_one("#welcome").render()):
                     raise SystemExit("The installed welcome screen is missing")
+                if app.screen.query_one("#input-area").region.height != 3:
+                    raise SystemExit("The default composer must occupy three rows")
+                await pilot.press("tab")
+                if app.focused.id != "chat-area":
+                    raise SystemExit("Tab must enter transcript navigation")
+                await pilot.press("tab", "right")
+                if app.focused.id != "choose-thinking":
+                    raise SystemExit("Configuration controls must support arrow navigation")
+                await pilot.press("tab", "f1")
+                if "Alt+M" not in app.screen.query_one("#record-content").text:
+                    raise SystemExit("Installed action help must expose direct shortcuts")
+                await pilot.press("escape", "/", "t", "h", "tab")
+                if app.screen.query_one("#chat-input").text != "/think ":
+                    raise SystemExit("Installed slash candidates must support completion")
+                await pilot.press("escape")
                 await pilot.press("ctrl+p")
-                app.screen.query_one("#palette-search")
+                if app.screen.query_one("#palette-search").content_region.height != 1:
+                    raise SystemExit("The focused picker search must retain a visible text row")
                 await pilot.press("escape", "f4")
                 from agentnexus.tui.widgets.input_bar import Composer
 
@@ -79,7 +95,7 @@ async def smoke(target):
         version._conn.close()
         if timeline._conn is not None:
             timeline._conn.close()
-    print("Installed wheel starts at 80x24 with the new welcome, action menu and editor.")
+    print("Installed wheel passes three-row layout, region navigation, help, completion, pickers and inline editing at 80x24.")
 
 
 def verify_wheel(wheel):

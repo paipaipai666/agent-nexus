@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from sqlite3 import Error as StorageError
 
 from rich.text import Text
 from textual import on, work
@@ -37,17 +38,25 @@ class InspectorScreen(ActionScreen[None]):
         TerminalAction("close", "返回", "escape", "close", key_display="Esc"),
     )
     BINDINGS = [action.binding() for action in ACTIONS]
+    CONTROLS = {"child-reply": "reply", "child-send": "instruct", "child-stop": "stop", "task-record": "record"}
     DEFAULT_CSS = """
-    InspectorScreen { align: center middle; }
-    InspectorScreen > Vertical { width: 96%; height: 94%; background: $surface; border: solid $primary; padding: 0 1; }
+    InspectorScreen { align: center middle; background: $background; }
+    InspectorScreen > Vertical { width: 100%; height: 100%; background: $background; border: none; padding: 0 2; }
     InspectorScreen Label { height: 1; color: $text-muted; }
-    InspectorScreen #task-detail { height: auto; max-height: 3; }
+    InspectorScreen #task-title { color: $foreground; text-style: bold; margin-bottom: 1; }
+    InspectorScreen #task-detail { height: 1; text-wrap: nowrap; text-overflow: ellipsis; color: $text-muted; }
     InspectorScreen #task-todos { height: auto; max-height: 4; overflow-y: auto; }
-    InspectorScreen OptionList { height: auto; max-height: 6; min-height: 2; border: none; background: transparent; }
-    InspectorScreen TextArea { height: 1fr; border: none; background: transparent; }
-    InspectorScreen Horizontal { height: 3; }
-    InspectorScreen Button { width: 1fr; min-width: 8; }
+    InspectorScreen #task-content { layout: vertical; height: 1fr; }
+    InspectorScreen OptionList { width: 100%; height: auto; max-height: 5; min-height: 1; border: none; background: transparent; }
+    InspectorScreen #child-list > .option-list--option-highlighted { color: $foreground; background: $primary 12%; text-style: bold; }
+    InspectorScreen #child-detail { height: 1fr; padding: 0; border: none; background: transparent; }
+    InspectorScreen #task-controls { height: 1; margin-top: 1; }
+    InspectorScreen #task-controls Button { width: 1fr; height: 1; min-height: 1; min-width: 8; padding: 0; border: none; background: transparent; text-style: none; }
+    InspectorScreen #task-controls Button:focus, InspectorScreen #task-controls Button:hover { color: $primary; background: $primary 12%; }
     InspectorScreen ContextFooter { height: 1; color: $text-muted; }
+    InspectorScreen.wide #task-content { layout: horizontal; }
+    InspectorScreen.wide #child-list { width: 36; height: 1fr; max-height: 100%; padding-right: 1; }
+    InspectorScreen.wide #child-detail { width: 1fr; }
     """
 
     def __init__(self, chat, sid, terminal):
@@ -58,45 +67,63 @@ class InspectorScreen(ActionScreen[None]):
         self._requests = terminal.collaboration_requests.setdefault(sid, {})
         self._drafts = terminal.collaboration_drafts.setdefault(sid, {})
         self._disabled_reasons = {}
+        self._recovery = None
+        self._detail_identity = None
 
     def compose(self):
         with Vertical():
-            yield Label("任务与协作 · F3")
+            yield Label("AgentNexus / 任务与协作", id="task-title")
             yield Static("", id="task-detail")
             yield Static("", id="task-todos")
-            yield OptionList(id="child-list", compact=True)
-            yield TextArea("", id="child-detail", read_only=True, soft_wrap=True)
-            with Horizontal():
-                yield Button("回复问题", id="child-reply")
-                yield Button("补充指令", id="child-send")
-                yield Button("停止子任务", id="child-stop")
-                yield Button("执行记录", id="task-record")
+            with Horizontal(id="task-content"):
+                yield OptionList(id="child-list", compact=True)
+                yield TextArea("", id="child-detail", read_only=True, soft_wrap=True)
+            with Horizontal(id="task-controls"):
+                actions = {action.id: action for action in self.ACTIONS}
+                for control, action_id in self.CONTROLS.items():
+                    action = actions[action_id]
+                    yield Button(f"{action.display_key} {action.title}", id=control)
             yield ContextFooter(id="task-actions")
 
     def on_mount(self):
         self.refresh_data()
-        self.query_one("#child-list").focus()
+        self.query_one("#child-list" if self.children_by_id else "#child-detail").focus()
         self.set_interval(1, self.refresh_data)
 
     def refresh_data(self):
+        try:
+            self._refresh_data()
+        except (OSError, StorageError) as exc:
+            self.query_one("#task-detail", Static).update(Text(f"任务状态不可用 · {exc}"))
+            self._disabled_reasons = dict.fromkeys(("reply", "instruct", "stop", "record"), f"任务状态不可用 · {exc}")
+            self._sync_actions()
+
+    def on_resize(self, event):
+        self.set_class(event.size.width >= 112, "wide")
+
+    def _refresh_data(self):
         children = self.chat.list_subagents(self.sid)
         children.sort(key=lambda child: (not child.get("waiting_questions"), child.get("status") not in {"thinking", "tool_calling", "waiting", "cancelling"}))
-        self.query_one("#task-detail", Static).update(task_summary(self.chat.get_session_recovery(self.sid)))
+        self._recovery = self.chat.get_session_recovery(self.sid)
+        waiting = sum(child.get("waiting_questions", 0) for child in children)
+        self.query_one("#task-detail", Static).update(Text(f"待答复 {waiting} · 子任务 {len(children)} · ") + task_summary(self._recovery))
         todo = getattr(self.chat.session_agent(self.sid), "_todo_list", None)
         items = todo.list_items() if todo is not None else []
         self.query_one("#task-todos", Static).update(Text("\n".join(f"{item.status} · {item.description}" for item in items)))
+        self.query_one("#task-todos").display = bool(items)
         options = self.query_one("#child-list", OptionList)
+        options.display = bool(children)
         new_ids = [child["subagent_id"] for child in children]
         if new_ids != list(self.children_by_id):
             options.clear_options()
             for child in children:
-                options.add_option(Option(Text(child_label(child)), id=child["subagent_id"]))
+                options.add_option(Option(Text(child_label(child, include_progress=False), no_wrap=True, overflow="ellipsis"), id=child["subagent_id"]))
             if new_ids:
                 options.highlighted = new_ids.index(self.selected_id) if self.selected_id in new_ids else 0
                 self.selected_id = new_ids[options.highlighted]
         else:
             for child in children:
-                options.replace_option_prompt(child["subagent_id"], Text(child_label(child)))
+                options.replace_option_prompt(child["subagent_id"], Text(child_label(child, include_progress=False), no_wrap=True, overflow="ellipsis"))
         self.children_by_id = {child["subagent_id"]: child for child in children}
         self.show_child()
 
@@ -120,35 +147,50 @@ class InspectorScreen(ActionScreen[None]):
             "instruct": "当前子任务不支持接收补充指令" if not active else "",
             "stop": "请选择一个运行中的子任务" if not child or child.get("status") in {"completed", "failed", "interrupted", "cancelling"} else "",
         }
-        for button, action in [("child-reply", "reply"), ("child-send", "instruct"), ("child-stop", "stop")]:
-            control = self.query_one(f"#{button}", Button)
-            control.disabled = bool(self._disabled_reasons[action])
-            control.tooltip = self._disabled_reasons[action] or None
-        self.query_one(ContextFooter).show_actions(self.action_states())
+        self._sync_actions()
         if child:
             lines = [child_label(child), "", child.get("task", "")]
             if child.get("error"):
                 lines.extend(["", child["error"]])
             for message in messages:
                 state = message.get("question_state") or message.get("delivery", "")
-                lines.extend(["", f"{message['kind']} #{message['id']} · {state}", message["content"]])
+                labels = {"question": "问题", "reply": "回复", "instruction": "补充指令", "progress": "进度", "open": "待回复", "answered": "已回复", "closed": "已关闭", "stale": "已失效", "queued": "待送达", "delivered": "已送达", "rejected": "已拒绝"}
+                lines.extend(["", f"{labels.get(message['kind'], message['kind'])} #{message['id']} · {labels.get(state, state)}", message["content"]])
             content = "\n".join(lines)
         else:
-            recovery = self.chat.get_session_recovery(self.sid)
+            recovery = self._recovery
             content = (recovery.get("question", "") + "\n\n" + recovery.get("answer", "")) if recovery else "当前会话没有子任务。\n执行记录可查看保存状态、检查点和任务恢复信息。"
         detail = self.query_one("#child-detail", TextArea)
         if detail.text != content:
+            identity = (self.selected_id, child.get("child_run_id") if child else None)
+            selection, offset = detail.selection, detail.scroll_offset
+            following = detail.scroll_y >= detail.max_scroll_y
             detail.load_text(content)
+            if identity == self._detail_identity:
+                detail.selection = selection
+                if following:
+                    detail.call_after_refresh(lambda: detail.scroll_end(animate=False))
+                else:
+                    detail.call_after_refresh(lambda: detail.scroll_to(x=offset.x, y=offset.y, animate=False))
+            self._detail_identity = identity
 
     def action_states(self):
         return [ActionState(state.action, self._disabled_reasons.get(state.action.id, "")) for state in super().action_states()]
+
+    def _sync_actions(self):
+        states = {state.action.id: state for state in self.action_states()}
+        for button, action_id in self.CONTROLS.items():
+            control = self.query_one(f"#{button}", Button)
+            control.disabled = bool(states[action_id].disabled_reason)
+            control.tooltip = states[action_id].disabled_reason or None
+        self.query_one(ContextFooter).show_actions([states[key] for key in ("region", "close", "help")], prefix="↑↓ 选择子任务")
 
     async def action_perform(self, action_id):
         self.refresh_data()
         await super().action_perform(action_id)
 
     def action_cycle_region(self):
-        self.query_one("#child-list" if self.query_one("#child-detail").has_focus else "#child-detail").focus()
+        self.query_one("#child-list" if self.query_one("#child-detail").has_focus and self.children_by_id else "#child-detail").focus()
 
     def action_reply(self):
         self.message_child(dict(self.children_by_id[self.selected_id]), reply=True)
@@ -158,10 +200,9 @@ class InspectorScreen(ActionScreen[None]):
 
     @on(Button.Pressed)
     async def activate_control(self, event):
-        actions = {"child-reply": "reply", "child-send": "instruct", "child-stop": "stop", "task-record": "record"}
-        if event.button.id in actions:
+        if event.button.id in self.CONTROLS:
             event.stop()
-            await self.action_perform(actions[event.button.id])
+            await self.action_perform(self.CONTROLS[event.button.id])
 
     @work(group="child-message", exclusive=True)
     async def message_child(self, child, *, reply):

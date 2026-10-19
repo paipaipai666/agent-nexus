@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from importlib import import_module
+from threading import RLock
 
 from pydantic import ValidationError
 
@@ -90,23 +91,26 @@ class TerminalCommands:
         self._loaded_drafts = set()
         from agentnexus.tui.drafts import DraftStore
 
-        self._draft_store = DraftStore()
+        self._draft_lock = RLock()
+        self._draft_store = DraftStore(lock=self._draft_lock)
 
     def load_draft(self, sid):
         """Restore a conversation's pending input and attachments once."""
-        if sid not in self._loaded_drafts:
-            saved = self._draft_store.load(sid)
-            self.inputs.setdefault(sid, saved["input"])
-            self.drafts.setdefault(sid, saved["draft"])
-            self.attachments.setdefault(sid, saved["attachments"])
-            self._loaded_drafts.add(sid)
+        with self._draft_lock:
+            if sid not in self._loaded_drafts:
+                saved = self._draft_store.load(sid)
+                self.inputs.setdefault(sid, saved["input"])
+                self.drafts.setdefault(sid, saved["draft"])
+                self.attachments.setdefault(sid, saved["attachments"])
+                self._loaded_drafts.add(sid)
 
     def save_draft(self, sid, *, text=None):
         """Persist pending input without retaining slash commands."""
-        self.load_draft(sid)
-        text = text if text is not None else self.inputs.get(sid, "")
-        self.inputs[sid] = text if not text.startswith("/") else ""
-        self._draft_store.save(sid, {"input": self.inputs.get(sid, ""), "draft": self.drafts.get(sid, ""), "attachments": self.attachments.get(sid, [])})
+        with self._draft_lock:
+            self.load_draft(sid)
+            text = text if text is not None else self.inputs.get(sid, "")
+            self.inputs[sid] = text if not text.startswith("/") else ""
+            self._draft_store.save(sid, {"input": self.inputs.get(sid, ""), "draft": self.drafts.get(sid, ""), "attachments": self.attachments.get(sid, [])})
 
     def requires_confirmation(self, command, args):
         action, _ = split_action(args)

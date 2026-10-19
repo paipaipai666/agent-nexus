@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import replace
 from functools import partial
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ from agentnexus.skills import (
 )
 from agentnexus.tui.actions import (
     ACTIONS,
+    COMPOSER_ACTIONS,
     CONTROL_ACTIONS,
     RECORD_ACTIONS,
     SCREEN_ACTIONS,
@@ -39,7 +41,6 @@ from agentnexus.tui.actions import (
 from agentnexus.tui.commands import COMMAND_HELP, TerminalCommands
 from agentnexus.tui.execution import ChatExecution
 from agentnexus.tui.screens.interactions import Choice
-from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
 from agentnexus.tui.widgets.input_bar import Composer, ConfigurationBar, InputBar
@@ -90,6 +91,9 @@ class ChatArea(Widget, can_focus=True):
     class OutputPending(Message):
         """Signal that new output arrived while the user reads earlier messages."""
 
+    class RecordSelected(Message):
+        """Refresh contextual actions after selecting a different transcript item."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.following_output = True
@@ -101,6 +105,14 @@ class ChatArea(Widget, can_focus=True):
         self.selected_record = record
         record.add_class("record-selected")
         record.scroll_visible(animate=False)
+        self.post_message(self.RecordSelected())
+
+    def on_click(self, event):
+        for widget in event.widget.ancestors_with_self:
+            if isinstance(widget, (ChatMessage, ReasoningBlock, ToolCall)):
+                self.select_record(widget)
+                self.focus()
+                break
 
     def on_focus(self):
         records = list(self.query("ChatMessage, ReasoningBlock, ToolCall"))
@@ -140,9 +152,6 @@ class ChatArea(Widget, can_focus=True):
 
     def compose(self):
         yield Welcome(id="welcome")
-        tree = CollaborationTree(id="collaboration-tree")
-        tree.display = False
-        yield tree
 
     def watch_scroll_y(self, old_value, new_value):
         super().watch_scroll_y(old_value, new_value)
@@ -268,6 +277,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._attachments = self._terminal.attachments
         self._submissions = self._terminal.submissions
         self._command_results = {}
+        self._draft_save_error = None
         if self._memory:
             self._memory._on_compact = partial(self._on_compact_event, session_id=self._chat_session.id)
 
@@ -286,11 +296,6 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         latest = Button("有新输出 · Ctrl+End 跳到最新", id="new-output")
         latest.display = False
         yield latest
-        with Horizontal(id="task-strip"):
-            yield Static("", id="task-summary")
-            yield Button("撤销", id="undo-checkpoint")
-            yield Button("重做", id="redo-checkpoint")
-            yield Button("记录", id="open-task-record")
         self._hud = HUD(id="hud", compact=True)
         self._chat_input = InputBar(id="input-area", hud=self._hud)
         yield self._chat_input
@@ -303,7 +308,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
         workspace = self._chat_session.workspace or str(Path.cwd())
         name = Path(workspace).name or workspace
-        return f"[bold]AgentNexus[/]  [dim]{escape(name)} · {escape(str(branch))} · 会话 {escape(self._chat_session.id[:8])}[/]"
+        location = f"{escape(name)} · " if name.casefold() != "agentnexus" else ""
+        return f"[bold]AgentNexus[/]  [dim]{location}{escape(str(branch))}[/] · [@click=screen.perform('sessions')]F2 会话 {escape(self._chat_session.id[:8])}[/]"
 
     def on_mount(self):
         self._render_restored_history()
@@ -383,7 +389,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         text = event.text
         inp = self.query_one("#chat-input", Composer)
         inp.value = ""
-        self._terminal.save_draft(self._chat_session.id, text="")
+        self._save_input_draft("")
         if self._terminal.drafts.get(self._chat_session.id) == text:
             self._terminal.drafts.pop(self._chat_session.id, None)
         self._update_command_suggestions("")
@@ -401,7 +407,18 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def on_input_bar_app_input_changed(self, event: InputBar.AppInputChanged):
         self._update_command_suggestions(event.text)
-        self._terminal.save_draft(self._chat_session.id, text=event.text)
+        self._save_input_draft(event.text)
+
+    def _save_input_draft(self, text=None, *, session_id=None):
+        sid = session_id or self._chat_session.id
+        try:
+            self._terminal.save_draft(sid, text=text)
+            self._draft_save_error = None
+        except OSError as exc:
+            identity = (sid, type(exc), exc.errno)
+            if identity != self._draft_save_error:
+                self.app.notify(f"草稿未写入磁盘，当前会话可以继续：{exc.strerror or str(exc)}", severity="error")
+            self._draft_save_error = identity
 
     def on_key(self, event: Key):
         if event.key != "escape":
@@ -422,6 +439,9 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         if not self._chat_area.following_output:
             self.query_one("#new-output").display = True
 
+    def on_chat_area_record_selected(self):
+        self._refresh_action_hints()
+
     def action_latest_output(self):
         self.query_one("#new-output").display = False
         self._chat_area.resume_output()
@@ -429,10 +449,6 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "new-output":
             self.action_latest_output()
-        elif event.button.id in {"open-task-record", "open-collaboration", "open-inspector"}:
-            self.action_task_record()
-        elif event.button.id in {"undo-checkpoint", "redo-checkpoint"}:
-            self._handle_command("/undo" if event.button.id == "undo-checkpoint" else "/redo")
 
     def action_clear_screen(self):
         self._chat_area.clear_all()
@@ -449,13 +465,26 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def action_focus_input(self):
         try:
+            self._update_command_suggestions("")
             self.query_one("#chat-input", Composer).focus()
+            self._refresh_action_hints()
         except Exception as e:
             logger.debug("Failed to focus chat input: %s", e)
 
     def _action_state(self, action_id):
         action = ACTIONS[action_id]
-        reason = "当前没有可浏览的记录" if action.scope == "records" and self._chat_area.selected_record is None else ""
+        if action_id == "send":
+            composer = self.query_one(Composer)
+            action = replace(action, key_display="Ctrl+S" if composer.multiline or composer.suggestions_active else "Enter",
+                             title="排队" if self._chat_session.id in self._running_sessions else "发送")
+        elif action_id == "newline":
+            action = replace(action, key_display="Enter" if self.query_one(Composer).multiline else "Shift+Enter")
+        reason = ""
+        if action.scope == "records":
+            if not self._chat_area.query("ChatMessage, ReasoningBlock, ToolCall"):
+                reason = "当前没有可浏览的记录"
+            elif action_id in {"open-record", "full-record"} and self._chat_area.selected_record is None:
+                reason = "请先用方向键选择一条记录"
         return ActionState(action, reason)
 
     async def action_perform(self, action_id):
@@ -463,7 +492,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         if state.disabled_reason:
             self.app.notify(state.disabled_reason)
             return
-        host = self._chat_area if state.action.scope == "records" else self.query_one(ConfigurationBar) if state.action.scope == "controls" else self
+        hosts = {"screen": self, "records": self._chat_area, "controls": self.query_one(ConfigurationBar), "composer": self.query_one(Composer)}
+        host = hosts[state.action.scope]
         await host.run_action(state.action.handler)
 
     def _focused_region(self):
@@ -480,16 +510,18 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             return
         region = self._focused_region()
         if region == "records":
-            ids = ("previous-record", "next-record", "open-record", "full-record", "input", "help")
-            prefix = ""
+            ids = ("full-record", "open-record", "input", "help")
+            prefix = "↑↓ 选择"
         elif region == "controls":
             ids = ("previous-control", "next-control", "input", "help")
             prefix = "Enter 选择"
         else:
-            ids = ("next-region", "menu", "help")
             composer = self.query_one(Composer)
-            send = "排队" if self._chat_session.id in self._running_sessions else "发送"
-            prefix = f"Enter 换行 · Ctrl+S {send}" if composer.multiline else f"Enter {send}"
+            if composer.suggestions_active:
+                ids = ("accept-command", "complete-command", "input", "help")
+            else:
+                ids = ("newline", "send", "menu", "help") if composer.multiline else ("send", "menu", "next-region", "help")
+            prefix = ""
         self.query_one("#composer-hints", ContextFooter).show_actions([self._action_state(key) for key in ids], prefix=prefix)
 
     def on_descendant_focus(self, event):
@@ -503,9 +535,14 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
         region = self._focused_region()
         actions = [*SCREEN_ACTIONS]
-        actions.extend(RECORD_ACTIONS if region == "records" else CONTROL_ACTIONS if region == "controls" else [])
+        if region == "records":
+            actions.extend(RECORD_ACTIONS)
+        elif region == "controls":
+            actions.extend(CONTROL_ACTIONS)
+        else:
+            actions.extend(COMPOSER_ACTIONS if self.query_one(Composer).suggestions_active else COMPOSER_ACTIONS[:2])
         focused = self.app.focused
-        text = describe_actions([self._action_state(action.id) for action in actions])
+        text = self._hud.describe_usage() + "\n\n" + describe_actions([self._action_state(action.id) for action in actions])
         self.app.push_screen(RecordScreen("当前区域的键盘操作", text), lambda _: focused.focus() if focused and focused.is_mounted else self.action_focus_input())
 
     def _cycle_region(self, offset):
@@ -697,7 +734,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             rendered = json.dumps(result.value, ensure_ascii=False, indent=2, default=str)
             self._command_results.setdefault(sid, []).append(rendered)
             if result.draft is not None:
-                self._terminal.save_draft(sid, text=result.draft)
+                self._save_input_draft(result.draft, session_id=sid)
             if result.submission is not None:
                 submission = dict(result.submission)
                 if sid == self._chat_session.id:
@@ -740,8 +777,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def _activate_session(self, session_id):
         old_id = self._chat_session.id
-        self._drafts[old_id] = self.query_one("#chat-input", Composer).value
-        self._terminal.save_draft(old_id)
+        self._save_input_draft(self.query_one("#chat-input", Composer).value, session_id=old_id)
         self._terminal.load_draft(session_id)
         self._chat_session = self._chat_service.get_session_snapshot(session_id)["session"]
         self._agent = self._chat_service.session_agent(session_id)
@@ -796,6 +832,13 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         options.highlighted = 0 if self._command_candidates else None
         composer.suggestions_active = bool(self._command_candidates)
         palette.display = composer.suggestions_active
+        self._refresh_action_hints()
+
+    def action_accept_command(self):
+        self._choose_command_suggestion()
+
+    def action_complete_command(self):
+        self._choose_command_suggestion(complete=True)
 
     def on_composer_suggestion_requested(self, event: Composer.SuggestionRequested):
         event.stop()

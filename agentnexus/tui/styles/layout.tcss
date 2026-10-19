@@ -47,29 +47,6 @@ Screen {
     padding: 0;
 }
 
-#task-strip {
-    height: 1;
-    padding: 0 2;
-    background: $surface;
-}
-
-#task-summary {
-    width: 1fr;
-    height: 1;
-    text-wrap: nowrap;
-    text-overflow: ellipsis;
-}
-
-#task-strip Button {
-    height: 1;
-    min-width: 6;
-    width: 6;
-    border: none;
-    padding: 0;
-    background: transparent;
-    color: $text-muted;
-}
-
 #command-palette {
     display: none;
     height: auto;

@@ -269,9 +269,7 @@ async def test_child_stream_tokens_do_not_flood_chat_and_questions_are_visible(i
 
 
 @pytest.mark.asyncio
-async def test_execution_keeps_token_totals_in_the_existing_hud(interactive_runtime):
-    from textual.widgets import Static
-
+async def test_execution_keeps_token_totals_available_from_the_status_help(interactive_runtime):
     runtime, agents = interactive_runtime
     agents["initial"].total_usage = {"input_tokens": 1200, "output_tokens": 300}
     app = AgentNexusTUI(runtime=runtime)
@@ -279,8 +277,10 @@ async def test_execution_keeps_token_totals_in_the_existing_hud(interactive_runt
         await submit_command(app, pilot, "usage request")
         await wait_until(pilot, lambda: runtime.chat.get_session_recovery("initial") is not None and not runtime.chat.is_processing)
         await pilot.pause()
-        text = app.screen.query_one("#hud-text", Static).content
-        assert "in:1.2k out:300" in text
+        await pilot.press("f1")
+        text = app.screen.query_one("#record-content").text
+        assert "累计输入 1200" in text
+        assert "累计输出 300" in text
 
 
 @pytest.mark.asyncio

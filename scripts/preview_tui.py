@@ -28,13 +28,19 @@ def save_screenshot(app, path, title):
 
 async def preview(output, size, theme):
     """Capture welcome, task and inspector states without an LLM request."""
+    from concurrent.futures import ThreadPoolExecutor
+
     from agentnexus.agents.react_types import ReActEvent, ReActEventType
     from agentnexus.core.config import get_settings
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.observability.timeline import get_timeline_store
     from agentnexus.services.chat import ChatService, SessionHandle
+    from agentnexus.services.collaboration import ChildTask, CollaborationRun
+    from agentnexus.services.subagents import SubagentRunContext
     from agentnexus.tui.app import AgentNexusTUI
     from agentnexus.tui.widgets.input_bar import Composer
+    from agentnexus.tui.widgets.message import ToolCall
 
     answer = "已检查终端入口。思考、工具和回答按顺序显示，任务详情使用统一入口。"
     agent = MagicMock()
@@ -64,6 +70,10 @@ async def preview(output, size, theme):
     app = AgentNexusTUI(runtime=runtime)
     app.theme = theme
     output.mkdir(parents=True, exist_ok=True)
+    pool = ThreadPoolExecutor(1)
+    context = SubagentRunContext(chat, "preview", "demo-parent")
+    collaboration = CollaborationRun(context, get_timeline_store(), pool, lambda: False)
+    chat._collaborations["demo-parent"] = collaboration
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         save_screenshot(app, output / "welcome.svg", "AgentNexus · welcome")
@@ -73,15 +83,32 @@ async def preview(output, size, theme):
             if chat.get_session_recovery("preview") and not chat.is_processing:
                 break
             await pilot.pause(.02)
+        for _ in range(200):
+            if all(tool.result != "executing..." for tool in app.screen.query(ToolCall)):
+                break
+            await pilot.pause(.02)
+        else:
+            raise RuntimeError("Tool completion did not reach the rendered conversation")
         child = chat._subagents.register("preview", "demo-parent", "源码检查", "explorer", "检查终端入口与布局")
         chat._subagents.update(child, status="completed", latest_progress="入口与窗口缩放已检查", steps_used=3)
-        child = chat._subagents.register("preview", "demo-parent", "交互检查", "reviewer", "检查键盘操作与工具展开")
-        chat._subagents.update(child, status="waiting", latest_progress="需要确认多行输入快捷键", waiting_questions=1)
+        child = context.started("交互检查", "reviewer", "检查键盘操作与工具展开")
+        chat._subagents.update(child, status="waiting", latest_progress="需要确认多行输入快捷键", waiting_questions=1, child_run_id="demo-attempt", collaborative=True)
+        task = ChildTask(child, "demo-attempt")
+        collaboration.children[child.subagent_id] = task
+        collaboration._send(task, child.subagent_id, "parent", "question", "多行消息继续使用 Ctrl+S 发送吗？", "demo-question")
         app.screen._refresh_workspace()
         await pilot.pause()
         app.screen._chat_area.scroll_home(animate=False)
         await pilot.pause()
         save_screenshot(app, output / "conversation.svg", "AgentNexus · offline demo")
+        app.screen.query_one(Composer).value = "/thi"
+        await pilot.pause()
+        save_screenshot(app, output / "suggestions.svg", "AgentNexus · command completion")
+        await pilot.press("escape")
+        app.screen.query_one(Composer).value = ""
+        await pilot.press("f1")
+        save_screenshot(app, output / "status.svg", "AgentNexus · usage and keys")
+        await pilot.press("escape")
         await pilot.press("ctrl+p")
         save_screenshot(app, output / "commands.svg", "AgentNexus · actions")
         await pilot.press("escape", "f4")
@@ -90,10 +117,14 @@ async def preview(output, size, theme):
         save_screenshot(app, output / "composer.svg", "AgentNexus · inline composer")
         await pilot.press("f3")
         save_screenshot(app, output / "inspector.svg", "AgentNexus · task inspector")
+        await pilot.press("r")
+        save_screenshot(app, output / "reply.svg", "AgentNexus · reply editor")
+        await pilot.press("escape")
+    task.ended = True
+    collaboration.close("finished")
+    pool.shutdown()
     print(f"Actual Textual screenshots: {output}")
     version._conn.close()
-    from agentnexus.observability.timeline import get_timeline_store
-
     get_timeline_store()._conn.close()
 
 

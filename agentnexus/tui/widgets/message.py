@@ -75,21 +75,17 @@ class ChatMessage(Widget):
         quip = f" {comment}" if comment else ""
         self.mount(Static(_safe(f"{emoji}{quip}"), classes="msg-reaction"))
 
-    def action_full_output(self):
-        from agentnexus.tui.screens.interactions import RecordScreen
-
-        self.app.push_screen(RecordScreen("消息全文", self.content))
-
 
 class ReasoningBlock(Widget, can_focus=True):
     """Model-provided reasoning, visible while streaming and readable afterward."""
 
     BINDINGS = [("enter", "toggle_details", "折叠思考"), ("space", "toggle_details", "折叠思考"), ("d", "full_output", "思考全文")]
     DEFAULT_CSS = """
-    ReasoningBlock { height: auto; margin: 0 0 1 0; padding: 0 1; background: $surface; }
+    ReasoningBlock { height: auto; max-width: 100; margin: 0 0 1 0; padding: 0 1; background: transparent; }
     ReasoningBlock:focus { background: $primary 8%; }
-    .reasoning-heading { height: 1; width: 100%; color: $primary; text-wrap: nowrap; text-overflow: ellipsis; }
-    .reasoning-content { height: auto; max-height: 8; overflow-y: auto; scrollbar-size-vertical: 1; color: $text-muted; }
+    .reasoning-heading { height: 1; width: 100%; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
+    ReasoningBlock.reasoning-active .reasoning-heading { color: $primary; }
+    .reasoning-content { height: auto; max-height: 8; padding-left: 2; overflow-y: auto; scrollbar-size-vertical: 1; color: $text-muted; }
     """
 
     def __init__(self, content="", *, active=False, **kwargs):
@@ -98,11 +94,12 @@ class ReasoningBlock(Widget, can_focus=True):
         self.active = active
         self.expanded = True
         self._update_pending = False
+        self.set_class(active, "reasoning-active")
 
     def _heading(self):
         marker = "▾" if self.expanded else "▸"
         status = "正在思考" if self.active else "思考结束"
-        return Text(f"{marker} {status} · {len(self.content)} 字 · Enter 折叠 / 展开 · D 全文")
+        return Text(f"{marker} {status} · {len(self.content)} 字")
 
     def compose(self):
         yield Label(self._heading(), classes="reasoning-heading")
@@ -117,6 +114,7 @@ class ReasoningBlock(Widget, can_focus=True):
     def _flush(self):
         self._update_pending = False
         if self.is_mounted:
+            self.set_class(self.active, "reasoning-active")
             self.query_one(".reasoning-heading", Label).update(self._heading())
             body = self.query_one(".reasoning-content", Static)
             following = body.scroll_y >= body.max_scroll_y
@@ -170,9 +168,6 @@ class ToolCall(Widget, can_focus=True):
         result = Static(_safe(str(self.result) if self.result else ""), id="tool-result")
         result.display = self.expanded
         yield result
-        hint = Label("D 完整输出 · Enter 收起", id="tool-hint")
-        hint.display = self.expanded
-        yield hint
 
     def on_mount(self):
         self.query_one("#tool-result", Static).styles.height = "auto"
@@ -180,7 +175,6 @@ class ToolCall(Widget, can_focus=True):
     def action_toggle_details(self):
         self.expanded = not self.expanded
         self.query_one("#tool-result").display = self.expanded
-        self.query_one("#tool-hint").display = self.expanded
         self.query_one("#tool-name", Label).update(self._header())
 
     def on_click(self, event):

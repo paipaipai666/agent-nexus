@@ -1,7 +1,9 @@
 """Terminal navigation and draft editing over the existing chat operations."""
 
 import asyncio
+from sqlite3 import Error as StorageError
 
+from rich.style import Style
 from rich.text import Text
 from textual import work
 
@@ -24,6 +26,8 @@ class ChatWorkspace:
             Choice("会话 · 新建", "/session new", "在当前工作区开始新任务"),
             Choice("会话 · 切换", "@sessions", "F2"),
             Choice("任务 · 详情与协作", "@task", "F3 · 查看子代理、回复问题、检查执行记录"),
+            Choice("任务 · 撤销上一检查点", "/undo", disabled_reason="当前任务正在执行" if self._chat_session.id in self._running_sessions else "没有可撤销的检查点" if not self._hud._can_undo else ""),
+            Choice("任务 · 重做下一检查点", "/redo", disabled_reason="当前任务正在执行" if self._chat_session.id in self._running_sessions else "没有可重做的检查点" if not self._hud._can_redo else ""),
             Choice("计划 · 关闭计划模式" if plan else "计划 · 开启计划模式", "/plan off" if plan else "/plan on"),
             Choice("模型 · 切换", "@models", str(getattr(self._agent, "model_id", "未配置"))),
             Choice("思考强度 · 选择", "@thinking", self._chat_service.get_thinking_effort(self._chat_session.id) or "默认"),
@@ -197,23 +201,25 @@ class ChatWorkspace:
             draft=self._terminal.drafts.get(sid, ""), queued=sid in self._running_sessions,
         )
         children = self._chat_service.list_subagents(sid)
-        self.query_one("#collaboration-tree").update_children(children)
         self._side_panel.update_collaboration(children)
         failure = ""
         try:
             recovery = self._chat_service.get_session_recovery(sid)
-        except OSError as exc:
+        except (OSError, StorageError) as exc:
             recovery, failure = None, str(exc)
-        self.query_one("#task-strip").display = bool(recovery or failure or children)
+        status = self.query_one("#task-summary")
+        status.display = bool(recovery or failure or children)
         summary = Text(f"任务状态不可用 · {failure}") if failure else task_summary(recovery)
         if recovery and sid in self._running_sessions:
             summary = task_summary({**recovery, "status": "running" if recovery.get("status") != "interrupted" else "interrupted"})
         waiting = sum(child.get("waiting_questions", 0) for child in children)
         queued = len(self._queued_messages.get(sid, []))
-        prefix = (f"待答复 {waiting} · " if waiting else "") + (f"排队 {queued} · " if queued else "")
-        self.query_one("#task-summary").update(Text(prefix) + summary)
-        for action in ("undo", "redo"):
-            self.query_one(f"#{action}-checkpoint").disabled = sid in self._running_sessions or not getattr(self._hud, f"_can_{action}")
+        prefix = (f"待答复 {waiting} · F3 · " if waiting else "") + (f"排队 {queued} · " if queued else "")
+        label = Text(prefix.rstrip(" ·")) if waiting and not failure else Text(prefix) + summary
+        label.stylize(Style(meta={"@click": "screen.perform('tasks')"}))
+        status.update(label)
+        status.tooltip = label.plain + " · F3 查看任务与协作"
+        status.set_class(bool(waiting or failure), "needs-attention")
         self._refresh_action_hints()
 
     def action_task_record(self):

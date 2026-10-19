@@ -1,6 +1,6 @@
 # AgentNexus TUI 调研与重构提案
 
-日期：2026-10-19。基线：413453f。状态：用户已批准本方案，按下列三个提交实施。
+日期：2026-10-19。基线：413453f。状态：用户已批准本方案，三个提交单元已实现并通过验证。
 
 ## 调研依据
 
@@ -31,7 +31,7 @@
 | 键盘与鼠标能力不对称 | MessageEditor 只有 Ctrl+S/Esc 发送和返回；思考、工具全文只有 D 入口 | 需要给鼠标辅助提供同一操作入口，同时避免增高面板 |
 | 信息层次混乱 | 实际 80×24 截图中，协作树在内容顶部、底部又显示待答复；每段思考重复长提示；菜单搜索框 3 行、每项描述再占一行 | 真正内容被提示和控件挤压；所有区域近似相同视觉权重 |
 
-复测脚本：C:/Users/29218/AppData/Local/Temp/nexus-tui-audit-20261019.py。它只构造临时离线数据，不修改应用源码。现有界面实拍在 baseline-80/。concept-*.svg/png 是提案效果图，不是已实现界面。
+以上为改动前的基线审计结果。对应的键盘流程现已纳入 tests/unit/test_tui_navigation.py、test_tui_layout.py 与 test_tui_workspace.py；实际界面可通过 scripts/preview_tui.py 重新导出。审计时的 concept-*.svg/png 是提案效果图，最终验证使用真实 Textual 应用导出的画面。
 
 ## 4+1 计划
 
@@ -96,3 +96,30 @@
 任务面板提供 R 回复、I 补充、L 记录、X 停止，优先待答复和运行中的子任务。按钮、按键、可点击底栏与 F1 帮助共用动作及禁用原因。回复编辑器以自己的按键上下文接管输入，R/I/X/L 是普通文字，发送支持 Ctrl+S 和底栏点击。协作回归保留不确定送达时的原请求 ID，确认相同内容的两次主动提交仍是两个请求。
 
 新增 Pilot 回归通过真实按键覆盖空会话和长历史、配置区方向键、记录阅读返回、PageUp、Ctrl+End、F1、Alt+T、菜单逐级返回。运行中的 Ctrl+C 测试验证先复制选区、再停止任务，最后通过真实 ChatService 检查 interrupted 结果。原先脱离 Textual App、伪造内部状态调用 action_stop_task 的测试由这条完整流程替代。
+
+第二步提交 146ffbd，417 项功能对齐测试通过。
+
+第三步将协作待答复状态合入配置行，删除重复的协作树和独立任务栏。普通输入区始终为三行，多行仅按实际内容增高。HUD 只常驻上下文用量和压缩状态，完整累计用量、能力与检查点通过 F1 或点击 HUD 查看。撤销与重做保留在操作菜单中，并说明禁用原因。思考继续实时可见，结束后降低标题视觉权重；全文与展开提示集中到当前区域底栏。
+
+选择器采用单行搜索、单行选项和当前项说明，靠近输入位置打开。任务页在宽终端并排显示列表和正文，窄终端纵向排列；持续更新时保留阅读位置。回复编辑器、记录正文和搜索框显式覆盖焦点边框，避免 Textual 默认样式挤掉内容行。底栏按终端字符宽度裁剪低优先级提示，60、80 列下的全文入口仍可点击。单行输入、多行输入和命令候选的帮助与实际按键含义一致。
+
+完整回归还复现了 Windows 草稿文件并发读写引发的 WinError 5：界面输入与后台命令结果同时保存时，读取和原子替换会竞争。同一 TerminalCommands 及 DraftStore 共享可重入锁，将草稿元数据捕获、读取和替换串行化，不锁住模型执行或其他慢操作。真实文件系统上的多线程用例先失败、修复后通过；另验证目录不可写时保留当前输入，仍能打开菜单并发送任务，同时提示磁盘保存失败。此保证限于同一运行实例，不是跨进程文件锁，草稿格式未改变。
+
+## 最终验收
+
+2026-10-19，执行 scripts/verify_tui_parity.py：431 项通过，3853 项不在本轮筛选范围。覆盖 TUI、共享运行时、模型提供方、配置和记忆查询相关测试。Ruff、无注释门禁与差异空白检查通过；未修改 desktop 源码，也未将本轮结果表述为全项目测试通过。
+
+构建后的 agentnexus-0.2.17-py3-none-any.whl 大小为 756579 字节，SHA256 为 `64a28d1b6a97e8cbc3f4cbfda732bacb31339518c1a009bd7d7753e4e8f79112`。安装到独立临时目录后，确认实际导入安装包，验证 80×24 下的三行输入区、区域切换、配置方向键、F1、命令补全、单行选择器、内联多行编辑和任务页；同时确认运行时样式和资源已打包。
+
+实际 Textual 导出画面已检查深色 60×20、80×24、120×32，以及浅色 80×24，包含欢迎、对话、操作菜单、命令建议、多行输入、任务、回复和帮助。使用隔离的离线演示数据，不请求模型。可在项目根目录复测：
+
+```powershell
+rtk proxy python -X utf8 scripts/verify_tui_parity.py
+rtk proxy python -X utf8 scripts/verify_tui_parity.py --skip-tests --wheel .research_tmp/tui-keyboard-20261019-wheel/agentnexus-0.2.17-py3-none-any.whl
+rtk proxy python -X utf8 scripts/preview_tui.py --output .research_tmp/tui-preview-80 --width 80 --height 24
+rtk proxy python -X utf8 scripts/preview_tui.py --output .research_tmp/tui-preview-60 --width 60 --height 20
+rtk proxy python -X utf8 scripts/preview_tui.py --output .research_tmp/tui-preview-120 --width 120 --height 32
+rtk proxy python -X utf8 scripts/preview_tui.py --output .research_tmp/tui-preview-light --width 80 --height 24 --theme nexus-light
+```
+
+Pilot 证明的是应用内按键分发和实际界面行为。Windows Terminal、tmux 等外部终端对 Alt 组合键的物理转发未做人工验收；Ctrl+P 保留全部对应动作入口。

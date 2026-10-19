@@ -2,6 +2,9 @@
   height: 1;
   padding: 0 1;
   color: $text-muted;
+  link-style: none;
+  link-color: $text-muted;
+  link-color-hover: $primary;
   text-wrap: nowrap;
   text-overflow: ellipsis;
 }
