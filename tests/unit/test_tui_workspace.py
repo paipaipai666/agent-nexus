@@ -257,6 +257,42 @@ async def test_command_menu_filters_and_executes_a_selected_action(workspace_run
 
 
 @pytest.mark.asyncio
+async def test_thinking_picker_changes_effort_without_replacing_the_draft(workspace_runtime):
+    runtime, _ = workspace_runtime
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.screen.query_one("#chat-input", Input).value = "尚未发送的任务"
+        await pilot.press("ctrl+p")
+        app.screen.query_one("#palette-search", Input).value = "思考强度"
+        await pilot.press("enter")
+        await settle(pilot, lambda: "选择思考强度" in str(app.screen.query_one("Label").render()))
+        app.screen.query_one("#palette-search", Input).value = "high"
+        await pilot.press("enter")
+        await settle(pilot, lambda: runtime.chat.get_thinking_effort("workspace") == "high")
+        assert app.screen.query_one("#chat-input", Input).value == "尚未发送的任务"
+
+
+@pytest.mark.asyncio
+async def test_attachment_form_keeps_task_text_and_lists_attached_file(workspace_runtime, tmp_path):
+    runtime, _ = workspace_runtime
+    path = tmp_path / "中文 attachment.txt"
+    path.write_text("source material", encoding="utf-8")
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.screen.query_one("#chat-input", Input).value = "阅读此文件"
+        await pilot.press("ctrl+p")
+        app.screen.query_one("#palette-search", Input).value = "添加附件"
+        await pilot.press("enter")
+        await settle(pilot, lambda: bool(app.screen.query("#parameter-input")))
+        app.screen.query_one("#parameter-input", Input).value = str(path)
+        await pilot.press("enter")
+        await settle(pilot, lambda: bool(app.screen.query("#chat-input")))
+        await settle(pilot, lambda: "attachment.txt" in str(app.screen.query_one("#composer-meta").render()))
+        assert app.screen.query_one("#chat-input", Input).value == "阅读此文件"
+        assert runtime.agent.run.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_multiline_paste_opens_editor_without_sending(workspace_runtime):
     from textual.events import Paste
     from textual.widgets import TextArea
@@ -279,7 +315,8 @@ async def test_inspector_adapts_to_terminal_width_and_resize(workspace_runtime):
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(120, 32)) as pilot:
         await pilot.press("f3")
-        assert app.screen.query_one("#side-panel").display
+        assert app.screen.query_one("#task-detail") is not None
+        await pilot.press("escape")
         await pilot.resize_terminal(80, 24)
         assert not app.screen.query_one("#side-panel").display
         assert app.screen.query_one("#chat-area").region.width == 80
@@ -477,10 +514,10 @@ async def test_session_switch_replaces_timeline_todos_usage_and_capabilities(wor
         await pilot.press("enter")
         await settle(pilot, lambda: runtime.chat.get_session_recovery("workspace") is not None and not runtime.chat.is_processing)
         await pilot.pause()
-        await pilot.press("f3")
-        assert "旧会话任务" in str(app.screen.query_one("#todo-card").render())
         assert "in:1.2k" in app.screen.query_one("#hud-text").content
-        await pilot.press("f2")
+        await pilot.press("f3")
+        assert "旧会话任务" in str(app.screen.query_one("#task-todos").render())
+        await pilot.press("escape", "f2")
         await settle(pilot, lambda: bool(app.screen.query("#palette-search")))
         await pilot.press("enter")
         await settle(pilot, lambda: hasattr(app.screen, "_chat_session") and app.screen._chat_session.id != "workspace")
@@ -491,3 +528,5 @@ async def test_session_switch_replaces_timeline_todos_usage_and_capabilities(wor
         assert "ctx 0/" in text
         assert "in:0 out:0" in text
         assert "思考" in text
+        await pilot.press("f3")
+        assert "旧会话任务" not in str(app.screen.query_one("#task-todos").render())

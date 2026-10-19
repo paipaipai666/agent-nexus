@@ -34,6 +34,7 @@ class InspectorScreen(ModalScreen[None]):
     InspectorScreen > Vertical { width: 96%; height: 94%; background: $surface; border: solid $primary; padding: 0 1; }
     InspectorScreen Label { height: 1; color: $text-muted; }
     InspectorScreen #task-detail { height: auto; max-height: 3; }
+    InspectorScreen #task-todos { height: auto; max-height: 4; overflow-y: auto; }
     InspectorScreen OptionList { height: auto; max-height: 6; min-height: 2; border: none; background: transparent; }
     InspectorScreen TextArea { height: 1fr; border: none; background: transparent; }
     InspectorScreen Horizontal { height: 3; }
@@ -52,6 +53,7 @@ class InspectorScreen(ModalScreen[None]):
         with Vertical():
             yield Label("任务与协作 · F3")
             yield Static("", id="task-detail")
+            yield Static("", id="task-todos")
             yield OptionList(id="child-list", compact=True)
             yield TextArea("", id="child-detail", read_only=True, soft_wrap=True)
             with Horizontal():
@@ -68,6 +70,9 @@ class InspectorScreen(ModalScreen[None]):
     def refresh_data(self):
         children = self.chat.list_subagents(self.sid)
         self.query_one("#task-detail", Static).update(task_summary(self.chat.get_session_recovery(self.sid)))
+        todo = getattr(self.chat.session_agent(self.sid), "_todo_list", None)
+        items = todo.list_items() if todo is not None else []
+        self.query_one("#task-todos", Static).update(Text("\n".join(f"{item.status} · {item.description}" for item in items)))
         options = self.query_one("#child-list", OptionList)
         new_ids = [child["subagent_id"] for child in children]
         if new_ids != list(self.children_by_id):

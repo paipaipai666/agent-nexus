@@ -5,8 +5,9 @@ import asyncio
 from textual import work
 from textual.widgets import Input
 
+from agentnexus.tui.commands import COMMAND_HELP
 from agentnexus.tui.screens.inspector import InspectorScreen, task_summary
-from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, MessageEditor
+from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, MessageEditor, ParameterScreen
 from agentnexus.tui.widgets.input_bar import InputBar
 
 
@@ -16,47 +17,100 @@ class ChatWorkspace:
     def action_command_menu(self):
         plan = self._chat_service.is_plan_mode(self._chat_session.id)
         choices = [
-            Choice("新建会话", "/session new"),
-            Choice("关闭计划模式" if plan else "开启计划模式", "/plan off" if plan else "/plan on"),
-            Choice("查看模型", "/model list"),
-            Choice("思考强度", "/think ", "输入 low / medium / high / default", False),
-            Choice("添加附件", "/attach add ", "输入文件路径", False),
-            Choice("查看记忆", "/memory list"),
-            Choice("知识库", "/kb list"),
-            Choice("项目 Wiki", "/wiki list"),
-            Choice("Skill", "/skill list"),
-            Choice("MCP", "/mcp status"),
-            Choice("设置", "/settings show"),
-            Choice("任务恢复", "/recover status"),
+            Choice("会话 · 新建", "/session new", "在当前工作区开始新任务"),
+            Choice("会话 · 切换", "@sessions", "F2"),
+            Choice("任务 · 详情与协作", "@task", "F3 · 查看子代理、回复问题、检查执行记录"),
+            Choice("计划 · 关闭计划模式" if plan else "计划 · 开启计划模式", "/plan off" if plan else "/plan on"),
+            Choice("模型 · 切换", "@models", str(getattr(self._agent, "model_id", "未配置"))),
+            Choice("思考强度 · 选择", "@thinking", self._chat_service.get_thinking_effort(self._chat_session.id) or "默认"),
+            Choice("附件 · 添加附件", "@attach", "输入文件路径，保留正在编辑的消息"),
+            Choice("附件 · 管理", "@attachments"),
+            Choice("资料 · 记忆、知识库与 Wiki", "@knowledge"),
+            Choice("能力 · 选择 Skill", "@skills"),
+            Choice("能力 · MCP 状态", "/mcp status"),
+            Choice("设置 · 查看配置", "/settings show"),
+            Choice("任务恢复 · 保存、继续与检查", "@recovery"),
+            Choice("外观 · 选择主题", "@themes"),
+            Choice("全部命令 · 高级操作", "@commands", "完整功能与参数帮助"),
         ]
-        choices.extend(Choice(label, f"/theme {theme}") for label, theme in [
-            ("主题 · 深色", "nexus-dark"), ("主题 · 浅色", "nexus-light"),
-            ("主题 · 终端深色", "ansi-dark"), ("主题 · 终端浅色", "ansi-light"),
-        ])
-        from agentnexus.core.config import get_settings
-
-        for provider in get_settings().llm_providers:
-            for model in provider.models:
-                selector = f"{provider.name}/{model.model_id}"
-                choices.append(Choice(f"切换模型 · {selector}", f"/model select {selector}"))
-        choices.extend(Choice(f"思考强度 · {effort}", f"/think {effort}") for effort in ("default", "none", "low", "medium", "high"))
-        existing = {choice.value for choice in choices}
-        choices.extend(Choice(description, command + " ", command, False)
-                       for command, description, _aliases in self._command_catalog() if command not in existing)
         self.app.push_screen(ChoiceScreen("操作 · Ctrl+P", choices), self._choose_workspace_action)
 
-    def _choose_workspace_action(self, choice):
-        if choice is not None:
-            if choice.execute:
+    @work(group="workspace-action", exclusive=True)
+    async def _choose_workspace_action(self, choice):
+        sid = self._chat_session.id
+        while choice is not None and choice.value.startswith("@"):
+            route = choice.value
+            if route == "@sessions":
+                self.action_session_menu()
+                return
+            if route == "@task":
+                self.action_task_record()
+                return
+            if route == "@attach":
+                path = await self.app.push_screen_wait(ParameterScreen("添加附件", "文件路径，可包含空格。最多 10 个附件。"))
+                choice = Choice("添加附件", "/attach add " + path) if path else None
+            elif route.startswith("@parameter:"):
+                command, prompt = route.removeprefix("@parameter:").split("|", 1)
+                value = await self.app.push_screen_wait(ParameterScreen(choice.label, prompt))
+                choice = Choice(choice.label, command + " " + value) if value else None
+            else:
+                title, choices, selected = self._workspace_choices(route, sid)
+                choice = await self.app.push_screen_wait(ChoiceScreen(title, choices, selected_value=selected))
+        if choice is not None and sid == self._chat_session.id:
+            if not choice.execute:
+                command = choice.value.strip()
+                argument = await self.app.push_screen_wait(ParameterScreen(command, choice.description or "输入命令参数", allow_empty=True))
+                if argument is None:
+                    self.action_focus_input()
+                    return
+                choice = Choice(choice.label, command + " " + argument)
+            if choice.value.startswith("/theme"):
                 self._handle_command(choice.value)
             else:
-                inp = self.query_one("#chat-input", Input)
-                if inp.value and not inp.value.startswith("/"):
-                    self._terminal.drafts[self._chat_session.id] = inp.value
-                    self._terminal.save_draft(self._chat_session.id)
-                inp.value = choice.value
-                inp.cursor_position = len(inp.value)
+                command, _, args = choice.value.partition(" ")
+                if command not in COMMAND_HELP:
+                    self._handle_command(choice.value)
+                else:
+                    self._run_terminal_command(command, args, sid, presentation="record")
         self.action_focus_input()
+
+    def _workspace_choices(self, route, sid):
+        from agentnexus.core.config import get_settings
+
+        if route == "@models":
+            choices = [Choice(f"{provider.name} / {model.model_id}", f"/model select {provider.name}/{model.model_id}")
+                       for provider in get_settings().llm_providers for model in provider.models]
+            choices.append(Choice("查看模型与配置", "/model list"))
+            return "选择模型", choices, f"/model select {getattr(self._agent, 'model_id', '')}"
+        if route == "@thinking":
+            current = self._chat_service.get_thinking_effort(sid) or "default"
+            labels = {"default": "跟随模型默认", "none": "关闭额外思考", "low": "轻量", "medium": "标准", "high": "深入"}
+            return "选择思考强度", [Choice(f"{label} · {effort}", f"/think {effort}") for effort, label in labels.items()], f"/think {current}"
+        if route == "@attachments":
+            choices = [Choice("添加附件", "@attach")]
+            choices.extend(Choice(f"移除 {item['name']}", f"/attach remove {i}") for i, item in enumerate(self._attachments.get(sid, []), 1))
+            return "消息附件", choices, None
+        if route == "@themes":
+            themes = [("深色", "nexus-dark"), ("浅色", "nexus-light"), ("终端深色", "ansi-dark"), ("终端浅色", "ansi-light")]
+            return "选择主题", [Choice(label, f"/theme {theme}") for label, theme in themes], f"/theme {self.app.theme}"
+        if route == "@skills":
+            choices = [Choice(name, f"/skill use {key}", description) for key, name, description in self._available_skill_summary()]
+            choices.append(Choice("查看 Skill 状态", "/skill status"))
+            return "选择 Skill", choices, None
+        if route == "@recovery":
+            return "恢复当前任务", [Choice("查看保存状态", "/recover status"), Choice("重试保存", "/recover save"),
+                                   Choice("继续未完成任务", "/recover continue", "将继续请求放入草稿，检查后发送"),
+                                   Choice("重试原始提交", "/recover retry", "沿用请求 ID，避免重复执行")], None
+        if route == "@knowledge":
+            choices = []
+            for title, command in [("记忆", "/memory"), ("知识库", "/kb"), ("项目 Wiki", "/wiki")]:
+                choices.append(Choice(f"{title} · 浏览", command + " list"))
+                action = "query" if command == "/wiki" else "search"
+                choices.append(Choice(f"{title} · 搜索", f"@parameter:{command} {action}|输入搜索内容"))
+                if command != "/memory":
+                    choices.append(Choice(f"{title} · 导入文件", f"@parameter:{command} ingest|输入文件路径，可包含空格"))
+            return "资料与检索", choices, None
+        return "全部命令", [Choice(description, command, COMMAND_HELP.get(command.split()[0], description), False) for command, description, _ in self._command_catalog()], None
 
     @work(group="session-picker", exclusive=True)
     async def action_session_menu(self):
@@ -75,10 +129,7 @@ class ChatWorkspace:
             self.app.notify(f"无法读取会话: {exc}", severity="error")
 
     def action_toggle_inspector(self):
-        if self.size.width >= 112:
-            self.toggle_class("has-inspector")
-        else:
-            self.action_task_record()
+        self.action_task_record()
 
     def on_resize(self, event):
         if event.size.width < 112:

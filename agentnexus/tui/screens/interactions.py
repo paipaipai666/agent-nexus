@@ -32,11 +32,12 @@ class ChoiceScreen(ModalScreen[Choice | None]):
     ChoiceScreen OptionList { height: 1fr; border: none; background: transparent; }
     """
 
-    def __init__(self, title, choices):
+    def __init__(self, title, choices, *, selected_value=None):
         super().__init__()
         self.heading = title
         self.choices = list(choices)
         self.visible_choices = list(choices)
+        self.selected_value = selected_value
 
     def compose(self):
         with Vertical():
@@ -59,7 +60,10 @@ class ChoiceScreen(ModalScreen[Choice | None]):
             if choice.description:
                 text.append("\n" + choice.description, "dim")
             options.add_option(Option(text, id=str(index)))
-        options.highlighted = 0 if self.visible_choices else None
+        selected = next((i for i, choice in enumerate(self.visible_choices) if choice.value == self.selected_value), 0)
+        options.highlighted = selected if self.visible_choices else None
+        if not self.visible_choices:
+            options.add_option(Option(Text("没有匹配操作，修改搜索词或按 Esc 返回", style="dim"), disabled=True))
 
     @on(Input.Changed)
     def filter_choices(self, event):
@@ -68,7 +72,7 @@ class ChoiceScreen(ModalScreen[Choice | None]):
     @on(Input.Submitted)
     def submit_choice(self):
         selected = self.query_one(OptionList).highlighted
-        if selected is not None:
+        if selected is not None and selected < len(self.visible_choices):
             self.dismiss(self.visible_choices[selected])
 
     @on(OptionList.OptionSelected)
@@ -80,6 +84,41 @@ class ChoiceScreen(ModalScreen[Choice | None]):
 
     def action_previous(self):
         self.query_one(OptionList).action_cursor_up()
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class ParameterScreen(ModalScreen[str | None]):
+    """Collect one operation parameter without overwriting the task composer."""
+
+    BINDINGS = [("escape", "cancel", "返回")]
+    DEFAULT_CSS = """
+    ParameterScreen { align: center middle; }
+    ParameterScreen > Vertical { width: 90%; max-width: 90; height: auto; padding: 1 2; background: $surface; border: solid $primary; }
+    ParameterScreen Label { height: auto; }
+    ParameterScreen Input { background: transparent; }
+    """
+
+    def __init__(self, title, prompt, *, allow_empty=False):
+        super().__init__()
+        self.heading, self.prompt = title, prompt
+        self.allow_empty = allow_empty
+
+    def compose(self):
+        with Vertical():
+            yield Label(self.heading)
+            yield Label(self.prompt)
+            yield Input(id="parameter-input")
+            yield Label("Enter 确认 · Esc 取消，原消息保持不变")
+
+    def on_mount(self):
+        self.query_one(Input).focus()
+
+    @on(Input.Submitted)
+    def submit(self, event):
+        if event.value.strip() or self.allow_empty:
+            self.dismiss(event.value.strip())
 
     def action_cancel(self):
         self.dismiss(None)

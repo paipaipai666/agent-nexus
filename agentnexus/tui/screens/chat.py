@@ -540,7 +540,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             self._chat_area.add_message("system", str(exc))
 
     @work(group="terminal-commands")
-    async def _run_terminal_command(self, command, args, sid):
+    async def _run_terminal_command(self, command, args, sid, *, presentation="chat"):
         try:
             if self._terminal.requires_confirmation(command, args):
                 approved = await self.app.push_screen_wait(ConfirmDialog(command, f"会话 {sid}\n{command} {args}", risk_level="high"))
@@ -564,7 +564,20 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
                 self._chat_area.clear_all()
                 self._render_restored_history()
                 self._refresh_version_display()
-            self._chat_area.add_message("system", rendered)
+            if presentation == "record":
+                from agentnexus.tui.screens.interactions import RecordScreen
+
+                action = args.split(maxsplit=1)[0] if args.strip() else ""
+                changed = command in {"/think", "/plan", "/undo", "/redo"} or (command, action) in {
+                    ("/model", "select"), ("/attach", "add"), ("/attach", "remove"),
+                    ("/session", "new"), ("/session", "switch"), ("/recover", "continue"), ("/recover", "save"),
+                }
+                if changed:
+                    self.app.notify(f"{command} 已完成")
+                else:
+                    self.app.push_screen(RecordScreen(command + " · 操作结果", rendered), lambda _: self.action_focus_input())
+            else:
+                self._chat_area.add_message("system", rendered)
             if result.session_id is not None:
                 self._activate_session(result.session_id)
             if result.draft is not None:
