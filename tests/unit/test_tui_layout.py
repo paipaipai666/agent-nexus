@@ -1,5 +1,6 @@
 """Responsive terminal layouts verified together with their input workflows."""
 
+import xml.etree.ElementTree as ET
 from sqlite3 import OperationalError
 
 import pytest
@@ -58,6 +59,20 @@ async def test_model_summary_and_activity_are_pointer_shortcuts(workspace_runtim
         await pilot.press("escape")
         await pilot.click("#agent-activity")
         assert app.screen.query_one("#task-detail")
+        await pilot.press("escape")
+        assert app.screen.query_one(Composer).has_focus
+
+
+@pytest.mark.asyncio
+async def test_action_picker_keeps_the_task_visible_above_the_choices(workspace_runtime):
+    runtime, _ = workspace_runtime
+    runtime.memory_manager.short_term.append("user", "保留当前任务上下文")
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("ctrl+p")
+        rendered = "".join(ET.fromstring(app.export_screenshot()).itertext()).replace("\xa0", " ")
+        assert "保留当前任务上下文" in rendered
+        assert "› 会话 · 新建" in rendered
         await pilot.press("escape")
         assert app.screen.query_one(Composer).has_focus
 

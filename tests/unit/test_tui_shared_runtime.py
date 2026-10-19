@@ -456,10 +456,12 @@ async def test_queue_drain_preserves_a_new_unsent_draft(interactive_runtime):
             await submit_command(app, pilot, "first")
             await wait_until(pilot, entered.is_set)
             await submit_command(app, pilot, "queued")
+            assert "排队 1" in str(app.screen.query_one("#agent-activity").render())
             app.screen.query_one("#chat-input", Composer).value = "not submitted yet"
             await pilot.pause()
             release.set()
             await wait_until(pilot, lambda: agents["initial"].run.call_count == 2 and not app.screen._running_sessions)
+            assert "排队" not in str(app.screen.query_one("#agent-activity").render())
             restored = TerminalCommands(runtime)
             restored.load_draft("initial")
             assert restored.inputs["initial"] == "not submitted yet"

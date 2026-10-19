@@ -23,7 +23,7 @@ Screen {
     display: none;
     width: 38;
     height: 100%;
-    border-left: solid $foreground 20%;
+    border-left: solid $foreground;
     padding: 0 1;
     scrollbar-size-vertical: 1;
 }
@@ -53,7 +53,7 @@ Screen {
     max-height: 10;
     padding: 0 2;
     background: $surface;
-    border-top: solid $foreground 20%;
+    border-top: solid $foreground;
     overflow-y: auto;
     scrollbar-size-vertical: 1;
 }

@@ -112,7 +112,8 @@ async def test_reasoning_stream_is_visible_and_keeps_tool_order(workspace_runtim
         blocks = list(app.screen.query("ReasoningBlock, ToolCall"))
         assert [type(block) for block in blocks] == [ReasoningBlock, ToolCall, ReasoningBlock]
         assert "工具结果已确认。" in str(blocks[-1].query_one(".reasoning-content").render())
-        assert "思考结束" in str(reasoning.query_one(".reasoning-heading").render())
+        assert str(reasoning.query_one(".reasoning-heading").render()) == "▾ 思考"
+        assert not reasoning.has_class("reasoning-active")
 
 
 @pytest.mark.asyncio

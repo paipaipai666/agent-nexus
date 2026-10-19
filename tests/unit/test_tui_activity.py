@@ -106,8 +106,10 @@ async def test_activity_tracks_reasoning_tool_and_completion(workspace_runtime):
 
     def execute(*_args, **_kwargs):
         runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "检查请求去重。"}), None, None)
+        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n" + "\n".join(f"检查步骤 {i}" for i in range(30))}), None, None)
         thinking.set()
         release_thinking.wait(10)
+        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n追加的思考内容。"}), None, None)
         runtime.agent._on_event(ReActEvent(ReActEventType.TOOL_START, {"id": "read", "name": "file_read"}), None, None)
         tools.set()
         release_tools.wait(10)
@@ -124,10 +126,16 @@ async def test_activity_tracks_reasoning_tool_and_completion(workspace_runtime):
             await settle(pilot, thinking.is_set)
             await settle(pilot, lambda: "思考" in activity_text(app))
             assert "工作中" in activity_text(app)
+            await settle(pilot, lambda: app.screen.query_one(".reasoning-content").region.height == 31)
+            area = app.screen.query_one("#chat-area")
+            await settle(pilot, lambda: area.max_scroll_y > 0 and area.scroll_y == area.max_scroll_y)
+            await pilot.press("pageup")
             release_thinking.set()
             await settle(pilot, tools.is_set)
             await settle(pilot, lambda: "读取文件" in activity_text(app))
             assert "空闲" not in activity_text(app)
+            assert area.scroll_y < area.max_scroll_y
+            assert app.screen.query_one("#new-output").display
             release_tools.set()
             await settle(pilot, lambda: "空闲" in activity_text(app))
             assert runtime.chat.get_session_recovery("workspace")["answer"] == "检查完成。"

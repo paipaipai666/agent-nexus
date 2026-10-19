@@ -1,9 +1,10 @@
 """AgentNexus terminal workspace backed by the shared application runtime."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from textual.app import App
-from textual.theme import Theme
+from textual.theme import BUILTIN_THEMES, Theme
 
 _STYLES = Path(__file__).parent / "styles"
 
@@ -24,7 +25,16 @@ class AgentNexusTUI(App):
     ENABLE_COMMAND_PALETTE = False
 
     def __init__(self, agent=None, memory=None, version=None, mcp_manager=None, skill_service=None, capability_runtime=None, *, runtime=None):
-        super().__init__()
+        super().__init__(ansi_color=True)
+        for name in ("ansi-dark", "ansi-light"):
+            theme = BUILTIN_THEMES[name]
+            self.register_theme(replace(theme, variables={**theme.variables,
+                "text-muted": "ansi_default", "text-disabled": "ansi_default",
+                "scrollbar-background": "ansi_default", "scrollbar-background-hover": "ansi_default",
+                "scrollbar-background-active": "ansi_default", "scrollbar-corner-color": "ansi_default",
+                "input-cursor-background": "ansi_default", "input-cursor-foreground": "ansi_default",
+                "input-cursor-text-style": "reverse",
+            }))
         self.register_theme(Theme(
             name="nexus-dark", primary="#dda0b0", secondary="#8bc4d6", accent="#dda0b0",
             background="#141414", surface="#1b1b1b", panel="#202020", foreground="#e4e4e4",
@@ -37,7 +47,7 @@ class AgentNexusTUI(App):
             success="#286a40", warning="#805307", error="#a52838", dark=False,
             variables={"text-muted": "#626262"},
         ))
-        self.theme = "nexus-dark"
+        self.theme = "ansi-dark"
         self._runtime = runtime
         if runtime is not None:
             agent, memory, version = runtime.agent, runtime.memory_manager, runtime.version_manager

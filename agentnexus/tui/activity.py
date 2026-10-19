@@ -59,13 +59,18 @@ class Activity:
     mode: Literal["idle", "working", "waiting", "confirming", "unavailable"] = "idle"
     detail: str = ""
     waiting: int = 0
+    queued: int = 0
 
     def label(self, frame=0):
         marker = f"[{('/','-',chr(92),'|')[frame % 4]}]" if self.mode == "working" else {"idle": "[ ]", "waiting": "[?]", "confirming": "[?]", "unavailable": "[!]"}[self.mode]
         title = {"idle": "空闲", "working": "工作中", "waiting": "等待回复", "confirming": "等待确认", "unavailable": "状态不可用"}[self.mode]
-        text = f"{marker} {title}" + (f" · {self.detail}" if self.detail else "")
+        text = f"{marker} {title}"
         if self.waiting:
             text += f" · 待答复 {self.waiting}"
+        if self.queued:
+            text += f" · 排队 {self.queued}"
+        if self.detail:
+            text += f" · {self.detail}"
         return text
 
 

@@ -62,13 +62,13 @@ class ChoiceScreen(ActionScreen[Choice | None]):
                TerminalAction("select", "确认", "enter", "submit_choice"))
     BINDINGS = [action.binding() for action in ACTIONS]
     DEFAULT_CSS = """
-    ChoiceScreen { align: center bottom; }
-    ChoiceScreen > Vertical { width: 100%; max-width: 100; height: 12; max-height: 70%; background: $surface; border: none; border-top: solid $foreground 20%; padding: 0 2; }
+    ChoiceScreen { align: center bottom; background: transparent; }
+    ChoiceScreen > Vertical { width: 100%; max-width: 100; height: 12; max-height: 70%; background: $background; border: none; border-top: solid $foreground; padding: 0 2; }
     ChoiceScreen Label { height: 1; color: $text-muted; }
     ChoiceScreen #palette-search { height: 1; padding: 0; border: none; background: $background; }
     ChoiceScreen Input .input--placeholder { color: $text-muted; }
     ChoiceScreen OptionList { height: 1fr; border: none; background: transparent; }
-    ChoiceScreen #palette-options > .option-list--option-highlighted { color: $foreground; background: $primary 12%; text-style: none; }
+    ChoiceScreen #palette-options > .option-list--option-highlighted { color: $foreground; background: transparent; text-style: bold; }
     ChoiceScreen #picker-detail { height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
     ChoiceScreen ContextFooter { height: 1; color: $text-muted; }
     """
@@ -171,8 +171,8 @@ class ParameterScreen(ActionScreen[str | None]):
                TerminalAction("submit", "确认", "enter", "submit"))
     BINDINGS = [action.binding() for action in ACTIONS]
     DEFAULT_CSS = """
-    ParameterScreen { align: center bottom; }
-    ParameterScreen > Vertical { width: 100%; max-width: 100; height: auto; padding: 0 2; background: $surface; border: none; border-top: solid $foreground 20%; }
+    ParameterScreen { align: center bottom; background: transparent; }
+    ParameterScreen > Vertical { width: 100%; max-width: 100; height: auto; padding: 0 2; background: $background; border: none; border-top: solid $foreground; }
     ParameterScreen Label { height: auto; }
     ParameterScreen #parameter-input { height: 1; border: none; padding: 0; background: $background; }
     ParameterScreen #parameter-error { color: $error; height: auto; }
@@ -218,7 +218,7 @@ class MessageEditor(ActionScreen[tuple[str, str]]):
     BINDINGS = [action.binding() for action in ACTIONS]
     DEFAULT_CSS = """
     MessageEditor { align: center middle; }
-    MessageEditor > Vertical { width: 96%; height: 85%; background: $surface; border: none; border-top: solid $foreground 20%; padding: 0 1; }
+    MessageEditor > Vertical { width: 96%; height: 85%; background: $surface; border: none; border-top: solid $foreground; padding: 0 1; }
     MessageEditor Label { height: 1; color: $text-muted; }
     MessageEditor #message-editor { height: 1fr; padding: 0; border: none; background: transparent; }
     MessageEditor ContextFooter { height: 1; color: $text-muted; }

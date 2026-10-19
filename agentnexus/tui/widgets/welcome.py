@@ -3,7 +3,9 @@
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from rich.style import Style
 from rich.text import Text
+from textual.color import Color
 from textual.widgets import Static
 
 from agentnexus.tui.branding import LOGO
@@ -33,7 +35,7 @@ class Welcome(Static):
             7: (f"思考    {self.thinking}", "dim"),
         }
         result = Text()
-        accent = self.app.current_theme.primary or "magenta"
+        accent = Style(color=Color.parse(self.app.current_theme.primary or "ansi_blue").rich_color)
         narrow = self.size.width < 64
         for index, line in enumerate(LOGO):
             result.append(line, accent)

@@ -67,6 +67,8 @@ async def smoke(target):
                     raise SystemExit("The installed welcome screen is missing")
                 if app.screen.query_one("#input-area").region.height != 3:
                     raise SystemExit("The default composer must occupy three rows")
+                if not app.current_theme.ansi or not app.native_ansi_color:
+                    raise SystemExit("The installed workspace must follow terminal colors")
                 await pilot.press("tab")
                 if app.focused.id != "chat-area":
                     raise SystemExit("Tab must enter transcript navigation")

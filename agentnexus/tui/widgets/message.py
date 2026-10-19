@@ -3,8 +3,12 @@
 from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, Static
+
+from agentnexus.tui.activity import tool_label
 
 
 def _safe(text: str) -> Text:
@@ -13,13 +17,7 @@ def _safe(text: str) -> Text:
 
 
 def render_diff_with_colors(diff_text: str) -> str:
-    """Render unified diff with Rich markup background colors for TUI display.
-
-    - Lines starting with '-' (removed) have red background
-    - Lines starting with '+' (added) have green background
-    - Lines starting with '@@' (hunk headers) have cyan background
-    - Other lines are kept as-is
-    """
+    """Keep unified diff signs readable with the terminal's basic colors."""
     lines = diff_text.split('\n')
     colored_lines = []
 
@@ -29,11 +27,11 @@ def render_diff_with_colors(diff_text: str) -> str:
         if line.startswith('---') or line.startswith('+++'):
             colored_lines.append(f"[bold]{escaped_line}[/bold]")
         elif line.startswith('-'):
-            colored_lines.append(f"[white on red]{escaped_line}[/white on red]")
+            colored_lines.append(f"[red]{escaped_line}[/red]")
         elif line.startswith('+'):
-            colored_lines.append(f"[white on green]{escaped_line}[/white on green]")
+            colored_lines.append(f"[green]{escaped_line}[/green]")
         elif line.startswith('@@'):
-            colored_lines.append(f"[white on dark_cyan]{escaped_line}[/white on dark_cyan]")
+            colored_lines.append(f"[cyan]{escaped_line}[/cyan]")
         else:
             colored_lines.append(escaped_line)
 
@@ -52,17 +50,21 @@ class ChatMessage(Widget):
         if self._rich_markup:
             yield Static(self.content, id="msg-content")
         elif "assistant" in self.classes:
-            yield Static(Markdown(self.content), id="msg-content")
+            yield Static(Markdown(self.content, code_theme="ansi_dark"), id="msg-content")
+        elif "user" in self.classes:
+            with Horizontal(classes="request-line"):
+                yield Static("›", classes="request-marker")
+                yield Static(_safe(self.content), id="msg-content")
         else:
             yield Static(_safe(self.content), id="msg-content")
 
     def on_mount(self):
-        if "```" in self.content:
+        if "assistant" in self.classes and "```" in self.content:
             self._render_code_blocks()
 
     def _render_code_blocks(self):
         """Render Markdown without replacing the streaming message target."""
-        self.query_one("#msg-content", Static).update(Markdown(self.content))
+        self.query_one("#msg-content", Static).update(Markdown(self.content, code_theme="ansi_dark"))
 
     def attach_reaction(self, emoji: str, comment: str = ""):
         """Mount a small emoji reaction row under this message (user bubbles).
@@ -80,12 +82,15 @@ class ReasoningBlock(Widget, can_focus=True):
     """Model-provided reasoning, visible while streaming and readable afterward."""
 
     BINDINGS = [("enter", "toggle_details", "折叠思考"), ("space", "toggle_details", "折叠思考"), ("d", "full_output", "思考全文")]
+
+    class Updated(Message):
+        """Signal when a throttled reasoning update changes transcript geometry."""
     DEFAULT_CSS = """
-    ReasoningBlock { height: auto; max-width: 100; margin: 0 0 1 0; padding: 0 1; background: transparent; }
-    ReasoningBlock:focus { background: $primary 8%; }
+    ReasoningBlock { height: auto; max-width: 100; margin: 0 0 1 0; padding: 0; border-left: blank $foreground; background: transparent; }
+    ReasoningBlock:focus { border-left: solid $primary; }
     .reasoning-heading { height: 1; width: 100%; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
     ReasoningBlock.reasoning-active .reasoning-heading { color: $primary; }
-    .reasoning-content { height: auto; max-height: 8; padding-left: 2; overflow-y: auto; scrollbar-size-vertical: 1; color: $text-muted; }
+    .reasoning-content { height: auto; padding-left: 2; color: $foreground; }
     """
 
     def __init__(self, content="", *, active=False, **kwargs):
@@ -98,8 +103,8 @@ class ReasoningBlock(Widget, can_focus=True):
 
     def _heading(self):
         marker = "▾" if self.expanded else "▸"
-        status = "正在思考" if self.active else "思考结束"
-        return Text(f"{marker} {status} · {len(self.content)} 字")
+        status = "思考中" if self.active else "思考"
+        return Text(f"{marker} {status}")
 
     def compose(self):
         yield Label(self._heading(), classes="reasoning-heading")
@@ -116,11 +121,8 @@ class ReasoningBlock(Widget, can_focus=True):
         if self.is_mounted:
             self.set_class(self.active, "reasoning-active")
             self.query_one(".reasoning-heading", Label).update(self._heading())
-            body = self.query_one(".reasoning-content", Static)
-            following = body.scroll_y >= body.max_scroll_y
-            body.update(Text(self.content))
-            if following and self.active:
-                body.call_after_refresh(lambda: body.scroll_end(animate=False))
+            self.query_one(".reasoning-content", Static).update(Text(self.content))
+            self.post_message(self.Updated())
 
     def finish(self):
         self.active = False
@@ -129,7 +131,7 @@ class ReasoningBlock(Widget, can_focus=True):
     def action_toggle_details(self):
         self.expanded = not self.expanded
         self.query_one(".reasoning-content").display = self.expanded
-        self._flush()
+        self.query_one(".reasoning-heading", Label).update(self._heading())
 
     def on_click(self, event):
         if event.widget.has_class("reasoning-heading"):
@@ -161,7 +163,7 @@ class ToolCall(Widget, can_focus=True):
         state = " · 执行中" if self.result == "executing..." else ""
         duration = f" · {self.duration_ms:.0f}ms" if self.duration_ms else ""
         detail = f" · {self.detail}" if self.detail else ""
-        return Text(f"{marker} {self.tool_name}{detail}{state}{duration}")
+        return Text(f"{marker} {tool_label(self.tool_name)}{detail}{state}{duration}")
 
     def compose(self) -> ComposeResult:
         yield Label(self._header(), id="tool-name")

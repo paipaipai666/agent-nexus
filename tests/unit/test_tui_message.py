@@ -30,12 +30,6 @@ class TestChatMessage:
         msg = ChatMessage("assistant", "<b>bold</b>", markup=True)
         assert msg._rich_markup is True
 
-    def test_compose_no_code(self):
-        msg = ChatMessage("user", "simple text")
-        children = list(msg.compose())
-        assert len(children) == 1
-        assert children[0].id == "msg-content"
-
     def test_compose_with_code(self):
         msg = ChatMessage("assistant", "text```python\nprint('hi')\n```more")
         children = list(msg.compose())

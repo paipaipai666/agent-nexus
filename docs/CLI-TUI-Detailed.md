@@ -5,7 +5,7 @@
 ## 概述
 
 - **CLI** 基于 **Typer** 框架，入口命令为 `nexus`，提供 10 个顶级命令 + 7 个子命令组，共 83 个叶子命令
-- **TUI** 基于 **Textual** 框架，使用 **Catppuccin Mocha** 主题，提供终端原生聊天界面
+- **TUI** 基于 **Textual** 框架，默认沿用终端的前景、背景与基础 ANSI 色，提供单栏聊天界面。当前按键与操作见 [TUI 功能命令](tui-commands.md)。
 
 ## CLI 命令结构
 

@@ -48,11 +48,11 @@ class InspectorScreen(ActionScreen[None]):
     InspectorScreen #task-todos { height: auto; max-height: 4; overflow-y: auto; }
     InspectorScreen #task-content { layout: vertical; height: 1fr; }
     InspectorScreen OptionList { width: 100%; height: auto; max-height: 5; min-height: 1; border: none; background: transparent; }
-    InspectorScreen #child-list > .option-list--option-highlighted { color: $foreground; background: $primary 12%; text-style: bold; }
+    InspectorScreen #child-list > .option-list--option-highlighted { color: $foreground; background: transparent; text-style: bold; }
     InspectorScreen #child-detail { height: 1fr; padding: 0; border: none; background: transparent; }
     InspectorScreen #task-controls { height: 1; margin-top: 1; }
     InspectorScreen #task-controls Button { width: 1fr; height: 1; min-height: 1; min-width: 8; padding: 0; border: none; background: transparent; text-style: none; }
-    InspectorScreen #task-controls Button:focus, InspectorScreen #task-controls Button:hover { color: $primary; background: $primary 12%; }
+    InspectorScreen #task-controls Button:focus, InspectorScreen #task-controls Button:hover { color: $primary; background: transparent; text-style: reverse; }
     InspectorScreen ContextFooter { height: 1; color: $text-muted; }
     """
 

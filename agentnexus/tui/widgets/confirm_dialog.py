@@ -1,5 +1,6 @@
 """ConfirmDialog — ModalScreen for HITL confirmation of high-risk tool calls."""
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
@@ -19,9 +20,10 @@ class ConfirmDialog(ModalScreen[bool]):
 
     ConfirmDialog > Vertical {
         background: $surface;
-        border: thick $warning;
+        border: solid $warning;
         padding: 1 2;
         width: 60;
+        max-width: 100%;
         max-height: 80%;
     }
 
@@ -56,11 +58,19 @@ class ConfirmDialog(ModalScreen[bool]):
         width: 100%;
         align-horizontal: center;
         padding-top: 1;
+        height: 2;
     }
 
     ConfirmDialog Button {
-        margin: 0 2;
+        width: 1fr;
+        min-width: 0;
+        height: 1;
+        min-height: 1;
+        border: none;
+        background: transparent;
+        margin: 0 1;
     }
+    ConfirmDialog Button:focus { text-style: bold reverse; }
     """
 
     def __init__(self, tool_name: str, params_summary: str, risk_level: str = "high"):
@@ -71,7 +81,6 @@ class ConfirmDialog(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         risk_label = {"high": "HIGH 高", "medium": "MEDIUM 中", "low": "LOW 低"}
-        risk_color = {"high": "#e06c75", "medium": "#e5c07b", "low": "#98c379"}
 
         with Vertical():
             yield Label(
@@ -79,8 +88,7 @@ class ConfirmDialog(ModalScreen[bool]):
                 id="confirm-title",
             )
             yield Label(
-                f"工具: {self._tool_name}    风险: [{risk_color.get(self._risk_level, '')}]"
-                f"{risk_label.get(self._risk_level, self._risk_level)}[/]",
+                Text(f"工具: {self._tool_name}    风险: {risk_label.get(self._risk_level, self._risk_level)}"),
             )
             with VerticalScroll(id="confirm-preview"):
                 yield Static(self._params_summary, id="confirm-content", markup=False)

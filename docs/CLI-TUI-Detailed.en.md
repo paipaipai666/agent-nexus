@@ -5,7 +5,7 @@
 ## Overview
 
 - **CLI**: Built on **Typer** framework, root command `nexus`, provides 10 top-level commands + 7 subcommand groups with 83 leaf commands
-- **TUI**: Built on **Textual** framework with **Catppuccin Mocha** theme, provides terminal-native chat interface
+- **TUI**: Built on **Textual** with a single-column chat layout using the terminal's default foreground, background and ANSI colors. See [TUI commands](tui-commands.md) for current controls.
 
 ## CLI Command Structure
 

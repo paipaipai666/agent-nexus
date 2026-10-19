@@ -89,21 +89,21 @@ class TestRenderDiffWithColors:
         from agentnexus.tui.widgets.message import render_diff_with_colors
 
         result = render_diff_with_colors("+new line")
-        assert "on green" in result
+        assert "[green]" in result
         assert "+new line" in result
 
     def test_removed_lines_red(self):
         from agentnexus.tui.widgets.message import render_diff_with_colors
 
         result = render_diff_with_colors("-old line")
-        assert "on red" in result
+        assert "[red]" in result
         assert "-old line" in result
 
     def test_hunk_header_cyan(self):
         from agentnexus.tui.widgets.message import render_diff_with_colors
 
         result = render_diff_with_colors("@@ -1,3 +1,4 @@")
-        assert "dark_cyan" in result
+        assert "[cyan]" in result
 
     def test_file_header_bold(self):
         from agentnexus.tui.widgets.message import render_diff_with_colors
@@ -136,8 +136,8 @@ class TestRenderDiffWithColors:
         lines = result.split("\n")
         assert len(lines) == 6
         assert "bold" in lines[0]
-        assert "on red" in lines[3]
-        assert "on green" in lines[4]
+        assert "[red]" in lines[3]
+        assert "[green]" in lines[4]
 
     def test_rich_markup_escaped(self):
         from agentnexus.tui.widgets.message import render_diff_with_colors

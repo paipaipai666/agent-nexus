@@ -137,6 +137,8 @@ class ChatExecution:
                     self._hud.update_context(current_tokens=self._memory.estimate_stm_tokens() if self._memory else 0,
                                              total_input=usage.get("input_tokens", 0), total_output=usage.get("output_tokens", 0))
                 self._drain_session_queue(sid)
+                if sid == self._chat_session.id:
+                    self._refresh_workspace()
 
     def _confirm_execution(self, sid, started, summary):
         result = [False]
@@ -178,7 +180,7 @@ class ChatExecution:
         if self._streaming_msg_widget is not None:
             widget = self._streaming_msg_widget
             widget.content = self._streaming_buffer
-            self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Markdown(widget.content)) if widget.is_mounted else None)
+            self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Markdown(widget.content, code_theme="ansi_dark")) if widget.is_mounted else None)
             self._streaming_msg_widget = None
             self._streaming_buffer = ""
 
@@ -292,7 +294,7 @@ class ChatExecution:
                 widget = self._streaming_msg_widget
                 self._streaming_msg_widget = None
                 widget.content = answer
-                self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Markdown(answer)) if widget.is_mounted else None)
+                self.call_after_refresh(lambda: widget.query_one("#msg-content", Static).update(Markdown(answer, code_theme="ansi_dark")) if widget.is_mounted else None)
             elif answer:
                 self._chat_area.add_message("assistant", answer)
             if kind != "run_finished" or payload.get("error"):

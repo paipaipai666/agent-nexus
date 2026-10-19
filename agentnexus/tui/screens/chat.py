@@ -165,6 +165,9 @@ class ChatArea(Widget, can_focus=True):
         else:
             self.post_message(self.OutputPending())
 
+    def on_reasoning_block_updated(self):
+        self.follow_output()
+
     def resume_output(self):
         self.following_output = True
         self.call_after_refresh(lambda: self.scroll_end(animate=False))
@@ -423,7 +426,6 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
     def on_key(self, event: Key):
         if event.key != "escape":
             return
-        self.remove_class("has-inspector")
         self._update_command_suggestions("")
         event.stop()
         self.action_focus_input()

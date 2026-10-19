@@ -39,7 +39,7 @@ class HUD(Widget):
         self._thinking = "默认"
         self._plan = False
         if compact:
-            self.tooltip = "F1 查看用量与按键"
+            self.tooltip = "Alt+M 切换模型 · Alt+T 思考强度 · F1 用量与按键"
         settings = get_settings()
         full_id, base_url, _key, _timeout = settings.get_active_llm_profile()
         self.model = full_id

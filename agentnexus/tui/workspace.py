@@ -1,6 +1,7 @@
 """Terminal navigation and draft editing over the existing chat operations."""
 
 import asyncio
+from dataclasses import replace
 from sqlite3 import Error as StorageError
 
 from textual import work
@@ -162,10 +163,6 @@ class ChatWorkspace:
     def action_toggle_inspector(self):
         self.action_task_record()
 
-    def on_resize(self, event):
-        if event.size.width < 112:
-            self.remove_class("has-inspector")
-
     def action_edit_message(self):
         self._chat_input.toggle_multiline()
         self._update_command_suggestions(self.query_one("#chat-input").text)
@@ -217,6 +214,7 @@ class ChatWorkspace:
             children=getattr(self, "_activity_children", ()), recovery=getattr(self, "_activity_recovery", None),
             failure=getattr(self, "_activity_failure", ""), compacting=sid in self._compacting_sessions,
         )
+        activity = replace(activity, queued=len(self._queued_messages.get(sid, ())))
         indicator = self.query_one("#agent-activity")
         indicator.update_activity(activity)
         if getattr(self, "_activity_failure", ""):
