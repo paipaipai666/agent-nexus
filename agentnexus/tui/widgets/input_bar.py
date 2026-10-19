@@ -22,6 +22,8 @@ class Composer(TextArea):
         Binding("enter", "enter", "发送 / 换行", priority=True),
         Binding("ctrl+s", "submit", "发送", priority=True),
         Binding("shift+enter,alt+enter,ctrl+j", "newline", "换行", priority=True),
+        Binding("up", "up", "上一项", priority=True),
+        Binding("down", "down", "下一项", priority=True),
     ]
 
     class Submitted(Message):
@@ -34,6 +36,14 @@ class Composer(TextArea):
     def __init__(self, **kwargs):
         super().__init__(soft_wrap=True, show_line_numbers=False, tab_behavior="focus", **kwargs)
         self.multiline = False
+        self.suggestions_active = False
+
+    class SuggestionRequested(Message):
+        """Navigate or accept a visible command candidate without leaving input."""
+
+        def __init__(self, action):
+            super().__init__()
+            self.action = action
 
     @property
     def value(self):
@@ -47,10 +57,24 @@ class Composer(TextArea):
         self.multiline = "\n" in text
 
     def action_enter(self):
-        if self.multiline:
+        if self.suggestions_active and not self.multiline:
+            self.post_message(self.SuggestionRequested("execute"))
+        elif self.multiline:
             self.action_newline()
         else:
             self.action_submit()
+
+    def action_up(self):
+        if self.suggestions_active:
+            self.post_message(self.SuggestionRequested("previous"))
+        else:
+            self.action_cursor_up()
+
+    def action_down(self):
+        if self.suggestions_active:
+            self.post_message(self.SuggestionRequested("next"))
+        else:
+            self.action_cursor_down()
 
     def action_newline(self):
         self.multiline = True

@@ -931,9 +931,7 @@ class TestSkillCommandHelpers:
         screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
         screen._skill_registry = registry
 
-        suggestions = screen._match_command_suggestions("/d")
-
-        assert "\n" in suggestions
+        suggestions = [choice.value for choice in screen._match_command_suggestions("/d")]
         assert "/docx" in suggestions
         assert "/pdf" in suggestions
 
@@ -946,28 +944,10 @@ class TestSkillCommandHelpers:
             ]
         )
 
-        suggestions = screen._match_command_suggestions("/demo")
+        suggestions = [choice.value for choice in screen._match_command_suggestions("/demo")]
 
         assert "/demo-00" in suggestions
         assert "/demo-24" in suggestions
-
-    def test_update_command_suggestions_updates_scroll_container(self):
-        screen = ChatScreen(agent=MagicMock(), memory=None, version=None)
-        palette = MagicMock()
-        content = MagicMock()
-
-        def query_one(selector, _type=None):
-            return palette if selector == "#command-palette" else content
-
-        screen.query_one = query_one
-        screen._match_command_suggestions = MagicMock(return_value="[bold]Commands[/]\n/demo")
-
-        screen._update_command_suggestions("/demo")
-
-        content.update.assert_called_once_with("[bold]Commands[/]\n/demo")
-        assert palette.styles.display == "block"
-        palette.scroll_home.assert_called_once_with(animate=False)
-
 
 class TestExitAndInterruptCommands:
     def test_tui_no_longer_owns_turn_persistence(self):

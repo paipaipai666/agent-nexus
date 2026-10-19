@@ -37,6 +37,16 @@ class ActionState:
     disabled_reason: str = ""
 
 
+def describe_actions(states):
+    """Describe the currently available keys and explain unavailable operations."""
+    lines = []
+    for state in states:
+        action = state.action
+        detail = state.disabled_reason or action.description
+        lines.append(f"{action.display_key}  {action.title}" + (f"\n  {detail}" if detail else ""))
+    return "\n\n".join(lines)
+
+
 SCREEN_ACTIONS = (
     TerminalAction("menu", "操作", "ctrl+p", "command_menu"),
     TerminalAction("sessions", "会话", "f2", "session_menu"),

@@ -478,6 +478,8 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
     context = SubagentRunContext(runtime.chat, "workspace", "parent")
     run = CollaborationRun(context, store, pool, lambda: False)
     runtime.chat._collaborations["parent"] = run
+    completed = context.started("已完成检查", "explorer", "已经结束的任务")
+    runtime.chat._subagents.update(completed, status="completed")
     entry = context.started("源码检查", "explorer", "检查入口")
     runtime.chat._subagents.update(entry, status="waiting", child_run_id="attempt", collaborative=True)
     child = ChildTask(entry, "attempt")
@@ -488,14 +490,15 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.press("f3")
             assert "输出 Markdown 吗？" in app.screen.query_one("#child-detail", TextArea).text
-            await pilot.click("#child-reply")
+            await pilot.press("r")
             app.screen.query_one("#message-editor", TextArea).load_text("是的，使用 Markdown。")
+            await pilot.press("end", "space", "r", "i", "x", "l")
             await pilot.press("ctrl+s")
             await settle(pilot, lambda: len(store.list_collaboration_messages("workspace", entry.subagent_id)) == 2)
             reply = store.list_collaboration_messages("workspace", entry.subagent_id)[-1]
             assert reply["question_id"] == question["id"]
             assert reply["child_run_id"] == "attempt"
-            assert reply["content"] == "是的，使用 Markdown。"
+            assert reply["content"] == "是的，使用 Markdown。 rixl"
             assert reply["delivery"] == "queued"
             assert "queued" in app.screen.query_one("#child-detail", TextArea).text
             await click_ready(app, pilot, "#child-send")
@@ -508,7 +511,10 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
                 await settle(pilot, lambda: not app.screen.query_one("#child-send").has_class("-active"))
                 await click_ready(app, pilot, "#child-send")
                 app.screen.query_one("#message-editor", TextArea).load_text("继续检查")
-                await pilot.press("ctrl+s")
+                if count == 3:
+                    await pilot.click("#editor-actions", offset=(16, 0))
+                else:
+                    await pilot.press("ctrl+s")
                 await settle(pilot, lambda: len(store.list_collaboration_messages("workspace", entry.subagent_id)) == count)
             instructions = store.list_collaboration_messages("workspace", entry.subagent_id)[-2:]
             assert [message["content"] for message in instructions] == ["继续检查", "继续检查"]

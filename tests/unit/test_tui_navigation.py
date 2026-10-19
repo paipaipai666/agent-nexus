@@ -140,3 +140,50 @@ async def test_ctrl_c_copies_selection_then_stops_the_active_run(workspace_runti
             release.set()
         await settle(pilot, lambda: not runtime.chat.is_processing)
         assert runtime.chat.get_session_recovery("workspace")["status"] == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_slash_candidate_completes_or_opens_its_picker_without_a_model_request(workspace_runtime):
+    runtime, _ = workspace_runtime
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("/", "t", "h", "tab")
+        assert app.screen.query_one(Composer).text == "/think "
+        assert app.focused.id == "chat-input"
+        assert runtime.agent.run.call_count == 0
+        await pilot.press("enter")
+        assert "选择思考强度" in str(app.screen.query_one("Label").render())
+        await pilot.press("h", "i", "g", "h", "enter")
+        await settle(pilot, lambda: runtime.chat.get_thinking_effort("workspace") == "high")
+        assert app.focused.id == "chat-input"
+        assert app.screen.query_one(Composer).text == ""
+        assert runtime.agent.run.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_global_search_opens_a_knowledge_action_directly(workspace_runtime):
+    runtime, _ = workspace_runtime
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.screen.query_one(Composer).value = "保留任务文本"
+        await pilot.press("ctrl+p", "知", "识", "库", " ", "搜", "索", "enter")
+        assert app.screen.query_one("#parameter-input").has_focus
+        await pilot.press("escape")
+        assert app.screen.query_one("#palette-search").value == "知识库 搜索"
+        await pilot.press("escape")
+        assert app.screen.query_one(Composer).text == "保留任务文本"
+
+
+@pytest.mark.asyncio
+async def test_slash_candidates_accept_keyboard_and_mouse_selection(workspace_runtime):
+    runtime, _ = workspace_runtime
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("/", "s", "down", "tab")
+        assert app.screen.query_one(Composer).text == "/stats "
+        app.screen.query_one(Composer).value = "/think"
+        await pilot.pause()
+        await pilot.click("#command-palette-options", offset=(1, 0))
+        assert "选择思考强度" in str(app.screen.query_one("Label").render())
+        await pilot.press("escape")
+        assert runtime.agent.run.call_count == 0

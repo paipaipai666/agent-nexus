@@ -37,6 +37,10 @@ class ChatWorkspace:
             Choice("外观 · 选择主题", "@themes"),
             Choice("全部命令 · 高级操作", "@commands", "完整功能与参数帮助"),
         ]
+        choices.extend(self._workspace_choices("@knowledge", self._chat_session.id)[1])
+        values = {choice.value for choice in choices}
+        choices.extend(Choice(f"命令 {command}", command, description, False)
+                       for command, description, _ in self._command_catalog() if command not in values)
         return choices
 
     @work(group="workspace-action", exclusive=True)
@@ -163,6 +167,7 @@ class ChatWorkspace:
 
     def action_edit_message(self):
         self._chat_input.toggle_multiline()
+        self._update_command_suggestions(self.query_one("#chat-input").text)
 
     async def on_input_bar_action_requested(self, event: InputBar.ActionRequested):
         await self.action_perform(CONTROL_IDS[event.action])
@@ -174,7 +179,8 @@ class ChatWorkspace:
         self._choose_workspace_action(Choice("", "@thinking"))
 
     def action_choose_attachment(self):
-        self._choose_workspace_action(Choice("", "@attachments"))
+        route = "@attachments" if self._attachments.get(self._chat_session.id) else "@attach"
+        self._choose_workspace_action(Choice("", route))
 
     def action_toggle_plan(self):
         enabled = self._chat_service.is_plan_mode(self._chat_session.id)

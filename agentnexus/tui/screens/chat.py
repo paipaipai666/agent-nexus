@@ -6,6 +6,7 @@ import logging
 from functools import partial
 from types import SimpleNamespace
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
@@ -13,7 +14,8 @@ from textual.events import Key
 from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Button, Label, Static, TextArea
+from textual.widgets import Button, Label, OptionList, Static, TextArea
+from textual.widgets.option_list import Option
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.text_utils import collapse_and_truncate
@@ -25,9 +27,18 @@ from agentnexus.skills import (
     format_tool_policy_summary,
     validate_session_profile,
 )
-from agentnexus.tui.actions import ACTIONS, CONTROL_ACTIONS, RECORD_ACTIONS, SCREEN_ACTIONS, ActionState, ContextFooter
+from agentnexus.tui.actions import (
+    ACTIONS,
+    CONTROL_ACTIONS,
+    RECORD_ACTIONS,
+    SCREEN_ACTIONS,
+    ActionState,
+    ContextFooter,
+    describe_actions,
+)
 from agentnexus.tui.commands import COMMAND_HELP, TerminalCommands
 from agentnexus.tui.execution import ChatExecution
+from agentnexus.tui.screens.interactions import Choice
 from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
@@ -267,9 +278,11 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             yield self._chat_area
             self._side_panel = SidePanel(id="side-panel")
             yield self._side_panel
-        self._command_palette_content = Static("", id="command-palette-content")
+        self._command_candidates = []
         with VerticalScroll(id="command-palette"):
-            yield self._command_palette_content
+            options = OptionList(id="command-palette-options", compact=True)
+            options.can_focus = False
+            yield options
         latest = Button("有新输出 · Ctrl+End 跳到最新", id="new-output")
         latest.display = False
         yield latest
@@ -491,12 +504,14 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         region = self._focused_region()
         actions = [*SCREEN_ACTIONS]
         actions.extend(RECORD_ACTIONS if region == "records" else CONTROL_ACTIONS if region == "controls" else [])
-        lines = [f"{action.display_key}  {action.title}" + (f"\n  {action.description}" if action.description else "") +
-                 (f"\n  {state.disabled_reason}" if (state := self._action_state(action.id)).disabled_reason else "") for action in actions]
         focused = self.app.focused
-        self.app.push_screen(RecordScreen("当前区域的键盘操作", "\n\n".join(lines)), lambda _: focused.focus() if focused and focused.is_mounted else self.action_focus_input())
+        text = describe_actions([self._action_state(action.id) for action in actions])
+        self.app.push_screen(RecordScreen("当前区域的键盘操作", text), lambda _: focused.focus() if focused and focused.is_mounted else self.action_focus_input())
 
     def _cycle_region(self, offset):
+        if offset == 1 and isinstance(self.app.focused, Composer) and self.app.focused.suggestions_active:
+            self._choose_command_suggestion(complete=True)
+            return
         focused = self.app.focused
         ancestors = list(focused.ancestors_with_self) if focused is not None else []
         controls = self.query_one(ConfigurationBar)
@@ -771,19 +786,54 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
 
     def _update_command_suggestions(self, text: str):
         suggestions = self._match_command_suggestions(text)
-        try:
-            palette = self.query_one("#command-palette", VerticalScroll)
-            self.query_one("#command-palette-content", Static).update(suggestions)
-            palette.styles.display = "block" if suggestions else "none"
-            if suggestions:
-                palette.scroll_home(animate=False)
-        except Exception as e:
-            logger.debug("Failed to update command suggestions: %s", e)
+        palette = self.query_one("#command-palette", VerticalScroll)
+        composer = self.query_one(Composer)
+        self._command_candidates = suggestions if not composer.multiline else []
+        options = self.query_one("#command-palette-options", OptionList)
+        options.clear_options()
+        for choice in self._command_candidates:
+            options.add_option(Option(Text(f"{choice.value}  {choice.description}"), id=choice.value))
+        options.highlighted = 0 if self._command_candidates else None
+        composer.suggestions_active = bool(self._command_candidates)
+        palette.display = composer.suggestions_active
 
-    def _match_command_suggestions(self, text: str) -> str:
+    def on_composer_suggestion_requested(self, event: Composer.SuggestionRequested):
+        event.stop()
+        options = self.query_one("#command-palette-options", OptionList)
+        if event.action == "previous":
+            options.action_cursor_up()
+        elif event.action == "next":
+            options.action_cursor_down()
+        else:
+            self._choose_command_suggestion()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected):
+        if event.option_list.id == "command-palette-options":
+            event.stop()
+            self._choose_command_suggestion()
+
+    def _choose_command_suggestion(self, *, complete=False):
+        selected = self.query_one("#command-palette-options", OptionList).highlighted
+        if selected is None or selected >= len(self._command_candidates):
+            return
+        command = self._command_candidates[selected].value
+        composer = self.query_one(Composer)
+        if complete:
+            composer.value = command + " "
+            return
+        routes = {"/model": "@models", "/think": "@thinking", "/attach": "@attachments", "/session": "@sessions",
+                  "/sessions": "@sessions", "/switch": "@sessions", "/skill": "@skills"}
+        if command in routes:
+            composer.value = ""
+            self._choose_workspace_action(Choice("", routes[command]))
+        else:
+            composer.value = command
+            composer.action_submit()
+
+    def _match_command_suggestions(self, text: str) -> list[Choice]:
         raw = text.strip()
         if not raw.startswith("/"):
-            return ""
+            return []
         prefix = raw.lower()
         matches = []
         needle = prefix[1:]
@@ -793,11 +843,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
                 continue
             alias_matches = needle and " " not in prefix and any(alias.startswith(needle) for alias in aliases)
             if command_lower.startswith(prefix) or alias_matches:
-                matches.append((command, description))
-        if not matches:
-            return "[dim]无匹配命令[/]"
-        rendered = "\n".join(f"  [#70a6e8]{command:<18}[/] [dim]{description}[/]" for command, description in matches)
-        return "[bold]Commands[/]\n" + rendered
+                matches.append(Choice(command, command, description))
+        return matches
 
     def _command_catalog(self) -> list[tuple[str, str, tuple[str, ...]]]:
         commands = [(command, description, ()) for command, description in COMMAND_DEFINITIONS]

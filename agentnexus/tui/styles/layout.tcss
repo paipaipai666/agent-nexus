@@ -81,7 +81,10 @@ Screen {
     scrollbar-size-vertical: 1;
 }
 
-#command-palette-content {
-    width: 100%;
+#command-palette-options {
     height: auto;
+    max-height: 8;
+    border: none;
+    padding: 0;
+    background: transparent;
 }
