@@ -75,6 +75,11 @@ class ChatMessage(Widget):
         quip = f" {comment}" if comment else ""
         self.mount(Static(_safe(f"{emoji}{quip}"), classes="msg-reaction"))
 
+    def action_full_output(self):
+        from agentnexus.tui.screens.interactions import RecordScreen
+
+        self.app.push_screen(RecordScreen("消息全文", self.content))
+
 
 class ReasoningBlock(Widget, can_focus=True):
     """Model-provided reasoning, visible while streaming and readable afterward."""

@@ -33,25 +33,27 @@ class ChoiceScreen(ModalScreen[Choice | None]):
     ChoiceScreen OptionList { height: 1fr; border: none; background: transparent; }
     """
 
-    def __init__(self, title, choices, *, selected_value=None):
+    def __init__(self, title, choices, *, selected_value=None, query=""):
         super().__init__()
         self.heading = title
         self.choices = list(choices)
         self.visible_choices = list(choices)
         self.selected_value = selected_value
+        self.search_text = query
 
     def compose(self):
         with Vertical():
             yield Label(self.heading)
-            yield Input(placeholder="输入名称、命令或工作区进行筛选", id="palette-search")
+            yield Input(self.search_text, placeholder="输入名称、命令或工作区进行筛选", id="palette-search")
             yield OptionList(id="palette-options", compact=True)
             yield Label("↑↓ 选择 · Enter 确认 · Esc 返回")
 
     def on_mount(self):
-        self._filter("")
+        self._filter(self.search_text)
         self.query_one(Input).focus()
 
     def _filter(self, query):
+        self.search_text = query
         words = query.casefold().split()
         self.visible_choices = [choice for choice in self.choices if all(word in f"{choice.label} {choice.value} {choice.description}".casefold() for word in words)]
         options = self.query_one(OptionList)
@@ -85,6 +87,11 @@ class ChoiceScreen(ModalScreen[Choice | None]):
 
     def action_previous(self):
         self.query_one(OptionList).action_cursor_up()
+
+    @on(OptionList.OptionHighlighted)
+    def remember_choice(self, event):
+        if event.option_index < len(self.visible_choices):
+            self.selected_value = self.visible_choices[event.option_index].value
 
     def action_cancel(self):
         self.dismiss(None)

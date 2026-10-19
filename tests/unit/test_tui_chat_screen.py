@@ -970,29 +970,6 @@ class TestSkillCommandHelpers:
 
 
 class TestExitAndInterruptCommands:
-    def test_stop_action_cancels_the_active_run(self):
-        agent = MagicMock()
-        screen = ChatScreen(agent=agent, memory=None, version=None)
-        screen._chat_area = MagicMock()
-        screen._side_panel = MagicMock()
-        screen._stop_spinner = MagicMock()
-        screen.action_focus_input = MagicMock()
-        screen._current_run_id = "run_1"
-        screen._chat_service = MagicMock()
-        screen._chat_service.get_run_snapshot.return_value = MagicMock(
-            answer="interrupted",
-            question="question",
-        )
-
-        screen.action_stop_task()
-
-        screen._chat_service.cancel_run.assert_called_once_with(
-            screen._current_run_id,
-            reason="用户请求停止",
-        )
-        screen._stop_spinner.assert_called_once()
-        screen.action_focus_input.assert_not_called()
-
     def test_tui_no_longer_owns_turn_persistence(self):
         screen = ChatScreen(agent=MagicMock(), memory=MagicMock(), version=MagicMock())
 

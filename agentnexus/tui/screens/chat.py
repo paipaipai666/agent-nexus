@@ -8,13 +8,12 @@ from types import SimpleNamespace
 
 from textual import work
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.events import Key
 from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Button, Label, Static
+from textual.widgets import Button, Label, Static, TextArea
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.text_utils import collapse_and_truncate
@@ -26,12 +25,13 @@ from agentnexus.skills import (
     format_tool_policy_summary,
     validate_session_profile,
 )
+from agentnexus.tui.actions import ACTIONS, CONTROL_ACTIONS, RECORD_ACTIONS, SCREEN_ACTIONS, ActionState, ContextFooter
 from agentnexus.tui.commands import COMMAND_HELP, TerminalCommands
 from agentnexus.tui.execution import ChatExecution
 from agentnexus.tui.widgets.collaboration import CollaborationTree
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
-from agentnexus.tui.widgets.input_bar import Composer, InputBar
+from agentnexus.tui.widgets.input_bar import Composer, ConfigurationBar, InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
 from agentnexus.tui.widgets.welcome import Welcome
@@ -62,7 +62,7 @@ COMMAND_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
 }
 
 
-class ChatArea(Widget):
+class ChatArea(Widget, can_focus=True):
     """Scrollable message area."""
     DEFAULT_CSS = """
     ChatArea {
@@ -71,12 +71,61 @@ class ChatArea(Widget):
     }
     """
 
+    BINDINGS = [action.binding() for action in RECORD_ACTIONS]
+
+    async def action_perform(self, action_id):
+        await self.screen.action_perform(action_id)
+
     class OutputPending(Message):
         """Signal that new output arrived while the user reads earlier messages."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.following_output = True
+        self.selected_record = None
+
+    def select_record(self, record):
+        if self.selected_record is not None:
+            self.selected_record.remove_class("record-selected")
+        self.selected_record = record
+        record.add_class("record-selected")
+        record.scroll_visible(animate=False)
+
+    def on_focus(self):
+        records = list(self.query("ChatMessage, ReasoningBlock, ToolCall"))
+        if records:
+            self.select_record(self.selected_record if self.selected_record in records else records[-1])
+
+    def on_descendant_focus(self, event):
+        if isinstance(event.widget, (ChatMessage, ReasoningBlock, ToolCall)):
+            self.select_record(event.widget)
+
+    def _move_record(self, offset):
+        records = list(self.query("ChatMessage, ReasoningBlock, ToolCall"))
+        if records:
+            current = records.index(self.selected_record) if self.selected_record in records else len(records) - 1
+            self.following_output = False
+            self.select_record(records[max(0, min(len(records) - 1, current + offset))])
+
+    def action_previous_record(self):
+        self._move_record(-1)
+
+    def action_next_record(self):
+        self._move_record(1)
+
+    def action_open_record(self):
+        if isinstance(self.selected_record, (ReasoningBlock, ToolCall)):
+            self.selected_record.action_toggle_details()
+        else:
+            self.action_full_record()
+
+    def action_full_record(self):
+        if self.selected_record is not None:
+            from agentnexus.tui.screens.interactions import RecordScreen
+
+            record = self.selected_record
+            content = record.raw_result if isinstance(record, ToolCall) else record.content
+            self.app.push_screen(RecordScreen("记录全文", content), lambda _: self.focus())
 
     def compose(self):
         yield Welcome(id="welcome")
@@ -129,18 +178,14 @@ class ChatArea(Widget):
     def clear_all(self):
         self.query("ChatMessage, ToolCall, ReasoningBlock").remove()
         self.following_output = True
+        self.selected_record = None
 
 
 class ChatScreen(ChatWorkspace, ChatExecution, Screen):
     """A terminal-first conversation and collaboration workspace."""
 
     BINDINGS = [
-        Binding("ctrl+p", "command_menu", "操作", priority=True),
-        Binding("f2", "session_menu", "会话", priority=True),
-        Binding("f3", "toggle_inspector", "任务", priority=True),
-        Binding("f4", "edit_message", "多行", priority=True),
-        Binding("ctrl+c", "stop_task", "停止", priority=True),
-        Binding("ctrl+end", "latest_output", "最新输出", priority=True),
+        *(action.binding() for action in SCREEN_ACTIONS if action.id != "input"),
         ("ctrl+l", "clear_screen", "清屏"),
         ("ctrl+h", "show_help", "帮助"),
     ]
@@ -354,7 +399,11 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self.action_focus_input()
 
     def action_stop_task(self):
-        self._force_interrupt_agent()
+        focused = self.app.focused
+        if isinstance(focused, TextArea) and focused.selected_text:
+            focused.action_copy()
+        elif self._chat_session.id in self._running_sessions:
+            self._force_interrupt_agent()
 
     def on_chat_area_output_pending(self):
         if not self._chat_area.following_output:
@@ -390,6 +439,88 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             self.query_one("#chat-input", Composer).focus()
         except Exception as e:
             logger.debug("Failed to focus chat input: %s", e)
+
+    def _action_state(self, action_id):
+        action = ACTIONS[action_id]
+        reason = "当前没有可浏览的记录" if action.scope == "records" and self._chat_area.selected_record is None else ""
+        return ActionState(action, reason)
+
+    async def action_perform(self, action_id):
+        state = self._action_state(action_id)
+        if state.disabled_reason:
+            self.app.notify(state.disabled_reason)
+            return
+        host = self._chat_area if state.action.scope == "records" else self.query_one(ConfigurationBar) if state.action.scope == "controls" else self
+        await host.run_action(state.action.handler)
+
+    def _focused_region(self):
+        focused = self.app.focused
+        ancestors = list(focused.ancestors_with_self) if focused is not None else []
+        if self._chat_area in ancestors:
+            return "records"
+        if self.query_one(ConfigurationBar) in ancestors:
+            return "controls"
+        return "input"
+
+    def _refresh_action_hints(self):
+        if not self.is_mounted:
+            return
+        region = self._focused_region()
+        if region == "records":
+            ids = ("previous-record", "next-record", "open-record", "full-record", "input", "help")
+            prefix = ""
+        elif region == "controls":
+            ids = ("previous-control", "next-control", "input", "help")
+            prefix = "Enter 选择"
+        else:
+            ids = ("next-region", "menu", "help")
+            composer = self.query_one(Composer)
+            send = "排队" if self._chat_session.id in self._running_sessions else "发送"
+            prefix = f"Enter 换行 · Ctrl+S {send}" if composer.multiline else f"Enter {send}"
+        self.query_one("#composer-hints", ContextFooter).show_actions([self._action_state(key) for key in ids], prefix=prefix)
+
+    def on_descendant_focus(self, event):
+        self._refresh_action_hints()
+
+    def on_text_area_selection_changed(self, event):
+        self._refresh_action_hints()
+
+    def action_context_help(self):
+        from agentnexus.tui.screens.interactions import RecordScreen
+
+        region = self._focused_region()
+        actions = [*SCREEN_ACTIONS]
+        actions.extend(RECORD_ACTIONS if region == "records" else CONTROL_ACTIONS if region == "controls" else [])
+        lines = [f"{action.display_key}  {action.title}" + (f"\n  {action.description}" if action.description else "") +
+                 (f"\n  {state.disabled_reason}" if (state := self._action_state(action.id)).disabled_reason else "") for action in actions]
+        focused = self.app.focused
+        self.app.push_screen(RecordScreen("当前区域的键盘操作", "\n\n".join(lines)), lambda _: focused.focus() if focused and focused.is_mounted else self.action_focus_input())
+
+    def _cycle_region(self, offset):
+        focused = self.app.focused
+        ancestors = list(focused.ancestors_with_self) if focused is not None else []
+        controls = self.query_one(ConfigurationBar)
+        current = 1 if self._chat_area in ancestors else 2 if controls in ancestors else 0
+        target = (current + offset) % 3
+        if target == 0:
+            self.action_focus_input()
+        elif target == 1:
+            self._chat_area.focus()
+        else:
+            controls.focus_current()
+
+    def action_next_region(self):
+        self._cycle_region(1)
+
+    def action_previous_region(self):
+        self._cycle_region(-1)
+
+    def action_previous_page(self):
+        self._chat_area.following_output = False
+        self._chat_area.scroll_relative(y=-self._chat_area.size.height, animate=False)
+
+    def action_next_page(self):
+        self._chat_area.scroll_relative(y=self._chat_area.size.height, animate=False)
 
     def _restore_stm_from_version(self):
         """Replace current STM with the version HEAD's snapshot."""

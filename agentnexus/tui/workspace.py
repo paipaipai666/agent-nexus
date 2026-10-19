@@ -5,6 +5,7 @@ import asyncio
 from rich.text import Text
 from textual import work
 
+from agentnexus.tui.actions import CONTROL_IDS
 from agentnexus.tui.commands import COMMAND_HELP
 from agentnexus.tui.screens.inspector import InspectorScreen, task_summary
 from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, ParameterScreen
@@ -15,6 +16,9 @@ class ChatWorkspace:
     """Keep keyboard navigation separate from execution and command dispatch."""
 
     def action_command_menu(self):
+        self._choose_workspace_action(Choice("", "@root"))
+
+    def _root_choices(self):
         plan = self._chat_service.is_plan_mode(self._chat_session.id)
         choices = [
             Choice("会话 · 新建", "/session new", "在当前工作区开始新任务"),
@@ -33,50 +37,69 @@ class ChatWorkspace:
             Choice("外观 · 选择主题", "@themes"),
             Choice("全部命令 · 高级操作", "@commands", "完整功能与参数帮助"),
         ]
-        self.app.push_screen(ChoiceScreen("操作 · Ctrl+P", choices), self._choose_workspace_action)
+        return choices
 
     @work(group="workspace-action", exclusive=True)
     async def _choose_workspace_action(self, choice):
         sid = self._chat_session.id
-        while choice is not None and choice.value.startswith("@"):
-            route = choice.value
-            if route == "@sessions":
-                self.action_session_menu()
-                return
-            if route == "@task":
-                self.action_task_record()
-                return
-            if route == "@attach":
-                path = await self.app.push_screen_wait(ParameterScreen("添加附件", "文件路径，可包含空格。最多 10 个附件。"))
-                choice = Choice("添加附件", "/attach add " + path) if path else None
-            elif route.startswith("@parameter:"):
-                command, prompt = route.removeprefix("@parameter:").split("|", 1)
-                value = await self.app.push_screen_wait(ParameterScreen(choice.label, prompt))
-                choice = Choice(choice.label, command + " " + value) if value else None
-            else:
-                title, choices, selected = self._workspace_choices(route, sid)
-                choice = await self.app.push_screen_wait(ChoiceScreen(title, choices, selected_value=selected))
-        if choice is not None and sid == self._chat_session.id:
-            if not choice.execute:
+        parents = []
+        query, selected = "", None
+        while choice is not None and sid == self._chat_session.id:
+            if choice.value.startswith("@"):
+                route = choice.value
+                if route == "@task":
+                    self.action_task_record()
+                    return
+                if route == "@attach":
+                    value = await self.app.push_screen_wait(ParameterScreen("添加附件", "文件路径，可包含空格。最多 10 个附件。"))
+                    result = Choice("添加附件", "/attach add " + value) if value else None
+                elif route.startswith("@parameter:"):
+                    command, prompt = route.removeprefix("@parameter:").split("|", 1)
+                    value = await self.app.push_screen_wait(ParameterScreen(choice.label, prompt))
+                    result = Choice(choice.label, command + " " + value) if value else None
+                else:
+                    if route == "@sessions":
+                        title, choices, current = "会话 · F2", await self._session_choices(), None
+                    else:
+                        title, choices, current = self._workspace_choices(route, sid)
+                    picker = ChoiceScreen(title, choices, selected_value=selected or current, query=query)
+                    result = await self.app.push_screen_wait(picker)
+                    if result is not None:
+                        parents.append((choice, picker.search_text, picker.selected_value))
+                query, selected = "", None
+                if result is not None:
+                    choice = result
+                    continue
+            elif not choice.execute:
                 command = choice.value.strip()
                 argument = await self.app.push_screen_wait(ParameterScreen(command, choice.description or "输入命令参数", allow_empty=True))
-                if argument is None:
-                    self.action_focus_input()
-                    return
-                choice = Choice(choice.label, command + " " + argument)
-            if choice.value.startswith("/theme"):
+                if argument is not None:
+                    choice = Choice(choice.label, command + " " + argument)
+                    continue
+            else:
+                self._execute_workspace_choice(choice, sid)
+                break
+            if parents:
+                choice, query, selected = parents.pop()
+            else:
+                break
+        self.action_focus_input()
+
+    def _execute_workspace_choice(self, choice, sid):
+        if choice.value.startswith("/theme"):
+            self._handle_command(choice.value)
+        else:
+            command, _, args = choice.value.partition(" ")
+            if command not in COMMAND_HELP:
                 self._handle_command(choice.value)
             else:
-                command, _, args = choice.value.partition(" ")
-                if command not in COMMAND_HELP:
-                    self._handle_command(choice.value)
-                else:
-                    self._run_terminal_command(command, args, sid, presentation="record")
-        self.action_focus_input()
+                self._run_terminal_command(command, args, sid, presentation="record")
 
     def _workspace_choices(self, route, sid):
         from agentnexus.core.config import get_settings
 
+        if route == "@root":
+            return "操作 · Ctrl+P", self._root_choices(), None
         if route == "@models":
             choices = [Choice(f"{provider.name} / {model.model_id}", f"/model select {provider.name}/{model.model_id}")
                        for provider in get_settings().llm_providers for model in provider.models]
@@ -112,8 +135,10 @@ class ChatWorkspace:
             return "资料与检索", choices, None
         return "全部命令", [Choice(description, command, COMMAND_HELP.get(command.split()[0], description), False) for command, description, _ in self._command_catalog()], None
 
-    @work(group="session-picker", exclusive=True)
-    async def action_session_menu(self):
+    def action_session_menu(self):
+        self._choose_workspace_action(Choice("", "@sessions"))
+
+    async def _session_choices(self):
         try:
             result = await asyncio.to_thread(self._terminal.run, "/session", "list", self._chat_session.id)
             choices = [Choice("+ 新建会话", "/session new")]
@@ -124,9 +149,10 @@ class ChatWorkspace:
                 prefix = "当前 · " if sid == self._chat_session.id else ""
                 choices.append(Choice(prefix + str(item.get("preview") or item.get("title") or sid),
                                       f"/session switch {sid}", str(item.get("workspace_path") or item.get("workspace") or sid)))
-            self.app.push_screen(ChoiceScreen("会话 · F2", choices), self._choose_workspace_action)
+            return choices
         except Exception as exc:
             self.app.notify(f"无法读取会话: {exc}", severity="error")
+            return []
 
     def action_toggle_inspector(self):
         self.action_task_record()
@@ -138,13 +164,21 @@ class ChatWorkspace:
     def action_edit_message(self):
         self._chat_input.toggle_multiline()
 
-    def on_input_bar_action_requested(self, event: InputBar.ActionRequested):
-        actions = {"choose-model": "@models", "choose-thinking": "@thinking", "choose-attachment": "@attachments"}
-        if event.action == "toggle-plan":
-            enabled = self._chat_service.is_plan_mode(self._chat_session.id)
-            self._choose_workspace_action(Choice("计划模式", "/plan off" if enabled else "/plan on"))
-        else:
-            self._choose_workspace_action(Choice("", actions[event.action]))
+    async def on_input_bar_action_requested(self, event: InputBar.ActionRequested):
+        await self.action_perform(CONTROL_IDS[event.action])
+
+    def action_choose_model(self):
+        self._choose_workspace_action(Choice("", "@models"))
+
+    def action_choose_thinking(self):
+        self._choose_workspace_action(Choice("", "@thinking"))
+
+    def action_choose_attachment(self):
+        self._choose_workspace_action(Choice("", "@attachments"))
+
+    def action_toggle_plan(self):
+        enabled = self._chat_service.is_plan_mode(self._chat_session.id)
+        self._choose_workspace_action(Choice("计划模式", "/plan off" if enabled else "/plan on"))
 
     def _refresh_workspace(self):
         if not self.is_mounted:
@@ -174,6 +208,7 @@ class ChatWorkspace:
         self.query_one("#task-summary").update(Text(prefix) + summary)
         for action in ("undo", "redo"):
             self.query_one(f"#{action}-checkpoint").disabled = sid in self._running_sessions or not getattr(self._hud, f"_can_{action}")
+        self._refresh_action_hints()
 
     def action_task_record(self):
         sid = self._chat_session.id

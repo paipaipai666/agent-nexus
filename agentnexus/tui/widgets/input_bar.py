@@ -12,6 +12,8 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Button, Static, TextArea
 
+from agentnexus.tui.actions import CONTROL_ACTIONS, ContextFooter
+
 
 class Composer(TextArea):
     """Keep typed and pasted messages in one buffer with predictable submission."""
@@ -64,6 +66,37 @@ class Composer(TextArea):
         event.stop()
 
 
+class ConfigurationBar(Horizontal):
+    """Navigate configuration controls without adding stops to the region cycle."""
+
+    BINDINGS = [action.binding() for action in CONTROL_ACTIONS]
+
+    async def action_perform(self, action_id):
+        await self.screen.action_perform(action_id)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.selected_id = "choose-model"
+
+    def focus_current(self):
+        self.query_one(f"#{self.selected_id}").focus()
+
+    def on_descendant_focus(self, event):
+        self.selected_id = event.widget.id
+
+    def _move(self, offset):
+        buttons = [button for button in self.query(Button) if not button.disabled]
+        if buttons:
+            current = next((i for i, button in enumerate(buttons) if button.has_focus), 0)
+            buttons[(current + offset) % len(buttons)].focus()
+
+    def action_previous(self):
+        self._move(-1)
+
+    def action_next(self):
+        self._move(1)
+
+
 class InputBar(Widget):
     """Task buffer, current configuration and terminal-safe action shortcuts."""
 
@@ -88,7 +121,7 @@ class InputBar(Widget):
             self.action = action
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="composer-actions"):
+        with ConfigurationBar(id="composer-actions"):
             yield Button("模型", id="choose-model")
             yield Button("思考", id="choose-thinking")
             yield Button("计划", id="toggle-plan")
@@ -99,7 +132,7 @@ class InputBar(Widget):
             self._inp = Composer(id="chat-input", placeholder="描述任务，或按 Ctrl+P 选择操作")
             yield self._inp
         with Horizontal(id="composer-footer"):
-            yield Static("", id="composer-hints")
+            yield ContextFooter("", id="composer-hints")
             if self._hud is not None:
                 yield self._hud
 
