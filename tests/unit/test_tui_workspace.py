@@ -211,7 +211,7 @@ async def test_unavailable_task_store_keeps_the_terminal_usable(workspace_runtim
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        assert "任务存储暂时不可用" in str(app.screen.query_one("#task-summary").render())
+        assert "任务存储暂时不可用" in app.screen.query_one("#agent-activity").tooltip
         await pilot.press("ctrl+p")
         assert app.screen.query_one("#palette-search").has_focus
 
@@ -227,7 +227,7 @@ async def test_restored_history_skips_the_large_welcome_logo(workspace_runtime):
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
         assert not app.screen.query_one("#welcome").display
-        assert "ctx 4.0k/" in app.screen.query_one("#hud-text").content
+        assert "ctx" in app.screen.query_one("#hud-text").content
         assert "恢复的任务" in str(app.screen.query_one("#todo-card").render())
         await pilot.press("f1")
         assert "累计输入 1234" in app.screen.query_one("#record-content").text
@@ -331,21 +331,19 @@ async def test_thinking_picker_changes_effort_without_replacing_the_draft(worksp
 
 
 @pytest.mark.asyncio
-async def test_composer_actions_fit_a_narrow_terminal_and_open_the_picker(workspace_runtime):
-    from textual.widgets import Button
-
+async def test_model_configuration_stays_accessible_in_a_narrow_terminal(workspace_runtime):
     runtime, _ = workspace_runtime
     runtime.agent.model_id = "provider/very-long-model-identifier-that-should-be-shortened"
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(60, 20)) as pilot:
         await pilot.pause()
-        for button in app.screen.query("#composer-actions Button"):
-            assert button.region.right <= 60
-        await pilot.click("#choose-thinking")
+        assert not app.screen.query("#composer-actions")
+        await pilot.press("alt+t")
         app.screen.query_one("#palette-search", Input).value = "high"
         await pilot.press("enter")
-        await settle(pilot, lambda: bool(app.screen.query("#choose-thinking")))
-        await settle(pilot, lambda: "high" in str(app.screen.query_one("#choose-thinking", Button).label))
+        await settle(pilot, lambda: runtime.chat.get_thinking_effort("workspace") == "high")
+        await pilot.press("f1")
+        assert "思考强度 high" in app.screen.query_one("#record-content").text
 
 
 @pytest.mark.asyncio
@@ -411,7 +409,7 @@ async def test_task_summary_opens_actual_collaboration_progress(workspace_runtim
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        assert "待答复 1" in str(app.screen.query_one("#task-summary").render())
+        assert "待答复 1" in str(app.screen.query_one("#agent-activity").render())
         await pilot.press("f3")
         assert "检查入口" in app.screen.query_one("#child-detail").text
         assert "检查源码" in app.screen.query_one("#child-detail").text

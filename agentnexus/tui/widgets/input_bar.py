@@ -10,9 +10,9 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Static, TextArea
+from textual.widgets import Static, TextArea
 
-from agentnexus.tui.actions import CONTROL_ACTIONS, ContextFooter
+from agentnexus.tui.actions import ContextFooter
 from agentnexus.tui.widgets.activity import ActivityStatus
 
 
@@ -91,37 +91,6 @@ class Composer(TextArea):
         event.stop()
 
 
-class ConfigurationBar(Horizontal):
-    """Navigate configuration controls without adding stops to the region cycle."""
-
-    BINDINGS = [action.binding() for action in CONTROL_ACTIONS]
-
-    async def action_perform(self, action_id):
-        await self.screen.action_perform(action_id)
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_id = "choose-model"
-
-    def focus_current(self):
-        self.query_one(f"#{self.selected_id}").focus()
-
-    def on_descendant_focus(self, event):
-        self.selected_id = event.widget.id
-
-    def _move(self, offset):
-        buttons = [button for button in self.query(Button) if not button.disabled]
-        if buttons:
-            current = next((i for i, button in enumerate(buttons) if button.has_focus), 0)
-            buttons[(current + offset) % len(buttons)].focus()
-
-    def action_previous(self):
-        self._move(-1)
-
-    def action_next(self):
-        self._move(1)
-
-
 class InputBar(Widget):
     """Task buffer, current configuration and terminal-safe action shortcuts."""
 
@@ -140,20 +109,7 @@ class InputBar(Widget):
             super().__init__()
             self.text = text
 
-    class ActionRequested(Message):
-        def __init__(self, action):
-            super().__init__()
-            self.action = action
-
     def compose(self) -> ComposeResult:
-        with ConfigurationBar(id="composer-actions"):
-            yield Button("模型", id="choose-model")
-            yield Button("思考", id="choose-thinking")
-            yield Button("计划", id="toggle-plan")
-            yield Button("附件", id="choose-attachment")
-            status = Static("", id="task-summary")
-            status.display = False
-            yield status
         yield Static("", id="composer-meta")
         with Horizontal(id="input-row"):
             yield Static("›", id="input-prompt")
@@ -161,9 +117,9 @@ class InputBar(Widget):
             yield self._inp
         with Horizontal(id="composer-footer"):
             yield ActivityStatus(id="agent-activity")
-            yield ContextFooter("", id="composer-hints")
             if self._hud is not None:
                 yield self._hud
+            yield ContextFooter("", id="composer-hints")
 
     def update_state(self, *, model, thinking, plan, attachments, draft, queued):
         self._queued = queued
@@ -174,9 +130,8 @@ class InputBar(Widget):
             meta.append("附件 " + ", ".join(item["name"] for item in attachments))
         self.query_one("#composer-meta", Static).update(meta)
         self.query_one("#composer-meta").display = bool(attachments)
-        for selector, label in [("choose-model", model), ("choose-thinking", f"思考 {thinking}"),
-                                ("toggle-plan", "计划 开" if plan else "计划 关"), ("choose-attachment", f"附件 {len(attachments)}")]:
-            self.query_one(f"#{selector}", Button).label = Text(label)
+        if self._hud is not None:
+            self._hud.update_configuration(thinking=thinking, plan=plan)
         self._update_hints()
 
     def toggle_multiline(self):
@@ -184,6 +139,22 @@ class InputBar(Widget):
         self._update_size()
         self._update_hints()
         self._inp.focus()
+
+    def fit_footer(self):
+        """Give state and direct actions space before optional session metadata."""
+        if not self.is_mounted:
+            return
+        width = self.query_one("#composer-footer").size.width
+        if not width:
+            return
+        activity = self.query_one(ActivityStatus)
+        hints = self.query_one(ContextFooter)
+        status_width = min(cell_len(activity.activity.label()), max(8, width // 2))
+        hint_width = min(hints.preferred_width, max(hints.minimum_width, width - status_width - 2))
+        status_width = min(status_width, max(8, width - hint_width - 2))
+        activity.styles.width = status_width
+        if self._hud is not None:
+            self._hud.fit_compact(max(0, width - status_width - hint_width - 4))
 
     def _update_hints(self):
         send = "排队" if self._queued else "发送"
@@ -198,6 +169,7 @@ class InputBar(Widget):
 
     def on_resize(self):
         self._update_size()
+        self.fit_footer()
 
     def on_mount(self):
         self._update_hints()
@@ -213,6 +185,3 @@ class InputBar(Widget):
         self._update_hints()
         self.post_message(self.AppInputChanged(event.text_area.text))
 
-    def on_button_pressed(self, event: Button.Pressed):
-        event.stop()
-        self.post_message(self.ActionRequested(event.button.id))

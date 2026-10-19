@@ -21,10 +21,16 @@ async def test_task_status_shares_the_three_row_composer(workspace_runtime, size
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         assert app.screen.query_one("#input-area").region.height == 3
-        assert app.screen.query_one("#task-summary").region.y == app.screen.query_one("#choose-model").region.y
+        composer = app.screen.query_one("#input-area")
+        assert composer.styles.border_top[0] == "solid"
+        assert app.screen.query_one("#input-row").region.y == composer.region.y + 1
+        assert not app.screen.query("#composer-actions")
         assert app.screen.query_one("#chat-area").region.height >= size[1] - 4
-        assert "待答复 1" in str(app.screen.query_one("#task-summary").render())
-        assert "F1" in str(app.screen.query_one("#composer-hints").render())
+        activity = app.screen.query_one("#agent-activity")
+        assert "待答复 1" in str(activity.render())
+        assert activity.region.right <= app.screen.query_one("#composer-hints").region.x
+        assert "F3 任务" in str(app.screen.query_one("#composer-hints").render())
+        assert "F1 帮助" in str(app.screen.query_one("#composer-hints").render())
 
 
 @pytest.mark.asyncio
@@ -38,6 +44,38 @@ async def test_clicking_the_send_hint_submits_the_same_task(workspace_runtime):
         await settle(pilot, lambda: runtime.chat.get_session_recovery("workspace") is not None and not runtime.chat.is_processing)
         assert runtime.chat.get_session_recovery("workspace")["question"] == "从底栏发送任务"
         assert runtime.agent.run.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_model_summary_and_activity_are_pointer_shortcuts(workspace_runtime):
+    runtime, _ = workspace_runtime
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(120, 32)) as pilot:
+        await pilot.pause()
+        assert "test-model" in app.screen.query_one("#hud-text").content
+        await pilot.click("#hud-text")
+        await settle(pilot, lambda: bool(app.screen.query("#palette-search")))
+        await pilot.press("escape")
+        await pilot.click("#agent-activity")
+        assert app.screen.query_one("#task-detail")
+        await pilot.press("escape")
+        assert app.screen.query_one(Composer).has_focus
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [60, 120, 180])
+async def test_task_details_keep_a_single_column(workspace_runtime, width):
+    runtime, _ = workspace_runtime
+    child = runtime.chat._subagents.register("workspace", "parent", "检查任务", "reviewer", "完整任务说明")
+    runtime.chat._subagents.update(child, status="thinking")
+    app = AgentNexusTUI(runtime=runtime)
+    async with app.run_test(size=(width, 32)) as pilot:
+        await pilot.press("f3")
+        tasks, detail = app.screen.query_one("#child-list"), app.screen.query_one("#child-detail")
+        assert tasks.region.x == detail.region.x
+        assert tasks.region.width == detail.region.width
+        assert tasks.region.bottom <= detail.region.y
+        assert "完整任务说明" in detail.text
 
 
 @pytest.mark.asyncio
@@ -120,6 +158,6 @@ async def test_record_full_text_hint_stays_clickable_at_normal_terminal_widths(w
         await pilot.press("tab")
         hints = str(app.screen.query_one("#composer-hints").render())
         assert "D 全文" in hints
-        offset = cell_len(hints.partition("D 全文")[0]) + 1
+        offset = max(0, app.screen.query_one("#composer-hints").size.width - cell_len(hints)) + cell_len(hints.partition("D 全文")[0]) + 1
         await pilot.click("#composer-hints", offset=(offset, 0))
         assert app.screen.query_one("#record-content").text == "可复制的完整结果"

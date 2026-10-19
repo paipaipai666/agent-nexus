@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+from rich.cells import cell_len
 from rich.markup import escape
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
@@ -33,6 +35,9 @@ class HUD(Widget):
     def __init__(self, *args, compact=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.compact = compact
+        self._compact_budget = None
+        self._thinking = "默认"
+        self._plan = False
         if compact:
             self.tooltip = "F1 查看用量与按键"
         settings = get_settings()
@@ -55,6 +60,17 @@ class HUD(Widget):
     def update_capabilities(self, supports_thinking: bool, strategy: str = ""):
         self._supports_thinking = supports_thinking
         self._strategy = strategy
+        self._refresh()
+
+    def update_configuration(self, *, thinking, plan):
+        self._thinking, self._plan = thinking, plan
+        self._refresh()
+
+    def fit_compact(self, width):
+        self._compact_budget = width
+        text = self._build_text()
+        self.display = bool(text)
+        self.styles.width = cell_len(Text.from_markup(text).plain)
         self._refresh()
 
     def update_model(self, model: str, base_url: str = "", *, workspace: str | None = None):
@@ -101,13 +117,13 @@ class HUD(Widget):
 
     async def on_click(self):
         if self.compact:
-            await self.screen.action_perform("help")
+            await self.screen.action_perform("models")
 
     def describe_usage(self):
         """Expose full session metrics without expanding the terminal status row."""
         return (f"模型 {self.model}\n上下文 {self.current_tokens} / {self.ctx_max if self.ctx_max is not None else '未报告上限'}\n"
                 f"累计输入 {self.total_input}\n累计输出 {self.total_output}\n"
-                f"思考能力 {'支持' if self._supports_thinking else '不支持'}\n工具策略 {self._strategy or '未报告'}\n检查点 {self._head}")
+                f"思考能力 {'支持' if self._supports_thinking else '不支持'}\n思考强度 {self._thinking}\n计划模式 {'开' if self._plan else '关'}\n工具策略 {self._strategy or '未报告'}\n检查点 {self._head}")
 
     def _build_text(self) -> str:
         ctx_used = self.current_tokens
@@ -127,7 +143,13 @@ class HUD(Widget):
         compact_indicator = " · compact 压缩中" if self._compacting else ""
 
         if self.compact:
-            return "压缩中 · " + ctx_seg if self._compacting else ctx_seg
+            model = Text(self._display_model)
+            model.truncate(18, overflow="ellipsis")
+            short_ctx = f"ctx {pct:02d}%" if self.ctx_max is not None else "ctx ?"
+            configuration = f"{escape(self._display_model)} · {self._thinking}" + (" · 计划" if self._plan else "")
+            candidates = [f"{configuration} · {ctx_seg}", f"{escape(model.plain)} · {ctx_seg}",
+                          f"{escape(model.plain)} · {short_ctx}", ctx_seg, short_ctx]
+            return next((text for text in candidates if self._compact_budget is None or cell_len(Text.from_markup(text).plain) <= self._compact_budget), "")
 
         head_short = self._head[:8] if self._head and self._head != "---" else self._head
         version_actions = []

@@ -3,16 +3,12 @@
 import asyncio
 from sqlite3 import Error as StorageError
 
-from rich.style import Style
-from rich.text import Text
 from textual import work
 
-from agentnexus.tui.actions import CONTROL_IDS
 from agentnexus.tui.activity import session_activity
 from agentnexus.tui.commands import COMMAND_HELP
-from agentnexus.tui.screens.inspector import InspectorScreen, task_summary
+from agentnexus.tui.screens.inspector import InspectorScreen
 from agentnexus.tui.screens.interactions import Choice, ChoiceScreen, ParameterScreen
-from agentnexus.tui.widgets.input_bar import InputBar
 
 
 class ChatWorkspace:
@@ -174,9 +170,6 @@ class ChatWorkspace:
         self._chat_input.toggle_multiline()
         self._update_command_suggestions(self.query_one("#chat-input").text)
 
-    async def on_input_bar_action_requested(self, event: InputBar.ActionRequested):
-        await self.action_perform(CONTROL_IDS[event.action])
-
     def action_choose_model(self):
         self._choose_workspace_action(Choice("", "@models"))
 
@@ -212,19 +205,6 @@ class ChatWorkspace:
         except (OSError, StorageError) as exc:
             failure = str(exc)
         self._side_panel.update_collaboration(children)
-        status = self.query_one("#task-summary")
-        status.display = bool(recovery or failure or children)
-        summary = Text(f"任务状态不可用 · {failure}") if failure else task_summary(recovery)
-        if recovery and sid in self._running_sessions:
-            summary = task_summary({**recovery, "status": "running" if recovery.get("status") != "interrupted" else "interrupted"})
-        waiting = sum(child.get("waiting_questions", 0) for child in children)
-        queued = len(self._queued_messages.get(sid, []))
-        prefix = (f"待答复 {waiting} · F3 · " if waiting else "") + (f"排队 {queued} · " if queued else "")
-        label = Text(prefix.rstrip(" ·")) if waiting and not failure else Text(prefix) + summary
-        label.stylize(Style(meta={"@click": "screen.perform('tasks')"}))
-        status.update(label)
-        status.tooltip = label.plain + " · F3 查看任务与协作"
-        status.set_class(bool(waiting or failure), "needs-attention")
         self._activity_children, self._activity_recovery, self._activity_failure = children, recovery, failure
         self._refresh_activity()
         self._refresh_action_hints()
@@ -237,7 +217,11 @@ class ChatWorkspace:
             children=getattr(self, "_activity_children", ()), recovery=getattr(self, "_activity_recovery", None),
             failure=getattr(self, "_activity_failure", ""), compacting=sid in self._compacting_sessions,
         )
-        self.query_one("#agent-activity").update_activity(activity)
+        indicator = self.query_one("#agent-activity")
+        indicator.update_activity(activity)
+        if getattr(self, "_activity_failure", ""):
+            indicator.tooltip += " · " + self._activity_failure
+        self._chat_input.fit_footer()
 
     def action_task_record(self):
         sid = self._chat_session.id

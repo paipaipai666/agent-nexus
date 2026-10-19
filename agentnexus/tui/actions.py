@@ -19,7 +19,7 @@ class TerminalAction:
     key: str
     handler: str
     description: str = ""
-    scope: Literal["screen", "records", "controls", "composer"] = "screen"
+    scope: Literal["screen", "records", "composer"] = "screen"
     key_display: str = ""
 
     @property
@@ -58,7 +58,7 @@ SCREEN_ACTIONS = (
     TerminalAction("attachments", "附件", "alt+a", "choose_attachment"),
     TerminalAction("plan", "计划模式", "alt+p", "toggle_plan"),
     TerminalAction("help", "帮助", "f1", "context_help"),
-    TerminalAction("next-region", "浏览", "tab", "next_region", "在输入、记录和配置间切换；有命令候选时 Tab 补全"),
+    TerminalAction("next-region", "浏览", "tab", "next_region", "在输入和记录间切换；有命令候选时 Tab 补全"),
     TerminalAction("previous-region", "上一区域", "shift+tab", "previous_region"),
     TerminalAction("previous-page", "上翻对话", "pageup", "previous_page", key_display="PageUp"),
     TerminalAction("next-page", "下翻对话", "pagedown", "next_page", key_display="PageDown"),
@@ -74,11 +74,6 @@ RECORD_ACTIONS = (
     TerminalAction("full-record", "全文", "d", "full_record", scope="records", key_display="D"),
 )
 
-CONTROL_ACTIONS = (
-    TerminalAction("previous-control", "上一项", "left", "previous", scope="controls", key_display="←"),
-    TerminalAction("next-control", "下一项", "right", "next", scope="controls", key_display="→"),
-)
-
 COMPOSER_ACTIONS = (
     TerminalAction("send", "发送", "ctrl+s", "submit", "Ctrl+S 始终发送当前消息", scope="composer"),
     TerminalAction("newline", "换行", "enter", "newline", "Shift+Enter、Alt+Enter 或 Ctrl+J 也可换行", scope="composer"),
@@ -86,8 +81,7 @@ COMPOSER_ACTIONS = (
     TerminalAction("complete-command", "补全", "tab", "complete_command"),
 )
 
-ACTIONS = {action.id: action for action in (*SCREEN_ACTIONS, *RECORD_ACTIONS, *CONTROL_ACTIONS, *COMPOSER_ACTIONS)}
-CONTROL_IDS = {"choose-model": "models", "choose-thinking": "thinking", "toggle-plan": "plan", "choose-attachment": "attachments"}
+ACTIONS = {action.id: action for action in (*SCREEN_ACTIONS, *RECORD_ACTIONS, *COMPOSER_ACTIONS)}
 
 
 class ContextFooter(Static):
@@ -101,6 +95,16 @@ class ContextFooter(Static):
     def show_actions(self, states, *, prefix=""):
         self._states, self._prefix = list(states), prefix
         self._render_actions()
+
+    @property
+    def preferred_width(self):
+        states = self._states or []
+        return cell_len(" · ".join(filter(None, [self._prefix, *(f"{s.action.display_key} {s.action.title}" for s in states)])))
+
+    @property
+    def minimum_width(self):
+        states = self._states or []
+        return cell_len(" · ".join(f"{s.action.display_key} {s.action.title}" for i, s in enumerate(states) if i == 0 or s.action.id in {"help", "input", "cancel", "close", "save"}))
 
     def on_resize(self):
         if self._states is not None:

@@ -70,10 +70,12 @@ async def smoke(target):
                 await pilot.press("tab")
                 if app.focused.id != "chat-area":
                     raise SystemExit("Tab must enter transcript navigation")
-                await pilot.press("tab", "right")
-                if app.focused.id != "choose-thinking":
-                    raise SystemExit("Configuration controls must support arrow navigation")
-                await pilot.press("tab", "f1")
+                await pilot.press("tab")
+                if app.focused.id != "chat-input":
+                    raise SystemExit("Tab must return directly to input")
+                if "空闲" not in str(app.screen.query_one("#agent-activity").render()):
+                    raise SystemExit("Installed session activity is missing")
+                await pilot.press("f1")
                 if "Alt+M" not in app.screen.query_one("#record-content").text:
                     raise SystemExit("Installed action help must expose direct shortcuts")
                 await pilot.press("escape", "/", "t", "h", "tab")

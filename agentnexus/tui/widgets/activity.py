@@ -10,7 +10,7 @@ class ActivityStatus(Static):
     """Keep lifecycle state visible independently of model configuration."""
 
     DEFAULT_CSS = """
-    ActivityStatus { width: auto; max-width: 45%; height: 1; margin-right: 2; text-wrap: nowrap; text-overflow: ellipsis; color: $text-muted; }
+    ActivityStatus { width: auto; height: 1; margin-right: 2; text-wrap: nowrap; text-overflow: ellipsis; color: $text-muted; }
     ActivityStatus.working { color: $primary; }
     ActivityStatus.waiting, ActivityStatus.confirming, ActivityStatus.unavailable { color: $warning; }
     """
@@ -35,3 +35,6 @@ class ActivityStatus(Static):
     def _tick(self):
         self.frame = (self.frame + 1) % 4
         self.update(Text(self.activity.label(self.frame)))
+
+    async def on_click(self):
+        await self.screen.action_perform("tasks")

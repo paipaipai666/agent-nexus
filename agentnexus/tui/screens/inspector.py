@@ -54,9 +54,6 @@ class InspectorScreen(ActionScreen[None]):
     InspectorScreen #task-controls Button { width: 1fr; height: 1; min-height: 1; min-width: 8; padding: 0; border: none; background: transparent; text-style: none; }
     InspectorScreen #task-controls Button:focus, InspectorScreen #task-controls Button:hover { color: $primary; background: $primary 12%; }
     InspectorScreen ContextFooter { height: 1; color: $text-muted; }
-    InspectorScreen.wide #task-content { layout: horizontal; }
-    InspectorScreen.wide #child-list { width: 36; height: 1fr; max-height: 100%; padding-right: 1; }
-    InspectorScreen.wide #child-detail { width: 1fr; }
     """
 
     def __init__(self, chat, sid, terminal):
@@ -75,7 +72,7 @@ class InspectorScreen(ActionScreen[None]):
             yield Label("AgentNexus / 任务与协作", id="task-title")
             yield Static("", id="task-detail")
             yield Static("", id="task-todos")
-            with Horizontal(id="task-content"):
+            with Vertical(id="task-content"):
                 yield OptionList(id="child-list", compact=True)
                 yield TextArea("", id="child-detail", read_only=True, soft_wrap=True)
             with Horizontal(id="task-controls"):
@@ -97,9 +94,6 @@ class InspectorScreen(ActionScreen[None]):
             self.query_one("#task-detail", Static).update(Text(f"任务状态不可用 · {exc}"))
             self._disabled_reasons = dict.fromkeys(("reply", "instruct", "stop", "record"), f"任务状态不可用 · {exc}")
             self._sync_actions()
-
-    def on_resize(self, event):
-        self.set_class(event.size.width >= 112, "wide")
 
     def _refresh_data(self):
         children = self.chat.list_subagents(self.sid)

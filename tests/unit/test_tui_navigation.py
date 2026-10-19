@@ -29,7 +29,7 @@ async def test_copying_selected_draft_does_not_stop_a_task(workspace_runtime):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("history_size", [0, 10])
-async def test_tab_cycles_three_regions_independent_of_history(workspace_runtime, history_size):
+async def test_tab_cycles_input_and_records_independent_of_history(workspace_runtime, history_size):
     runtime, _ = workspace_runtime
     for _ in range(history_size):
         runtime.memory_manager.short_term.append("system", "[思考过程] 检查操作路径。")
@@ -46,13 +46,9 @@ async def test_tab_cycles_three_regions_independent_of_history(workspace_runtime
             await pilot.press("escape")
             assert app.focused.id == "chat-area"
         await pilot.press("tab")
-        assert app.focused.id == "choose-model"
-        await pilot.press("right")
-        assert app.focused.id == "choose-thinking"
-        await pilot.press("tab")
         assert app.focused.id == "chat-input"
         await pilot.press("shift+tab")
-        assert app.focused.id == "choose-thinking"
+        assert app.focused.id == "chat-area"
         await pilot.press("escape")
         assert app.focused.id == "chat-input"
 

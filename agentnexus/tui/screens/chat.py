@@ -31,7 +31,6 @@ from agentnexus.skills import (
 from agentnexus.tui.actions import (
     ACTIONS,
     COMPOSER_ACTIONS,
-    CONTROL_ACTIONS,
     RECORD_ACTIONS,
     SCREEN_ACTIONS,
     ActionState,
@@ -43,7 +42,7 @@ from agentnexus.tui.execution import ChatExecution
 from agentnexus.tui.screens.interactions import Choice
 from agentnexus.tui.widgets.confirm_dialog import ConfirmDialog
 from agentnexus.tui.widgets.hud import HUD
-from agentnexus.tui.widgets.input_bar import Composer, ConfigurationBar, InputBar
+from agentnexus.tui.widgets.input_bar import Composer, InputBar
 from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
 from agentnexus.tui.widgets.side_panel import SidePanel
 from agentnexus.tui.widgets.welcome import Welcome
@@ -480,6 +479,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
                              title="排队" if self._chat_session.id in self._running_sessions else "发送")
         elif action_id == "newline":
             action = replace(action, key_display="Enter" if self.query_one(Composer).multiline else "Shift+Enter")
+        elif action_id == "stop":
+            action = replace(action, title="复制" if isinstance(self.app.focused, TextArea) and self.app.focused.selected_text else "停止")
         reason = ""
         if action.scope == "records":
             if not self._chat_area.query("ChatMessage, ReasoningBlock, ToolCall"):
@@ -493,7 +494,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         if state.disabled_reason:
             self.app.notify(state.disabled_reason)
             return
-        hosts = {"screen": self, "records": self._chat_area, "controls": self.query_one(ConfigurationBar), "composer": self.query_one(Composer)}
+        hosts = {"screen": self, "records": self._chat_area, "composer": self.query_one(Composer)}
         host = hosts[state.action.scope]
         await host.run_action(state.action.handler)
 
@@ -502,8 +503,6 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         ancestors = list(focused.ancestors_with_self) if focused is not None else []
         if self._chat_area in ancestors:
             return "records"
-        if self.query_one(ConfigurationBar) in ancestors:
-            return "controls"
         return "input"
 
     def _refresh_action_hints(self):
@@ -513,17 +512,19 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         if region == "records":
             ids = ("full-record", "open-record", "input", "help")
             prefix = "↑↓ 选择"
-        elif region == "controls":
-            ids = ("previous-control", "next-control", "input", "help")
-            prefix = "Enter 选择"
         else:
             composer = self.query_one(Composer)
             if composer.suggestions_active:
                 ids = ("accept-command", "complete-command", "input", "help")
+            elif self._chat_session.id in self._running_sessions:
+                ids = ("stop", "send", "help")
+            elif self.query_one("#agent-activity").activity.mode in {"waiting", "unavailable"} or self.query_one("#agent-activity").activity.waiting:
+                ids = ("tasks", "menu", "help")
             else:
                 ids = ("newline", "send", "menu", "help") if composer.multiline else ("send", "menu", "next-region", "help")
             prefix = ""
         self.query_one("#composer-hints", ContextFooter).show_actions([self._action_state(key) for key in ids], prefix=prefix)
+        self._chat_input.fit_footer()
 
     def on_descendant_focus(self, event):
         self._refresh_action_hints()
@@ -538,8 +539,6 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         actions = [*SCREEN_ACTIONS]
         if region == "records":
             actions.extend(RECORD_ACTIONS)
-        elif region == "controls":
-            actions.extend(CONTROL_ACTIONS)
         else:
             actions.extend(COMPOSER_ACTIONS if self.query_one(Composer).suggestions_active else COMPOSER_ACTIONS[:2])
         focused = self.app.focused
@@ -552,15 +551,12 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             return
         focused = self.app.focused
         ancestors = list(focused.ancestors_with_self) if focused is not None else []
-        controls = self.query_one(ConfigurationBar)
-        current = 1 if self._chat_area in ancestors else 2 if controls in ancestors else 0
-        target = (current + offset) % 3
+        current = 1 if self._chat_area in ancestors else 0
+        target = (current + offset) % 2
         if target == 0:
             self.action_focus_input()
         elif target == 1:
             self._chat_area.focus()
-        else:
-            controls.focus_current()
 
     def action_next_region(self):
         self._cycle_region(1)
