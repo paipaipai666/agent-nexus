@@ -84,6 +84,13 @@ No explanatory comments in code. Comments rot; the code and its tests are the do
 - **Security**: No hardcoded secrets. Follow OWASP.
 - **Delegation**: Provide full context to sub-agents. Synthesize their output. Do not delegate irreversible or security-critical actions.
 
+## Performance Tuning Records
+
+- Every performance-tuning task must add or update a record in the repository's `log/` directory before completion. This also applies when an investigation produces no code change or no improvement.
+- Name records `YYYY-MM-DD-<topic>.md`. Append follow-up findings and measurements for the same issue to its existing record.
+- Record the observed symptoms, affected paths, measured root cause and evidence, fix and relevant commits, and before/after results.
+- Include the environment, code revisions, workload, measurement method, sample counts, metric units, reproducible commands or scripts, raw data locations, validation results, and remaining limitations. State missing measurements and unverified hypotheses explicitly.
+
 <!-- headroom:rtk-instructions -->
 
 # RTK (Rust Token Killer) - Token-Optimized Commands
