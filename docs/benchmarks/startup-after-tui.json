@@ -1,0 +1,126 @@
+{
+  "measurement_version": 3,
+  "target": "tui",
+  "python": "3.13.6 (tags/v3.13.6:4e66535, Aug  6 2025, 14:36:00) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "samples": [
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5347386999055743,
+        "runtime_build_start": 0.6805588998831809,
+        "runtime_build_end": 1.812148599885404,
+        "key_sent": 2.317742899991572,
+        "interactive": 2.34575039986521
+      },
+      "ready_seconds": 2.34575039986521
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5234025998506695,
+        "runtime_build_start": 0.6807536999695003,
+        "runtime_build_end": 1.8219114998355508,
+        "key_sent": 2.386772299883887,
+        "interactive": 2.4060406999196857
+      },
+      "ready_seconds": 2.4060406999196857
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5370213999412954,
+        "runtime_build_start": 0.6980740998405963,
+        "runtime_build_end": 1.83578409999609,
+        "key_sent": 2.383422299986705,
+        "interactive": 2.4041317999362946
+      },
+      "ready_seconds": 2.4041317999362946
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5947608000133187,
+        "runtime_build_start": 0.76474400004372,
+        "runtime_build_end": 1.904025300173089,
+        "key_sent": 2.4657156001776457,
+        "interactive": 2.471970100188628
+      },
+      "ready_seconds": 2.471970100188628
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5007569999434054,
+        "runtime_build_start": 0.6429480998776853,
+        "runtime_build_end": 1.7375212998595089,
+        "key_sent": 2.353283799951896,
+        "interactive": 2.3595418999902904
+      },
+      "ready_seconds": 2.3595418999902904
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5905245998874307,
+        "runtime_build_start": 0.7449944999534637,
+        "runtime_build_end": 2.0149334999732673,
+        "key_sent": 2.5778246000409126,
+        "interactive": 2.6018689998891205
+      },
+      "ready_seconds": 2.6018689998891205
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.6219941000454128,
+        "runtime_build_start": 0.8169722000602633,
+        "runtime_build_end": 2.208013700088486,
+        "key_sent": 2.7739713001064956,
+        "interactive": 2.798305399948731
+      },
+      "ready_seconds": 2.798305399948731
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5500860000029206,
+        "runtime_build_start": 0.7011863000225276,
+        "runtime_build_end": 1.7856185999698937,
+        "key_sent": 2.3220680998638272,
+        "interactive": 2.3417228998150676
+      },
+      "ready_seconds": 2.3417228998150676
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5383484000340104,
+        "runtime_build_start": 0.6930877000559121,
+        "runtime_build_end": 1.7897652999963611,
+        "key_sent": 2.3556985000614077,
+        "interactive": 2.375498899957165
+      },
+      "ready_seconds": 2.375498899957165
+    },
+    {
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.548466500127688,
+        "runtime_build_start": 0.6988149001263082,
+        "runtime_build_end": 1.76653810008429,
+        "key_sent": 2.288559100124985,
+        "interactive": 2.294424300082028
+      },
+      "ready_seconds": 2.294424300082028
+    }
+  ],
+  "summary": {
+    "count": 10,
+    "median_seconds": 2.38981534994673,
+    "min_seconds": 2.294424300082028,
+    "max_seconds": 2.798305399948731
+  },
+  "production_revision": "f39e834715facdf50ec8efe143d0d7fc190e4e42",
+  "cache_state": "Fresh process and empty capability cache; OS and model file caches retained"
+}

@@ -1,0 +1,587 @@
+{
+  "revision": "27529a0904896d883d9c92137a380c64eec3f246",
+  "measurement_version": 3,
+  "tui": {
+    "samples_seconds": [
+      15.253135899896733,
+      8.31448930001352,
+      20.175734599935822
+    ],
+    "median_seconds": 15.253135899896733,
+    "min_seconds": 8.31448930001352,
+    "max_seconds": 20.175734599935822,
+    "runtime_build": {
+      "samples_seconds": [
+        1.0173201999859884,
+        1.0313461000332609,
+        1.028517400030978
+      ],
+      "median_seconds": 1.028517400030978,
+      "min_seconds": 1.0173201999859884,
+      "max_seconds": 1.0313461000332609
+    },
+    "cli_import": {
+      "samples_seconds": [
+        0.39570580003783107,
+        0.3906415000092238,
+        0.38457339990418404
+      ],
+      "median_seconds": 0.3906415000092238,
+      "min_seconds": 0.38457339990418404,
+      "max_seconds": 0.39570580003783107
+    },
+    "keyboard_echo": {
+      "samples_seconds": [
+        0.02772199991159141,
+        0.014990200055763125,
+        0.013549100025556982
+      ],
+      "median_seconds": 0.014990200055763125,
+      "min_seconds": 0.013549100025556982,
+      "max_seconds": 0.02772199991159141
+    },
+    "files": [
+      "tui-baseline-plain-1-1792555926796471400.json",
+      "tui-baseline-plain-2-1792555943575793500.json",
+      "tui-baseline-plain-3-1792555953088816700.json"
+    ],
+    "probe": {
+      "samples_seconds": [
+        12.993484299979173,
+        5.966495299944654,
+        17.99518690002151
+      ],
+      "median_seconds": 12.993484299979173,
+      "min_seconds": 5.966495299944654,
+      "max_seconds": 17.99518690002151
+    },
+    "probe_fraction": [
+      0.8518565877372889,
+      0.7176021382257299,
+      0.8919222648814359
+    ]
+  },
+  "source_http": {
+    "source_health": {
+      "samples_seconds": [
+        2.297078700037673,
+        2.2171297000022605,
+        1.9464801999274641
+      ],
+      "median_seconds": 2.2171297000022605,
+      "min_seconds": 1.9464801999274641,
+      "max_seconds": 2.297078700037673
+    },
+    "first_capabilities": {
+      "samples_seconds": [
+        70.77439539995976,
+        5.437748699914664,
+        71.63432650000323
+      ],
+      "median_seconds": 70.77439539995976,
+      "min_seconds": 5.437748699914664,
+      "max_seconds": 71.63432650000323
+    },
+    "repeat_capabilities": {
+      "samples_seconds": [
+        0.015748900012113154,
+        0.0031207000138238072,
+        0.01609060005284846
+      ],
+      "median_seconds": 0.015748900012113154,
+      "min_seconds": 0.0031207000138238072,
+      "max_seconds": 0.01609060005284846
+    }
+  },
+  "raw_samples": {
+    "tui-baseline-plain-1-1792555926796471400.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 0.11052319989539683,
+          "thread": 15116
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.5062289999332279,
+          "thread": 15116
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.6521422999212518,
+          "thread": 15116
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.6694624999072403,
+          "thread": 15116
+        },
+        {
+          "name": "tui_run_start",
+          "seconds": 1.6807688999688253,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen.__init__.start",
+          "seconds": 1.749034299980849,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen.__init__.end",
+          "seconds": 2.088107499992475,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen.on_mount.start",
+          "seconds": 2.119010799913667,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.start",
+          "seconds": 2.119883699924685,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.end",
+          "seconds": 2.1217291998909786,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.start",
+          "seconds": 2.123325499938801,
+          "thread": 15116
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 2.1242776999715716,
+          "thread": 15116
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 15.117761999950744,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.end",
+          "seconds": 15.119425099925138,
+          "thread": 15116
+        },
+        {
+          "name": "ChatScreen.on_mount.end",
+          "seconds": 15.123435999965295,
+          "thread": 15116
+        },
+        {
+          "name": "tui_key_sent",
+          "seconds": 15.225413899985142,
+          "thread": 15116
+        },
+        {
+          "name": "tui_interactive",
+          "seconds": 15.253135899896733,
+          "thread": 15116
+        }
+      ],
+      "pid": 24632,
+      "measurement_version": 3,
+      "wall_seconds": 16.437527099973522,
+      "health_seconds": null,
+      "announced_seconds": null,
+      "api_timings": [],
+      "exit_code": 0,
+      "target": "tui",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "tui-baseline-plain-1-1792555926796471400.json",
+      "log_file": "tui-baseline-plain-1-1792555926796471400.log"
+    },
+    "tui-baseline-plain-2-1792555943575793500.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 0.11327229999005795,
+          "thread": 44376
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.5039137999992818,
+          "thread": 44376
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.644229199970141,
+          "thread": 44376
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.675575300003402,
+          "thread": 44376
+        },
+        {
+          "name": "tui_run_start",
+          "seconds": 1.6862304999958724,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen.__init__.start",
+          "seconds": 1.7427335999673232,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen.__init__.end",
+          "seconds": 2.0999426000053063,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen.on_mount.start",
+          "seconds": 2.129895400023088,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.start",
+          "seconds": 2.131088500027545,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.end",
+          "seconds": 2.131584299961105,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.start",
+          "seconds": 2.1346201000269502,
+          "thread": 44376
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 2.135551300016232,
+          "thread": 44376
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 8.102046599960886,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.end",
+          "seconds": 8.103036199929193,
+          "thread": 44376
+        },
+        {
+          "name": "ChatScreen.on_mount.end",
+          "seconds": 8.105418400024064,
+          "thread": 44376
+        },
+        {
+          "name": "tui_key_sent",
+          "seconds": 8.299499099957757,
+          "thread": 44376
+        },
+        {
+          "name": "tui_interactive",
+          "seconds": 8.31448930001352,
+          "thread": 44376
+        }
+      ],
+      "pid": 19292,
+      "measurement_version": 3,
+      "wall_seconds": 9.183261699974537,
+      "health_seconds": null,
+      "announced_seconds": null,
+      "api_timings": [],
+      "exit_code": 0,
+      "target": "tui",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "tui-baseline-plain-2-1792555943575793500.json",
+      "log_file": "tui-baseline-plain-2-1792555943575793500.log"
+    },
+    "tui-baseline-plain-3-1792555953088816700.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 0.11351930000819266,
+          "thread": 40560
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.4980926999123767,
+          "thread": 40560
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.6371367999818176,
+          "thread": 40560
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.6656542000127956,
+          "thread": 40560
+        },
+        {
+          "name": "tui_run_start",
+          "seconds": 1.6762850999366492,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen.__init__.start",
+          "seconds": 1.7457472999813035,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen.__init__.end",
+          "seconds": 2.0877443999052048,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen.on_mount.start",
+          "seconds": 2.119528300012462,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.start",
+          "seconds": 2.120599400019273,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen._init_skill_registry.end",
+          "seconds": 2.1209741999628022,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.start",
+          "seconds": 2.1227106999140233,
+          "thread": 40560
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 2.124039899907075,
+          "thread": 40560
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 20.119226799928583,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen._refresh_model_panel.end",
+          "seconds": 20.12010299996473,
+          "thread": 40560
+        },
+        {
+          "name": "ChatScreen.on_mount.end",
+          "seconds": 20.12290979991667,
+          "thread": 40560
+        },
+        {
+          "name": "tui_key_sent",
+          "seconds": 20.162185499910265,
+          "thread": 40560
+        },
+        {
+          "name": "tui_interactive",
+          "seconds": 20.175734599935822,
+          "thread": 40560
+        }
+      ],
+      "pid": 28548,
+      "measurement_version": 3,
+      "wall_seconds": 21.059140699915588,
+      "health_seconds": null,
+      "announced_seconds": null,
+      "api_timings": [],
+      "exit_code": 0,
+      "target": "tui",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "tui-baseline-plain-3-1792555953088816700.json",
+      "log_file": "tui-baseline-plain-3-1792555953088816700.log"
+    },
+    "server-baseline-plain-1-1792555574438927300.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 1.0999967344105244e-05,
+          "thread": 14600
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.4320541999768466,
+          "thread": 14600
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.7936720000579953,
+          "thread": 14600
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.846909400075674,
+          "thread": 14600
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 2.2188104999950156,
+          "thread": 36100
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 72.97847860003822,
+          "thread": 36100
+        }
+      ],
+      "pid": 22540,
+      "measurement_version": 2,
+      "wall_seconds": 73.11130610003602,
+      "health_seconds": 2.297078700037673,
+      "announced_seconds": 0.9846639999886975,
+      "api_timings": [
+        {
+          "endpoint": "/api/runtime/status",
+          "seconds": 0.020849699969403446,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 70.77439539995976,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.015748900012113154,
+          "status": 200
+        }
+      ],
+      "exit_code": 1,
+      "target": "server",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "server-baseline-plain-1-1792555574438927300.json",
+      "log_file": "server-baseline-plain-1-1792555574438927300.log"
+    },
+    "server-baseline-plain-2-1792555647866199600.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 1.0399962775409222e-05,
+          "thread": 12480
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.42443310003727674,
+          "thread": 12480
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.7861209999537095,
+          "thread": 12480
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.8275242999661714,
+          "thread": 12480
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 2.144615299999714,
+          "thread": 4852
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 7.56347219995223,
+          "thread": 4852
+        }
+      ],
+      "pid": 34172,
+      "measurement_version": 2,
+      "wall_seconds": 7.698556199902669,
+      "health_seconds": 2.2171297000022605,
+      "announced_seconds": 0.9512306000106037,
+      "api_timings": [
+        {
+          "endpoint": "/api/runtime/status",
+          "seconds": 0.02105800004210323,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 5.437748699914664,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0031207000138238072,
+          "status": 200
+        }
+      ],
+      "exit_code": 1,
+      "target": "server",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "server-baseline-plain-2-1792555647866199600.json",
+      "log_file": "server-baseline-plain-2-1792555647866199600.log"
+    },
+    "server-baseline-plain-3-1792555655881126900.json": {
+      "events": [
+        {
+          "name": "worker_start",
+          "seconds": 9.999959729611874e-06,
+          "thread": 13956
+        },
+        {
+          "name": "cli_import_end",
+          "seconds": 0.39398259995505214,
+          "thread": 13956
+        },
+        {
+          "name": "runtime_build_start",
+          "seconds": 0.740774399950169,
+          "thread": 13956
+        },
+        {
+          "name": "runtime_build_end",
+          "seconds": 1.746337900054641,
+          "thread": 13956
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.start",
+          "seconds": 1.8589046000270173,
+          "thread": 41816
+        },
+        {
+          "name": "AgentLLM._probe_capabilities.end",
+          "seconds": 73.48908660002053,
+          "thread": 41816
+        }
+      ],
+      "pid": 41644,
+      "measurement_version": 2,
+      "wall_seconds": 73.63099469989538,
+      "health_seconds": 1.9464801999274641,
+      "announced_seconds": 0.9399079999420792,
+      "api_timings": [
+        {
+          "endpoint": "/api/runtime/status",
+          "seconds": 0.01906359998974949,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 71.63432650000323,
+          "status": 200
+        },
+        {
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.01609060005284846,
+          "status": 200
+        }
+      ],
+      "exit_code": 1,
+      "target": "server",
+      "variant": "baseline",
+      "profiled": false,
+      "result_file": "server-baseline-plain-3-1792555655881126900.json",
+      "log_file": "server-baseline-plain-3-1792555655881126900.log"
+    }
+  }
+}

@@ -1,0 +1,346 @@
+{
+  "measurement_version": 3,
+  "target": "server",
+  "python": "3.13.6 (tags/v3.13.6:4e66535, Aug  6 2025, 14:36:00) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "samples": [
+    {
+      "health_seconds": 2.1497414000332355,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0072014001198112965,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.013282299973070621,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.026932999957352877,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5867864999454468,
+        "runtime_build_start": 0.9601360000669956,
+        "runtime_build_end": 2.0429746001027524
+      },
+      "ready_seconds": 2.1497414000332355
+    },
+    {
+      "health_seconds": 2.0334006999619305,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0051935999654233456,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.02516680001281202,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.004049899987876415,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5259591999929398,
+        "runtime_build_start": 0.872575500048697,
+        "runtime_build_end": 1.9245422999374568
+      },
+      "ready_seconds": 2.0334006999619305
+    },
+    {
+      "health_seconds": 2.1611903000157326,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.00429369998164475,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.013224499998614192,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.02783360006287694,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5288892998360097,
+        "runtime_build_start": 0.880434799939394,
+        "runtime_build_end": 2.0099287999328226
+      },
+      "ready_seconds": 2.1611903000157326
+    },
+    {
+      "health_seconds": 2.1705223000608385,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.019621399929746985,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.015579000115394592,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.00439849984832108,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5306341999676079,
+        "runtime_build_start": 0.8781244000419974,
+        "runtime_build_end": 1.9884643000550568
+      },
+      "ready_seconds": 2.1705223000608385
+    },
+    {
+      "health_seconds": 2.1637822999618948,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.006741899996995926,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.02275030012242496,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.018454899778589606,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5645990998018533,
+        "runtime_build_start": 0.9297518997918814,
+        "runtime_build_end": 2.051740599796176
+      },
+      "ready_seconds": 2.1637822999618948
+    },
+    {
+      "health_seconds": 2.2224344999995083,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0032297999132424593,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0211327001452446,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.025965600041672587,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.521302699809894,
+        "runtime_build_start": 0.870795999886468,
+        "runtime_build_end": 1.9256835000123829
+      },
+      "ready_seconds": 2.2224344999995083
+    },
+    {
+      "health_seconds": 2.1281085999216884,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.00466410000808537,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.029664200032129884,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.00448490004055202,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5318039997946471,
+        "runtime_build_start": 0.8863407999742776,
+        "runtime_build_end": 1.9693191999103874
+      },
+      "ready_seconds": 2.1281085999216884
+    },
+    {
+      "health_seconds": 2.2469053000677377,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.003899600123986602,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.012517200084403157,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.004640699829906225,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.5317812999710441,
+        "runtime_build_start": 0.8790657001081854,
+        "runtime_build_end": 1.933898099930957
+      },
+      "ready_seconds": 2.2469053000677377
+    },
+    {
+      "health_seconds": 2.6012566999997944,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.020205700071528554,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0679293000139296,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.003460699925199151,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.6294719998259097,
+        "runtime_build_start": 1.1043064999394119,
+        "runtime_build_end": 2.4121671998873353
+      },
+      "ready_seconds": 2.6012566999997944
+    },
+    {
+      "health_seconds": 2.4220862998627126,
+      "api": [
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0365559000056237,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "GET",
+          "endpoint": "/api/config/llm/capabilities",
+          "seconds": 0.0032013000454753637,
+          "source": "unknown",
+          "status": "unknown"
+        },
+        {
+          "method": "POST",
+          "endpoint": "/api/config/llm/capabilities/refresh",
+          "seconds": 0.01544440002180636,
+          "source": "unknown",
+          "status": "probing"
+        }
+      ],
+      "exit_code": 0,
+      "events": {
+        "cli_import_end": 0.6238617999479175,
+        "runtime_build_start": 1.0190160998608917,
+        "runtime_build_end": 2.291183899855241
+      },
+      "ready_seconds": 2.4220862998627126
+    }
+  ],
+  "summary": {
+    "count": 10,
+    "median_seconds": 2.1671523000113666,
+    "min_seconds": 2.0334006999619305,
+    "max_seconds": 2.6012566999997944
+  },
+  "production_revision": "f39e834715facdf50ec8efe143d0d7fc190e4e42",
+  "cache_state": "Fresh process and empty capability cache; OS and model file caches retained"
+}
