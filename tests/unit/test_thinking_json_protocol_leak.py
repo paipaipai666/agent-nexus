@@ -57,24 +57,16 @@ class TestProbeThenNativeStrategy:
 
         import agentnexus.core.llm as llm_mod
         from agentnexus.core.llm import AgentLLM
-        llm_mod._probe_cache.clear()
+        from agentnexus.core.providers.base import StreamResult
 
-        real = AgentLLM.__dict__["_merge_probed_capabilities"]
-        client = object.__new__(AgentLLM)
-        client.model = f"test/model-{tool_calling}-{thinking}"
-        client.base_url = f"https://api.example.com/v1/{tool_calling}/{thinking}"
-        client._capabilities = None
-        client._session_tracker = SessionCapabilityTracker()
-        monkeypatch.setattr(
-            AgentLLM, "_probe_capabilities",
-            lambda self: {"tool_calling": tool_calling, "json_mode": False,
-                          "parallel_tool_calls": False},
-        )
-        monkeypatch.setattr(
-            AgentLLM, "_merge_probed_capabilities",
-            lambda self, caps: real(self, caps),
-        )
-        return client
+        class Provider:
+            def stream_chat(self, **kwargs):
+                calls = [{"id": "noop", "name": "noop", "arguments": {}}] if tool_calling else []
+                return StreamResult(text="plain text", tool_calls=calls)
+
+        monkeypatch.setattr(llm_mod, "select_provider", lambda *args: Provider())
+        return AgentLLM(model=f"test/model-{tool_calling}-{thinking}", api_key="fixture-key",
+                        base_url=f"https://api.example.com/v1/{tool_calling}/{thinking}")
 
     def test_thinking_on_plus_probed_tool_calling_selects_native(self, monkeypatch):
         """用户看到的现象反面：thinking 绿 + 探测到工具 → 必须 NATIVE。"""
@@ -121,21 +113,7 @@ class TestEndToEndThinkingJsonLeak:
         import agentnexus.core.config as cfg_mod
         cfg_mod._settings_cache = None
 
-        from agentnexus.core.capabilities import detect_capabilities
-        from agentnexus.core.llm import AgentLLM
-
-        caps = detect_capabilities("m", "https://x.test/v1")
-        client = object.__new__(AgentLLM)
-        client.model = "m"
-        client.base_url = "https://x.test/v1"
-        client._capabilities = None
-        client._session_tracker = SessionCapabilityTracker()
-        monkeypatch.setattr(
-            AgentLLM, "_probe_capabilities",
-            lambda self: {"tool_calling": True, "json_mode": True,
-                          "parallel_tool_calls": False},
-        )
-
+        client = TestProbeThenNativeStrategy()._client_with_probe(monkeypatch, tool_calling=True, thinking=True)
         resolved = client.ensure_capabilities()
         assert resolved.supports_thinking is True
         assert resolved.supports_tool_calling is True, (

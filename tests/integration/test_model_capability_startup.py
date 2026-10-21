@@ -2,9 +2,14 @@
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +25,7 @@ from agentnexus.core.providers.router import close_providers
 def model_endpoint(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-    state = SimpleNamespace(delay=0.0, requests=[])
+    state = SimpleNamespace(delay=0.0, requests=[], on_request=lambda payload: None)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -29,6 +34,7 @@ def model_endpoint(monkeypatch):
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             state.requests.append(payload)
+            state.on_request(payload)
             time.sleep(state.delay)
             prompt = payload["messages"][-1]["content"]
             delta = {"content": "done"}
@@ -116,3 +122,69 @@ def test_first_task_preserves_native_tools_after_local_capability_read(model_end
     assert model_endpoint.client.capabilities.supports_tool_calling is True
     assert len(model_endpoint.requests) == 3
     assert all("合法的 JSON" not in message["content"] for message in model_endpoint.requests[-1]["messages"])
+
+
+def test_successful_discovery_survives_a_new_process(model_endpoint):
+    script = (
+        "from agentnexus.core.llm import AgentLLM; "
+        "import sys; "
+        "c=AgentLLM(model='persisted-fixture',api_key=sys.argv[2],base_url=sys.argv[1]); "
+        "print(c.ensure_capabilities().supports_parallel_tool_calls)"
+    )
+    for _ in range(2):
+        result = subprocess.run([sys.executable, "-c", script, model_endpoint.url, "fixture-key"],
+                                capture_output=True, text=True, timeout=15, check=True)
+        assert result.stdout.strip() == "True"
+    assert len(model_endpoint.requests) == 2
+    assert "fixture-key" not in "".join(
+        path.read_text(encoding="utf-8")
+        for path in Path(os.environ["AGENTNEXUS_HOME"]).rglob("*.json")
+    )
+
+
+def test_same_model_shares_discovery_without_blocking_another_model(model_endpoint):
+    barrier = threading.Barrier(2)
+    simultaneous = []
+
+    def meet_peer(payload):
+        if payload["messages"][0]["content"] == "Call the noop tool.":
+            try:
+                barrier.wait(timeout=1)
+                simultaneous.append(True)
+            except threading.BrokenBarrierError:
+                simultaneous.append(False)
+
+    model_endpoint.on_request = meet_peer
+    clients = [AgentLLM(model=model, api_key="fixture-key", base_url=model_endpoint.url)
+               for model in ("model-a", "model-a", "model-b")]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(client.ensure_capabilities) for client in clients]
+        assert all(future.result(timeout=5).supports_tool_calling for future in futures)
+    assert simultaneous == [True, True]
+    assert len(model_endpoint.requests) == 4
+
+
+def test_changing_credentials_does_not_reuse_discovery(model_endpoint):
+    assert model_endpoint.client.ensure_capabilities().supports_tool_calling is True
+    changed = AgentLLM(model="startup-fixture", api_key="different-fixture-key", base_url=model_endpoint.url)
+    assert changed.ensure_capabilities().supports_tool_calling is True
+    assert len(model_endpoint.requests) == 4
+
+
+@pytest.mark.parametrize("corruption", ["expired", "invalid-json", "invalid-flags"])
+def test_unusable_persistent_cache_is_rebuilt(model_endpoint, corruption):
+    script = (
+        "from agentnexus.core.llm import AgentLLM; import sys; "
+        "c=AgentLLM(model='cache-fixture',api_key='fixture-key',base_url=sys.argv[1]); "
+        "assert c.ensure_capabilities().supports_parallel_tool_calls"
+    )
+    subprocess.run([sys.executable, "-c", script, model_endpoint.url], check=True, timeout=15)
+    path = next((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if corruption == "expired":
+        data["expires_at"] = 0
+    elif corruption == "invalid-flags":
+        data["result"]["tool_calling"] = "false"
+    path.write_text("incomplete" if corruption == "invalid-json" else json.dumps(data), encoding="utf-8")
+    subprocess.run([sys.executable, "-c", script, model_endpoint.url], check=True, timeout=15)
+    assert len(model_endpoint.requests) == 4

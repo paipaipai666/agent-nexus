@@ -8,9 +8,21 @@ Tests the full ReActAgent loop going through the new provider chain:
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.core.capabilities import ModelCapabilities
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
+
+
+@pytest.fixture(autouse=True)
+def isolated_provider_pool():
+    """Keep mocked SDK connections local to each regression case."""
+    from agentnexus.core.providers.router import close_providers
+
+    close_providers()
+    yield
+    close_providers()
 
 
 def _openai_chunk(content=None, finish_reason=None, tool_calls=None):
@@ -25,14 +37,17 @@ def _openai_chunk(content=None, finish_reason=None, tool_calls=None):
 
 
 def _make_llm_with_settings(model, base_url):
-    """Create an AgentLLM with patched settings."""
-    with patch("agentnexus.core.llm.get_settings") as mock_s:
-        mock_s.return_value.llm_model_id = model
-        mock_s.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_s.return_value.llm_base_url = base_url
-        mock_s.return_value.llm_timeout = 30
+    """Create a configured prompt-JSON client for provider codec regressions."""
+    from agentnexus.core.config import Settings
+
+    settings = Settings(llm_model_id=model, llm_api_key="sk-test", llm_base_url=base_url,
+                        llm_timeout=30, model_tool_calling=False, model_json_mode=False)
+    with patch("agentnexus.core.llm.get_settings", return_value=settings), patch(
+        "agentnexus.core.capabilities.get_settings", return_value=settings,
+    ):
         from agentnexus.core.llm import AgentLLM
         llm = AgentLLM()
+        llm.capabilities
     return llm
 
 
@@ -44,6 +59,7 @@ def _prompt_json_caps():
         supports_json_schema=False,
         supports_thinking=False,
         supports_parallel_tool_calls=False,
+        from_default_fallback=False,
     )
 
 

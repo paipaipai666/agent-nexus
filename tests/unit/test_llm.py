@@ -310,6 +310,9 @@ class TestCall:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_thinking_off_sends_explicit_none(self, mock_trace, mock_settings):
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "deepseek-ai/DeepSeek-V4-Flash", "https://api.deepseek.com", SecretStr("key"), 60,
+        )
         mock_settings.return_value.llm_model_id = "deepseek-ai/DeepSeek-V4-Flash"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
@@ -335,6 +338,9 @@ class TestCall:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_thinking_on_sends_configured_effort(self, mock_trace, mock_settings):
+        mock_settings.return_value.get_active_llm_profile.return_value = (
+            "deepseek-ai/DeepSeek-V4-Flash", "https://api.deepseek.com", SecretStr("key"), 60,
+        )
         mock_settings.return_value.llm_model_id = "deepseek-ai/DeepSeek-V4-Flash"
         mock_settings.return_value.llm_api_key.get_secret_value.return_value = "key"
         mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
@@ -383,10 +389,6 @@ class TestCall:
 class TestCapabilityProbe:
     """Live probe for models the static registry doesn't know (from_default_fallback)."""
 
-    def teardown_method(self):
-        import agentnexus.core.llm as m
-        m._probe_cache.clear()
-
     @staticmethod
     def _patch_provider(monkeypatch, provider):
         import agentnexus.core.llm as m
@@ -418,7 +420,7 @@ class TestCapabilityProbe:
         assert client.ensure_capabilities().supports_tool_calling is False
         assert client.ensure_capabilities().supports_json_mode is True
 
-    def test_probe_failure_keeps_conservative_defaults_and_is_not_cached(
+    def test_probe_failure_keeps_unknown_defaults(
         self, temp_agentnexus_home, monkeypatch,
     ):
         class _DownProvider:
@@ -429,8 +431,7 @@ class TestCapabilityProbe:
         client = AgentLLM(model="stealth/probe-down", api_key="k",
                           base_url="https://example.test/v1")
         assert client.ensure_capabilities().supports_tool_calling is False
-        import agentnexus.core.llm as m
-        assert ("stealth/probe-down", "https://example.test/v1") not in m._probe_cache
+        assert client.capabilities.from_default_fallback is True
 
     def test_probe_detects_parallel_tool_calls(self, temp_agentnexus_home, monkeypatch):
         class _ParallelProvider:
