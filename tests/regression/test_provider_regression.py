@@ -7,7 +7,19 @@ No LiteLLM — that dependency was removed.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from agentnexus.core.config import Settings
 from agentnexus.core.llm import AgentLLM
+from agentnexus.core.providers.router import close_providers
+
+
+@pytest.fixture(autouse=True)
+def isolated_provider_pool(monkeypatch):
+    monkeypatch.setattr("agentnexus.core.llm._provider_health", {})
+    close_providers()
+    yield
+    close_providers()
 
 
 def _openai_chunk(content=None, finish_reason=None, tool_calls=None,
@@ -42,15 +54,19 @@ def _mock_openai_client(chunks):
     return client
 
 
-def _settings(mock_settings, model, base_url, key="sk-test", timeout=30):
-    secret = MagicMock()
-    secret.get_secret_value.return_value = key
-    mock_settings.return_value.llm_model_id = model
-    mock_settings.return_value.llm_api_key = secret
-    mock_settings.return_value.llm_base_url = base_url
-    mock_settings.return_value.llm_timeout = timeout
-    mock_settings.return_value.get_active_llm_profile.return_value = (model, base_url, secret, timeout)
+def _settings(mock_settings, model, base_url, key="sk-test", timeout=30, tool_calling=True):
+    mock_settings.return_value = Settings(
+        llm_model_id=model, llm_base_url=base_url, llm_api_key=key, llm_timeout=timeout,
+        model_tool_calling=tool_calling, model_json_mode=False,
+    )
     return mock_settings
+
+
+def _configured_llm(mock_settings):
+    with patch("agentnexus.core.capabilities.get_settings", return_value=mock_settings.return_value):
+        llm = AgentLLM()
+        llm.capabilities
+    return llm
 
 
 class TestProviderEndToEnd:
@@ -66,7 +82,7 @@ class TestProviderEndToEnd:
             _openai_chunk(content="DeepSeek answer", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -86,7 +102,7 @@ class TestProviderEndToEnd:
             _usage_chunk(50, 20),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -102,7 +118,7 @@ class TestProviderEndToEnd:
 
         from agentnexus.core.providers.base import StreamResult
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         mock_provider = MagicMock()
         mock_provider.stream_chat.return_value = StreamResult(
             text="Claude answer", finish_reason="stop",
@@ -126,7 +142,7 @@ class TestProviderEndToEnd:
             _openai_chunk(content="Azure answer", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -143,7 +159,7 @@ class TestProviderEndToEnd:
             _openai_chunk(content="Proxy answer", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -160,7 +176,7 @@ class TestProviderFailureBehavior:
         _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", side_effect=ConnectionError("refused")):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -172,7 +188,7 @@ class TestProviderFailureBehavior:
         _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = TimeoutError("timed out")
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -185,7 +201,7 @@ class TestProviderFailureBehavior:
         _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = Exception("401 Unauthorized")
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -199,10 +215,7 @@ class TestProviderToolCalling:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_tool_calls_flow_through_provider(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
 
         tc1 = {"index": 0, "id": "call_abc", "function": {"name": "search", "arguments": '{"q'}}
@@ -215,7 +228,7 @@ class TestProviderToolCalling:
 
         tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             llm._call(
                 [{"role": "user", "content": "search for test"}], 0, True, 0,
@@ -230,18 +243,14 @@ class TestProviderToolCalling:
     @patch("agentnexus.core.llm.trace_manager")
     def test_unsupported_tool_capability_degrades(self, mock_trace, mock_settings):
         """When the model doesn't support tool calling, capability degrades gracefully."""
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-reasoner"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "deepseek/deepseek-reasoner", "https://api.deepseek.com", tool_calling=False)
         mock_trace.active = None
 
         client = _mock_openai_client([
             _openai_chunk(content="plain answer", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
-        llm._capabilities = None
+        llm = _configured_llm(mock_settings)
 
         tools = [{"type": "function", "function": {"name": "search"}}]
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
@@ -259,10 +268,7 @@ class TestProviderReasoningContent:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_deepseek_reasoning_content_preserved(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
@@ -270,7 +276,7 @@ class TestProviderReasoningContent:
             _openai_chunk(content="The answer is 42", reasoning_content="", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "what is life?"}], 0, True, 0)
 
@@ -280,17 +286,14 @@ class TestProviderReasoningContent:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_reasoning_content_empty_when_not_present(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
             _openai_chunk(content="Simple answer", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -304,17 +307,14 @@ class TestProviderTokenEstimation:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_tiktoken_estimation_used_when_no_usage(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "deepseek/deepseek-v4-flash"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.deepseek.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
             _openai_chunk(content="Hello world", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -329,10 +329,7 @@ class TestProviderStreaming:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_multiple_chunks_concatenated(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
@@ -342,7 +339,7 @@ class TestProviderStreaming:
             _openai_chunk(content="!", finish_reason="stop"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -351,17 +348,14 @@ class TestProviderStreaming:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_truncated_finish_reason_detected(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "openai/gpt-4"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "https://api.openai.com"
-        mock_settings.return_value.llm_timeout = 30
+        _settings(mock_settings, "openai/gpt-4", "https://api.openai.com")
         mock_trace.active = None
 
         client = _mock_openai_client([
             _openai_chunk(content="partial...", finish_reason="length"),
         ])
 
-        llm = AgentLLM()
+        llm = _configured_llm(mock_settings)
         with patch("agentnexus.core.providers.openai_provider.OpenAI", return_value=client):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 

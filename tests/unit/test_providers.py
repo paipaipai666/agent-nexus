@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentnexus.core.providers.base import StreamResult
 from agentnexus.core.providers.router import select_provider
 
@@ -402,6 +404,11 @@ class TestStreamResult:
 
 
 class TestFallbackBehavior:
+    @pytest.fixture(autouse=True)
+    def configured_protocol(self, monkeypatch):
+        monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
+        monkeypatch.setenv("AGENTNEXUS_MODEL_JSON_MODE", "false")
+
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_provider_transient_failure_raises_for_retry(self, mock_trace, mock_settings):
@@ -414,7 +421,7 @@ class TestFallbackBehavior:
 
         from agentnexus.core.llm import AgentLLM
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="gpt-4", api_key="key", base_url="https://api.openai.com", timeout=60)
 
         mock_provider = MagicMock()
         mock_provider.stream_chat.side_effect = ConnectionError("connection refused")
@@ -438,7 +445,7 @@ class TestFallbackBehavior:
 
         from agentnexus.core.llm import AgentLLM
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="gpt-4", api_key="key", base_url="https://api.openai.com", timeout=60)
 
         mock_provider = MagicMock()
         mock_provider.stream_chat.side_effect = ValueError("unsupported payload")
@@ -461,7 +468,7 @@ class TestFallbackBehavior:
 
         from agentnexus.core.llm import AgentLLM
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="anthropic/claude-4.5", api_key="key", base_url="https://api.anthropic.com", timeout=60)
         mock_provider = MagicMock()
         mock_provider.stream_chat.return_value = StreamResult(
             text="claude reply", finish_reason="stop",

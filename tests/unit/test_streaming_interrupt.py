@@ -8,8 +8,22 @@ the streaming loop runs to completion. These tests verify:
 """
 from unittest.mock import patch
 
+import pytest
+
+from agentnexus.core.config import Settings
 from agentnexus.core.llm import AgentLLM
 from agentnexus.core.providers.base import StreamResult
+
+
+@pytest.fixture(autouse=True)
+def isolated_provider_health(monkeypatch):
+    monkeypatch.setattr("agentnexus.core.llm._provider_health", {})
+
+
+def _settings(mock_settings):
+    mock_settings.return_value = Settings(
+        llm_model_id="test-model", llm_api_key="sk-test", llm_base_url="http://localhost:9999", llm_timeout=60,
+    )
 
 
 class TestStreamingNormalFlow:
@@ -52,10 +66,7 @@ class TestStreamingErrorHandling:
     @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.time.sleep")
     def test_call_exception_returns_empty(self, mock_sleep, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "test-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "http://localhost:9999"
-        mock_settings.return_value.llm_timeout = 60
+        _settings(mock_settings)
         mock_trace.active = None
 
         llm = AgentLLM()
@@ -68,10 +79,7 @@ class TestStreamingErrorHandling:
     @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.time.sleep")
     def test_last_error_set_on_failure(self, mock_sleep, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "test-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "http://localhost:9999"
-        mock_settings.return_value.llm_timeout = 60
+        _settings(mock_settings)
         mock_trace.active = None
 
         llm = AgentLLM()
@@ -83,10 +91,7 @@ class TestStreamingErrorHandling:
     @patch("agentnexus.core.llm.trace_manager")
     @patch("agentnexus.core.llm.time.sleep")
     def test_non_transient_error_returns_immediately(self, mock_sleep, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "test-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "http://localhost:9999"
-        mock_settings.return_value.llm_timeout = 60
+        _settings(mock_settings)
         mock_trace.active = None
 
         llm = AgentLLM()
@@ -124,10 +129,7 @@ class TestUsageTracking:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_last_usage_populated(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "test-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "http://localhost:9999"
-        mock_settings.return_value.llm_timeout = 60
+        _settings(mock_settings)
         mock_trace.active = None
 
         llm = AgentLLM()
@@ -143,10 +145,7 @@ class TestUsageTracking:
     @patch("agentnexus.core.llm.get_settings")
     @patch("agentnexus.core.llm.trace_manager")
     def test_total_usage_accumulates(self, mock_trace, mock_settings):
-        mock_settings.return_value.llm_model_id = "test-model"
-        mock_settings.return_value.llm_api_key.get_secret_value.return_value = "sk-test"
-        mock_settings.return_value.llm_base_url = "http://localhost:9999"
-        mock_settings.return_value.llm_timeout = 60
+        _settings(mock_settings)
         mock_trace.active = None
 
         llm = AgentLLM()

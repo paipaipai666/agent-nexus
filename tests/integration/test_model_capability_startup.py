@@ -25,14 +25,17 @@ from agentnexus.core.providers.router import close_providers
 def model_endpoint(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-    state = SimpleNamespace(delay=0.0, requests=[], on_request=lambda payload: None)
+    state = SimpleNamespace(delay=0.0, stream_interval=0.0, requests=[], on_request=lambda payload: None)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
             pass
 
         def do_POST(self):
-            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            try:
+                payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            except (json.JSONDecodeError, OSError):
+                return
             state.requests.append(payload)
             state.on_request(payload)
             time.sleep(state.delay)
@@ -47,14 +50,21 @@ def model_endpoint(monkeypatch):
                 ]}
             chunk = {"id": "fixture", "object": "chat.completion.chunk", "created": 0,
                      "model": payload["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": "stop"}]}
-            body = f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
+            parts = [f"data: {json.dumps(chunk)}\n\n".encode()]
+            if state.stream_interval:
+                parts.extend([b": keepalive\n\n"] * 30)
+            parts.append(b"data: [DONE]\n\n")
+            body = b"".join(parts)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             try:
-                self.wfile.write(body)
-            except (BrokenPipeError, ConnectionResetError):
+                for part in parts:
+                    self.wfile.write(part)
+                    self.wfile.flush()
+                    time.sleep(state.stream_interval)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -202,6 +212,42 @@ def test_changing_credentials_does_not_reuse_discovery(model_endpoint):
     assert len(model_endpoint.requests) == 4
 
 
+def test_model_switch_does_not_keep_a_snapshot_for_the_previous_model(model_endpoint, monkeypatch):
+    from agentnexus.core.config import LLMProvider, ModelEntry, ModelOverride, Settings
+
+    settings = Settings(llm_providers=[LLMProvider(
+        name="fixture", base_url=model_endpoint.url, api_key="fixture-key",
+        models=[
+            ModelEntry(model_id="startup-fixture", override=ModelOverride(supports_tool_calling=False)),
+            ModelEntry(model_id="new-model", override=ModelOverride(supports_tool_calling=True)),
+        ],
+    )])
+    reading, release, switching, configured = (threading.Event() for _ in range(4))
+
+    def read_settings():
+        reading.set()
+        assert release.wait(timeout=2)
+        return settings
+
+    def switch_model():
+        switching.set()
+        model_endpoint.client.configure(model="new-model", base_url=model_endpoint.url, api_key="fixture-key")
+        configured.set()
+
+    monkeypatch.setattr("agentnexus.core.capabilities.get_settings", read_settings)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        snapshot = pool.submit(model_endpoint.client.capability_snapshot)
+        assert reading.wait(timeout=1)
+        changed = pool.submit(switch_model)
+        assert switching.wait(timeout=1)
+        configured.wait(timeout=0.05)
+        release.set()
+        snapshot.result(timeout=2)
+        changed.result(timeout=2)
+    assert model_endpoint.client.capabilities.supports_tool_calling is True
+    assert model_endpoint.requests == []
+
+
 @pytest.mark.parametrize("corruption", ["expired", "invalid-json", "invalid-flags"])
 def test_unusable_persistent_cache_is_rebuilt(model_endpoint, corruption):
     script = (
@@ -219,3 +265,50 @@ def test_unusable_persistent_cache_is_rebuilt(model_endpoint, corruption):
     path.write_text("incomplete" if corruption == "invalid-json" else json.dumps(data), encoding="utf-8")
     subprocess.run([sys.executable, "-c", script, model_endpoint.url], check=True, timeout=15)
     assert len(model_endpoint.requests) == 4
+
+
+@pytest.mark.parametrize("mode", ["headers", "stream"])
+@pytest.mark.parametrize("wire", ["openai", "anthropic"])
+def test_discovery_has_a_short_total_deadline_and_does_not_cache_timeouts(model_endpoint, monkeypatch, mode, wire):
+    import agentnexus.core.capability_discovery as discovery
+    from agentnexus.core.providers.router import select_provider
+
+    monkeypatch.setattr(discovery, "PROBE_BUDGET_SECONDS", 0.7)
+    if wire == "anthropic":
+        model_endpoint.client.configure(model="fixture", base_url=model_endpoint.url + "/anthropic.com/v1", api_key="fixture-key")
+    if mode == "headers":
+        model_endpoint.delay = 1.5
+    else:
+        model_endpoint.stream_interval = 0.1
+    select_provider(model_endpoint.client.model, model_endpoint.client.base_url)
+    started = time.monotonic()
+    caps = model_endpoint.client.ensure_capabilities()
+    elapsed = time.monotonic() - started
+    assert elapsed < 1.2
+    assert len(model_endpoint.requests) == 1
+    assert caps.from_default_fallback is True
+    assert model_endpoint.client.capability_discovery_status == "failed"
+    assert list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json")) == []
+    request_count = len(model_endpoint.requests)
+    model_endpoint.client.start_capability_discovery()
+    assert model_endpoint.client.capability_discovery_status == "failed"
+    assert len(model_endpoint.requests) == request_count
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and any(t.name in {"capability-deadline", "openai-stream-pump"} for t in threading.enumerate()):
+        time.sleep(0.01)
+    assert not any(t.name in {"capability-deadline", "openai-stream-pump"} for t in threading.enumerate())
+
+
+def test_discovery_budget_is_shared_by_both_requests(model_endpoint, monkeypatch):
+    import agentnexus.core.capability_discovery as discovery
+    from agentnexus.core.providers.router import select_provider
+
+    monkeypatch.setattr(discovery, "PROBE_BUDGET_SECONDS", 1.5)
+    model_endpoint.on_request = lambda payload: setattr(model_endpoint, "delay", 0.4 if len(model_endpoint.requests) == 1 else 1.2)
+    select_provider(model_endpoint.client.model, model_endpoint.client.base_url)
+    started = time.monotonic()
+    caps = model_endpoint.client.ensure_capabilities()
+    assert time.monotonic() - started < 1.9
+    assert len(model_endpoint.requests) == 2
+    assert caps.from_default_fallback is True
+    assert model_endpoint.client.capability_discovery_status == "failed"

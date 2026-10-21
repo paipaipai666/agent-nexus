@@ -24,6 +24,8 @@ def _att(path: str, mime: str = "text/plain") -> dict:
 def agent():
     a = MagicMock()
     a.run.return_value = "ok"
+    a.agent_id = "attachment-fixture"
+    a.max_steps = 2
     a.llm_client.model = "test-model"
     a.llm_client.base_url = ""
     return a

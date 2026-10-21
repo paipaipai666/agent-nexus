@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 SUCCESS_TTL_SECONDS = 86_400
 FAILURE_BACKOFF_SECONDS = 30
+PROBE_BUDGET_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,7 @@ def probe_capabilities(provider, *, model: str, api_key: str, base_url: str, tim
     """Discover tool and JSON support against an immutable model target."""
     if provider is None:
         return None
+    deadline = time.monotonic() + min(timeout, PROBE_BUDGET_SECONDS)
     try:
         tool_result = provider.stream_chat(
             messages=[{"role": "user", "content": "Call the noop tool."}],
@@ -158,6 +160,7 @@ def probe_capabilities(provider, *, model: str, api_key: str, base_url: str, tim
             tools=[_PROBE_NOOP_TOOL],
             max_tokens=64,
             timeout=timeout,
+            deadline=deadline,
         )
     except Exception as exc:
         logger.debug("tool-calling probe failed for %s: %s", model, exc)
@@ -175,10 +178,12 @@ def probe_capabilities(provider, *, model: str, api_key: str, base_url: str, tim
                 tools=[_PROBE_NOOP_TOOL],
                 max_tokens=128,
                 timeout=timeout,
+                deadline=deadline,
             )
             parallel_tool_calls = len(parallel_result.tool_calls) >= 2
         except Exception as exc:
             logger.debug("parallel-tool probe failed for %s: %s", model, exc)
+            return None
     json_mode = False
     if not tool_calling:
         try:
@@ -191,11 +196,13 @@ def probe_capabilities(provider, *, model: str, api_key: str, base_url: str, tim
                 response_format={"type": "json_object"},
                 max_tokens=64,
                 timeout=timeout,
+                deadline=deadline,
             )
             json.loads(json_result.text)
             json_mode = True
         except Exception as exc:
             logger.debug("json-mode probe failed for %s: %s", model, exc)
+            return None
     return {"tool_calling": tool_calling, "json_mode": json_mode,
             "parallel_tool_calls": parallel_tool_calls}
 

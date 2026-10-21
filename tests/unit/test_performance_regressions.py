@@ -161,8 +161,8 @@ def test_cancelling_one_shared_llm_session_preserves_other_stream(monkeypatch):
     monkeypatch.setattr("agentnexus.core.providers.openai_provider.OpenAI", lambda **_: client)
     provider = OpenAIProvider()
     monkeypatch.setattr("agentnexus.core.llm.select_provider", lambda *_: provider)
-    monkeypatch.setattr(AgentLLM, "capabilities", property(lambda _: SimpleNamespace(
-        supports_thinking=False, max_output_tokens=64)))
+    monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
+    monkeypatch.setenv("AGENTNEXUS_MODEL_JSON_MODE", "false")
     llm = AgentLLM(model="test", api_key="test", base_url="http://localhost/v1")
     cancel = {name: threading.Event() for name in streams}
 

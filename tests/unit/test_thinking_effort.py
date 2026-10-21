@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -58,25 +57,19 @@ class TestChatServiceThinkingEffort:
 
 class TestLLMEffortOverride:
     def _llm(self, caps_thinking_effort="medium", supports_thinking=True):
+        from agentnexus.core.config import Settings
         from agentnexus.core.llm import AgentLLM
 
-        llm = AgentLLM.__new__(AgentLLM)
-        llm._capabilities = SimpleNamespace(
-            supports_thinking=supports_thinking,
-            thinking_effort=caps_thinking_effort,
-            supports_tool_calling=False,
-            supports_json_mode=False,
-            supports_json_schema=False,
-            supports_parallel_tool_calls=False,
-            max_output_tokens=256,
+        settings = Settings(
+            llm_model_id="m", llm_api_key="k", llm_base_url="http://x", llm_timeout=30,
+            model_tool_calling=False, model_json_mode=False, model_thinking=supports_thinking,
+            model_thinking_effort=caps_thinking_effort,
         )
-        llm._session_tracker = MagicMock()
-        llm._session_tracker.is_available = MagicMock(return_value=True)
-        llm._call_state = threading.local()
-        llm.model = "m"
-        llm.api_key = "k"
-        llm.base_url = "http://x"
-        llm.timeout = 30
+        with patch("agentnexus.core.llm.get_settings", return_value=settings), patch(
+            "agentnexus.core.capabilities.get_settings", return_value=settings,
+        ):
+            llm = AgentLLM()
+            llm.capabilities
         return llm
 
     def _capture_effort(self, llm, **kwargs):

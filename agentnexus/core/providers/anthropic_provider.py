@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
+from agentnexus.core.providers.base import BaseLLMProvider, StreamResult, remaining_timeout, request_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,7 @@ class AnthropicMessagesProvider(BaseLLMProvider):
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
         on_token: Callable[..., None] | None = None,
+        deadline: float | None = None,
     ) -> StreamResult:
         if not api_key:
             raise RuntimeError("Anthropic API key is required")
@@ -209,105 +210,109 @@ class AnthropicMessagesProvider(BaseLLMProvider):
         block_types: dict[int, str] = {}
         stop_reason = ""
 
-        with httpx.Client(timeout=httpx.Timeout(timeout, read=timeout * 10)) as client:
-            with client.stream("POST", url, headers=headers, json=body) as response:
-                thread_id = threading.get_ident()
-                with self._lock:
-                    self._active_responses[thread_id] = response
-                try:
-                    if response.status_code >= 400:
-                        raw = response.read().decode("utf-8", errors="replace")
-                        raise RuntimeError(f"Anthropic HTTP {response.status_code}: {raw[:400]}")
-                    for line in response.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload or payload == "[DONE]":
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
-                        etype = event.get("type") or ""
-                        if etype == "message_start":
-                            usage = (event.get("message") or {}).get("usage") or {}
-                            result.usage["input_tokens"] = int(usage.get("input_tokens") or 0)
-                            result.usage["cache_hit_tokens"] = int(
-                                usage.get("cache_read_input_tokens") or 0
-                            )
-                            result.usage["cache_miss_tokens"] = int(
-                                usage.get("cache_creation_input_tokens") or 0
-                            )
-                        elif etype == "content_block_start":
-                            index = int(event.get("index") or 0)
-                            block = event.get("content_block") or {}
-                            block_types[index] = block.get("type") or ""
-                            if block.get("type") == "tool_use":
-                                tid = str(block.get("id") or f"toolu_{index}")
-                                tool_bufs[tid] = {
-                                    "id": tid,
-                                    "name": str(block.get("name") or ""),
-                                    "arguments": "",
-                                    "_index": index,
-                                }
-                            if block.get("type") == "thinking" and block.get("thinking"):
-                                result.reasoning_content += str(block["thinking"])
-                                if on_token:
-                                    on_token(str(block["thinking"]), is_reasoning=True)
-                            if block.get("type") == "text" and block.get("text"):
-                                result.text += str(block["text"])
-                                if on_token:
-                                    on_token(str(block["text"]))
-                        elif etype == "content_block_delta":
-                            index = int(event.get("index") or 0)
-                            delta = event.get("delta") or {}
-                            dtype = delta.get("type") or ""
-                            if dtype == "text_delta":
-                                text = str(delta.get("text") or "")
-                                result.text += text
-                                if on_token and text:
-                                    on_token(text)
-                            elif dtype == "thinking_delta":
-                                think = str(delta.get("thinking") or "")
-                                result.reasoning_content += think
-                                if on_token and think:
-                                    on_token(think, is_reasoning=True)
-                            elif dtype == "input_json_delta":
-                                partial = str(delta.get("partial_json") or "")
-                                for buf in tool_bufs.values():
-                                    if buf.get("_index") == index:
-                                        buf["arguments"] += partial
-                                        break
-                        elif etype == "message_delta":
-                            delta = event.get("delta") or {}
-                            if delta.get("stop_reason"):
-                                stop_reason = str(delta["stop_reason"])
-                            usage = event.get("usage") or {}
-                            if usage.get("output_tokens") is not None:
-                                result.usage["output_tokens"] = int(usage.get("output_tokens") or 0)
-                        elif etype == "error":
-                            err = event.get("error") or {}
-                            raise RuntimeError(f"Anthropic stream error: {err}")
-                finally:
+        request_timeout = httpx.Timeout(timeout, read=timeout * 10) if deadline is None else httpx.Timeout(remaining_timeout(deadline))
+        with httpx.Client(timeout=request_timeout) as client:
+            with request_deadline(deadline, client.close):
+                if deadline is not None:
+                    client.timeout = httpx.Timeout(remaining_timeout(deadline))
+                with client.stream("POST", url, headers=headers, json=body) as response:
+                    thread_id = threading.get_ident()
                     with self._lock:
-                        self._active_responses.pop(thread_id, None)
+                        self._active_responses[thread_id] = response
+                    try:
+                        if response.status_code >= 400:
+                            raw = response.read().decode("utf-8", errors="replace")
+                            raise RuntimeError(f"Anthropic HTTP {response.status_code}: {raw[:400]}")
+                        for line in response.iter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if not payload or payload == "[DONE]":
+                                continue
+                            try:
+                                event = json.loads(payload)
+                            except json.JSONDecodeError:
+                                continue
+                            etype = event.get("type") or ""
+                            if etype == "message_start":
+                                usage = (event.get("message") or {}).get("usage") or {}
+                                result.usage["input_tokens"] = int(usage.get("input_tokens") or 0)
+                                result.usage["cache_hit_tokens"] = int(
+                                    usage.get("cache_read_input_tokens") or 0
+                                )
+                                result.usage["cache_miss_tokens"] = int(
+                                    usage.get("cache_creation_input_tokens") or 0
+                                )
+                            elif etype == "content_block_start":
+                                index = int(event.get("index") or 0)
+                                block = event.get("content_block") or {}
+                                block_types[index] = block.get("type") or ""
+                                if block.get("type") == "tool_use":
+                                    tid = str(block.get("id") or f"toolu_{index}")
+                                    tool_bufs[tid] = {
+                                        "id": tid,
+                                        "name": str(block.get("name") or ""),
+                                        "arguments": "",
+                                        "_index": index,
+                                    }
+                                if block.get("type") == "thinking" and block.get("thinking"):
+                                    result.reasoning_content += str(block["thinking"])
+                                    if on_token:
+                                        on_token(str(block["thinking"]), is_reasoning=True)
+                                if block.get("type") == "text" and block.get("text"):
+                                    result.text += str(block["text"])
+                                    if on_token:
+                                        on_token(str(block["text"]))
+                            elif etype == "content_block_delta":
+                                index = int(event.get("index") or 0)
+                                delta = event.get("delta") or {}
+                                dtype = delta.get("type") or ""
+                                if dtype == "text_delta":
+                                    text = str(delta.get("text") or "")
+                                    result.text += text
+                                    if on_token and text:
+                                        on_token(text)
+                                elif dtype == "thinking_delta":
+                                    think = str(delta.get("thinking") or "")
+                                    result.reasoning_content += think
+                                    if on_token and think:
+                                        on_token(think, is_reasoning=True)
+                                elif dtype == "input_json_delta":
+                                    partial = str(delta.get("partial_json") or "")
+                                    for buf in tool_bufs.values():
+                                        if buf.get("_index") == index:
+                                            buf["arguments"] += partial
+                                            break
+                            elif etype == "message_delta":
+                                delta = event.get("delta") or {}
+                                if delta.get("stop_reason"):
+                                    stop_reason = str(delta["stop_reason"])
+                                usage = event.get("usage") or {}
+                                if usage.get("output_tokens") is not None:
+                                    result.usage["output_tokens"] = int(usage.get("output_tokens") or 0)
+                            elif etype == "error":
+                                err = event.get("error") or {}
+                                raise RuntimeError(f"Anthropic stream error: {err}")
+                    finally:
+                        with self._lock:
+                            self._active_responses.pop(thread_id, None)
 
-        for buf in tool_bufs.values():
-            if not buf.get("name"):
-                continue
-            result.tool_calls.append({
-                "id": buf.get("id") or "",
-                "name": buf["name"],
-                "arguments": _parse_tool_arguments(buf.get("arguments") or "{}"),
-            })
+            for buf in tool_bufs.values():
+                if not buf.get("name"):
+                    continue
+                result.tool_calls.append({
+                    "id": buf.get("id") or "",
+                    "name": buf["name"],
+                    "arguments": _parse_tool_arguments(buf.get("arguments") or "{}"),
+                })
 
-        mapped = {
-            "end_turn": "stop",
-            "max_tokens": "max_tokens",
-            "tool_use": "tool_calls",
-            "stop_sequence": "stop",
-            "refusal": "content_filter",
-        }
+            mapped = {
+                "end_turn": "stop",
+                "max_tokens": "max_tokens",
+                "tool_use": "tool_calls",
+                "stop_sequence": "stop",
+                "refusal": "content_filter",
+            }
         result.finish_reason = mapped.get(stop_reason, stop_reason or ("tool_calls" if result.tool_calls else "stop"))
         if "input_tokens" in result.usage or "output_tokens" in result.usage:
             result.usage.setdefault("input_tokens", 0)

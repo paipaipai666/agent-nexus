@@ -12,7 +12,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
+from agentnexus.core.providers.base import BaseLLMProvider, StreamResult, remaining_timeout, request_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class OpenAIProvider(BaseLLMProvider):
         for client in clients:
             client.close()
 
-    def _guarded_iter(self, response: Any, *, timeout: int) -> Iterator[Any]:
+    def _guarded_iter(self, response: Any, *, timeout: int, deadline: float | None = None) -> Iterator[Any]:
         """Yield stream chunks with hung-connection watchdogs.
 
         A daemon pump thread owns the blocking ``next()``; the consumer side
@@ -84,9 +84,9 @@ class OpenAIProvider(BaseLLMProvider):
             except BaseException as exc:  # noqa: BLE001 — re-raised on consumer side
                 q.put(exc)
 
-        threading.Thread(target=_pump, daemon=True).start()
+        threading.Thread(target=_pump, daemon=True, name="openai-stream-pump").start()
         total_budget = float(timeout) * _TOTAL_BUDGET_MULT
-        deadline = time.monotonic() + total_budget
+        deadline = deadline if deadline is not None else time.monotonic() + total_budget
 
         while True:
             remaining = deadline - time.monotonic()
@@ -125,125 +125,136 @@ class OpenAIProvider(BaseLLMProvider):
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
         on_token: Callable[[str], None] | None = None,
+        deadline: float | None = None,
     ) -> StreamResult:
-        client = self._get_client(api_key, base_url, timeout)
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-        }
-
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
-
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-            if parallel_tool_calls is not None:
-                kwargs["parallel_tool_calls"] = parallel_tool_calls
-
-        if response_format:
-            kwargs["response_format"] = response_format
-
-        if stream_options:
-            kwargs["stream_options"] = stream_options
-
-        if reasoning_effort is not None:
-            kwargs["reasoning_effort"] = reasoning_effort
-            if reasoning_effort == "none":
-                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-            else:
-                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        client = self._get_client(api_key, base_url, timeout) if deadline is None else OpenAI(
+            api_key=api_key, base_url=base_url, timeout=remaining_timeout(deadline), max_retries=0,
+        )
 
         try:
-            response = client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "reasoning_effort" not in msg and "thinking" not in msg:
-                raise
-            kwargs.pop("reasoning_effort", None)
-            kwargs.pop("extra_body", None)
-            response = client.chat.completions.create(**kwargs)
-        thread_id = threading.get_ident()
-        with self._lock:
-            self._active_streams[thread_id] = response
+            with request_deadline(deadline, client.close):
+                kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "stream": True,
+                }
 
-        result = StreamResult()
-        tool_call_bufs: dict[int, dict[str, Any]] = {}
+                if max_tokens is not None:
+                    kwargs["max_tokens"] = max_tokens
 
-        try:
-            for chunk in self._guarded_iter(response, timeout=timeout):
-                if hasattr(chunk, "usage") and chunk.usage:
-                    result.usage = {
-                        "input_tokens": chunk.usage.prompt_tokens or 0,
-                        "output_tokens": chunk.usage.completion_tokens or 0,
-                        "total_tokens": chunk.usage.total_tokens or 0,
-                    }
-                    if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
-                        result.usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
-                        result.usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
-                    elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
-                        result.usage["cache_hit_tokens"] = getattr(
-                            chunk.usage.prompt_tokens_details, "cached_tokens", 0
-                        ) or 0
+                if tools:
+                    kwargs["tools"] = tools
+                    kwargs["tool_choice"] = "auto"
+                    if parallel_tool_calls is not None:
+                        kwargs["parallel_tool_calls"] = parallel_tool_calls
 
-                if not chunk.choices:
-                    continue
+                if response_format:
+                    kwargs["response_format"] = response_format
 
-                delta = chunk.choices[0].delta
-                content = (delta.content or "").replace("</think>", "").replace("<think>", "")
-                result.text += content
+                if stream_options:
+                    kwargs["stream_options"] = stream_options
 
-                if on_token and content:
-                    on_token(content)
+                if reasoning_effort is not None:
+                    kwargs["reasoning_effort"] = reasoning_effort
+                    if reasoning_effort == "none":
+                        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+                    else:
+                        kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
-                rc = getattr(delta, "reasoning_content", None)
-                if rc:
-                    result.reasoning_content += rc
-                    if on_token:
-                        on_token(rc, is_reasoning=True)
+                if deadline is not None:
+                    kwargs["timeout"] = remaining_timeout(deadline)
 
-                tc_list = getattr(delta, "tool_calls", None) or []
-                for tc in tc_list:
-                    idx = tc.get("index", 0) if isinstance(tc, dict) else getattr(tc, "index", 0)
-                    if idx not in tool_call_bufs:
-                        tool_call_bufs[idx] = {
-                            "id": "",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    buf = tool_call_bufs[idx]
-                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                    if tc_id:
-                        buf["id"] = tc_id
-                    fn = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
-                    if fn:
-                        name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
-                        args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
-                        if name:
-                            buf["function"]["name"] += name
-                        if args:
-                            buf["function"]["arguments"] += args
-
-                fr = getattr(chunk.choices[0], "finish_reason", "")
-                if fr:
-                    result.finish_reason = fr
-        finally:
-            with self._lock:
-                self._active_streams.pop(thread_id, None)
-            self._close_stream(response)
-
-        for buf in tool_call_bufs.values():
-            if buf["function"]["name"]:
                 try:
-                    args = json.loads(buf["function"]["arguments"]) if buf["function"]["arguments"] else {}
-                except (json.JSONDecodeError, ValueError):
-                    args = {}
-                result.tool_calls.append({
-                    "id": buf["id"],
-                    "name": buf["function"]["name"],
-                    "arguments": args,
-                })
+                    response = client.chat.completions.create(**kwargs)
+                except Exception as exc:
+                    msg = str(exc).lower()
+                    if "reasoning_effort" not in msg and "thinking" not in msg:
+                        raise
+                    kwargs.pop("reasoning_effort", None)
+                    kwargs.pop("extra_body", None)
+                    response = client.chat.completions.create(**kwargs)
+                thread_id = threading.get_ident()
+                with self._lock:
+                    self._active_streams[thread_id] = response
 
-        return result
+                result = StreamResult()
+                tool_call_bufs: dict[int, dict[str, Any]] = {}
+
+                try:
+                    for chunk in self._guarded_iter(response, timeout=timeout, deadline=deadline):
+                        if hasattr(chunk, "usage") and chunk.usage:
+                            result.usage = {
+                                "input_tokens": chunk.usage.prompt_tokens or 0,
+                                "output_tokens": chunk.usage.completion_tokens or 0,
+                                "total_tokens": chunk.usage.total_tokens or 0,
+                            }
+                            if hasattr(chunk.usage, "prompt_cache_hit_tokens"):
+                                result.usage["cache_hit_tokens"] = chunk.usage.prompt_cache_hit_tokens or 0
+                                result.usage["cache_miss_tokens"] = chunk.usage.prompt_cache_miss_tokens or 0
+                            elif hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
+                                result.usage["cache_hit_tokens"] = getattr(
+                                    chunk.usage.prompt_tokens_details, "cached_tokens", 0
+                                ) or 0
+
+                        if not chunk.choices:
+                            continue
+
+                        delta = chunk.choices[0].delta
+                        content = (delta.content or "").replace("</think>", "").replace("<think>", "")
+                        result.text += content
+
+                        if on_token and content:
+                            on_token(content)
+
+                        rc = getattr(delta, "reasoning_content", None)
+                        if rc:
+                            result.reasoning_content += rc
+                            if on_token:
+                                on_token(rc, is_reasoning=True)
+
+                        tc_list = getattr(delta, "tool_calls", None) or []
+                        for tc in tc_list:
+                            idx = tc.get("index", 0) if isinstance(tc, dict) else getattr(tc, "index", 0)
+                            if idx not in tool_call_bufs:
+                                tool_call_bufs[idx] = {
+                                    "id": "",
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            buf = tool_call_bufs[idx]
+                            tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                            if tc_id:
+                                buf["id"] = tc_id
+                            fn = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
+                            if fn:
+                                name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
+                                args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
+                                if name:
+                                    buf["function"]["name"] += name
+                                if args:
+                                    buf["function"]["arguments"] += args
+
+                        fr = getattr(chunk.choices[0], "finish_reason", "")
+                        if fr:
+                            result.finish_reason = fr
+                finally:
+                    with self._lock:
+                        self._active_streams.pop(thread_id, None)
+                    self._close_stream(response)
+
+                for buf in tool_call_bufs.values():
+                    if buf["function"]["name"]:
+                        try:
+                            args = json.loads(buf["function"]["arguments"]) if buf["function"]["arguments"] else {}
+                        except (json.JSONDecodeError, ValueError):
+                            args = {}
+                        result.tool_calls.append({
+                            "id": buf["id"],
+                            "name": buf["function"]["name"],
+                            "arguments": args,
+                        })
+
+                return result
+        finally:
+            if deadline is not None:
+                client.close()

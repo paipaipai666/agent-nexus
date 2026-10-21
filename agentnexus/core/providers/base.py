@@ -2,10 +2,45 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def remaining_timeout(deadline: float) -> float:
+    """Return the remaining absolute request budget or fail before more I/O."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Model capability probe deadline exceeded")
+    return remaining
+
+
+@contextmanager
+def request_deadline(deadline: float | None, close: Callable[[], None]):
+    """Close a dedicated request transport when its absolute budget expires."""
+    if deadline is None:
+        yield
+        return
+
+    def cancel():
+        try:
+            close()
+        except Exception:
+            pass
+
+    timer = threading.Timer(remaining_timeout(deadline), cancel)
+    timer.name = "capability-deadline"
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
+        timer.join(timeout=0.1)
 
 
 @dataclass
@@ -48,6 +83,7 @@ class BaseLLMProvider(ABC):
         stream_options: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
         on_token: Callable[..., None] | None = None,
+        deadline: float | None = None,
     ) -> StreamResult:
         """Execute a streaming chat completion and return the unified result.
 

@@ -90,6 +90,7 @@ class AgentLLM:
         self.api_key = api_key or apiKey or profile[2].get_secret_value()
         self.timeout = timeout or profile[3]
         self._call_state = threading.local()
+        self._capability_lock = threading.RLock()
         self.total_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_hit_tokens": 0}
         self._capabilities: ModelCapabilities | None = None
         self._discovery: CapabilityDiscovery | None = None
@@ -181,15 +182,16 @@ class AgentLLM:
     def configure(self, *, model: str, base_url: str, api_key: str, timeout: int | None = None) -> None:
         """Hot-switch the underlying model/provider (shared instance — every
         agent holding this client picks the change up on its next call)."""
-        self.base_url = base_url
-        self.model = model.strip()
-        self.api_key = api_key
-        if timeout:
-            self.timeout = timeout
-        self._capabilities = None
-        self._discovery = None
-        self._session_tracker = None
-        self.last_error = ""
+        with self._capability_lock:
+            self.base_url = base_url
+            self.model = model.strip()
+            self.api_key = api_key
+            if timeout:
+                self.timeout = timeout
+            self._capabilities = None
+            self._discovery = None
+            self._session_tracker = None
+            self.last_error = ""
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -198,19 +200,20 @@ class AgentLLM:
 
     def capability_snapshot(self) -> ModelCapabilitySnapshot:
         """Read capability flags and discovery state from one local snapshot."""
-        if self._capabilities is None:
-            self._capabilities = detect_capabilities(self.model, self.base_url)
-        caps = self._capabilities
-        if not caps.from_default_fallback:
-            return ModelCapabilitySnapshot(caps, "config", "ready")
-        snapshot = self._get_discovery(caps).snapshot()
-        if snapshot.result is not None:
-            caps = replace(caps, supports_tool_calling=snapshot.result["tool_calling"],
-                           supports_json_mode=snapshot.result["json_mode"],
-                           supports_parallel_tool_calls=caps.supports_parallel_tool_calls if caps.parallel_explicit else snapshot.result["parallel_tool_calls"],
-                           from_default_fallback=False)
-            return ModelCapabilitySnapshot(caps, "probe", "ready")
-        return ModelCapabilitySnapshot(caps, "unknown", snapshot.status)
+        with self._capability_lock:
+            if self._capabilities is None:
+                self._capabilities = detect_capabilities(self.model, self.base_url)
+            caps = self._capabilities
+            if not caps.from_default_fallback:
+                return ModelCapabilitySnapshot(caps, "config", "ready")
+            snapshot = self._get_discovery(caps).snapshot()
+            if snapshot.result is not None:
+                caps = replace(caps, supports_tool_calling=snapshot.result["tool_calling"],
+                               supports_json_mode=snapshot.result["json_mode"],
+                               supports_parallel_tool_calls=caps.supports_parallel_tool_calls if caps.parallel_explicit else snapshot.result["parallel_tool_calls"],
+                               from_default_fallback=False)
+                return ModelCapabilitySnapshot(caps, "probe", "ready")
+            return ModelCapabilitySnapshot(caps, "unknown", snapshot.status)
 
     def _get_discovery(self, caps: ModelCapabilities) -> CapabilityDiscovery:
         if self._discovery is None:
@@ -224,9 +227,12 @@ class AgentLLM:
 
     def ensure_capabilities(self) -> ModelCapabilities:
         """Confirm an unknown protocol before executing a model task."""
-        caps = self.capabilities
-        if caps.from_default_fallback and self.api_key and self.base_url:
-            self._get_discovery(caps).ensure(self._probe_loader())
+        with self._capability_lock:
+            caps = self.capabilities
+            if not caps.from_default_fallback or not self.api_key or not self.base_url:
+                return caps
+            discovery, loader = self._get_discovery(caps), self._probe_loader()
+        discovery.ensure(loader)
         return self.capabilities
 
     @property
@@ -236,9 +242,10 @@ class AgentLLM:
 
     def start_capability_discovery(self) -> None:
         """Warm unknown protocol capabilities without blocking the caller."""
-        caps = self.capabilities
-        if caps.from_default_fallback and self.api_key and self.base_url:
-            self._get_discovery(caps).start(self._probe_loader())
+        with self._capability_lock:
+            caps = self.capabilities
+            if caps.from_default_fallback and self.api_key and self.base_url:
+                self._get_discovery(caps).start(self._probe_loader())
 
     @property
     def session_tracker(self) -> SessionCapabilityTracker:
