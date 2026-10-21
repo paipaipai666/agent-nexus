@@ -3,22 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Check, ChevronDown, Cpu, Settings2, X } from 'lucide-react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { api, ProviderInfo } from '../../services/api'
+import type { ModelCapabilities } from '../../services/modelCapabilities'
 import { usePrefersReducedMotion } from '../../utils/effects'
-
-interface ModelCapabilities {
-  model: string
-  base_url: string
-  source: 'registry' | 'probe' | 'config'
-  tool_calling: boolean
-  json_mode: boolean
-  json_schema: boolean
-  thinking: boolean
-  vision: boolean
-  parallel_tool_calls: boolean
-  max_context_tokens: number
-  max_output_tokens: number
-  session_disabled: string[]
-}
 
 interface ModelPickerProps {
   currentModel: string | null
@@ -44,13 +30,20 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
   const rootRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const reducedMotion = usePrefersReducedMotion()
+  useEffect(() => () => { requestId.current++ }, [])
 
   const refreshCaps = async () => {
     const id = ++requestId.current
     setCapabilities({ kind: 'loading' })
     try {
-      const data = await api.getModelCapabilities()
-      if (id === requestId.current) setCapabilities({ kind: 'ready', data })
+      let data = await api.refreshModelCapabilities()
+      while (id === requestId.current) {
+        setCapabilities({ kind: 'ready', data })
+        if (data.discovery_status !== 'probing') return
+        await new Promise(resolve => window.setTimeout(resolve, 250))
+        if (id !== requestId.current) return
+        data = await api.getModelCapabilities()
+      }
     } catch (failure) {
       if (id === requestId.current) setCapabilities({ kind: 'error', message: failure instanceof Error ? failure.message : '查询失败' })
     }
@@ -215,9 +208,11 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
               <span className="text-[11.5px]" style={{ color: 'var(--fg-faint)' }}>能力检测</span>
               <span className="text-[12px]" style={{ color: 'var(--fg-faint)' }}>
                 {!caps ? capabilities.kind === 'error' ? '检测失败' : capabilities.kind === 'loading' ? '检测中…' : '尚未检测'
+                  : caps.discovery_status === 'probing' ? '检测中…'
+                  : caps.discovery_status === 'failed' ? '检测暂不可用'
                   : caps.source === 'probe' ? '实时探测'
                   : caps.source === 'config' ? '配置指定'
-                  : '注册表'}
+                  : '尚未检测'}
               </span>
             </div>
             {caps ? (
@@ -233,18 +228,21 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
                     return (
                       <CapChip
                         label={active.label}
-                        ok={caps[active.key]}
+                        ok={caps.source === 'unknown' ? null : caps[active.key]}
                         disabled={caps.session_disabled.includes(active.key)}
                       />
                     )
                   })()}
-                  <CapChip label="思考" ok={caps.thinking} disabled={caps.session_disabled.includes('thinking')} />
-                  <CapChip label="视觉" ok={caps.vision} />
-                  <CapChip label="并行工具" ok={caps.parallel_tool_calls} disabled={caps.session_disabled.includes('parallel_tool_calls')} />
+                  <CapChip label="思考" ok={caps.source === 'unknown' && !caps.thinking ? null : caps.thinking} disabled={caps.session_disabled.includes('thinking')} />
+                  <CapChip label="视觉" ok={caps.source === 'unknown' && !caps.vision ? null : caps.vision} />
+                  <CapChip label="并行工具" ok={caps.source === 'unknown' ? null : caps.parallel_tool_calls} disabled={caps.session_disabled.includes('parallel_tool_calls')} />
                 </div>
                 <div className="mt-1.5 text-[12px]" style={{ color: 'var(--fg-faint)' }}>
-                  上下文 {(caps.max_context_tokens / 1000).toFixed(0)}K · 输出 {(caps.max_output_tokens / 1000).toFixed(0)}K
+                  上下文 {caps.max_context_tokens ? `${(caps.max_context_tokens / 1000).toFixed(0)}K` : '未知'} · 输出 {(caps.max_output_tokens / 1000).toFixed(0)}K
                 </div>
+                {caps.source === 'unknown' && caps.discovery_status !== 'probing' && (
+                  <button type="button" className="mt-1 underline text-xs" onClick={() => void refreshCaps()}>重试能力检测</button>
+                )}
               </>
             ) : capabilities.kind === 'error' ? (
               <div role="alert" className="text-xs" style={{ color: 'var(--red)' }}>{capabilities.message}
@@ -273,10 +271,11 @@ export default function ModelPicker({ currentModel, onSwitched }: ModelPickerPro
   )
 }
 
-function CapChip({ label, ok, disabled = false }: { label: string; ok: boolean; disabled?: boolean }) {
+function CapChip({ label, ok, disabled = false }: { label: string; ok: boolean | null; disabled?: boolean }) {
   return (
     <span
       className="inline-flex items-center gap-0.5 px-1.5 rounded text-[10.5px] leading-4"
+      aria-label={`${label}：${disabled ? '已禁用' : ok === null ? '未知' : ok ? '支持' : '不支持'}`}
       title={disabled ? `${label}：运行时被禁用（API 报错后自动降级）` : label}
       style={
         disabled
@@ -286,7 +285,7 @@ function CapChip({ label, ok, disabled = false }: { label: string; ok: boolean; 
             : { background: 'var(--surface-3)', color: 'var(--fg-faint)' }
       }
     >
-      {ok && !disabled ? <Check size={8} /> : (!ok && !disabled) ? <X size={8} /> : <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />}
+      {ok === null ? '?' : ok && !disabled ? <Check size={8} /> : (!ok && !disabled) ? <X size={8} /> : <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />}
       {label}
     </span>
   )

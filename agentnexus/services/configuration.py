@@ -213,16 +213,21 @@ def get_llm_capabilities(runtime):
     or ``unknown`` (conservative defaults, not yet probed).
     """
     llm = runtime.llm
-    caps = llm.capabilities
-    settings = runtime.settings
-    overridden = settings.model_tool_calling is not None or settings.model_json_mode is not None
-    if overridden:
-        source = 'config'
-    elif caps.from_default_fallback:
-        source = 'unknown'
-    else:
-        source = 'probe'
-    return {'model': llm.model, 'base_url': llm.base_url, 'source': source, 'tool_calling': caps.supports_tool_calling, 'json_mode': caps.supports_json_mode, 'json_schema': caps.supports_json_schema, 'thinking': caps.supports_thinking, 'vision': caps.supports_vision, 'parallel_tool_calls': caps.supports_parallel_tool_calls, 'max_context_tokens': caps.max_context_tokens, 'max_output_tokens': caps.max_output_tokens, 'session_disabled': sorted(llm.session_tracker.disabled_features)}
+    snapshot = llm.capability_snapshot()
+    caps = snapshot.capabilities
+    return {'model': llm.model, 'base_url': llm.base_url, 'source': snapshot.source,
+            'discovery_status': snapshot.status,
+            'tool_calling': caps.supports_tool_calling, 'json_mode': caps.supports_json_mode,
+            'json_schema': caps.supports_json_schema, 'thinking': caps.supports_thinking,
+            'vision': caps.supports_vision, 'parallel_tool_calls': caps.supports_parallel_tool_calls,
+            'max_context_tokens': caps.max_context_tokens, 'max_output_tokens': caps.max_output_tokens,
+            'session_disabled': sorted(llm.session_tracker.disabled_features)}
+
+
+def refresh_llm_capabilities(runtime):
+    """Request background discovery and immediately return its current snapshot."""
+    runtime.llm.start_capability_discovery()
+    return get_llm_capabilities(runtime)
 
 def update_config(req: ConfigUpdateRequest, runtime):
     from agentnexus.core.config import get_settings, load_config_yaml, write_config_yaml

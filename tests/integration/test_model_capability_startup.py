@@ -90,14 +90,15 @@ def test_capability_http_read_returns_unknown_without_contacting_model(model_end
 
 
 @pytest.mark.asyncio
-async def test_tui_accepts_input_without_contacting_model(model_endpoint):
+async def test_tui_accepts_input_while_background_discovery_is_pending(model_endpoint):
     from textual.events import Key
 
     from agentnexus.agents.re_act_agent import ReActAgent
     from agentnexus.tools.registry import ToolRegistry
     from agentnexus.tui.app import AgentNexusTUI
 
-    model_endpoint.delay = 0.3
+    release = threading.Event()
+    model_endpoint.on_request = lambda payload: release.wait(timeout=5)
     app = AgentNexusTUI(agent=ReActAgent(model_endpoint.client, ToolRegistry()))
     async with app.run_test(size=(100, 30)):
         async with asyncio.timeout(3):
@@ -108,7 +109,37 @@ async def test_tui_accepts_input_without_contacting_model(model_endpoint):
             while composer.text != "x":
                 await asyncio.sleep(0.005)
         assert composer.text == "x"
-        assert model_endpoint.requests == []
+        try:
+            assert model_endpoint.client.capability_discovery_status == "probing"
+            assert model_endpoint.client.capabilities.from_default_fallback is True
+        finally:
+            release.set()
+        caps = await asyncio.to_thread(model_endpoint.client.ensure_capabilities)
+        assert caps.supports_tool_calling is True
+
+
+def test_capability_refresh_is_asynchronous_and_eventually_updates_http_snapshot(model_endpoint):
+    from agentnexus.server.deps import get_runtime
+    from agentnexus.server.routes.config import router
+
+    model_endpoint.delay = 0.2
+    app = FastAPI()
+    app.include_router(router, prefix="/api/config")
+    app.dependency_overrides[get_runtime] = lambda: SimpleNamespace(llm=model_endpoint.client, settings=get_settings())
+    with TestClient(app) as client:
+        started = time.perf_counter()
+        response = client.post("/api/config/llm/capabilities/refresh")
+        assert response.status_code == 200
+        assert time.perf_counter() - started < 0.15
+        assert response.json()["discovery_status"] == "probing"
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            snapshot = client.get("/api/config/llm/capabilities").json()
+            if snapshot["discovery_status"] == "ready":
+                break
+            time.sleep(0.01)
+    assert snapshot["source"] == "probe"
+    assert snapshot["parallel_tool_calls"] is True
 
 
 def test_first_task_preserves_native_tools_after_local_capability_read(model_endpoint):

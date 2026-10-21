@@ -221,6 +221,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._skill_service = skill_service
         self._capability_runtime = capability_runtime
         self._spinner_timer = None
+        self._capability_timer = None
         self._spinner_frames = None
         self._current_tool_name: str = ""
         self._current_tool_widget = None
@@ -1490,8 +1491,25 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
                 base_url = getattr(llm, "base_url", "")
                 if isinstance(model, str) and isinstance(base_url, str):
                     self._hud.update_model(model, base_url, workspace=self._chat_session.workspace)
+            from agentnexus.core.llm import AgentLLM
+
+            llm = getattr(self._agent, "llm_client", None)
+            if isinstance(llm, AgentLLM) and llm.capability_discovery_status == "unknown":
+                self.call_after_refresh(self._start_model_capability_discovery)
         except Exception as e:
             logger.debug("Failed to refresh model panel: %s", e)
+
+    def _start_model_capability_discovery(self):
+        llm = self._agent.llm_client
+        llm.start_capability_discovery()
+        if llm.capability_discovery_status == "probing" and self._capability_timer is None:
+            self._capability_timer = self.set_interval(0.25, self._poll_model_capabilities)
+
+    def _poll_model_capabilities(self):
+        if self._agent.llm_client.capability_discovery_status != "probing":
+            self._capability_timer.stop()
+            self._capability_timer = None
+            self._refresh_model_panel()
 
     def _refresh_todo_panel(self):
         if not hasattr(self, '_side_panel') or not self._agent:

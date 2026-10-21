@@ -4,7 +4,6 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from functools import partial
 from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
@@ -16,6 +15,7 @@ from rich.text import Text
 from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.capabilities import (
     ModelCapabilities,
+    ModelCapabilitySnapshot,
     SessionCapabilityTracker,
     detect_capabilities,
 )
@@ -194,17 +194,23 @@ class AgentLLM:
     @property
     def capabilities(self) -> ModelCapabilities:
         """Read configured and cached capabilities without remote I/O."""
+        return self.capability_snapshot().capabilities
+
+    def capability_snapshot(self) -> ModelCapabilitySnapshot:
+        """Read capability flags and discovery state from one local snapshot."""
         if self._capabilities is None:
             self._capabilities = detect_capabilities(self.model, self.base_url)
         caps = self._capabilities
-        if caps.from_default_fallback:
-            result = self._get_discovery(caps).snapshot().result
-            if result is not None:
-                return replace(caps, supports_tool_calling=result["tool_calling"],
-                               supports_json_mode=result["json_mode"],
-                               supports_parallel_tool_calls=caps.supports_parallel_tool_calls if caps.parallel_explicit else result["parallel_tool_calls"],
-                               from_default_fallback=False)
-        return caps
+        if not caps.from_default_fallback:
+            return ModelCapabilitySnapshot(caps, "config", "ready")
+        snapshot = self._get_discovery(caps).snapshot()
+        if snapshot.result is not None:
+            caps = replace(caps, supports_tool_calling=snapshot.result["tool_calling"],
+                           supports_json_mode=snapshot.result["json_mode"],
+                           supports_parallel_tool_calls=caps.supports_parallel_tool_calls if caps.parallel_explicit else snapshot.result["parallel_tool_calls"],
+                           from_default_fallback=False)
+            return ModelCapabilitySnapshot(caps, "probe", "ready")
+        return ModelCapabilitySnapshot(caps, "unknown", snapshot.status)
 
     def _get_discovery(self, caps: ModelCapabilities) -> CapabilityDiscovery:
         if self._discovery is None:
@@ -212,8 +218,9 @@ class AgentLLM:
         return self._discovery
 
     def _probe_loader(self):
-        return partial(probe_capabilities, select_provider(self.model, self.base_url),
-                       model=self.model, api_key=self.api_key, base_url=self.base_url, timeout=self.timeout)
+        model, base_url, api_key, timeout = self.model, self.base_url, self.api_key, self.timeout
+        return lambda: probe_capabilities(select_provider(model, base_url),
+                                          model=model, api_key=api_key, base_url=base_url, timeout=timeout)
 
     def ensure_capabilities(self) -> ModelCapabilities:
         """Confirm an unknown protocol before executing a model task."""
@@ -221,6 +228,17 @@ class AgentLLM:
         if caps.from_default_fallback and self.api_key and self.base_url:
             self._get_discovery(caps).ensure(self._probe_loader())
         return self.capabilities
+
+    @property
+    def capability_discovery_status(self) -> str:
+        """Read discovery progress without waiting for its worker."""
+        return self.capability_snapshot().status
+
+    def start_capability_discovery(self) -> None:
+        """Warm unknown protocol capabilities without blocking the caller."""
+        caps = self.capabilities
+        if caps.from_default_fallback and self.api_key and self.base_url:
+            self._get_discovery(caps).start(self._probe_loader())
 
     @property
     def session_tracker(self) -> SessionCapabilityTracker:

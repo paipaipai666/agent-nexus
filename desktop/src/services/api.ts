@@ -2,6 +2,7 @@ const BASE_URL = 'http://127.0.0.1:18765'
 
 import { parseRuntimeStatus } from './runtime-status'
 import { parseCommunication, type SubagentStatus } from './subagentWorkspace'
+import { parseModelCapabilities } from './modelCapabilities'
 export type { ContextCategory, RuntimeStatus } from './runtime-status'
 
 export interface AttachmentRef {
@@ -458,20 +459,10 @@ export const api = {
     ),
 
   getModelCapabilities: () =>
-    request<{
-      model: string
-      base_url: string
-      source: 'registry' | 'probe' | 'config'
-      tool_calling: boolean
-      json_mode: boolean
-      json_schema: boolean
-      thinking: boolean
-      vision: boolean
-      parallel_tool_calls: boolean
-      max_context_tokens: number
-      max_output_tokens: number
-      session_disabled: string[]
-    }>('/api/config/llm/capabilities'),
+    request<unknown>('/api/config/llm/capabilities').then(parseModelCapabilities),
+
+  refreshModelCapabilities: () =>
+    request<unknown>('/api/config/llm/capabilities/refresh', { method: 'POST' }).then(parseModelCapabilities),
 
   getStats: (days = 7) => request<Record<string, any>>(`/api/stats?days=${days}`),
 

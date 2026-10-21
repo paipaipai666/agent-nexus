@@ -97,6 +97,11 @@ def get_llm_capabilities(runtime=Depends(get_runtime)):
     return _call(configuration.get_llm_capabilities, runtime)
 
 
+@router.post('/llm/capabilities/refresh')
+def refresh_llm_capabilities(runtime=Depends(get_runtime)):
+    return _call(configuration.refresh_llm_capabilities, runtime)
+
+
 @router.put('')
 def update_config(req: ConfigUpdateRequest):
     from agentnexus.server.app import _get_runtime

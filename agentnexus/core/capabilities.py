@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 
 from agentnexus.core.config import get_settings
 
@@ -29,6 +30,15 @@ class ModelCapabilities:
 
     from_default_fallback: bool = True
     parallel_explicit: bool = False
+
+
+@dataclass(frozen=True)
+class ModelCapabilitySnapshot:
+    """Capabilities and discovery provenance observed at the same instant."""
+
+    capabilities: ModelCapabilities
+    source: Literal["unknown", "config", "probe"]
+    status: Literal["unknown", "probing", "ready", "failed"]
 
 
 def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
