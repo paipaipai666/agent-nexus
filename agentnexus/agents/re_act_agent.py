@@ -961,7 +961,8 @@ class ReActAgent:
         return []
 
     def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
-        return decisions.select_strategy(session_caps, self.llm_client.capabilities)
+        caps = self.llm_client.ensure_capabilities() if isinstance(self.llm_client, AgentLLM) else self.llm_client.capabilities
+        return decisions.select_strategy(session_caps, caps)
 
     @staticmethod
     def _stash_partial_answer(ctx: ExecutionContext, text: str | None) -> None:

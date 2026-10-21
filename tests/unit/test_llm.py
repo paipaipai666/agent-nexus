@@ -405,7 +405,7 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _FakeProvider())
         client = AgentLLM(model="stealth/probe-tools", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is True
+        assert client.ensure_capabilities().supports_tool_calling is True
 
     def test_probe_enables_json_mode_when_tools_unsupported(self, temp_agentnexus_home, monkeypatch):
         class _TextOnlyProvider:
@@ -415,8 +415,8 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _TextOnlyProvider())
         client = AgentLLM(model="stealth/probe-json", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is False
-        assert client.capabilities.supports_json_mode is True
+        assert client.ensure_capabilities().supports_tool_calling is False
+        assert client.ensure_capabilities().supports_json_mode is True
 
     def test_probe_failure_keeps_conservative_defaults_and_is_not_cached(
         self, temp_agentnexus_home, monkeypatch,
@@ -428,7 +428,7 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _DownProvider())
         client = AgentLLM(model="stealth/probe-down", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is False
+        assert client.ensure_capabilities().supports_tool_calling is False
         import agentnexus.core.llm as m
         assert ("stealth/probe-down", "https://example.test/v1") not in m._probe_cache
 
@@ -450,8 +450,8 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _ParallelProvider())
         client = AgentLLM(model="stealth/probe-parallel", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is True
-        assert client.capabilities.supports_parallel_tool_calls is True
+        assert client.ensure_capabilities().supports_tool_calling is True
+        assert client.ensure_capabilities().supports_parallel_tool_calls is True
 
     def test_probe_marks_non_parallel_model(self, temp_agentnexus_home, monkeypatch):
         class _SerialProvider:
@@ -466,8 +466,8 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _SerialProvider())
         client = AgentLLM(model="stealth/probe-serial", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is True
-        assert client.capabilities.supports_parallel_tool_calls is False
+        assert client.ensure_capabilities().supports_tool_calling is True
+        assert client.ensure_capabilities().supports_parallel_tool_calls is False
 
     def test_config_override_wins_over_probe(self, temp_agentnexus_home, monkeypatch):
         monkeypatch.setenv("AGENTNEXUS_MODEL_TOOL_CALLING", "false")
@@ -482,7 +482,7 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, _FakeProvider())
         client = AgentLLM(model="stealth/probe-override", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is False
+        assert client.ensure_capabilities().supports_tool_calling is False
 
     def test_unknown_model_without_probe_stays_conservative(self, temp_agentnexus_home, monkeypatch):
         """Without a catalog or successful probe, flags stay off."""
@@ -490,7 +490,7 @@ class TestCapabilityProbe:
         self._patch_provider(monkeypatch, None)
         client = AgentLLM(model="stealth/never-known", api_key="k",
                           base_url="https://example.test/v1")
-        assert client.capabilities.supports_tool_calling is False
+        assert client.ensure_capabilities().supports_tool_calling is False
 
 
 class TestPerCallStateIsolation:

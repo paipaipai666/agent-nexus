@@ -201,11 +201,16 @@ class AgentLLM:
 
     @property
     def capabilities(self) -> ModelCapabilities:
+        """Read locally known capabilities without contacting the model endpoint."""
         if self._capabilities is None:
-            caps = detect_capabilities(self.model, self.base_url)
-            if caps.from_default_fallback:
-                caps = self._merge_probed_capabilities(caps)
-            self._capabilities = caps
+            self._capabilities = detect_capabilities(self.model, self.base_url)
+        return self._capabilities
+
+    def ensure_capabilities(self) -> ModelCapabilities:
+        """Discover unknown protocol capabilities before executing a model task."""
+        caps = self.capabilities
+        if caps.from_default_fallback:
+            self._capabilities = self._merge_probed_capabilities(caps)
         return self._capabilities
 
     def _merge_probed_capabilities(self, caps: ModelCapabilities) -> ModelCapabilities:
@@ -501,7 +506,7 @@ class AgentLLM:
         effort: str | None = None,
     ) -> "StreamResult":
         """Call LLM via a direct provider (OpenAI SDK)."""
-        caps = self.capabilities
+        caps = self.ensure_capabilities()
         tracker = self.session_tracker
 
         provider_tools = None

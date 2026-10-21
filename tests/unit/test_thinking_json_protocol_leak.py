@@ -79,7 +79,7 @@ class TestProbeThenNativeStrategy:
     def test_thinking_on_plus_probed_tool_calling_selects_native(self, monkeypatch):
         """用户看到的现象反面：thinking 绿 + 探测到工具 → 必须 NATIVE。"""
         client = self._client_with_probe(monkeypatch, tool_calling=True, thinking=True)
-        caps = client.capabilities
+        caps = client.ensure_capabilities()
 
         assert caps.supports_thinking is True
         assert caps.supports_tool_calling is True, (
@@ -92,7 +92,7 @@ class TestProbeThenNativeStrategy:
     def test_thinking_on_without_tool_calling_falls_to_prompt_json(self, monkeypatch):
         """对照：探测失败才允许 PROMPT_JSON（这时 JSON 格式注入是预期的）。"""
         client = self._client_with_probe(monkeypatch, tool_calling=False, thinking=True)
-        caps = client.capabilities
+        caps = client.ensure_capabilities()
         strategy = decisions.select_strategy(SessionCapabilityTracker(), caps)
         assert strategy is CallingStrategy.PROMPT_JSON
 
@@ -136,7 +136,7 @@ class TestEndToEndThinkingJsonLeak:
                           "parallel_tool_calls": False},
         )
 
-        resolved = client.capabilities
+        resolved = client.ensure_capabilities()
         assert resolved.supports_thinking is True
         assert resolved.supports_tool_calling is True, (
             "BUG: model_thinking 阻断探测 → tool_calling 永远 False → PROMPT_JSON + JSON 提示词"
