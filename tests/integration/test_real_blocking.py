@@ -5,6 +5,7 @@ large file uploads. Previous tests mocked ingest_one_document which
 completely bypassed the real blocking path.
 """
 
+import asyncio
 import concurrent.futures
 import gc
 import threading
@@ -58,8 +59,20 @@ def server_app(temp_agentnexus_home):
 
 
 @pytest.fixture
-def client(server_app):
-    return TestClient(server_app)
+def client(server_app, monkeypatch):
+    from agentnexus.server.routes import knowledge
+
+    tasks = set()
+    monkeypatch.setattr(knowledge, "_background_tasks", tasks)
+
+    async def finish_ingestions():
+        await asyncio.gather(*list(tasks), return_exceptions=True)
+
+    with TestClient(server_app) as active_client:
+        try:
+            yield active_client
+        finally:
+            active_client.portal.call(finish_ingestions)
 
 
 def _make_large_content(size_mb: float) -> bytes:
@@ -77,62 +90,39 @@ class TestRealEventLoopBlocking:
     but the file I/O + temp file + thread pool paths are exercised for real.
     """
 
-    def test_other_endpoints_respond_during_10mb_upload(self, client):
-        """While a 10MB file is being streamed to disk, other endpoints must respond.
-
-        This is the core repro of the reported bug: upload a large file,
-        then immediately hit other endpoints. If the event loop is blocked,
-        the other endpoints will time out or take >>1s.
-        """
-        content_10mb = _make_large_content(10)
+    @pytest.mark.parametrize("size_mb", [10, 50])
+    def test_other_endpoints_respond_while_ingestion_is_blocked(self, client, size_mb):
+        """Serve requests on the same event loop before ingestion is released."""
+        content = _make_large_content(size_mb)
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
 
         with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
             def slow_ingest(*args, **kwargs):
-                time.sleep(2)
+                started.set()
+                try:
+                    assert release.wait(timeout=10)
+                finally:
+                    finished.set()
                 return MagicMock(), MagicMock()
 
             mock_ingest.side_effect = slow_ingest
 
-            resp = client.post(
-                "/api/kb/documents",
-                files={"file": ("big.txt", content_10mb, "text/plain")},
-            )
-            assert resp.status_code == 200
-
-            start = time.monotonic()
-            health = client.get("/health")
-            docs = client.get("/api/kb/documents")
-            elapsed = time.monotonic() - start
-
-            assert health.status_code == 200
-            assert docs.status_code == 200
-            assert elapsed < 1.0, (
-                f"Other endpoints took {elapsed:.2f}s — event loop is blocked!"
-            )
-
-    def test_other_endpoints_respond_during_50mb_upload(self, client):
-        """While a 50MB file is being streamed to disk, other endpoints must respond."""
-        content_50mb = _make_large_content(50)
-
-        with patch("agentnexus.rag.kb_service.ingest_one_document") as mock_ingest:
-            mock_ingest.return_value = (MagicMock(), MagicMock())
-
-            resp = client.post(
-                "/api/kb/documents",
-                files={"file": ("huge.txt", content_50mb, "text/plain")},
-            )
-            assert resp.status_code == 200
-
-            start = time.monotonic()
-            health = client.get("/health")
-            config = client.get("/api/config")
-            elapsed = time.monotonic() - start
-
-            assert health.status_code == 200
-            assert config.status_code == 200
-            assert elapsed < 1.0, (
-                f"Other endpoints took {elapsed:.2f}s during 50MB upload"
-            )
+            try:
+                resp = client.post(
+                    "/api/kb/documents",
+                    files={"file": ("big.txt", content, "text/plain")},
+                )
+                assert resp.status_code == 200
+                assert started.wait(timeout=5)
+                assert not finished.is_set()
+                for endpoint in ("/health", "/api/kb/documents", "/api/config"):
+                    assert client.get(endpoint).status_code == 200
+                    assert not finished.is_set()
+            finally:
+                release.set()
+                assert finished.wait(timeout=5)
 
     def test_concurrent_uploads_dont_block_each_other(self, client):
         """Three concurrent 10MB uploads should all complete without blocking."""

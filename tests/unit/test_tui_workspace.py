@@ -146,7 +146,7 @@ async def test_running_reasoning_survives_switching_sessions(workspace_runtime):
 
     def execute(*_args, **_kwargs):
         runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "此任务仍在分析。"}), None, None)
-        release.wait(8)
+        assert release.wait(timeout=30)
         return SimpleNamespace(answer="完成")
 
     runtime.agent.run.side_effect = execute
@@ -165,6 +165,8 @@ async def test_running_reasoning_survives_switching_sessions(workspace_runtime):
             app.screen.query_one("#chat-input", Composer).value = "/session switch workspace"
             await pilot.press("enter")
             await settle(pilot, lambda: app.screen._chat_session.id == "workspace")
+            await settle(pilot, lambda: any("此任务仍在分析。" in str(widget.render())
+                                          for widget in app.screen.query(".reasoning-content")))
             assert "此任务仍在分析。" in str(app.screen.query_one(".reasoning-content").render())
             assert "思考" in str(app.screen.query_one("#agent-activity").render())
         finally:

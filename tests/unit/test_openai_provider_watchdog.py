@@ -96,14 +96,17 @@ def test_slow_stream_chunks_below_gap_pass_through():
     assert not stream.closed
 
 
-def test_total_budget_blows_long_running_stream():
+def test_total_budget_blows_long_running_stream(monkeypatch):
+    monkeypatch.setattr(provider_mod, "_CHUNK_GAP_S", 10)
+    monkeypatch.setattr(provider_mod, "_TOTAL_BUDGET_MULT", 0.1)
     provider = OpenAIProvider()
-    stream = _SlowStream(gap_s=0.4, n=10)
+    stream = _HangingStream()
 
     with pytest.raises(TimeoutError, match="total budget"):
         for _ in provider._guarded_iter(stream, timeout=1):
             pass
     assert stream.closed
+    assert stream.finished.wait(timeout=1)
 
 
 def test_pump_exception_propagates():

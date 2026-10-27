@@ -6,6 +6,7 @@ from rich.color import ColorType
 from agentnexus.tui.app import AgentNexusTUI
 from agentnexus.tui.widgets.input_bar import Composer
 from agentnexus.tui.widgets.message import ReasoningBlock
+from tests.unit.test_tui_workspace import settle
 from tests.unit.test_tui_workspace import workspace_runtime as workspace_runtime
 
 
@@ -49,6 +50,7 @@ async def test_long_reasoning_uses_the_transcript_scroll(workspace_runtime):
         assert body.max_scroll_y == 0
         area = app.screen.query_one("#chat-area")
         await pilot.press("pageup")
+        await settle(pilot, lambda: area.scroll_y < area.max_scroll_y)
         assert area.scroll_y < area.max_scroll_y
         await pilot.press("ctrl+end", "tab", "enter")
         assert not body.display

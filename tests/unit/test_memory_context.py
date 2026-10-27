@@ -806,6 +806,7 @@ class TestChatScreenAnswerRender:
         from agentnexus.tui.app import AgentNexusTUI
         from agentnexus.tui.widgets.input_bar import InputBar
         from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
+        from tests.unit.test_tui_workspace import settle
 
         class FakeCaps:
             supports_thinking = True
@@ -900,7 +901,8 @@ class TestChatScreenAnswerRender:
                     if recovery and recovery["status"] != "running":
                         break
                     await asyncio.sleep(0.05)
-                await pilot.pause()
+                await settle(pilot, lambda: any(message.content == "Final answer"
+                                              for message in screen.query(ChatMessage)))
 
                 chat_area = screen.query_one("#chat-area")
                 messages = [w for w in chat_area.walk_children() if isinstance(w, ChatMessage)]
