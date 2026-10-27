@@ -805,7 +805,7 @@ class TestChatScreenAnswerRender:
         from agentnexus.memory.versioned import ConversationVersionManager
         from agentnexus.tui.app import AgentNexusTUI
         from agentnexus.tui.widgets.input_bar import InputBar
-        from agentnexus.tui.widgets.message import ChatMessage, ToolCall
+        from agentnexus.tui.widgets.message import ChatMessage, ReasoningBlock, ToolCall
 
         class FakeCaps:
             supports_thinking = True
@@ -906,7 +906,7 @@ class TestChatScreenAnswerRender:
                 messages = [w for w in chat_area.walk_children() if isinstance(w, ChatMessage)]
                 tools = [w for w in chat_area.walk_children() if isinstance(w, ToolCall)]
 
-                thought_messages = [m for m in messages if "Thought:" in getattr(m, "content", "")]
+                thought_messages = [w for w in chat_area.walk_children() if isinstance(w, ReasoningBlock)]
                 assert thought_messages
                 assert tools
                 assert any("Need fresh information before answering" in m.content for m in thought_messages)
