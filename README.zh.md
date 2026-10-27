@@ -42,7 +42,6 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 🗣️ **对话与任务执行** | TUI 交互界面，ReAct 循环自动规划→执行→观察 |
 | 🧠 **本地记忆** | 短期（STM 压缩金字塔）+ 长期（SQLite+ChromaDB，评分驱逐） |
 | 📚 **知识库 RAG** | 混合检索（稠密+稀疏+RRF+重排序），8 种文件格式导入 |
-| 🌐 **浏览器自动化** | 经外部 MCP 服务器接入浏览器工具（如 Playwright/CDP） |
 | 📖 **Wiki 系统** | 混合 Wiki + RAG 知识管理，Karpathy 的 LLM Wiki 模式，机械验证，置信度路由 |
 | 🔒 **安全沙箱** | 工作区路径沙箱 + 越界一键放行提示；Shell 链：bubblewrap/Seatbelt/Low-IL → Docker → 本地兜底 |
 | 🛡️ **工具审计** | 7 道关卡（RBAC/Schema/限流/超时/风险/HITL/日志） |
@@ -50,7 +49,7 @@ AgentNexus 是一个 **ReAct（Thought→Action→Observe）单智能体** CLI �
 | 📊 **评估体系** | 9 个评估器（Agent/Trajectory/幻觉/RAG/代码/记忆等） |
 | 🎭 **Persona 系统** | Agent 身份、行为原则（立场/自主权/问责）、用户任务地图 |
 | 🎯 **技能系统** | 可复用工作流模板，TF-IDF + 学习型重排序路由 |
-| 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理 |
+| 🔌 **MCP 集成** | stdio/HTTP 导入外部工具，全量治理；浏览器自动化需接入提供 Playwright/CDP 等工具的外部 MCP 服务器 |
 | 🤖 **子代理委派** | Agent-in-Agent 隔离执行子任务 |
 
 ## 快速开始

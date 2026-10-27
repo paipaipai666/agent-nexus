@@ -42,7 +42,6 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 🗣️ **Conversation & Tasks** | TUI interface with ReAct loop: plan→execute→observe |
 | 🧠 **Local Memory** | STM compression pyramid + LTM (SQLite+ChromaDB, score-based eviction) |
 | 📚 **Knowledge Base RAG** | Hybrid retrieval (dense+sparse+RRF+rerank), 8 file formats |
-| 🌐 **Browser Automation** | Via external MCP server — bring your own Playwright/CDP browser toolset |
 | 📖 **Wiki System** | Hybrid Wiki + RAG knowledge management, Karpathy's LLM Wiki pattern, mechanical verification, confidence-based routing |
 | 🔒 **Security Sandbox** | Workspace path sandbox with one-click out-of-bounds approval; shell chain: bubblewrap/Seatbelt/Low-IL → Docker → local fallback |
 | 🛡️ **Tool Audit** | 7 security gates (RBAC/Schema/Rate-limit/Timeout/Risk/HITL/Audit) |
@@ -50,9 +49,8 @@ User → CLI/TUI/Desktop → ReAct Agent (FSM + 3-tier LLM Strategy)
 | 📊 **Evaluation** | 9 evaluators (Agent/Trajectory/Hallucination/RAG/Code/Memory, etc.) |
 | 🎭 **Persona System** | Agent identity, behavioral principles (stance/autonomy/accountability), and user-defined mission map |
 | 🎯 **Skill System** | Reusable workflow templates, TF-IDF + learned reranker routing |
-| 🔌 **MCP Integration** | Import external tools via stdio/HTTP, full governance |
+| 🔌 **MCP Integration** | Import external tools via stdio/HTTP with full governance; browser automation requires an external MCP server providing tools such as Playwright/CDP |
 | 🤖 **Sub-agent Delegation** | Agent-in-Agent isolated subtask execution |
-| 🕸️ **Code Knowledge Graph** | Semantic search, relationship queries, context retrieval |
 
 ## Quick Start
 
