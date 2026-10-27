@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.observability.timeline import TimelineStore
 from agentnexus.server.deps import get_runtime
 from agentnexus.server.error_handlers import register_error_handlers
@@ -12,7 +13,6 @@ from agentnexus.server.routes.chat import router
 from agentnexus.services.chat import ChatService
 from agentnexus.services.collaboration import CollaborationRun
 from agentnexus.services.subagents import SubagentRunContext
-from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.confirm_bridge import ConfirmBridge
 from agentnexus.tools.providers.base import ToolProviderContext
 from agentnexus.tools.providers.subagent_provider import SubagentToolProvider

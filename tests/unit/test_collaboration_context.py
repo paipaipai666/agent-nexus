@@ -2,9 +2,9 @@ import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
 from agentnexus.tools.confirm_bridge import CancelBridge, SubagentBridge
-from agentnexus.tools.registry import ToolRegistry
 from agentnexus.tools.providers.base import ToolProviderContext
 from agentnexus.tools.providers.subagent_provider import SubagentToolProvider
+from agentnexus.tools.registry import ToolRegistry
 
 
 def test_run_bridges_keep_inherited_identity_after_another_run_starts():

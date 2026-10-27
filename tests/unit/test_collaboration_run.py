@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from agentnexus.observability.timeline import TimelineStore
+from agentnexus.services.collaboration import ChildTask, CollaborationRun
 from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
-from agentnexus.services.collaboration import CollaborationRun, ChildTask
 
 
 def make_run(tmp_path):
@@ -188,6 +188,7 @@ def test_failed_worker_submission_does_not_leave_an_active_child(tmp_path):
 
 def test_managed_timeout_reports_deadline_and_retains_worker_until_exit(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
+
     from agentnexus.core.config import get_settings
     from agentnexus.services.chat import ChatService
     from agentnexus.tools.subagent import _run_subagent_attempt
@@ -240,6 +241,7 @@ def test_managed_timeout_reports_deadline_and_retains_worker_until_exit(tmp_path
 
 def test_managed_child_holds_capacity_until_timed_out_tool_exits(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
+
     from agentnexus.services.chat import ChatService
     from agentnexus.tools.registry import ToolMeta
     from agentnexus.tools.subagent import _run_subagent_attempt
