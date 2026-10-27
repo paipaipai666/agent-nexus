@@ -25,7 +25,7 @@ from agentnexus.core.providers.router import close_providers
 def model_endpoint(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-    state = SimpleNamespace(delay=0.0, stream_interval=0.0, requests=[], on_request=lambda payload: None)
+    state = SimpleNamespace(delay=0.0, stream_interval=0.0, stream_gap=0.0, requests=[], on_request=lambda payload: None)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -60,9 +60,11 @@ def model_endpoint(monkeypatch):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             try:
-                for part in parts:
+                for index, part in enumerate(parts):
                     self.wfile.write(part)
                     self.wfile.flush()
+                    if index == 0:
+                        time.sleep(state.stream_gap)
                     time.sleep(state.stream_interval)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
@@ -333,3 +335,22 @@ def test_anthropic_stream_checks_deadline_when_transport_close_cannot_interrupt(
     assert model_endpoint.client.capability_discovery_status == "failed"
     assert len(model_endpoint.requests) == 1
     assert list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json")) == []
+
+
+def test_anthropic_deadline_interrupts_a_pending_socket_read(model_endpoint, monkeypatch):
+    import agentnexus.core.capability_discovery as discovery
+    import agentnexus.core.providers.anthropic_provider as provider
+
+    monkeypatch.setattr(discovery, "PROBE_BUDGET_SECONDS", 1.5)
+    monkeypatch.setattr(provider.httpx.Client, "close", lambda self: None)
+    model_endpoint.delay = 0.8
+    model_endpoint.stream_gap = 3.0
+    model_endpoint.client.configure(
+        model="fixture", base_url=model_endpoint.url + "/anthropic.com/v1", api_key="fixture-key",
+    )
+    started = time.monotonic()
+    caps = model_endpoint.client.ensure_capabilities()
+    elapsed = time.monotonic() - started
+    assert elapsed < 1.9, elapsed
+    assert caps.from_default_fallback is True
+    assert model_endpoint.client.capability_discovery_status == "failed"

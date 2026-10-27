@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -164,6 +165,13 @@ class AnthropicMessagesProvider(BaseLLMProvider):
             stream = self._active_responses.get(thread_id if thread_id is not None else threading.get_ident())
         if stream is not None:
             try:
+                network = stream.extensions.get("network_stream")
+                connection = network.get_extra_info("socket") if network is not None else None
+                if connection is not None:
+                    try:
+                        connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
                 stream.close()
             except Exception:
                 pass
@@ -212,11 +220,16 @@ class AnthropicMessagesProvider(BaseLLMProvider):
 
         request_timeout = httpx.Timeout(timeout, read=timeout * 10) if deadline is None else httpx.Timeout(remaining_timeout(deadline))
         with httpx.Client(timeout=request_timeout) as client:
-            with request_deadline(deadline, client.close):
+            thread_id = threading.get_ident()
+
+            def abort_request():
+                self.abort_active_stream(thread_id)
+                client.close()
+
+            with request_deadline(deadline, abort_request):
                 if deadline is not None:
                     client.timeout = httpx.Timeout(remaining_timeout(deadline))
                 with client.stream("POST", url, headers=headers, json=body) as response:
-                    thread_id = threading.get_ident()
                     with self._lock:
                         self._active_responses[thread_id] = response
                     try:
