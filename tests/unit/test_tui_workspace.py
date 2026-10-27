@@ -394,6 +394,7 @@ async def test_inspector_adapts_to_terminal_width_and_resize(workspace_runtime):
         assert app.screen.query_one("#task-detail") is not None
         await pilot.press("escape")
         await pilot.resize_terminal(80, 24)
+        await settle(pilot, lambda: app.screen.query_one("#chat-area").region.width == 80)
         assert not app.screen.query_one("#side-panel").display
         assert app.screen.query_one("#chat-area").region.width == 80
         await pilot.press("f3")
@@ -513,7 +514,14 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
                 await click_ready(app, pilot, "#child-send")
                 app.screen.query_one("#message-editor", TextArea).load_text("继续检查")
                 if count == 3:
-                    await pilot.click("#editor-actions", offset=(16, 0))
+                    footer = app.screen.query_one("#editor-actions")
+
+                    def send_offset():
+                        return next((column for column in range(footer.size.width)
+                                     if footer.get_style_at(column, 0).meta.get("@click") == "screen.perform('send')"), None)
+
+                    await settle(pilot, lambda: send_offset() is not None)
+                    assert await pilot.click("#editor-actions", offset=(send_offset(), 0))
                 else:
                     await pilot.press("ctrl+s")
                 await settle(pilot, lambda: len(store.list_collaboration_messages("workspace", entry.subagent_id)) == count)
