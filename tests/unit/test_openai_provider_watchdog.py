@@ -16,11 +16,13 @@ class _FakeChunk:
 
 
 class _HangingStream:
-    """Yields one chunk, then blocks forever on the second next()."""
+    """Yield one chunk, then block until the connection is closed."""
 
     def __init__(self):
         self.closed = False
         self._yielded = False
+        self._closed = threading.Event()
+        self.finished = threading.Event()
 
     def __iter__(self):
         return self
@@ -31,11 +33,13 @@ class _HangingStream:
         if not self._yielded:
             self._yielded = True
             return _FakeChunk("first")
-        threading.Event().wait()
-        raise AssertionError("unreachable")
+        self._closed.wait()
+        self.finished.set()
+        raise RuntimeError("stream closed by abort")
 
     def close(self):
         self.closed = True
+        self._closed.set()
 
 
 class _SlowStream:
@@ -80,6 +84,7 @@ def test_hung_stream_aborted_after_chunk_gap():
 
     assert [c.choices[0].delta.content for c in items] == ["first"]
     assert stream.closed
+    assert stream.finished.wait(timeout=1)
 
 
 def test_slow_stream_chunks_below_gap_pass_through():
