@@ -312,3 +312,24 @@ def test_discovery_budget_is_shared_by_both_requests(model_endpoint, monkeypatch
     assert len(model_endpoint.requests) == 2
     assert caps.from_default_fallback is True
     assert model_endpoint.client.capability_discovery_status == "failed"
+
+
+def test_anthropic_stream_checks_deadline_when_transport_close_cannot_interrupt(model_endpoint, monkeypatch):
+    from contextlib import nullcontext
+
+    import agentnexus.core.capability_discovery as discovery
+    import agentnexus.core.providers.anthropic_provider as provider
+
+    monkeypatch.setattr(discovery, "PROBE_BUDGET_SECONDS", 0.7)
+    monkeypatch.setattr(provider, "request_deadline", lambda deadline, close: nullcontext())
+    model_endpoint.stream_interval = 0.1
+    model_endpoint.client.configure(
+        model="fixture", base_url=model_endpoint.url + "/anthropic.com/v1", api_key="fixture-key",
+    )
+    started = time.monotonic()
+    caps = model_endpoint.client.ensure_capabilities()
+    assert time.monotonic() - started < 1.2
+    assert caps.from_default_fallback is True
+    assert model_endpoint.client.capability_discovery_status == "failed"
+    assert len(model_endpoint.requests) == 1
+    assert list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json")) == []

@@ -224,6 +224,8 @@ class AnthropicMessagesProvider(BaseLLMProvider):
                             raw = response.read().decode("utf-8", errors="replace")
                             raise RuntimeError(f"Anthropic HTTP {response.status_code}: {raw[:400]}")
                         for line in response.iter_lines():
+                            if deadline is not None:
+                                remaining_timeout(deadline)
                             if not line or not line.startswith("data:"):
                                 continue
                             payload = line[5:].strip()
