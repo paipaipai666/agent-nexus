@@ -202,6 +202,10 @@ class TestCliKnowledgeBase:
     def test_kb_add_persists_structured_artifacts(self, monkeypatch):
         captured: dict[str, object] = {}
 
+        class FakeEmbeddingModel:
+            def encode(self, texts, **_kwargs):
+                return [[1.0] + [0.0] * 511 for _ in texts]
+
         class FakeCollection:
             def __init__(self):
                 self.count_value = 0
@@ -216,11 +220,17 @@ class TestCliKnowledgeBase:
             captured["metadatas"] = metadatas
             captured["ids"] = ids
             captured["name"] = name
+            captured["embeddings"] = _kwargs["embed_texts_provider"](texts)
             fake_collection.count_value = len(texts)
             return ids or [f"generated-{index}" for index in range(len(texts))]
 
         monkeypatch.setattr(kb_cli, "upsert_documents", fake_write_documents)
         monkeypatch.setattr(kb_cli, "get_collection", lambda *args, **kwargs: fake_collection)
+        monkeypatch.setattr(
+            "agentnexus.rag.model_assets.prepare_embedding",
+            lambda **_: (FakeEmbeddingModel(), "cli-test-embedding"),
+        )
+        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
 
         with isolated_filesystem():
             cfg._settings_cache = None
@@ -250,6 +260,7 @@ class TestCliKnowledgeBase:
                 assert chunks[0].metadata["heading_path"] == ["Guide"]
 
                 assert captured["ids"] == [chunks[0].chunk_id]
+                assert captured["embeddings"] == [[1.0] + [0.0] * 511]
                 expected_collection = catalog.get_knowledge_base("default").collection_name
                 assert captured["name"] == expected_collection
                 metadatas = captured["metadatas"]
