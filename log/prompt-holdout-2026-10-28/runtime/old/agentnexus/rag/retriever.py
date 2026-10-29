@@ -1,0 +1,714 @@
+import logging
+import threading
+import time
+import warnings
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
+
+from agentnexus.core.config import get_settings
+from agentnexus.core.llm import AgentLLM
+from agentnexus.observability.tracer import trace_span
+from agentnexus.prompts import load_prompt
+from agentnexus.storage.chroma import resolve_collection_name, upsert_documents
+from agentnexus.storage.chroma import search as chroma_search
+
+from . import ranking as _ranking
+from .ids import make_chunk_id, make_document_version, make_source_id
+from .models import ChunkRecord, KnowledgeBaseRecord, SourceDocument
+from .ranking import matches_metadata_filters as _matches_metadata_filters
+from .ranking import structural_score_boost as _structural_score_boost
+from .store import get_knowledge_base_catalog
+
+warnings.filterwarnings("ignore", message=".*pkg_resources.*")
+
+logger = logging.getLogger(__name__)
+
+QUERY_REWRITE_PROMPT = load_prompt("rag_query_rewrite")
+MULTI_QUERY_PROMPT = load_prompt("rag_multi_query")
+HYDE_PROMPT = load_prompt("rag_hyde")
+
+_RERANKER_FAILURE_TTL_S = 300.0
+_CACHED_RERANKER: "CrossEncoder | None" = None
+_CACHED_RERANKER_NAME: str | None = None
+_reranker_failures: dict[str, float] = {}
+_reranker_lock = threading.Lock()
+
+
+def reset_reranker_cache() -> None:
+    """Clear the process-wide reranker cache (tests / config reloads)."""
+    global _CACHED_RERANKER, _CACHED_RERANKER_NAME
+    _CACHED_RERANKER = None
+    _CACHED_RERANKER_NAME = None
+    _reranker_failures.clear()
+
+
+def _build_cross_encoder(cross_encoder_cls, model_name: str) -> "CrossEncoder":
+    """Construct a CrossEncoder, preferring the local HuggingFace snapshot.
+
+    Loading by repo id makes the tokenizer contact HuggingFace Hub; in the
+    incident environment that call timed out AFTER the 2.3 GB weights were
+    already loaded — a full allocation discarded on every attempt. A local
+    path + ``local_files_only`` keeps the whole load offline (mirrors
+    ``embeddings._resolve_local_model_path``).
+    """
+    from agentnexus.rag.embeddings import _resolve_local_model_path
+
+    local_path = _resolve_local_model_path(model_name)
+    if local_path is None:
+        raise FileNotFoundError(f"Reranker model '{model_name}' is not cached")
+    try:
+        return cross_encoder_cls(local_path, local_files_only=True)
+    except TypeError:
+        return cross_encoder_cls(local_path)
+
+
+@dataclass
+class SearchResult:
+    id: str
+    text: str
+    score: float
+    source: str = ""
+    metadata: dict | None = None
+    context_text: str | None = None
+    citation: str | None = None
+
+
+def reciprocal_rank_fusion(
+    dense_results: list[tuple[str, float]],
+    sparse_results: list[tuple[str, float]],
+    k: int = 60,
+) -> dict[str, float]:
+    return _ranking.reciprocal_rank_fusion(dense_results, sparse_results, k=k)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def _looks_like_question(query: str) -> bool:
+    normalized = query.strip()
+    if not normalized:
+        return False
+    question_tokens = (
+        "?",
+        "？",
+        "什么",
+        "如何",
+        "怎么",
+        "怎样",
+        "为何",
+        "为什么",
+        "是否",
+        "哪种",
+        "哪些",
+        "谁",
+        "when",
+        "what",
+        "why",
+        "how",
+        "which",
+    )
+    lowered = normalized.casefold()
+    return any(token in normalized or token in lowered for token in question_tokens)
+
+
+def result_display_text(result: SearchResult) -> str:
+    context_text = result.context_text
+    if isinstance(context_text, str) and context_text.strip():
+        return context_text
+    return result.text
+
+
+def result_citation(result: SearchResult) -> str:
+    if isinstance(result.citation, str) and result.citation.strip():
+        return result.citation
+
+    metadata = result.metadata or {}
+    source_uri = str(metadata.get("source_uri") or result.id)
+    labels: list[str] = []
+    section_title = metadata.get("section_title")
+    if isinstance(section_title, str) and section_title.strip():
+        labels.append(section_title.strip())
+    page_number = metadata.get("page_number")
+    if isinstance(page_number, int):
+        labels.append(f"Page {page_number}")
+    heading_depth = metadata.get("heading_depth")
+    if isinstance(heading_depth, int):
+        labels.append(f"H{heading_depth}")
+    if labels:
+        return f"{source_uri} [{' | '.join(labels)}]"
+    return source_uri
+
+
+def rewrite_query(query: str, llm: AgentLLM | None = None) -> str:
+    settings = get_settings()
+    if not settings.enable_query_rewrite:
+        return query
+    try:
+        llm_client = llm or AgentLLM()
+        prompt = QUERY_REWRITE_PROMPT.format(query=query)
+        rewritten = llm_client.think([{"role": "user", "content": prompt}], temperature=0, silent=True)
+        rewritten = (rewritten or "").strip()
+        if len(rewritten) >= 2:
+            return rewritten
+    except Exception:
+        logger.debug("Query rewrite failed, using original query", exc_info=True)
+    return query
+
+
+def expand_queries(query: str, llm: AgentLLM | None = None) -> list[str]:
+    settings = get_settings()
+    rewritten = rewrite_query(query, llm=llm)
+    queries = [rewritten]
+    if not settings.enable_multi_query:
+        return queries
+    try:
+        llm_client = llm or AgentLLM()
+        prompt = MULTI_QUERY_PROMPT.format(
+            query=query,
+            rewritten_query=rewritten,
+            count=settings.rag_multi_query_count,
+        )
+        expanded = llm_client.think([{"role": "user", "content": prompt}], temperature=0, silent=True)
+        candidates = []
+        for line in (expanded or "").splitlines():
+            normalized = line.strip().lstrip("-").lstrip("0123456789.").strip()
+            if normalized:
+                candidates.append(normalized)
+        queries.extend(candidates)
+    except Exception:
+        pass
+    return _dedupe_preserve_order([query, *queries])[: max(settings.rag_multi_query_count, 1) + 1]
+
+
+def generate_hypothetical_document(query: str, llm: AgentLLM | None = None) -> str:
+    settings = get_settings()
+    if not settings.enable_hyde:
+        return ""
+    if settings.hyde_question_only and not _looks_like_question(query):
+        return ""
+    try:
+        llm_client = llm or AgentLLM()
+        prompt = HYDE_PROMPT.format(query=query)
+        response = llm_client.think([{"role": "user", "content": prompt}], temperature=0.2, silent=True)
+        return (response or "").strip()
+    except Exception:
+        return ""
+
+
+class HybridRetriever:
+    def __init__(self, namespace: str = "default"):
+        self.namespace = namespace
+        self._bm25 = _ranking.BM25Index()
+        self._chunks: dict[str, ChunkRecord] = {}
+        self._reranker: "CrossEncoder | None" = None
+
+    def build_bm25(self, documents: list[str]):
+        chunks: list[ChunkRecord] = []
+        for index, text in enumerate(documents):
+            source_id = make_source_id(f"memory://{self.namespace}/doc-{index}")
+            document_version = make_document_version(source_id, text)
+            document = SourceDocument(
+                document_id=document_version,
+                kb_id="",
+                source_id=source_id,
+                source_uri=f"memory://{self.namespace}/doc-{index}",
+                document_version=document_version,
+                content=text,
+                indexed_text=text,
+                sparse_text=text,
+            )
+            chunks.append(
+                ChunkRecord(
+                    chunk_id=make_chunk_id(document_version, 0, text),
+                    kb_id="",
+                    document_id=document.document_id,
+                    document_version=document_version,
+                    chunk_index=0,
+                    text=text,
+                    indexed_text=text,
+                    sparse_text=text,
+                    metadata={"source_uri": document.source_uri},
+                )
+            )
+        self._chunks = {chunk.chunk_id: chunk for chunk in chunks}
+        self._bm25.build(chunks)
+
+    def rebuild_from_catalog(self):
+        catalog = get_knowledge_base_catalog()
+        kb = catalog.get_knowledge_base(self.namespace)
+        if kb is None:
+            self._chunks = {}
+            self._bm25.build([])
+            return
+        chunks = catalog.list_chunks_by_kb(kb.kb_id)
+        self._chunks = {chunk.chunk_id: chunk for chunk in chunks}
+        self._bm25.build(chunks)
+
+    def expand_contexts(
+        self,
+        results: list[SearchResult],
+        window: int | None = None,
+        view: str = "section",
+    ) -> list[SearchResult]:
+        if view != "chunk":
+            results = self.merge_results_by_section(results)
+        settings = get_settings()
+        if not settings.enable_context_expansion:
+            return results
+
+        resolved_window = settings.rag_context_window if window is None else window
+        max_chunks = settings.rag_context_max_chunks
+        if resolved_window <= 0 and max_chunks <= 1:
+            return results
+
+        catalog = get_knowledge_base_catalog()
+        expanded: list[SearchResult] = []
+        for result in results:
+            chunk = self._chunks.get(result.id)
+            if chunk is None:
+                expanded.append(result)
+                continue
+            context_chunks = self._collect_context_chunks(
+                chunk,
+                catalog=catalog,
+                window=resolved_window,
+                max_chunks=max_chunks,
+            )
+            if not context_chunks:
+                expanded.append(result)
+                continue
+
+            anchor_index = next(
+                (index for index, item in enumerate(context_chunks) if item.chunk_id == chunk.chunk_id),
+                None,
+            )
+            if anchor_index is None:
+                anchor_index = 0
+
+            context_parts: list[str] = []
+            for index, candidate in enumerate(context_chunks):
+                prefix = ">> " if index == anchor_index else ""
+                context_parts.append(f"{prefix}{candidate.text}".strip())
+            result.context_text = "\n\n".join(context_parts)
+            result.citation = self._build_result_citation(chunk, context_chunks)
+            expanded.append(result)
+        return expanded
+
+    def merge_results_by_section(self, results: list[SearchResult]) -> list[SearchResult]:
+        merged: list[SearchResult] = []
+        seen_groups: set[tuple[str, object]] = set()
+
+        for result in results:
+            chunk = self._chunks.get(result.id)
+            if chunk is None:
+                merged.append(result)
+                continue
+            group_key = (
+                chunk.document_id,
+                chunk.section_index if chunk.section_index is not None else chunk.chunk_index,
+            )
+            if group_key in seen_groups:
+                continue
+            seen_groups.add(group_key)
+            merged.append(result)
+        return merged
+
+    def _collect_context_chunks(
+        self,
+        anchor: ChunkRecord,
+        *,
+        catalog,
+        window: int,
+        max_chunks: int,
+    ) -> list[ChunkRecord]:
+        selected: list[ChunkRecord] = []
+        seen_ids: set[str] = set()
+
+        def append_chunks(chunks: list[ChunkRecord]):
+            for candidate in chunks:
+                if candidate.chunk_id in seen_ids:
+                    continue
+                selected.append(candidate)
+                seen_ids.add(candidate.chunk_id)
+                if len(selected) >= max_chunks:
+                    break
+
+        section_chunks_count = 0
+        if anchor.section_index is not None:
+            section_chunks = catalog.list_section_chunks(anchor.document_id, anchor.section_index)
+            append_chunks(section_chunks)
+            section_chunks_count = len(section_chunks)
+        if len(selected) < max_chunks and section_chunks_count <= 1 and anchor.page_number is not None:
+            page_chunks = [
+                chunk
+                for chunk in catalog.list_chunks(anchor.document_id)
+                if chunk.page_number == anchor.page_number
+            ]
+            append_chunks(page_chunks)
+        if len(selected) < max_chunks and section_chunks_count <= 1 and window > 0:
+            append_chunks(
+                catalog.list_neighbor_chunks(
+                    anchor.document_id,
+                    anchor.chunk_index,
+                    window=window,
+                )
+            )
+
+        if not selected:
+            return []
+        selected.sort(key=lambda item: item.chunk_index)
+        return selected[:max_chunks]
+
+    def _build_result_citation(self, anchor: ChunkRecord, context_chunks: list[ChunkRecord]) -> str:
+        metadata = anchor.metadata or {}
+        source_uri = str(metadata.get("source_uri") or anchor.document_id)
+        labels: list[str] = []
+
+        section_title = metadata.get("section_title")
+        if isinstance(section_title, str) and section_title.strip():
+            labels.append(section_title.strip())
+        elif context_chunks:
+            section_titles = [
+                str(chunk.metadata.get("section_title")).strip()
+                for chunk in context_chunks
+                if (
+                    isinstance(chunk.metadata.get("section_title"), str)
+                    and str(chunk.metadata.get("section_title")).strip()
+                )
+            ]
+            if section_titles:
+                labels.append(section_titles[0])
+
+        page_numbers = sorted(
+            {
+                chunk.page_number
+                for chunk in context_chunks
+                if isinstance(chunk.page_number, int)
+            }
+        )
+        if page_numbers:
+            if len(page_numbers) == 1:
+                labels.append(f"Page {page_numbers[0]}")
+            else:
+                labels.append(f"Page {page_numbers[0]}-{page_numbers[-1]}")
+
+        heading_depth = metadata.get("heading_depth")
+        if isinstance(heading_depth, int):
+            labels.append(f"H{heading_depth}")
+
+        if labels:
+            return f"{source_uri} [{' | '.join(labels)}]"
+        return source_uri
+
+    def load_reranker(self, model_name: str | None = None):
+        """Load the reranker, cached process-wide (see module-level note)."""
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError:
+            logger.warning("sentence_transformers not installed, reranker disabled")
+            self._reranker = None
+            return
+
+        settings = get_settings()
+        name = model_name or settings.reranker_model
+
+        failed_at = _reranker_failures.get(name)
+        if failed_at is not None and time.monotonic() - failed_at < _RERANKER_FAILURE_TTL_S:
+            self._reranker = None
+            return
+
+        global _CACHED_RERANKER, _CACHED_RERANKER_NAME
+        if _CACHED_RERANKER is not None and _CACHED_RERANKER_NAME == name:
+            self._reranker = _CACHED_RERANKER
+            return
+
+        with _reranker_lock:
+            if _CACHED_RERANKER is not None and _CACHED_RERANKER_NAME == name:
+                self._reranker = _CACHED_RERANKER
+                return
+            try:
+                model = _build_cross_encoder(CrossEncoder, name)
+            except Exception as exc:
+                logger.warning("Failed to load reranker model '%s'", name, exc_info=True)
+                if not isinstance(exc, FileNotFoundError):
+                    from agentnexus.rag.model_assets import report_load_failure
+
+                    report_load_failure("reranker", name)
+                _reranker_failures[name] = time.monotonic()
+                self._reranker = None
+                return
+            _CACHED_RERANKER = model
+            _CACHED_RERANKER_NAME = name
+            self._reranker = model
+
+    def search(
+        self,
+        query: str,
+        dense_results: list[tuple[str, float]],
+        top_k: int = 5,
+        rrf_k: int = 60,
+        min_score: float = 0.3,
+        metadata_filters: dict[str, object] | None = None,
+    ) -> list[SearchResult]:
+        sparse = self._bm25.search(query, top_k=top_k * 2, metadata_filters=metadata_filters)
+        fused = reciprocal_rank_fusion(dense_results, sparse, k=rrf_k)
+        boosted: list[tuple[str, float]] = []
+        for chunk_id, score in fused.items():
+            chunk = self._chunks.get(chunk_id)
+            if chunk is None or not _matches_metadata_filters(chunk, metadata_filters):
+                continue
+            boosted.append((chunk_id, score + _structural_score_boost(query, chunk)))
+        ranked = sorted(boosted, key=lambda x: x[1], reverse=True)[:top_k * 2]
+
+        if self._reranker is not None and len(ranked) > 1:
+            return self._rerank(
+                query,
+                ranked,
+                top_k,
+                min_score=min_score,
+                metadata_filters=metadata_filters,
+            )
+
+        return [
+            SearchResult(
+                id=chunk_id,
+                text=self._chunks[chunk_id].text,
+                score=score,
+                source="rrf",
+                metadata=self._chunks[chunk_id].metadata,
+            )
+            for chunk_id, score in ranked[:top_k]
+            if chunk_id in self._chunks
+        ]
+
+    def _rerank(
+        self,
+        query: str,
+        candidates: list[tuple[str, float]],
+        top_k: int,
+        min_score: float = 0.3,
+        metadata_filters: dict[str, object] | None = None,
+    ) -> list[SearchResult]:
+        pairs = [(query, self._chunks[chunk_id].text) for chunk_id, _ in candidates if chunk_id in self._chunks]
+        chunk_ids = [chunk_id for chunk_id, _ in candidates if chunk_id in self._chunks]
+        scores = _predict_in_batches(self._reranker, pairs)
+        scored = [(chunk_id, float(score)) for chunk_id, score in zip(chunk_ids, scores)]
+        filtered = [
+            item
+            for item in scored
+            if item[1] >= min_score
+            and _matches_metadata_filters(self._chunks[item[0]], metadata_filters)
+        ]
+        reranked = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_k]
+        return [
+            SearchResult(
+                id=chunk_id,
+                text=self._chunks[chunk_id].text,
+                score=score,
+                source="rerank",
+                metadata=self._chunks[chunk_id].metadata,
+            )
+            for chunk_id, score in reranked
+        ]
+
+
+_RERANK_BATCH_SIZE = 16
+
+
+def _predict_in_batches(reranker, pairs: list[tuple[str, str]]) -> list[float]:
+    """CrossEncoder.predict in fixed batches under torch.inference_mode.
+
+    inference_mode drops autograd bookkeeping (~half the intermediate memory);
+    batching keeps the peak flat regardless of candidate count.
+    """
+    try:
+        import torch
+        ctx = torch.inference_mode()
+    except Exception:
+        import contextlib
+        ctx = contextlib.nullcontext()
+    all_scores: list[float] = []
+    with ctx:
+        for start in range(0, len(pairs), _RERANK_BATCH_SIZE):
+            batch = pairs[start:start + _RERANK_BATCH_SIZE]
+            all_scores.extend(float(s) for s in reranker.predict(batch))
+    return all_scores
+
+
+_retriever: HybridRetriever | None = None
+_retriever_reranker_requested: dict[str, bool] = {}
+_retriever_catalog_revision: tuple[object, tuple[str, int] | None] | None = None
+_retriever_lock = threading.Lock()
+
+
+def _get_retriever(namespace: str = "default", docs: list[str] | None = None) -> HybridRetriever:
+    global _retriever, _retriever_catalog_revision
+    with _retriever_lock:
+        catalog = get_knowledge_base_catalog()
+        revision = (catalog, catalog.content_revision(namespace))
+        if (
+            _retriever is None or _retriever.namespace != namespace
+            or _retriever_catalog_revision != revision or docs
+        ):
+            retriever = HybridRetriever(namespace=namespace)
+            if docs:
+                retriever.build_bm25(docs)
+            else:
+                retriever.rebuild_from_catalog()
+            _retriever = retriever
+            _retriever_catalog_revision = revision
+        return _retriever
+
+
+def build_knowledge_base(documents: list[str], load_reranker: bool = True, namespace: str = "default"):
+    from agentnexus.storage.chroma import delete_collection
+
+    global _retriever, _retriever_catalog_revision
+
+    delete_collection(namespace=namespace)
+
+    catalog = get_knowledge_base_catalog()
+    collection_name = resolve_collection_name(namespace=namespace)
+    existing_kb = catalog.get_knowledge_base(namespace)
+    if existing_kb is not None:
+        catalog.delete_knowledge_base(existing_kb.kb_id)
+    kb_record = KnowledgeBaseRecord(
+        kb_id=collection_name,
+        namespace=namespace,
+        display_name=namespace,
+        collection_name=collection_name,
+    )
+    catalog.upsert_knowledge_base(kb_record)
+
+    document_records: list[SourceDocument] = []
+    chunk_records: list[ChunkRecord] = []
+    chunk_texts: list[str] = []
+    chunk_metadatas: list[dict] = []
+    chunk_ids: list[str] = []
+
+    for index, text in enumerate(documents):
+        source_id = make_source_id(f"memory://{namespace}/doc-{index}")
+        document_version = make_document_version(source_id, text)
+        document = SourceDocument(
+            document_id=document_version,
+            kb_id=kb_record.kb_id,
+            source_id=source_id,
+            source_uri=f"memory://{namespace}/doc-{index}",
+            document_version=document_version,
+            content=text,
+            indexed_text=text,
+            sparse_text=text,
+        )
+        document_records.append(document)
+        chunk = ChunkRecord(
+            chunk_id=make_chunk_id(document_version, 0, text),
+            kb_id=kb_record.kb_id,
+            document_id=document.document_id,
+            document_version=document_version,
+            chunk_index=0,
+            text=text,
+            indexed_text=text,
+            sparse_text=text,
+            metadata={"source_uri": document.source_uri},
+        )
+        chunk_records.append(chunk)
+        chunk_texts.append(chunk.text)
+        chunk_metadatas.append(chunk.metadata)
+        chunk_ids.append(chunk.chunk_id)
+
+    catalog.upsert_documents(document_records)
+    catalog.upsert_chunks(chunk_records)
+    upsert_documents(chunk_texts, metadatas=chunk_metadatas, ids=chunk_ids, namespace=namespace)
+
+    retriever = HybridRetriever(namespace=namespace)
+    retriever._chunks = {chunk.chunk_id: chunk for chunk in chunk_records}
+    retriever._bm25.build(chunk_records)
+    _retriever_reranker_requested[namespace] = load_reranker
+    if load_reranker:
+        retriever.load_reranker()
+    _retriever = retriever
+    _retriever_catalog_revision = (catalog, catalog.content_revision(namespace))
+
+
+def _expand_rag_queries(query: str) -> tuple[list[str], str]:
+    """Query-variant stage: multi-query expansion + hypothetical document (HyDE)."""
+    return expand_queries(query), generate_hypothetical_document(query)
+
+
+def _fuse_dense_candidates(
+    queries: list[str], hypothetical_document: str, namespace: str,
+    *, model, collection_name: str,
+) -> list[tuple[str, float]]:
+    """Dense stage: RRF-pre-fuse per-query Chroma hits, plus the HyDE hit."""
+    fused: dict[str, float] = {}
+    for search_query in queries:
+        hits = chroma_search(
+            search_query, limit=10, namespace=namespace, name=collection_name, embedding_model_provider=lambda: model,
+        )
+        for rank, item in enumerate(hits):
+            fused[item["id"]] = fused.get(item["id"], 0.0) + 1.0 / (60 + rank + 1)
+    if hypothetical_document:
+        hyde_hits = chroma_search(
+            hypothetical_document, limit=10, namespace=namespace, name=collection_name,
+            embedding_model_provider=lambda: model,
+        )
+        for rank, item in enumerate(hyde_hits):
+            fused[item["id"]] = fused.get(item["id"], 0.0) + 0.5 / (60 + rank + 1)
+    return sorted(fused.items(), key=lambda x: x[1], reverse=True)
+
+
+@trace_span("rag_search", lambda query, namespace="default": {"query": query[:200]})
+def search_knowledge_base(query: str, namespace: str = "default") -> str:
+    from agentnexus.core.hooks import HookType, get_hook_manager
+
+    hook_mgr = get_hook_manager()
+    hook_mgr.fire(HookType.BEFORE_RAG_SEARCH, {
+        "query": query, "namespace": namespace,
+    })
+
+    retriever = _get_retriever(namespace=namespace)
+    if not retriever._chunks:
+        return "知识库为空，请先用 `nexus kb add` 添加文档。"
+    from agentnexus.rag.kb_index import ensure_embedding_index
+    from agentnexus.rag.model_assets import prepare_embedding
+
+    model, identity = prepare_embedding(allow_download=False)
+    collection_name = ensure_embedding_index(namespace, model, identity)
+    should_load_reranker = _retriever_reranker_requested.get(namespace, True)
+    if should_load_reranker and retriever._reranker is None:
+        retriever.load_reranker()
+    queries, hypothetical_document = _expand_rag_queries(query)
+    dense_results = _fuse_dense_candidates(
+        queries, hypothetical_document, namespace, model=model, collection_name=collection_name,
+    )
+    if not dense_results:
+        return "未找到相关知识。"
+    results = retriever.search(query, dense_results, top_k=5)
+    if not results:
+        return "未找到相关知识。"
+    results = retriever.expand_contexts(results)
+    result_text = "\n\n".join(
+        f"[{index + 1}] {result_citation(result)} (相关度:{result.score:.2f}) {result_display_text(result)}"
+        for index, result in enumerate(results)
+    )
+
+    hook_mgr.fire(HookType.AFTER_RAG_SEARCH, {
+        "query": query, "namespace": namespace,
+        "result_count": len(results),
+    })
+    return result_text

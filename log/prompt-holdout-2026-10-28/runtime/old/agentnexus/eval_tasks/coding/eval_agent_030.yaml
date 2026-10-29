@@ -1,0 +1,30 @@
+id: eval_agent_030
+description: 生成项目的 API 文档框架
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- grep
+- read
+- write
+input:
+  prompt: 生成项目的 API 文档框架
+  tools:
+  - grep
+  - read
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: grep
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 扫描项目中的路由或视图函数，提取 docstring，生成 API 文档框架。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 扫描项目中的路由或视图函数，提取 docstring，生成 API 文档框架。

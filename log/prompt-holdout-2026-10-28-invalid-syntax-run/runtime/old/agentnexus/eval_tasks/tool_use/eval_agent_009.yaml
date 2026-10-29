@@ -1,0 +1,25 @@
+id: eval_agent_009
+description: 什么是 RESTful API 设计规范？
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 什么是 RESTful API 设计规范？
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解释 RESTful API 的核心原则：资源导向、HTTP 方法语义、无状态等。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解释 RESTful API 的核心原则：资源导向、HTTP 方法语义、无状态等。

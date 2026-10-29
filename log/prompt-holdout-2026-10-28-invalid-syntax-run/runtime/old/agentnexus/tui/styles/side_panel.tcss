@@ -1,0 +1,5 @@
+SidePanel { height: 100%; overflow-y: auto; }
+SidePanel Label { color: $text-muted; height: 1; margin-top: 1; }
+SidePanel Static { height: auto; margin: 0 0 1 0; border: none; padding: 0; }
+.side-heading { text-style: bold; color: $foreground; }
+SidePanel Button { height: 1; min-width: 0; width: 100%; border: none; padding: 0; background: transparent; color: $primary; }

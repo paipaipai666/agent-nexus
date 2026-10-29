@@ -1,0 +1,28 @@
+id: eval_agent_026
+description: 优化这段 SQL 查询：为 WHERE 子句添加索引建议
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- web_search
+input:
+  prompt: 优化这段 SQL 查询：为 WHERE 子句添加索引建议
+  tools:
+  - read
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 分析 SQL 查询的 WHERE 和 JOIN 条件，建议合适的复合索引。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 分析 SQL 查询的 WHERE 和 JOIN 条件，建议合适的复合索引。

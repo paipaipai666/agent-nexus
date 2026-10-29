@@ -1,0 +1,25 @@
+id: eval_agent_049
+description: 把 MySQL 查询结果导出为 CSV
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 把 MySQL 查询结果导出为 CSV
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 MySQL 的 SELECT INTO OUTFILE 或 mysqldump --csv 导出查询结果。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 MySQL 的 SELECT INTO OUTFILE 或 mysqldump --csv 导出查询结果。

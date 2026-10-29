@@ -1,0 +1,13 @@
+{
+  "id": "answer-072",
+  "answer_sha256": "7f761dbae3ee4ff8bdf46fa003b1ff1e0e5decf9d49059ee51d4315196e440f4",
+  "input_rows": [
+    "bad"
+  ],
+  "expected_if_broad_claim_holds": 0,
+  "observed": {
+    "passed": false,
+    "output": "Traceback (most recent call last):\n  File \"<string>\", line 18, in <module>\n    actual=handle(args)\n  File \"service.py\", line 4, in handle\n  File \"logic.py\", line 2, in solve\n  File \"logic.py\", line 2, in <genexpr>\nAttributeError: 'str' object has no attribute 'get'\n"
+  },
+  "scope": "Audit witness for the extra claim only; frozen task checks unchanged"
+}

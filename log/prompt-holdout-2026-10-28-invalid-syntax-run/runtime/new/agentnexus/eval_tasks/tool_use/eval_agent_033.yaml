@@ -1,0 +1,25 @@
+id: eval_agent_033
+description: 解释 Docker 和虚拟机的主要区别
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 解释 Docker 和虚拟机的主要区别
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 比较 Docker 容器和虚拟机的架构差异：共享宿主机内核 vs 完整 OS。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 比较 Docker 容器和虚拟机的架构差异：共享宿主机内核 vs 完整 OS。

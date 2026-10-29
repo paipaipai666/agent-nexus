@@ -1,0 +1,25 @@
+id: eval_agent_025
+description: 比较 SQLAlchemy 和 Django ORM 的差异
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 比较 SQLAlchemy 和 Django ORM 的差异
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 从配置方式、查询语法、性能、迁移工具等方面比较两个 ORM 的差异。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 从配置方式、查询语法、性能、迁移工具等方面比较两个 ORM 的差异。

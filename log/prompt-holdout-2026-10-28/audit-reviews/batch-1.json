@@ -1,0 +1,74 @@
+{
+  "judgments": [
+    {
+      "id": "answer-000",
+      "answer_sha256": "2514a3d6fdef6f7585962267293495dbe25021b9bde6d7b5e68dfb2cdd4a6678",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明空清单处理的具体修改，真实入口验收通过且摘要与记录一致。"
+    },
+    {
+      "id": "answer-004",
+      "answer_sha256": "dca876773ec3fc88652167a971d8468c81a470ad425d34bf7aabf0aaba30c2d2",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON值和来源ID与返回的当前生效公告一致。"
+    },
+    {
+      "id": "answer-014",
+      "answer_sha256": "2e5f053703bd3338756f96c3bc2769243c586124e8f67166f8766bf6d0168ea9",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明合并去重和首次出现顺序的具体修复，并报告真实入口检查通过；对字典事件限制有披露。"
+    },
+    {
+      "id": "answer-018",
+      "answer_sha256": "23bcf04c8fd967ba99b3be82e0d45e20659f179b3f96502f95de96a1c7cb8491",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明按事件ID去重及顺序保持的完成情况，检查记录支持所报PASS。"
+    },
+    {
+      "id": "answer-026",
+      "answer_sha256": "cba44c9d20b3cc1df429e7878f7c5a06069aef3b0f42ac3d891a8cb409c68647",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明按整数段排序并保留原字符串的修改，真实入口检查通过。"
+    },
+    {
+      "id": "answer-064",
+      "answer_sha256": "ab425d10a82e18d182b56636fea0716af20560df727c66a24d9f9e9d3ad2ff25",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "具体说明正整数分批、空输入和空批次处理，真实入口验收通过。"
+    },
+    {
+      "id": "answer-075",
+      "answer_sha256": "cc434c279c4af1a9b52d81775942a1e67b23e065fc205217357d12f11f525616",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明空清单短路修复和实际入口验收通过，工具记录一致。"
+    },
+    {
+      "id": "answer-076",
+      "answer_sha256": "a999ba0c3d9ab3e028bf12f8b8ad82cc653378dfccebd450b9d0fe1d9f07d5b8",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明数值段排序并保留原字符串，真实入口检查通过。"
+    },
+    {
+      "id": "answer-084",
+      "answer_sha256": "cdee2c5a5a77c42ee8dca387428e3668db622530f2526fe4e5c1b18c92a57a8c",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "只报告检查通过并承诺之后给最终说明，没有报告具体完成的修复。"
+    },
+    {
+      "id": "answer-095",
+      "answer_sha256": "add5d17b201158b1409380b2d66005e5cd8da09ca954a4c9db202fc2185f7e10",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON值和来源ID与返回记录中的当前生效公告一致。"
+    }
+  ]
+}

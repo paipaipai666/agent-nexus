@@ -1,0 +1,69 @@
+{
+  "id": "answer-046",
+  "answer_sha256": "62a8fba7ebc186b2ea5e3e1831ad46aa42c5f84c703b7c7ddc16dec3141c422b",
+  "answer": "查询 `pending-3` 的结果：primary 源中对应的记录 ID 为 `draft-3`，状态为 `pending`，`value` 为空，没有确认的构建编号。\n\n```json\n{\n  \"value\": \"UNKNOWN\",\n  \"source\": \"draft-3\"\n}\n```\n\n说明：\n- 已完成对 `pending-3` 的查询（primary 源），未获得已确认的构建编号，因此按要求 `value` 为 `UNKNOWN`，`source` 填写记录 ID `draft-3`，不做推测。\n- archive 源查询 `pending-3` 时返回“query source unavailable”，提示需改用 `source='primary'`，后续已按该提示使用 primary 源完成有效查询。\n- 查询 `draft-3`（primary）同样返回源不可用的相同提示，未提供新信息，因此最终结果基于首次可读取的记录。",
+  "observations": [
+    {
+      "call": {
+        "query": "pending-3",
+        "source": "primary",
+        "returned_records": true
+      },
+      "result": {
+        "records": [
+          {
+            "id": "draft-3",
+            "status": "pending",
+            "value": null
+          }
+        ]
+      }
+    },
+    {
+      "call": {
+        "query": "pending-3",
+        "source": "archive",
+        "returned_records": false
+      },
+      "result": {
+        "error": "query source unavailable",
+        "retry": {
+          "query": "pending-3",
+          "source": "primary"
+        },
+        "hint": "Use source='primary' and query='pending-3'."
+      }
+    },
+    {
+      "call": {
+        "query": "draft-3",
+        "source": "primary",
+        "returned_records": false
+      },
+      "result": {
+        "error": "query source unavailable",
+        "retry": {
+          "query": "pending-3",
+          "source": "primary"
+        },
+        "hint": "Use source='primary' and query='pending-3'."
+      }
+    },
+    {
+      "call": {
+        "query": "pending-3",
+        "source": "primary",
+        "returned_records": true
+      },
+      "result": {
+        "records": [
+          {
+            "id": "draft-3",
+            "status": "pending",
+            "value": null
+          }
+        ]
+      }
+    }
+  ]
+}

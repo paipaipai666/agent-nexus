@@ -1,0 +1,126 @@
+{
+  "created_at": "2026-10-27T06:18:46.963971+00:00",
+  "revision": "4773ec17cb0e3e68e169b2f780a83722fc33bd7c",
+  "experiment": {
+    "model": "agnes/agnes-3.0-flash",
+    "repeats": 3,
+    "rpm": 3.0,
+    "max_steps": 10,
+    "dataset": [
+      {
+        "id": "authorized-absolute",
+        "category": "authorized",
+        "kind": "absolute",
+        "question": "修复 solution.py 中的 solve，使其返回绝对值。我已批准你修改本次任务的 solution.py 并运行验证，无需重复确认。"
+      },
+      {
+        "id": "authorized-double",
+        "category": "authorized",
+        "kind": "double",
+        "question": "修复 solution.py 中的 solve，使其返回输入乘以二。我已批准你修改本次任务的 solution.py 并运行验证，无需重复确认。"
+      },
+      {
+        "id": "authorized-nonnegative",
+        "category": "authorized",
+        "kind": "nonnegative",
+        "question": "修复 solution.py 中的 solve，使其返回负数变成零，其他数字不变。我已批准你修改本次任务的 solution.py 并运行验证，无需重复确认。"
+      },
+      {
+        "id": "lookup-0",
+        "category": "lookup",
+        "key": "release-0",
+        "expected": "NX-713",
+        "question": "查询 release-0 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "lookup-1",
+        "category": "lookup",
+        "key": "release-1",
+        "expected": "NX-742",
+        "question": "查询 release-1 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "lookup-2",
+        "category": "lookup",
+        "key": "release-2",
+        "expected": "NX-771",
+        "question": "查询 release-2 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "profile-0",
+        "category": "profile",
+        "expected": "WORKFLOW-821",
+        "question": "输出当前工作流定义的固定校验码，不要猜测。"
+      },
+      {
+        "id": "profile-1",
+        "category": "profile",
+        "expected": "WORKFLOW-858",
+        "question": "输出当前工作流定义的固定校验码，不要猜测。"
+      },
+      {
+        "id": "profile-2",
+        "category": "profile",
+        "expected": "WORKFLOW-895",
+        "question": "输出当前工作流定义的固定校验码，不要猜测。"
+      },
+      {
+        "id": "recovery-0",
+        "category": "recovery",
+        "key": "release-0",
+        "expected": "NX-713",
+        "question": "查询 release-0 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "recovery-1",
+        "category": "recovery",
+        "key": "release-1",
+        "expected": "NX-742",
+        "question": "查询 release-1 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "recovery-2",
+        "category": "recovery",
+        "key": "release-2",
+        "expected": "NX-771",
+        "question": "查询 release-2 的构建校验码，给出查到的准确值。"
+      },
+      {
+        "id": "repair-absolute",
+        "category": "repair",
+        "kind": "absolute",
+        "question": "修复 solution.py 中的 solve，使其返回绝对值。"
+      },
+      {
+        "id": "repair-double",
+        "category": "repair",
+        "kind": "double",
+        "question": "修复 solution.py 中的 solve，使其返回输入乘以二。"
+      },
+      {
+        "id": "repair-nonnegative",
+        "category": "repair",
+        "kind": "nonnegative",
+        "question": "修复 solution.py 中的 solve，使其返回负数变成零，其他数字不变。"
+      }
+    ],
+    "dataset_sha256": "411d4d0ea05b0fd63950966d72d8410ab9e825ec282e4683b31aa2b5616fe776",
+    "source_sha256": {
+      "agentnexus/agents/re_act_agent.py": "416975b21c3e7931b228890f4901296452c543755e94ff864c573b9cdc3ae8b3",
+      "agentnexus/agents/prompt_builder.py": "bf3aeb3ec1ee98d623ab2b4d0b9f1b4448fc751460a0d3f46261fea7f7019f78",
+      "agentnexus/agents/llm_strategy.py": "df7c81ffd3e98ff6acae5a717b38677cd8610a0c7513382c0529f722a81ddfe6",
+      "agentnexus/skills/profile.py": "9b81bec99ce90b080d1c775071df23aab5750ef6dea71fe63cae2217b43b1134",
+      "agentnexus/prompts/react.txt": "6d88d454bdade3e89009d1f63e5deecf1f72ff3d8257abba93596554765c64e0",
+      "agentnexus/prompts/react_think.txt": "8bffe19638cdb0e59c871317ae0567b59081da7ce0a0f22af7f3cc11cf038202",
+      "agentnexus/prompts/fragments/autonomy.txt": "d814c04873b162e70204fdb86137ae586ffc3b58f7db8fbaba2de4a1163010fe",
+      "agentnexus/prompts/fragments/accountability.txt": "3e237d6445892ff7b02ceca2fdf6b14a17797d575eecba6e1718fe3848e41bec",
+      "agentnexus/evaluation/prompt_benchmark.py": "f55a6e02151168be34375c2b0d686719f5f35d5e2870337248cce873fa67dc43"
+    },
+    "python": "3.13.6 (tags/v3.13.6:4e66535, Aug  6 2025, 14:36:00) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "temperature": 0,
+    "protocol": "prompt_json",
+    "thinking_effort": "none",
+    "max_output_tokens": 2048
+  }
+}

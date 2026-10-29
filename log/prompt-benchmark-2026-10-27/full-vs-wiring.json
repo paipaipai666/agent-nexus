@@ -1,0 +1,228 @@
+{
+  "paired_attempts": 45,
+  "improved": 2,
+  "regressed": 5,
+  "paired_delta": -0.06666666666666667,
+  "before": {
+    "attempts": 45,
+    "valid_attempts": 45,
+    "api_errors": 0,
+    "passed": 43,
+    "pass_rate": 0.9555555555555556,
+    "wilson_95": [
+      0.8517222081611939,
+      0.9877261309595557
+    ],
+    "artifact_pass_rate": 0.9555555555555556,
+    "budget_exhausted": 0,
+    "mean_input_tokens": 7034.2444444444445,
+    "input_tokens_samples": 45,
+    "mean_output_tokens": 129.2,
+    "output_tokens_samples": 45,
+    "mean_llm_calls": 3.1333333333333333,
+    "llm_calls_samples": 45,
+    "mean_tool_calls": 2.2222222222222223,
+    "tool_calls_samples": 45,
+    "mean_wall_s": 42.73101143999439,
+    "wall_s_samples": 45,
+    "mean_api_s": 30.831649319977604,
+    "api_s_samples": 45,
+    "categories": {
+      "authorized": {
+        "valid": 9,
+        "passed": 9,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      },
+      "lookup": {
+        "valid": 9,
+        "passed": 8,
+        "artifact_passed": 8,
+        "budget_exhausted": 0
+      },
+      "profile": {
+        "valid": 9,
+        "passed": 8,
+        "artifact_passed": 8,
+        "budget_exhausted": 0
+      },
+      "recovery": {
+        "valid": 9,
+        "passed": 9,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      },
+      "repair": {
+        "valid": 9,
+        "passed": 9,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      }
+    }
+  },
+  "after": {
+    "attempts": 45,
+    "valid_attempts": 45,
+    "api_errors": 0,
+    "passed": 40,
+    "pass_rate": 0.8888888888888888,
+    "wilson_95": [
+      0.7650062450910905,
+      0.9515959956217445
+    ],
+    "artifact_pass_rate": 0.9111111111111111,
+    "budget_exhausted": 0,
+    "mean_input_tokens": 7143.555555555556,
+    "input_tokens_samples": 45,
+    "mean_output_tokens": 173.0888888888889,
+    "output_tokens_samples": 45,
+    "mean_llm_calls": 3.2222222222222223,
+    "llm_calls_samples": 45,
+    "mean_tool_calls": 2.533333333333333,
+    "tool_calls_samples": 45,
+    "mean_wall_s": 52.75203360224453,
+    "wall_s_samples": 45,
+    "mean_api_s": 42.658399944457535,
+    "api_s_samples": 45,
+    "categories": {
+      "authorized": {
+        "valid": 9,
+        "passed": 8,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      },
+      "lookup": {
+        "valid": 9,
+        "passed": 8,
+        "artifact_passed": 8,
+        "budget_exhausted": 0
+      },
+      "profile": {
+        "valid": 9,
+        "passed": 6,
+        "artifact_passed": 6,
+        "budget_exhausted": 0
+      },
+      "recovery": {
+        "valid": 9,
+        "passed": 9,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      },
+      "repair": {
+        "valid": 9,
+        "passed": 9,
+        "artifact_passed": 9,
+        "budget_exhausted": 0
+      }
+    }
+  },
+  "paired_metrics": {
+    "input_tokens": {
+      "samples": 45,
+      "before": 7034.2444444444445,
+      "after": 7143.555555555556
+    },
+    "output_tokens": {
+      "samples": 45,
+      "before": 129.2,
+      "after": 173.0888888888889
+    },
+    "llm_calls": {
+      "samples": 45,
+      "before": 3.1333333333333333,
+      "after": 3.2222222222222223
+    },
+    "tool_calls": {
+      "samples": 45,
+      "before": 2.2222222222222223,
+      "after": 2.533333333333333
+    },
+    "wall_s": {
+      "samples": 45,
+      "before": 42.73101143999439,
+      "after": 52.75203360224453
+    },
+    "api_s": {
+      "samples": 45,
+      "before": 30.831649319977604,
+      "after": 42.658399944457535
+    }
+  },
+  "common_success_metrics": {
+    "input_tokens": {
+      "samples": 38,
+      "before": 7309.815789473684,
+      "after": 7497.605263157895
+    },
+    "output_tokens": {
+      "samples": 38,
+      "before": 128.47368421052633,
+      "after": 175.39473684210526
+    },
+    "llm_calls": {
+      "samples": 38,
+      "before": 3.236842105263158,
+      "after": 3.3157894736842106
+    },
+    "tool_calls": {
+      "samples": 38,
+      "before": 2.3157894736842106,
+      "after": 2.5
+    },
+    "wall_s": {
+      "samples": 38,
+      "before": 42.61849053155655,
+      "after": 53.050492315810466
+    },
+    "api_s": {
+      "samples": 38,
+      "before": 30.021999371035857,
+      "after": 42.72663045001804
+    }
+  },
+  "non_profile": {
+    "samples": 36,
+    "before_passed": 35,
+    "after_passed": 34,
+    "metrics": {
+      "input_tokens": {
+        "samples": 36,
+        "before": 8278.305555555555,
+        "after": 8444.583333333334
+      },
+      "output_tokens": {
+        "samples": 36,
+        "before": 148.30555555555554,
+        "after": 205.77777777777777
+      },
+      "llm_calls": {
+        "samples": 36,
+        "before": 3.5555555555555554,
+        "after": 3.6666666666666665
+      },
+      "tool_calls": {
+        "samples": 36,
+        "before": 2.6666666666666665,
+        "after": 3.0555555555555554
+      },
+      "wall_s": {
+        "samples": 36,
+        "before": 48.51791873887932,
+        "after": 60.30860724723769
+      },
+      "api_s": {
+        "samples": 36,
+        "before": 34.939215808298385,
+        "after": 49.02317129723573
+      }
+    }
+  },
+  "scorer_sha256": "2276823d6b7450cf21ffda7b69a5d6054339cf2bd9c6ee75ae6865273f57e055",
+  "changed_runtime_files": [
+    "agentnexus/evaluation/prompt_benchmark.py",
+    "agentnexus/prompts/fragments/autonomy.txt",
+    "agentnexus/prompts/react.txt",
+    "agentnexus/prompts/react_think.txt"
+  ]
+}

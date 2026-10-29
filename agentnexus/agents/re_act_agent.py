@@ -214,7 +214,10 @@ class ReActAgent:
 
     @property
     def _react_template(self) -> str:
-        """Select react template based on thinking capability."""
+        """Honor explicit profile templates and adapt the default ReAct template."""
+        compiled = self._compiled_session_profile
+        if compiled is not None and compiled.profile.prompt_profile.system not in (None, "react"):
+            return compiled.prompt_template
         if getattr(self.llm_client.capabilities, 'supports_thinking', False) is True:
             return REACT_THINK_PROMPT_TEMPLATE
         return REACT_PROMPT_TEMPLATE
@@ -706,7 +709,8 @@ class ReActAgent:
         if is_native:
             ctx.messages.append(
                 {"role": "user",
-                 "content": "请先用 Thought 分析以上工具返回的结果，判断信息是否充分，再决定下一步。"})
+                 "content": "根据以上工具结果决定下一步。任务尚未完成或验证时继续执行；"
+                            "任务完成后给出完整答案，说明验证结果或尚未解决的限制。"})
         try:
             self._persist_round()
         except Exception as e:
@@ -1098,7 +1102,7 @@ class ReActAgent:
         effective_question = question + self._run_attachment_note
         locations: dict[str, tuple[int, str]] = {}
         messages = assemble_react_messages(
-            system_rules=self._react_template.split("== 可用工具 ==")[0].rstrip(),
+            system_rules=self._react_template.rstrip(),
             tools_desc=tools_desc,
             sections=sections,
             question=effective_question,

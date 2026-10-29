@@ -1,0 +1,30 @@
+{
+  "requests": {
+    "old": {
+      "calls": 259,
+      "expected_system_prefix": 259,
+      "models": [
+        "agnes-3.0-flash"
+      ],
+      "temperatures": [
+        0
+      ]
+    },
+    "new": {
+      "calls": 271,
+      "expected_system_prefix": 271,
+      "models": [
+        "agnes-3.0-flash"
+      ],
+      "temperatures": [
+        0
+      ]
+    }
+  },
+  "junit": {
+    "tests": 328,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

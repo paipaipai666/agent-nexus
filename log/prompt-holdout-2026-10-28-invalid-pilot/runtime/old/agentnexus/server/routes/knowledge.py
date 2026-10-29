@@ -1,0 +1,266 @@
+"""Knowledge base API routes."""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic import BaseModel
+
+from agentnexus.server.error_handlers import APIError
+
+router = APIRouter(tags=["knowledge"])
+
+_background_tasks: set = set()
+
+_ingestion_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingestion")
+
+
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    namespace: str | None = None
+    source: str | None = None
+    file_format: str | None = None
+    section_title: str | None = None
+    view: str | None = None
+
+
+@router.get("/models")
+def local_model_status():
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.model_assets import cached_snapshot, statuses
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    settings = get_settings()
+    embedding = cached_snapshot(settings.embedding_model)
+    kb = get_knowledge_base_catalog().get_knowledge_base(settings.rag_default_namespace)
+    if kb is None or get_knowledge_base_catalog().count_chunks_by_kb(kb.kb_id) == 0:
+        index_state = "empty"
+    elif embedding is not None and kb.metadata.get("embedding_identity") == embedding.identity:
+        index_state = "ready"
+    else:
+        index_state = "rebuild_required"
+    return {"models": statuses(), "index_state": index_state}
+
+
+@router.post("/models/embedding/prepare")
+def prepare_local_embedding():
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.model_assets import start_embedding_prepare
+
+    settings = get_settings()
+    return {"model": start_embedding_prepare(settings.rag_default_namespace).to_dict()}
+
+
+@router.post("/models/reranker/prepare")
+def prepare_local_reranker():
+    from agentnexus.rag.model_assets import start_reranker_prepare
+
+    return {"model": start_reranker_prepare().to_dict()}
+
+
+@router.get("/documents")
+def list_documents():
+    from dataclasses import asdict
+
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    settings = get_settings()
+    catalog = get_knowledge_base_catalog()
+    kb = catalog.get_knowledge_base(settings.rag_default_namespace)
+    if kb is None:
+        return {"documents": [], "total_chunks": 0}
+    docs = catalog.list_documents()
+    doc_dicts = []
+    for d in docs:
+        doc_dict = asdict(d)
+        doc_dict["chunk_count"] = catalog.count_chunks(d.document_id)
+        doc_dicts.append(doc_dict)
+    total = catalog.count_chunks_by_kb(kb.kb_id)
+    return {"documents": doc_dicts, "total_chunks": total}
+
+
+@router.post("/search")
+def search_kb(req: SearchRequest):
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.kb_service import search_kb
+    from agentnexus.rag.model_assets import ModelUnavailable
+
+    try:
+        settings = get_settings()
+        results = search_kb(
+            query=req.query,
+            namespace=req.namespace or settings.rag_default_namespace,
+            top_k=req.top_k,
+            source=req.source or "",
+            file_format=req.file_format or "",
+            section_title=req.section_title or "",
+            view=req.view or "chunk",
+        )
+        results_data = []
+        for r in results:
+            if hasattr(r, "__dict__"):
+                results_data.append(r.__dict__)
+            elif isinstance(r, dict):
+                results_data.append(r)
+            else:
+                results_data.append({"text": str(r)})
+        ranking_mode = "rerank" if results_data and all(
+            result.get("source") == "rerank" for result in results_data
+        ) else "hybrid"
+        return {"results": results_data, "query": req.query, "ranking_mode": ranking_mode}
+    except ModelUnavailable as e:
+        raise APIError(409, "model_not_ready", str(e)) from e
+    except Exception as e:
+        raise APIError(500, "internal_error", str(e))
+
+
+@router.post("/documents")
+async def ingest_document(file: UploadFile = File(...)):
+    import asyncio
+    import os
+    import tempfile
+    import uuid
+    from pathlib import Path
+
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.kb_service import ingest_one_document
+
+    settings = get_settings()
+    filename = file.filename or "upload.txt"
+    suffix = Path(filename).suffix
+    run_id = f"ingest_{uuid.uuid4().hex[:12]}"
+
+    loop = asyncio.get_running_loop()
+
+    def _save_file():
+        """Read file and save to temp — runs in dedicated thread."""
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp_path = tmp.name
+        try:
+            file.file.seek(0)
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        finally:
+            tmp.close()
+        return tmp_path
+
+    tmp_path = await loop.run_in_executor(_ingestion_executor, _save_file)
+
+    def _run_ingestion():
+        """Run ingestion in dedicated thread pool."""
+        try:
+            ingest_one_document(
+                tmp_path,
+                namespace=settings.rag_default_namespace,
+                enable_contextual=settings.enable_contextual_retrieval,
+                run_id=run_id,
+                source_uri=filename,
+            )
+        except Exception:
+            pass
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    task = loop.run_in_executor(_ingestion_executor, _run_ingestion)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {"status": "processing", "run_id": run_id, "filename": filename}
+
+
+@router.get("/documents/runs/{run_id}")
+def get_ingestion_run(run_id: str):
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    catalog = get_knowledge_base_catalog()
+    run = catalog.get_ingestion_run(run_id)
+    if run is None:
+        raise APIError(404, "not_found", f"Ingestion run not found: {run_id}")
+    return {
+        "run_id": run.run_id,
+        "status": run.status,
+        "source_uri": run.source_uri,
+        "documents_seen": run.documents_seen,
+        "chunks_written": run.chunks_written,
+        "error_message": run.error_message,
+        "metadata": run.metadata,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    }
+
+
+@router.delete("/documents/{doc_id}")
+def delete_document(doc_id: str):
+    from agentnexus.core.config import get_settings
+    from agentnexus.rag.kb_service import DeleteIncompleteError, delete_document_and_vectors
+
+    settings = get_settings()
+    try:
+        deleted_vectors = delete_document_and_vectors(settings.rag_default_namespace, doc_id)
+        return {"status": "deleted", "doc_id": doc_id, "deleted_vectors": deleted_vectors}
+    except DeleteIncompleteError as e:
+        raise HTTPException(status_code=500, detail={
+            "error": "delete_incomplete",
+            "message": (
+                f"向量已删除（{e.deleted_vectors} 个），但目录删除重试 3 次均失败。"
+                "文档当前仍可通过关键词检索到（泄露状态）。"
+                "请调用 retry 补完删除，或 rollback 撤回删除（恢复向量）。"
+            ),
+            "doc_id": e.document_id,
+            "log_id": e.log_id,
+            "retry": f"/knowledge/documents/deletions/{e.log_id}/retry",
+            "rollback": f"/knowledge/documents/deletions/{e.log_id}/rollback",
+            "cause": str(e.cause),
+        })
+    except Exception as e:
+        raise APIError(500, "internal_error", str(e))
+
+
+@router.get("/documents/deletions")
+def list_failed_deletions():
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    catalog = get_knowledge_base_catalog()
+    return {"deletions": catalog.list_deletion_logs(status="failed")}
+
+
+@router.post("/documents/deletions/{log_id}/retry")
+def retry_deletion(log_id: int):
+    from agentnexus.rag.kb_service import retry_failed_deletion
+
+    try:
+        return retry_failed_deletion(log_id)
+    except KeyError as e:
+        raise APIError(404, "not_found", str(e))
+    except Exception as e:
+        raise APIError(500, "internal_error", str(e))
+
+
+@router.post("/documents/deletions/{log_id}/rollback")
+def rollback_deletion(log_id: int):
+    from agentnexus.rag.kb_service import rollback_failed_deletion
+
+    try:
+        return rollback_failed_deletion(log_id)
+    except KeyError as e:
+        raise APIError(404, "not_found", str(e))
+    except Exception as e:
+        raise APIError(409, "conflict", str(e))
+
+
+@router.get("/documents/runs")
+def list_ingestion_runs():
+    from agentnexus.rag.store import get_knowledge_base_catalog
+
+    catalog = get_knowledge_base_catalog()
+    runs = catalog.list_ingestion_runs() if hasattr(catalog, "list_ingestion_runs") else []
+    return {"runs": [r.__dict__ if hasattr(r, "__dict__") else r for r in runs]}

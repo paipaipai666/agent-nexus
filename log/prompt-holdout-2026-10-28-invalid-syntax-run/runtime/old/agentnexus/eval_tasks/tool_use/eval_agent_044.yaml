@@ -1,0 +1,25 @@
+id: eval_agent_044
+description: 创建虚拟环境并安装项目依赖
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 创建虚拟环境并安装项目依赖
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 创建 Python 虚拟环境，激活，从 requirements.txt 安装依赖。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 创建 Python 虚拟环境，激活，从 requirements.txt 安装依赖。

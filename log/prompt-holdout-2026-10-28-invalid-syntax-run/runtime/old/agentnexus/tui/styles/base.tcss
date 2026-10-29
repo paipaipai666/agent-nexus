@@ -1,0 +1,40 @@
+Widget {
+    background: transparent;
+}
+Screen {
+    background: $background;
+    color: $foreground;
+}
+ChoiceScreen, ParameterScreen {
+    background: transparent;
+}
+ChoiceScreen > Vertical, ParameterScreen > Vertical {
+    background: $background;
+}
+Scrollbar {
+    background: transparent;
+    color: $foreground;
+}
+Scrollbar:hover {
+    color: $primary;
+}
+LoadingIndicator {
+    color: $primary;
+}
+ContextFooter {
+    link-style: none;
+    link-color: $text-muted;
+    link-background: transparent;
+    link-style-hover: bold;
+    link-color-hover: $primary;
+}
+
+TextArea {
+    color: $foreground;
+}
+
+TextArea .text-area--cursor {
+    color: $foreground;
+    background: $background;
+    text-style: reverse;
+}

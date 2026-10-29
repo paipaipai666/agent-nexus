@@ -1,0 +1,28 @@
+id: eval_agent_037
+description: 把 JWT Token 的 payload 解码出来
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+- read
+input:
+  prompt: 把 JWT Token 的 payload 解码出来
+  tools:
+  - bash
+  - read
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 base64 解码 JWT 的第二部分（payload），返回 JSON 内容。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 base64 解码 JWT 的第二部分（payload），返回 JSON 内容。

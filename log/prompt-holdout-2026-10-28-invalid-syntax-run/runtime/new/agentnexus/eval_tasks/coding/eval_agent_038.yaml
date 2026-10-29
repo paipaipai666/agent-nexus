@@ -1,0 +1,28 @@
+id: eval_agent_038
+description: 生成数据库 ER 图的 PlantUML 描述
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+input:
+  prompt: 生成数据库 ER 图的 PlantUML 描述
+  tools:
+  - read
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 读取数据库模型定义，生成 PlantUML ER 图语法。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 读取数据库模型定义，生成 PlantUML ER 图语法。

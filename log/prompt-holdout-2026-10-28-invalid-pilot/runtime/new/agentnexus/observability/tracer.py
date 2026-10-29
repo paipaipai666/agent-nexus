@@ -1,0 +1,342 @@
+"""结构化 Trace 系统 — 核心追踪模块
+
+每个 Agent 节点执行时创建 Span，记录输入/输出/延迟/token 消耗，
+最终以 JSONL 格式写入 ~/.agentnexus/traces/ 目录。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import atexit
+import functools
+import json
+import threading
+import time
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class TraceSpan:
+    """一次操作（LLM 调用 / Agent 节点 / 工具执行）的追踪记录"""
+    span_id: str
+    parent_span_id: str = ""
+    name: str = ""
+    start_time: float = 0.0
+    end_time: float = 0.0
+    input: dict[str, Any] = field(default_factory=dict)
+    output: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    _flushed: bool = False
+
+    @property
+    def latency_ms(self) -> float:
+        return round((self.end_time - self.start_time) * 1000, 2)
+
+    @property
+    def status(self) -> str:
+        return self.metadata.get("status", "ok")
+
+
+class TraceContext:
+    """鍗曟浠诲姟鐨勫畬鏁?trace锛屽寘鍚墍鏈?span"""
+
+    def __init__(
+        self,
+        trace_id: str | None = None,
+        on_span_end: Callable[["TraceContext", TraceSpan], None] | None = None,
+    ):
+        self.trace_id = trace_id or str(uuid.uuid4())[:8]
+        self.spans: list[TraceSpan] = []
+        self._span_stack: list[TraceSpan] = []
+        self._lock = threading.RLock()
+        self._on_span_end = on_span_end
+
+    def start_span(self, name: str, input_data: dict | None = None) -> TraceSpan:
+        """鍒涘缓瀛?span 骞舵帹鍏ユ爤椤?"""
+        with self._lock:
+            parent_id = self._span_stack[-1].span_id if self._span_stack else ""
+            span = TraceSpan(
+                span_id=str(uuid.uuid4())[:8],
+                parent_span_id=parent_id,
+                name=name,
+                start_time=time.time(),
+                input=input_data or {},
+            )
+            self._span_stack.append(span)
+            return span
+
+    def end_span(self, span: TraceSpan, output_data: dict | None = None,
+                 metadata: dict | None = None):
+        """缁撴潫 span 骞惰褰曞埌 spans 鍒楄〃"""
+        should_flush = False
+        with self._lock:
+            if span in self.spans:
+                return
+            span.end_time = time.time()
+            if output_data:
+                span.output = _truncate_dict(output_data)
+            if metadata:
+                span.metadata = metadata
+            self.spans.append(span)
+            should_flush = True
+
+            if self._span_stack and self._span_stack[-1].span_id == span.span_id:
+                self._span_stack.pop()
+            else:
+                self._span_stack = [s for s in self._span_stack if s.span_id != span.span_id]
+        if should_flush and self._on_span_end:
+            self._on_span_end(self, span)
+
+
+class TraceManager:
+    """管理 trace 上下文的单例管理器"""
+
+    _instance: "TraceManager" | None = None
+    _lock = threading.Lock()
+    _write_lock = threading.Lock()
+    _local = threading.local()
+    _traces_dir: str = ""
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    @classmethod
+    def configure(cls, traces_dir: str):
+        """设置 trace 文件输出目录"""
+        cls._traces_dir = traces_dir
+
+    @property
+    def active(self) -> TraceContext | None:
+        return getattr(self._local, "trace", None)
+    def set_inherited_trace(self, trace_id: str | None) -> None:
+        """Record the dispatching thread's trace id on a worker thread.
+
+        Worker threads have no active TraceContext (``_local`` is thread-local),
+        so spans created there flush as orphans. Stamping the parent's trace id
+        into span metadata keeps parallel tool/subagent spans joinable to the
+        originating trace without sharing the non-thread-safe span stack.
+        """
+        self._local.inherited_trace_id = trace_id
+
+    def get_inherited_trace(self) -> str | None:
+        return getattr(self._local, "inherited_trace_id", None)
+
+    def start_trace(self, task: str, metadata: dict[str, Any] | None = None) -> TraceContext:
+        """开始一次新 trace，可选传入任务级元数据"""
+        ctx = TraceContext(on_span_end=self._flush_span)
+        root_span = ctx.start_span("task", {"task": _truncate(task)})
+        if metadata:
+            root_span.metadata = metadata
+        ctx._span_stack.clear()
+        ctx._span_stack.append(root_span)
+        self._local.trace = ctx
+        return ctx
+
+    def end_trace(self):
+        """结束当前 trace 并写入 JSONL"""
+        ctx = self.active
+        if ctx is None:
+            return
+        if ctx._span_stack:
+            root = ctx._span_stack[-1]
+            ctx.end_span(root)
+        self._flush(ctx)
+        self._local.trace = None
+
+    def span(self, name: str, input_data: dict | None = None):
+        """获取一个上下文管理器来包裹 span"""
+        return _SpanContext(self, name, input_data)
+
+    def _flush(self, ctx: TraceContext):
+        if not self._traces_dir:
+            return
+        date_str = time.strftime("%Y-%m-%d")
+        traces_path = Path(self._traces_dir)
+        try:
+            traces_path.mkdir(parents=True, exist_ok=True)
+            file_path = self._get_trace_file_path(date_str)
+
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    for span in ctx.spans:
+                        if span._flushed:
+                            continue
+                        record = self._span_record(ctx.trace_id, span)
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        span._flushed = True
+
+            self._cleanup_old_traces()
+        except OSError:
+            return
+
+    def _flush_span(self, ctx: TraceContext, span: TraceSpan):
+        """Write a single span to disk immediately (crash-safe)."""
+        if not self._traces_dir or span._flushed:
+            return
+        date_str = time.strftime("%Y-%m-%d")
+        file_path = self._get_trace_file_path(date_str)
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            record = self._span_record(ctx.trace_id, span)
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            span._flushed = True
+        except OSError:
+            return
+
+    def _flush_orphan_span(self, span: TraceSpan):
+        """Write a standalone span (no trace context) to disk immediately."""
+        if not self._traces_dir or span._flushed:
+            return
+        date_str = time.strftime("%Y-%m-%d")
+        file_path = self._get_trace_file_path(date_str)
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            record = self._span_record("orphan", span)
+            with self._write_lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            span._flushed = True
+        except OSError:
+            return
+
+    @staticmethod
+    def _span_record(trace_id: str, span: TraceSpan) -> dict:
+        return {
+            "trace_id": trace_id,
+            "span_id": span.span_id,
+            "parent_span_id": span.parent_span_id,
+            "name": span.name,
+            "start_time": span.start_time,
+            "end_time": span.end_time,
+            "latency_ms": span.latency_ms,
+            "input": span.input,
+            "output": span.output,
+            "metadata": span.metadata,
+        }
+
+    _MAX_TRACE_FILE_SIZE = 100 * 1024 * 1024
+
+    def _cleanup_old_traces(self):
+        """Remove JSONL files older than the configured retention period."""
+        try:
+            from agentnexus.core.config import get_settings
+            retention_days = get_settings().trace_retention_days
+        except Exception:
+            retention_days = 30
+
+        cutoff = time.time() - retention_days * 86400
+        traces_dir = Path(self._traces_dir)
+        for f in traces_dir.glob("*.jsonl"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
+    def _get_trace_file_path(self, date_str: str) -> Path:
+        """Get trace file path, rotating if the current file exceeds size limit."""
+        traces_path = Path(self._traces_dir)
+        base_path = traces_path / f"{date_str}.jsonl"
+        if not base_path.exists() or base_path.stat().st_size < self._MAX_TRACE_FILE_SIZE:
+            return base_path
+        seq = 1
+        while True:
+            rotated = traces_path / f"{date_str}_{seq}.jsonl"
+            if not rotated.exists() or rotated.stat().st_size < self._MAX_TRACE_FILE_SIZE:
+                return rotated
+            seq += 1
+
+
+class _SpanContext:
+    """用 with 语句管理 span 生命周期"""
+
+    def __init__(self, manager: TraceManager, name: str, input_data: dict | None):
+        self._manager = manager
+        self._name = name
+        self._input = input_data
+        self.span: TraceSpan | None = None
+
+    def __enter__(self) -> TraceSpan:
+        ctx = self._manager.active
+        if ctx is None:
+            span_id = str(uuid.uuid4())[:8]
+            self.span = TraceSpan(span_id=span_id, name=self._name,
+                                  start_time=time.time(), input=self._input or {})
+            return self.span
+        self.span = ctx.start_span(self._name, self._input)
+        return self.span
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.span is None:
+            return
+        md = dict(self.span.metadata) if self.span.metadata else {}
+        md["status"] = "error" if exc_type else "ok"
+        if exc_type:
+            md["error"] = str(exc_val)
+        ctx = self._manager.active
+        if ctx is None:
+            self.span.end_time = time.time()
+            self.span.metadata = md
+            self._manager._flush_orphan_span(self.span)
+            return
+        ctx.end_span(self.span, metadata=md)
+        return False
+
+
+def trace_span(name: str, attrs: dict | Callable[..., dict] | None = None):
+    """Decorator: wrap call in trace_manager.span(name, input_data).
+    attrs 为静态 dict 或 callable(*args, **kwargs) -> dict。同步/异步函数都支持。异常正常传播（span.__exit__ 原有失败记录语义不变）。"""
+    def decorator(fn):
+        if asyncio.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def async_wrapper(*args, **kwargs):
+                input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
+                with trace_manager.span(name, input_data):
+                    return await fn(*args, **kwargs)
+
+            return async_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
+            with trace_manager.span(name, input_data):
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def _truncate(text: str, max_len: int = 5000) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + f"...[截断 {len(text) - max_len} 字符]"
+
+
+def _truncate_dict(d: dict[str, Any], max_len: int = 5000) -> dict[str, Any]:
+    return {k: _truncate(str(v), max_len) for k, v in d.items()}
+
+
+trace_manager = TraceManager()
+
+
+def get_trace_manager() -> TraceManager:
+    """Return the global TraceManager singleton."""
+    return trace_manager
+
+
+@atexit.register
+def _flush_on_exit():
+    ctx = trace_manager.active
+    if ctx is not None and ctx.spans:
+        trace_manager.end_trace()

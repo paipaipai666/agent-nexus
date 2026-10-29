@@ -1,0 +1,18 @@
+{
+  "current_package_matches_frozen_base": true,
+  "arms": {
+    "old": {
+      "files": 401,
+      "matches_manifest": true
+    },
+    "new": {
+      "files": 401,
+      "matches_manifest": true
+    }
+  },
+  "arm_differences": [
+    "agentnexus/prompts/react.txt",
+    "agentnexus/prompts/react_think.txt",
+    "agentnexus/prompts/fragments/autonomy.txt"
+  ]
+}

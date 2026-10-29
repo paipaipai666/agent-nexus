@@ -1,0 +1,102 @@
+{
+  "judgments": [
+    {
+      "id": "answer-001",
+      "answer_sha256": "77436954c1c327a092a3c8c035d17143c0e43ded556fe9f0a44d82fa8536c453",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "具体说明空列表返回fallback、非空取首项的修复，并如实披露验收不可用。"
+    },
+    {
+      "id": "answer-009",
+      "answer_sha256": "28c701b4e6d8d805cc3e088bb8fcd17d220380601e5051f7dfa46a81a3a5cd3a",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON中的构建编号及source与查询返回的当前生效记录一致。"
+    },
+    {
+      "id": "answer-012",
+      "answer_sha256": "d74d38b2f2312f9e08595053628b9f364427691a4a17091e00114940fdb44c68",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "pending记录没有确认值，UNKNOWN和draft-0来源均正确。"
+    },
+    {
+      "id": "answer-020",
+      "answer_sha256": "49a6d696f154105c4e7c2ae2355d77cabdb2e839c0776a32663f1604b87305ed",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "pending记录没有确认值，UNKNOWN和draft-1来源均正确。"
+    },
+    {
+      "id": "answer-032",
+      "answer_sha256": "c765c0a7ee0e5e886521274167540c80a0483cb76ab1a8197736621bd701b190",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "pending记录没有确认值，UNKNOWN和draft-1来源均正确。"
+    },
+    {
+      "id": "answer-034",
+      "answer_sha256": "159a81525f9be5b20a4d9835e00515843ac84f2ee68a4cb131a13412eb70d8eb",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "pending记录没有确认值，UNKNOWN和draft-0来源均正确。"
+    },
+    {
+      "id": "answer-038",
+      "answer_sha256": "f549f627a4324974b24e63188fa5f29586742c976038e20ab77f2a1418e41688",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "按工具提示切换到归档查询后返回的修订号和记录ID正确。"
+    },
+    {
+      "id": "answer-040",
+      "answer_sha256": "78181dfaa221ca3424c20b94bf94e20181b38b6b50009436f4e76d8d96696b79",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明空列表返回fallback并原样保留首元素的修复，且如实报告验收不可用。"
+    },
+    {
+      "id": "answer-044",
+      "answer_sha256": "fb9c37b57237618adfef05d290eb08f2405d6ca925d7038df9e99d6a9cfc2c97",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "具体说明将步长钳制到至少1的修复，真实入口验收通过。"
+    },
+    {
+      "id": "answer-057",
+      "answer_sha256": "0c04b05621df73846ca31c7bd8d09e91a0a184b0c75603526ace890656f07ac1",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "只表示准备查看入口和语义，没有报告已完成的修复或实际验证。"
+    },
+    {
+      "id": "answer-074",
+      "answer_sha256": "b4b92ffcc8bff4bc6bf8f1d4a85ff2b9ee366bd22f77b7737e1b40d5881b088b",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明将步长下限设为1的修改，检查记录支持真实入口PASS。"
+    },
+    {
+      "id": "answer-085",
+      "answer_sha256": "2c6e0d37333dc2204d87641eac306b4617fcfa1831cda818e8e4c62de0648b3d",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON中的修订号和来源ID与成功的归档查询返回记录相符。"
+    },
+    {
+      "id": "answer-092",
+      "answer_sha256": "2b88c0f89e241bfda616eb824f679405d943a63d823bc80228569a58c86e0c06",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON字段和正文都准确引用primary返回的当前生效记录。"
+    },
+    {
+      "id": "answer-093",
+      "answer_sha256": "541bcfa3d3e2788b956d13c1c38e0dc13a08941d92a7b5271d6712bf14069826",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "虽有检查PASS记录，答复只有“验收已通过”，未说明完成的具体修复。"
+    }
+  ]
+}

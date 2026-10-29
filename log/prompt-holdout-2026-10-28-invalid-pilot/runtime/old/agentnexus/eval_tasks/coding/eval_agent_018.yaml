@@ -1,0 +1,28 @@
+id: eval_agent_018
+description: 设置 pre-commit 钩子运行 ruff 检查
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+- bash
+input:
+  prompt: 设置 pre-commit 钩子运行 ruff 检查
+  tools:
+  - write
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 创建 .pre-commit-config.yaml 配置 ruff 钩子，运行 pre-commit install。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 创建 .pre-commit-config.yaml 配置 ruff 钩子，运行 pre-commit install。

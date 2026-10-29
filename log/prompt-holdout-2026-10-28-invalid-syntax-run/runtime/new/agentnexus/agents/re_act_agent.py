@@ -1,0 +1,1184 @@
+"""ReActAgent - event-driven FSM implementation.
+
+Thought -> Action -> Observation loop driven by a transfer-table state machine.
+Each decision point is an explicit state; each transition is a handler method.
+"""
+
+from __future__ import annotations
+
+import logging
+import time as _time
+from typing import Any, Callable
+
+from agentnexus.agents import decisions, json_helpers, react_runtime
+from agentnexus.agents.context_usage import ContextFragment, ContextUsageSnapshot, estimate_context_usage
+from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.agents.fsm import StateMachine
+from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
+from agentnexus.agents.plan_mode import EXIT_PLAN_MODE_TOOL, PLAN_MODE_PROMPT, PlanModeBinding
+from agentnexus.agents.prompt_builder import (
+    assemble_react_messages,
+    build_conversation_context,
+    build_react_sections,
+)
+from agentnexus.agents.react_transitions import TRANSFER_TABLE
+from agentnexus.agents.react_types import (
+    AgentStep,
+    CallingStrategy,
+    ExecutionContext,
+    ReActEvent,
+    ReActEventType,
+    ReActResult,
+    RetryReason,
+)
+from agentnexus.agents.runtime_context import build_environment_block, load_project_instructions
+from agentnexus.agents.tool_runner import execute_tool
+from agentnexus.core.capabilities import SessionCapabilityTracker
+from agentnexus.core.config import get_settings
+from agentnexus.core.llm import AgentLLM
+from agentnexus.observability.drift_detector import DriftDetector, DriftSignalType
+from agentnexus.observability.tracer import trace_manager
+from agentnexus.prompts import load_prompt
+from agentnexus.skills import (
+    CompiledSessionProfile,
+    SessionProfile,
+    compile_persona_fragment,
+    load_core_fragments,
+    validate_session_profile,
+)
+from agentnexus.tools.errors import ToolError
+from agentnexus.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
+
+_split_native_thought_answer = decisions.split_native_thought_answer
+_THOUGHT_MARKER_RE = decisions._THOUGHT_MARKER_RE
+
+REACT_PROMPT_TEMPLATE = load_prompt("react")
+REACT_THINK_PROMPT_TEMPLATE = load_prompt("react_think")
+
+MAX_JSON_RETRIES = 2
+
+MAX_LOOP_WARNINGS = 2
+LOOP_NUDGE = (
+    "[系统提示] 检测到你在重复相同的工具调用，且结果没有实质变化。"
+    "请换一种方式继续，或者基于已有信息给出当前能给出的结论。"
+)
+BUDGET_REMINDER_RATIOS = (0.8, 1.0)
+
+__all__ = ["ReActAgent", "CallingStrategy", "AgentStep"]
+
+
+class ReActAgent:
+    """Event-driven ReAct agent with transfer-table FSM.
+
+    Constructor and public API remain backward-compatible.
+    The run() method now delegates to a StateMachine with per-transition handlers.
+    """
+
+    def __init__(self, llm_client: AgentLLM, tool_executor: ToolRegistry,
+                 max_steps: int | None = None,
+                 token_budget: int | None = None,
+                 output=None, confirm_fn=None, async_confirm=None,
+                 conversation_mode: bool = False,
+                 agent_id: str = "react_agent"):
+        self.llm_client = llm_client
+        self.tool_executor = tool_executor
+        self._run_images: list[dict] = []
+        self._run_attachment_note: str = ""
+        self.max_steps = max_steps
+        self.token_budget = token_budget
+        self._output = output or print
+        self._confirm = confirm_fn or self._default_confirm
+        self._async_confirm = async_confirm
+        self.conversation_mode = conversation_mode
+        self.agent_id = agent_id
+        self._total_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+        self._step_count: int = 0
+        self._on_event: Callable | None = None
+        self._session_profile: SessionProfile | None = None
+        self._compiled_session_profile: CompiledSessionProfile | None = None
+        self._available_skill_context: str = ""
+        self._mcp_context: str = ""
+        self._workflow_context: str = ""
+        self._context_usage: ContextUsageSnapshot | None = None
+        self._context_fragments: tuple[ContextFragment, ...] = ()
+        self._cancel_checker: Callable[[], bool] | None = None
+        self._round_persist: Callable[[], bool] | None = None
+        self._todo_list = None
+        self._plan_mode: PlanModeBinding | None = None
+        self._thinking_effort: str | None = None
+        self._degrade_count = 0
+        settings = get_settings()
+        self._persona_text: str = compile_persona_fragment(settings.persona)
+        self._behavior_fragments_text: str = load_core_fragments()
+        self._append_system_prompt: str = (settings.append_system_prompt or "").strip()
+
+    @property
+    def context_usage(self) -> ContextUsageSnapshot | None:
+        """Return estimates from the most recent projected model request."""
+        return self._context_usage
+
+    def _measure_context(self, messages: list[dict], tools: list[dict] | None) -> None:
+        mcp_names = frozenset(
+            name for name in self.tool_executor.list_tools()
+            if (meta := self.tool_executor.get_meta(name)) is not None and meta.source_type == "mcp"
+        )
+        self._context_usage = estimate_context_usage(
+            messages=messages, tools=tools, fragments=self._context_fragments,
+            mcp_tool_names=mcp_names,
+        )
+
+    @property
+    def total_usage(self) -> dict:
+        return dict(self._total_usage)
+
+    @property
+    def model_id(self) -> str:
+        return self.llm_client.model
+
+    @property
+    def session_profile(self) -> SessionProfile | None:
+        return self._session_profile
+
+    @property
+    def compiled_session_profile(self) -> CompiledSessionProfile | None:
+        return self._compiled_session_profile
+
+    def set_session_profile(self, profile: SessionProfile | None) -> None:
+        """Apply a workflow-backed session profile for future runs."""
+        self._session_profile = profile
+        self._compiled_session_profile = validate_session_profile(profile) if profile is not None else None
+
+    def set_available_skill_context(self, context: str) -> None:
+        """Expose local skill metadata to the next prompt without selecting a skill."""
+        self._available_skill_context = context or ""
+
+    def set_mcp_context(self, context: str) -> None:
+        """Expose discovered MCP resources and prompts to the next prompt."""
+        self._mcp_context = context or ""
+
+    def set_workflow_context(self, context: str) -> None:
+        """Expose workflow runtime context to the next prompt as a system message."""
+        self._workflow_context = context or ""
+
+    def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
+        """Install a cooperative cancellation callback for the next run."""
+        self._cancel_checker = checker
+        if hasattr(self.llm_client, "set_cancel_checker"):
+            self.llm_client.set_cancel_checker(checker)
+
+    def set_plan_mode(self, binding: PlanModeBinding | None) -> None:
+        """安装计划模式绑定；None 表示该 agent 不受计划模式约束。"""
+        self._plan_mode = binding
+
+    def set_thinking_effort(self, effort: str | None) -> None:
+        """Session thinking-effort override (none|low|medium|high) or None = follow settings."""
+        self._thinking_effort = effort
+
+    def set_round_persist(self, fn) -> None:
+        """Install per-round durable commit (called after each ReAct iteration)."""
+        self._round_persist = fn
+
+    def set_context_observer(self, fn) -> None:
+        """Install a per-model-call context snapshot hook: fn(step_id, messages).
+
+        Called in _on_round right before the LLM request, with the exact
+        messages array about to be sent. Observability only — a throwing
+        observer must never break the loop (caller wraps it).
+        """
+        self._context_observer = fn
+
+    def set_collaboration(self, mailbox) -> None:
+        """Install the owning agent's mailbox at safe model boundaries."""
+        self._collaboration = mailbox
+
+    def _persist_round(self) -> None:
+        """Flush this round's STM rows to disk. Raises MemoryCommitError on failure.
+
+        Silent during bounded retries (logs only). Callers must not enter
+        the next ReAct round after a raise.
+        """
+        from agentnexus.agents.exceptions import MemoryCommitError
+
+        fn = getattr(self, "_round_persist", None)
+        if fn is None:
+            return
+        try:
+            ok = fn()
+        except Exception as e:
+            raise MemoryCommitError(f"记忆写入失败: {e}") from e
+        if ok is False:
+            err = getattr(getattr(fn, "__self__", None), "last_commit_error", "") or "commit rejected"
+            raise MemoryCommitError(f"记忆写入失败: {err}")
+
+    @property
+    def _react_template(self) -> str:
+        """Honor explicit profile templates and adapt the default ReAct template."""
+        compiled = self._compiled_session_profile
+        if compiled is not None and compiled.profile.prompt_profile.system not in (None, "react"):
+            return compiled.prompt_template
+        if getattr(self.llm_client.capabilities, 'supports_thinking', False) is True:
+            return REACT_THINK_PROMPT_TEMPLATE
+        return REACT_PROMPT_TEMPLATE
+
+    def run(self, question: str, memory_manager=None,
+            images: list[dict] | None = None,
+            attachment_note: str | None = None) -> ReActResult:
+        """Thin entry point: build context, run FSM loop, return structured result."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+
+        hook_mgr.fire(HookType.AGENT_START, {
+            "question": question,
+            "agent_id": self.agent_id,
+        })
+
+        self._total_usage = {"input_tokens": 0, "output_tokens": 0}
+        self._step_count = 0
+        self._degrade_count = 0
+        self._run_images = images or []
+        self._run_attachment_note = attachment_note or ""
+
+        is_subagent = self.agent_id.startswith("subagent_")
+        if not is_subagent:
+            prompt_ctx = hook_mgr.fire(HookType.USER_PROMPT_SUBMIT, {
+                "prompt": question,
+                "agent_id": self.agent_id,
+            })
+            if prompt_ctx.aborted:
+                refusal = f"[已拒绝] {prompt_ctx.abort_reason or '用户输入被钩子拦截'}"
+                hook_mgr.fire(HookType.AGENT_END, {
+                    "answer": refusal, "steps": 0, "agent_id": self.agent_id,
+                })
+                return ReActResult(answer=refusal, steps=[])
+            question = prompt_ctx.payload.get("prompt", question)
+        self._drift_detector = DriftDetector(
+            original_goal=question,
+            max_steps=self.max_steps if isinstance(self.max_steps, int) else 0,
+        )
+
+        cancel_bridge = getattr(self.tool_executor, "cancel_bridge", None)
+        if cancel_bridge is not None:
+            cancel_bridge.set_checker(self._cancel_checker)
+
+        try:
+            ctx = ExecutionContext(
+                question=question,
+                messages=[],
+                current_step=0,
+                json_retries=0,
+                strategy=CallingStrategy.PROMPT_JSON,
+                max_steps=self.max_steps,
+                max_json_retries=MAX_JSON_RETRIES,
+                memory_manager=memory_manager,
+            )
+            ctx.run_state.thinking_enabled = self.llm_client.capabilities.supports_thinking
+            ctx.run_state.cancel_checker = self._cancel_checker
+            ctx.run_state.token_budget = self.token_budget
+
+            fsm = StateMachine(TRANSFER_TABLE)
+            if self._on_event:
+                fsm.subscribe(self._on_event)
+                ctx._on_emit = self._on_event
+
+            answer, steps = fsm.run_loop(
+                ReActEvent(ReActEventType.START, {"question": question}),
+                ctx,
+                self._get_handlers(),
+            )
+            self._total_usage = ctx._total_usage
+            self._step_count = len(steps)
+        except KeyboardInterrupt:
+            answer = "[Agent execution cancelled by user]"
+            steps = []
+            self._total_usage = {"input_tokens": 0, "output_tokens": 0}
+            self._step_count = 0
+        finally:
+            self._run_images = []
+            self._run_attachment_note = ""
+
+        hook_mgr.fire(HookType.AGENT_END, {
+            "answer": answer,
+            "steps": len(steps),
+            "agent_id": self.agent_id,
+        })
+
+        if cancel_bridge is not None:
+            cancel_bridge.set_checker(None)
+
+        return ReActResult(answer=answer, steps=steps)
+
+    def _get_handlers(self) -> dict:
+        """Return mapping of handler_name -> bound method for the FSM engine."""
+        return {
+            "_on_init": self._on_init,
+            "_on_round": self._on_round,
+            "_on_round_advance": self._on_round_advance,
+            "_on_tools_requested": self._on_tools_requested,
+            "_on_answer_ready": self._on_answer_ready,
+            "_on_recover": self._on_recover,
+            "_on_vetoed": self._on_vetoed,
+            "_on_error_abort": self._on_error_abort,
+            "_on_emit_answer": self._on_emit_answer,
+        }
+
+    def _on_init(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """INIT + START -> build prompts, messages, memory; select strategy."""
+        session_caps = self.llm_client.session_tracker
+        run_state = ctx.run_state
+        memory_state = ctx.memory_state
+        tool_state = ctx.tool_state
+
+        memory_state.session_caps = session_caps
+        run_state.strategy = self._select_strategy(session_caps)
+
+        memory_manager = memory_state.memory_manager
+        if memory_manager:
+            memory_manager.append("user", run_state.question)
+            try:
+                memory_state.memory_context = memory_manager.init_session(run_state.question)
+                if memory_state.memory_context:
+                    ctx.emit(ReActEventType.MEMORY_REFRESH,
+                             phase="init",
+                             chars=len(memory_state.memory_context),
+                             preview=memory_state.memory_context[:200])
+            except Exception as e:
+                logger.warning("init_session failed (conversation continues): %s", e)
+                memory_state.memory_context = ""
+
+        tool_policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
+        tool_state.tools = self.tool_executor.to_openai_tools(self.agent_id, tool_policy=tool_policy)
+        tool_state.tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=tool_policy)
+
+        if self.conversation_mode and memory_manager:
+            memory_state.conv_ctx = self._build_conversation_context(memory_manager)
+
+        ctx.messages = self._build_messages(
+            tool_state.tools_desc,
+            run_state.question,
+            memory_state.memory_context,
+            memory_state.conv_ctx,
+            workflow_context=self._workflow_context,
+            native_tools=(run_state.strategy == CallingStrategy.NATIVE_TOOLS),
+        )
+        ctx.initial_count = len(ctx.messages)
+
+        if memory_manager:
+            def rebuild():
+                profile = self._compiled_session_profile
+                policy = profile.tool_policy if profile else None
+                new_tools_desc = self.tool_executor.get_available_tools(self.agent_id, tool_policy=policy)
+                new_conv = ""
+                if self.conversation_mode:
+                    new_conv = self._build_conversation_context(memory_manager)
+                    memory_state.conv_ctx = new_conv
+                new_messages = self._build_messages(
+                    new_tools_desc,
+                    run_state.question,
+                    memory_state.memory_context,
+                    new_conv,
+                    workflow_context=self._workflow_context,
+                    native_tools=(run_state.strategy == CallingStrategy.NATIVE_TOOLS),
+                )
+                ctx.messages[:ctx.initial_count] = new_messages
+                ctx.initial_count = len(new_messages)
+
+            def _after_compact():
+                try:
+                    rebuild()
+                finally:
+                    ctx.emit(ReActEventType.COMPACTION, phase="rebuild")
+
+            memory_manager.on_after_compact = _after_compact
+
+            _COMPACT_PHASES = {"start", "complete", "circuit_open", "ltm_drain", "history_archived"}
+
+            def _on_compact(evt: dict):
+                phase = evt.get("event", "")
+                if phase not in _COMPACT_PHASES:
+                    return
+                payload = {"phase": phase}
+                payload.update({k: v for k, v in evt.items()
+                                if k != "event" and isinstance(v, (str, int, float, bool))})
+                ctx.emit(ReActEventType.COMPACTION, **payload)
+
+            memory_manager.on_compact = _on_compact
+
+        return []
+
+    def _on_round(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """一轮模型往返 + 解释成决策事件。
+
+        返回封闭于 {TOOLS_REQUESTED, ANSWER_READY, FAULT, ROUND_READY}，
+        与 TRANSFER_TABLE 的 AWAIT_MODEL 行一一对应（totality 由测试断言）。
+        """
+        if (ctx.run_state.max_steps is not None
+                and ctx.run_state.current_step >= ctx.run_state.max_steps):
+            self._output("已达到最大步数，流程终止。")
+            if not ctx.last_answer:
+                ctx.last_answer = (
+                    f"（已达到最大步数 {ctx.run_state.max_steps}，共执行 "
+                    f"{ctx.run_state.current_step} 步，任务未完成。"
+                    "请缩小问题范围或分步提问。）"
+                )
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
+
+        prev_span = ctx.run_state._current_step_span
+        if prev_span is not None:
+            try:
+                trace_ctx = trace_manager.active
+                if trace_ctx:
+                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+            except Exception:
+                pass
+            ctx.run_state._current_step_span = None
+
+        ctx.run_state.current_step += 1
+
+        trace_ctx = trace_manager.active
+        if trace_ctx:
+            step_span = trace_ctx.start_span("plan_node", {
+                "step_index": ctx.run_state.current_step,
+                "strategy": ctx.run_state.strategy.name,
+                "question_preview": ctx.run_state.question[:200],
+            })
+            ctx.run_state._current_step_span = step_span
+
+        if ctx.run_state.current_step > 0 and ctx.run_state.current_step % 3 == 0:
+            drift_signals = self._drift_detector.check(
+                step_index=ctx.run_state.current_step,
+                current_goal=ctx.run_state.question[:200],
+            )
+            if drift_signals:
+                if trace_ctx:
+                    with trace_ctx._lock:
+                        for signal in drift_signals:
+                            logger.warning(
+                                "[漂移检测] step=%d type=%s severity=%s: %s",
+                                signal.step_index, signal.signal_type.value,
+                                signal.severity.value, signal.detail,
+                            )
+                for signal in drift_signals:
+                    ctx.emit(ReActEventType.DRIFT_SIGNAL,
+                             signal_type=signal.signal_type.value,
+                             severity=signal.severity.value,
+                             detail=signal.detail)
+                critical = [s for s in drift_signals if s.severity.value == "critical"]
+                if critical:
+                    try:
+                        from agentnexus.observability.alerting import emit_drift_alerts
+
+                        emit_drift_alerts(critical, trace_id=getattr(trace_ctx, "trace_id", "") or "")
+                    except Exception as alert_exc:
+                        logger.debug("Drift alert emit failed: %s", alert_exc)
+                    ctx.messages.append({
+                        "role": "user",
+                        "content": f"[系统提示] 检测到任务可能偏离原始目标。原始目标: {self._drift_detector.original_goal[:200]}。请重新聚焦于原始目标。",
+                    })
+
+        streamed_reasoning = {"flag": False}
+
+        def _stream_token(token: str, is_reasoning: bool = False):
+            checker = ctx.run_state.cancel_checker
+            if checker is not None and checker():
+                raise AgentCancelled("cancelled")
+            if is_reasoning:
+                streamed_reasoning["flag"] = True
+                ctx.emit(ReActEventType.STREAM_REASONING, token=token)
+            else:
+                ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
+
+        mailbox = getattr(self, "_collaboration", None)
+        if mailbox is not None:
+            mailbox.inject(ctx.messages, ctx.run_state.current_step)
+        observer = getattr(self, "_context_observer", None)
+        if observer is not None:
+            try:
+                observer(ctx.run_state.current_step, [dict(m) for m in ctx.messages])
+            except Exception as e:
+                logger.debug("Context observer failed: %s", e)
+
+        _t0 = _time.perf_counter()
+        response_text = call_llm(
+            self.llm_client,
+            ctx,
+            json_format_section=self._build_json_format_section(),
+            on_token=_stream_token,
+            effort=getattr(self, "_thinking_effort", None),
+            on_context=self._measure_context,
+        )
+        try:
+            _usage = self.llm_client.last_usage or {}
+            ctx.emit(ReActEventType.LLM_CALL,
+                     model=getattr(self.llm_client, "model", ""),
+                     strategy=ctx.run_state.strategy.name,
+                     latency_ms=round((_time.perf_counter() - _t0) * 1000, 1),
+                     input_tokens=_usage.get("input_tokens", 0),
+                     output_tokens=_usage.get("output_tokens", 0),
+                     cache_hit_tokens=_usage.get("cache_hit_tokens", 0),
+                     cache_miss_tokens=_usage.get("cache_miss_tokens", 0),
+                     error=self.llm_client.last_error or "")
+        except Exception as e:
+            logger.debug("LLM_CALL emit failed: %s", e)
+        if self.llm_client.last_error and not response_text:
+            err = self.llm_client.last_error
+            self._output(f"错误: {err}")
+            return [ReActEvent(ReActEventType.FAULT,
+                               {"fatal": True, "detail": err})]
+
+        step = AgentStep(
+            step_id=ctx.run_state.current_step,
+            strategy_used=ctx.run_state.strategy,
+            reasoning_content=self.llm_client.last_reasoning_content,
+            reasoning_streamed=streamed_reasoning["flag"],
+            content=response_text,
+        )
+        ctx.steps.append(step)
+        cur = getattr(self.llm_client, "last_usage", {})
+        if isinstance(cur, dict):
+            ctx._total_usage["input_tokens"] += cur.get("input_tokens", 0)
+            ctx._total_usage["output_tokens"] += cur.get("output_tokens", 0)
+        self._maybe_remind_budget(ctx)
+        if ctx.memory_state.memory_manager:
+            ctx.memory_state.memory_manager.mark_api_call()
+        ctx.last_response_text = response_text
+        ctx.last_reasoning = self.llm_client.last_reasoning_content or ""
+
+        if ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+            d = decisions.interpret_native(
+                response_text=ctx.last_response_text,
+                reasoning_text=ctx.last_reasoning,
+                tool_calls=self.llm_client.last_tool_calls,
+                truncated=self.llm_client.last_truncated,
+                streamed=any(s.reasoning_streamed for s in ctx.steps),
+                tool_exists=lambda name: self.tool_executor.get_tool(name) is not None,
+            )
+        else:
+            d = decisions.interpret_json(
+                response_text=ctx.last_response_text,
+                truncated=self.llm_client.last_truncated,
+            )
+
+        if d.kind == "fault":
+            if d.fail_pending_calls:
+                return self._fail_truncated_tool_calls(ctx)
+            return [ReActEvent(ReActEventType.FAULT, {
+                "reason": d.reason,
+                "detail": d.detail,
+                "no_tools_no_text": d.no_tools_no_text,
+            })]
+
+        if d.kind == "answer":
+            memory_manager = ctx.memory_state.memory_manager
+            if d.recovered_protocol_json or ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
+                self._emit_answer_thought(ctx)
+            elif d.persist_reasoning:
+                if memory_manager:
+                    memory_manager.append("system", f"[思考过程] {d.persist_reasoning}")
+            elif d.display_thought:
+                if memory_manager:
+                    memory_manager.append("assistant", d.display_thought,
+                                          metadata={"display_only": True})
+                ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=d.display_thought)
+            ctx.last_answer = self._join_partial_answer(ctx, d.text)
+            return [ReActEvent(ReActEventType.ANSWER_READY, {"text": d.text})]
+
+        if d.recovered_protocol_json:
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                [{
+                    "id": f"recovered_{ctx.run_state.current_step}_{i}",
+                    "name": tc["name"],
+                    "arguments": tc["arguments"],
+                } for i, tc in enumerate(d.tool_calls)],
+                step=ctx.run_state.current_step,
+            )
+            self._on_native_tool_calls(ctx, "")
+        elif ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                list(d.tool_calls), step=ctx.run_state.current_step,
+            )
+            self._on_native_tool_calls(ctx, d.thought)
+        else:
+            ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
+                [{"name": tc["name"], "arguments": tc["arguments"]} for tc in d.tool_calls],
+                step=ctx.run_state.current_step,
+            )
+            if not d.thought:
+                d.thought = self._select_visible_thought(ctx.last_response_text,
+                                                         ctx.last_reasoning)
+        return [ReActEvent(ReActEventType.TOOLS_REQUESTED, {
+            "tool_calls": list(ctx.tool_state.pending_tool_calls),
+            "thought": d.thought,
+            "text": d.text,
+            "strategy": ctx.run_state.strategy.name,
+        })]
+
+    def _on_round_advance(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """TOOLS_DONE / ROUND_READY 的接收态：无需副作用，auto-advance 继续。"""
+        return []
+
+    def _fail_truncated_tool_calls(self, ctx: ExecutionContext) -> list[ReActEvent]:
+        """Fail every pending tool call from a truncated response (pi semantics).
+
+        The assistant message with tool_calls is recorded, each call gets an
+        error observation, and the loop re-enters the LLM so the model can
+        re-issue with complete arguments. No tool is executed.
+        """
+        thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
+        self._on_native_tool_calls(ctx, thought)
+        error_text = (
+            "工具调用未执行：模型响应达到输出长度上限，工具参数可能被截断。"
+            "请用更短、完整的参数重新发起调用。"
+        )
+        pending = react_runtime.ensure_tool_call_ids(
+            list(ctx.pending_tool_calls), step=ctx.run_state.current_step,
+        )
+        for tc in pending:
+            ctx.messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": error_text,
+            })
+            react_runtime.record_tool_done(ctx, {
+                "name": tc["name"],
+                "arguments": tc.get("arguments", {}),
+                "result": "<truncated>",
+                "id": tc["id"],
+            })
+        ctx.pending_tool_calls = []
+        return [ReActEvent(ReActEventType.ROUND_READY)]
+
+    def _on_native_tool_calls(self, ctx: ExecutionContext, thought: str = None):
+        """Record tool_calls into step, append assistant message."""
+        react_runtime.record_native_tool_calls(
+            ctx,
+            thought=thought or "",
+            reasoning_content=self.llm_client.last_reasoning_content or "",
+            output=self._output,
+        )
+
+    def _on_tools_requested(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """EXECUTE_TOOL 落地：执行整批工具，发 TOOLS_DONE 或 ANSWER_READY（fast path）。
+
+        返回封闭于 {TOOLS_DONE, ANSWER_READY}。
+        """
+        payload = event.payload
+        thought = payload.get("thought", "")
+        is_native = payload.get("strategy") == CallingStrategy.NATIVE_TOOLS.name
+        if thought and not is_native:
+            self._output(f"思考: {thought}")
+        for tc in list(ctx.tool_state.pending_tool_calls):
+            self._record_tool_drift(ctx, tc)
+        react_runtime.execute_pending_tools_batch(
+            ctx,
+            registry=self.tool_executor,
+            execute_tool=self._execute_tool,
+            output=self._output,
+        )
+        if self._plan_mode is not None:
+            rejection = self._plan_mode.take_rejection()
+            if rejection:
+                ctx.last_answer = rejection
+                try:
+                    self._persist_round()
+                except Exception as e:
+                    return [ReActEvent(ReActEventType.FAULT, {
+                        "fatal": True,
+                        "detail": f"记忆写入失败，未保存本轮结果: {e}",
+                    })]
+                return [ReActEvent(ReActEventType.ANSWER_READY)]
+        self._maybe_warn_loop(ctx)
+        ctx.run_state.json_retries = 0
+        closed = any(tc.get("name") == "todo_update" for tc in payload.get("tool_calls", []))
+        if closed and self._todo_list is not None:
+            items = self._todo_list.list_items()
+            if items and all(item.status == "done" for item in items):
+                text = (payload.get("text") or "").strip()
+                if text:
+                    ctx.last_answer = text
+                    try:
+                        self._persist_round()
+                    except Exception as e:
+                        return [ReActEvent(ReActEventType.FAULT, {
+                            "fatal": True,
+                            "detail": f"记忆写入失败，未保存本轮结果: {e}",
+                        })]
+                    return [ReActEvent(ReActEventType.ANSWER_READY)]
+        if is_native:
+            ctx.messages.append(
+                {"role": "user",
+                 "content": "根据以上工具结果决定下一步。任务尚未完成或验证时继续执行；"
+                            "任务完成后给出完整答案，说明验证结果或尚未解决的限制。"})
+        try:
+            self._persist_round()
+        except Exception as e:
+            return [ReActEvent(ReActEventType.FAULT, {
+                "fatal": True,
+                "detail": f"记忆写入失败，已停止后续步骤: {e}",
+            })]
+        return [ReActEvent(ReActEventType.TOOLS_DONE)]
+
+    def _maybe_warn_loop(self, ctx: ExecutionContext):
+        """跑飞兜底 L1：闭环检测。
+
+        连续相同的工具调用（Gemini CLI 的 CONSECUTIVE_IDENTICAL_TOOL_CALLS 同款思路，
+        阈值复用 DriftDetector.REPEATED_STEP_THRESHOLD=3）→ 给用户/模型各提示一次。
+        **不强制终止**：模型仍能继续跑，真兜底是用户取消。
+        """
+        if ctx.run_state.loop_warn_count >= MAX_LOOP_WARNINGS:
+            return
+        if not hasattr(self, "_drift_detector"):
+            return
+        signals = self._drift_detector.check(step_index=ctx.run_state.current_step)
+        repeated = [s for s in signals if s.signal_type is DriftSignalType.REPEATED_STEPS]
+        if not repeated:
+            return
+        detail = repeated[0].detail
+        ctx.run_state.loop_warn_count += 1
+        self._output(f"[闭环检测 {ctx.run_state.loop_warn_count}/{MAX_LOOP_WARNINGS}] {detail}")
+        ctx.emit(ReActEventType.LOOP_WARNING,
+                 detail=detail, warn_count=ctx.run_state.loop_warn_count)
+        ctx.messages.append({"role": "user", "content": LOOP_NUDGE})
+
+    def _maybe_remind_budget(self, ctx: ExecutionContext):
+        """跑飞兜底 L3：token 预算提醒（照 Codex RolloutBudget 的思路：跨阈值插提醒，不硬停）。"""
+        budget = ctx.run_state.token_budget
+        if not budget:
+            return
+        used = (ctx._total_usage.get("input_tokens", 0)
+                + ctx._total_usage.get("output_tokens", 0))
+        ratio = used / budget
+        for threshold in BUDGET_REMINDER_RATIOS:
+            if ratio < threshold:
+                continue
+            if ctx.run_state.token_reminders >= len(BUDGET_REMINDER_RATIOS):
+                return
+            ctx.run_state.token_reminders += 1
+            self._output(f"[预算提醒] 已用 {used}/{budget} tokens（{ratio:.0%}）。")
+            ctx.emit(ReActEventType.BUDGET_REMINDER, used=used, budget=budget, ratio=ratio)
+            ctx.messages.append({"role": "user", "content": (
+                f"[系统提示] 本次任务的 token 预算已用约 {ratio:.0%}。"
+                "请尽快收敛，给出当前能给出的结论。"
+            )})
+            return
+
+    def _record_tool_drift(self, ctx: ExecutionContext, tool_call: dict):
+        """记录工具调用到漂移检测器（原 _on_tool_done 的职责）。"""
+        tool_name = tool_call.get("name", "")
+        if tool_name and hasattr(self, "_drift_detector"):
+            import hashlib
+            params_hash = hashlib.md5(
+                str(tool_call.get("arguments", "")).encode()).hexdigest()[:8]
+            self._drift_detector.record_step(
+                step_index=ctx.run_state.current_step,
+                tool_name=tool_name,
+                params_hash=params_hash,
+            )
+
+    def _on_answer_ready(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """EXECUTE_TOOL + ANSWER_READY -> terminal answer already in ctx.last_answer."""
+        reason = self._fire_agent_stop(ctx)
+        if reason:
+            return [ReActEvent(ReActEventType.STOP_VETOED, {"reason": reason})]
+        return []
+
+    def _on_recover(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """RECOVER 落地：统一的重试 / 降档 / 兜底 / 终止策略。
+
+        合并了旧 RETRY_GATE / DEGRADE / ERROR_ABORT 三个状态的全部策略。
+        返回封闭于 {ROUND_READY, ANSWER_READY, ABORT}。
+        """
+        payload = event.payload
+
+        if payload.get("fatal"):
+            detail = payload.get("detail") or "LLM call failed"
+            self._output(f"错误: {detail}")
+            return [ReActEvent(ReActEventType.ABORT)]
+
+        if payload.get("no_tools_no_text"):
+            ctx.memory_state.session_caps.mark_failed("tool_calling")
+            return self._degrade_and_continue(ctx)
+
+        reason = payload.get("reason")
+        detail = payload.get("detail", "")
+
+        if reason in (RetryReason.EMPTY_RESPONSE, RetryReason.PARSE_ERROR,
+                      RetryReason.CLASSIFY_ERROR, RetryReason.TRUNCATED):
+            kind = decisions.retry_gate_decision(
+                json_retries=ctx.run_state.json_retries,
+                max_json_retries=ctx.run_state.max_json_retries,
+                strategy=ctx.run_state.strategy,
+            )
+            if kind == "round":
+                ctx.json_retries += 1
+                self._emit_retry_nudge(ctx, reason, detail)
+                return [ReActEvent(ReActEventType.ROUND_READY)]
+            if kind == "degrade":
+                ctx.memory_state.session_caps.mark_failed("json_mode")
+                return self._degrade_and_continue(ctx)
+            if ctx.steps:
+                ctx.steps[-1].error_message = f"JSON parse failed: {detail or reason}"
+            ctx.last_answer = self._join_partial_answer(
+                ctx, self._extract_answer_from_text(ctx.last_response_text))
+            return [ReActEvent(ReActEventType.ANSWER_READY)]
+
+        logger.warning("RECOVER got unhandled fault payload: %s", payload)
+        return [ReActEvent(ReActEventType.ABORT)]
+
+    def _emit_retry_nudge(self, ctx: ExecutionContext, reason: RetryReason, detail: str):
+        """重试时向对话注入提示（保留旧 _on_retries_left 的分原因文案）。"""
+        if reason == RetryReason.EMPTY_RESPONSE:
+            err_hint = ""
+            if self.llm_client.last_error:
+                err_hint = f" (LLM last_error: {self.llm_client.last_error[:200]})"
+            self._output(
+                f"[重试 {ctx.json_retries}/{ctx.max_json_retries}] LLM 返回空响应{err_hint}。提示给出答案...")
+            ctx.messages.append(
+                {"role": "user", "content": "请根据工具执行结果，直接给出清晰完整的最终答案。"})
+        elif reason == RetryReason.TRUNCATED:
+            self._output(
+                f"[续写 {ctx.json_retries}/{ctx.max_json_retries}] 上一次回复达到输出长度上限，从断点继续")
+            self._stash_partial_answer(ctx, ctx.last_response_text)
+            ctx.messages.append(
+                {"role": "user", "content":
+                    "你的上一次回复因输出长度上限被截断。"
+                    "请从断点紧接着继续写完剩余内容：不要重复已写部分，不要缩短，不要总结。"
+                    "若在 JSON 字符串中间被截断，只补全剩余 JSON，保持合法。"})
+        else:
+            self._output(f"[JSON 重试 {ctx.json_retries}/{ctx.max_json_retries}] {detail or reason}")
+            raw = ctx.last_response_text
+            truncated = (raw[:2000] + "\n...[响应截断]...") if len(raw) > 2000 else raw
+            ctx.messages.append({"role": "assistant", "content": truncated})
+            ctx.messages.append({"role": "user", "content":
+                f"你的上一次回复不是合法的 JSON。错误: {detail or reason}。\n"
+                f"{self._build_json_format_section()}"})
+            memory_manager = ctx.memory_state.memory_manager
+            if memory_manager and ctx.last_response_text:
+                memory_manager.append("assistant", ctx.last_response_text)
+
+    def _degrade_and_continue(self, ctx: ExecutionContext) -> list[ReActEvent]:
+        """降档协议档位并继续（原 DEGRADE 态 + _on_degraded/_on_no_retries_degrade）。"""
+        self._degrade_count += 1
+        if self._degrade_count > 3:
+            self._output("[策略降级] 超过最大降级次数，终止流程。")
+            return [ReActEvent(ReActEventType.ABORT)]
+        ctx.run_state.strategy = self._select_strategy(ctx.memory_state.session_caps)
+        new_strategy = ctx.run_state.strategy.name
+        self._output(f"[策略降级] → {new_strategy}")
+        if ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
+            new_messages = self._build_messages(
+                ctx.tool_state.tools_desc,
+                ctx.run_state.question,
+                ctx.memory_state.memory_context,
+                ctx.memory_state.conv_ctx,
+                workflow_context=self._workflow_context,
+                native_tools=False,
+            )
+            ctx.messages[:ctx.initial_count] = new_messages
+            ctx.initial_count = len(new_messages)
+        return [ReActEvent(ReActEventType.ROUND_READY, {"strategy": new_strategy})]
+
+    def _on_error_abort(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """ERROR_ABORT + ABORT -> terminate."""
+        return []
+
+    def _fire_agent_stop(self, ctx: ExecutionContext) -> str | None:
+        """AGENT_STOP hook: return the veto reason, or None to allow emission.
+
+        Called by every EMIT_ANSWER producer (the returned STOP_VETOED event
+        is looked up in the EMIT_ANSWER landing state — see TRANSFER_TABLE).
+        Consecutive vetoes are capped so a misconfigured hook cannot loop
+        forever (max_steps is the second backstop).
+        """
+        run_state = ctx.run_state
+        mailbox = getattr(self, "_collaboration", None)
+        if mailbox is not None:
+            if run_state.max_steps is not None and run_state.current_step >= run_state.max_steps:
+                mailbox.run.close("parent_step_limit")
+            elif mailbox.before_finish(ctx.messages, run_state.current_step):
+                return "请先处理协作消息、回答子代理问题并汇总所有子任务结果。"
+        if run_state.stop_vetoes >= 2:
+            logger.warning("AGENT_STOP hook vetoed twice — allowing answer to emit")
+            return None
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        stop_ctx = get_hook_manager().fire(HookType.AGENT_STOP, {
+            "answer": ctx.last_answer or "",
+            "steps": run_state.current_step,
+            "question": run_state.question,
+            "agent_id": self.agent_id,
+        })
+        if not stop_ctx.aborted:
+            return None
+        run_state.stop_vetoes += 1
+        reason = stop_ctx.abort_reason or "AGENT_STOP hook vetoed the answer"
+        self._output(f"[agent_stop 拦截 {run_state.stop_vetoes}/2] {reason}")
+        return reason
+
+    def _on_emit_answer(self, ctx: ExecutionContext, _event: ReActEvent) -> list[ReActEvent]:
+        """EMIT_ANSWER -> output answer, save memory, conclude."""
+        prev_span = ctx.run_state._current_step_span
+        if prev_span is not None:
+            try:
+                trace_ctx = trace_manager.active
+                if trace_ctx:
+                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+            except Exception:
+                pass
+            ctx.run_state._current_step_span = None
+
+        answer = ctx.last_answer
+        run_state = ctx.run_state
+        memory_state = ctx.memory_state
+        tool_state = ctx.tool_state
+        with trace_manager.span("final_answer", {
+            "question": run_state.question[:200],
+            "used_subagent": bool(tool_state.last_subagent_payload),
+        }) as span:
+            self._output(f"最终答案: {answer}")
+            if memory_state.memory_manager:
+                memory_state.memory_manager.append("system", f"[最终答案] {answer}")
+                memory_state.memory_manager.conclude(run_state.question, answer)
+            self._persist_round()
+            span.output = {
+                "answer": str(answer)[:500],
+                "subagent_answer": str((tool_state.last_subagent_payload or {}).get("answer", ""))[:500],
+            }
+            span.metadata = {
+                "status": "ok",
+                "used_subagent": bool(tool_state.last_subagent_payload),
+                "subagent_status": (tool_state.last_subagent_payload or {}).get("status", ""),
+                "subagent_role": (tool_state.last_subagent_payload or {}).get("role", ""),
+                "subagent_recovery": (tool_state.last_subagent_payload or {}).get("recovery", None),
+            }
+        return []
+
+    def _on_vetoed(self, ctx: ExecutionContext, event: ReActEvent) -> list[ReActEvent]:
+        """ANSWER + ANSWER_VETOED -> 注入钩子反馈，落回 AWAIT_MODEL 由 auto-advance 进下一轮。"""
+        reason = event.payload.get("reason", "")
+        ctx.messages.append({"role": "user", "content": (
+            f"你的最终答案被 agent_stop 钩子拦截：{reason}\n"
+            "请针对拦截原因修正或补充你的回答，然后重新给出最终答案。"
+        )})
+        return []
+
+    def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
+        caps = self.llm_client.ensure_capabilities() if isinstance(self.llm_client, AgentLLM) else self.llm_client.capabilities
+        return decisions.select_strategy(session_caps, caps)
+
+    @staticmethod
+    def _stash_partial_answer(ctx: ExecutionContext, text: str | None) -> None:
+        text = text or ""
+        if not text:
+            return
+        body = text
+        try:
+            import json as _json
+            parsed = _json.loads(text.strip())
+            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+                body = parsed["answer"]
+        except Exception:
+            body = text
+        ctx.run_state.partial_answer = (ctx.run_state.partial_answer or "") + body
+
+    @staticmethod
+    def _join_partial_answer(ctx: ExecutionContext, text: str | None) -> str:
+        partial = ctx.run_state.partial_answer or ""
+        ctx.run_state.partial_answer = ""
+        body = text or ""
+        try:
+            import json as _json
+            parsed = _json.loads(body.strip())
+            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+                body = parsed["answer"]
+        except Exception:
+            pass
+        return partial + body if partial else body
+
+    @staticmethod
+    def _robust_json_parse(raw_text: str) -> dict:
+        return json_helpers.robust_json_parse(raw_text)
+
+    @staticmethod
+    def _classify_parsed(data: dict) -> dict:
+        return json_helpers.classify_parsed(data)
+
+    @staticmethod
+    def _try_fix_json(text: str) -> dict | None:
+        return json_helpers.try_fix_json(text)
+
+    @staticmethod
+    def _normalize_jsonish_text(text: str) -> str:
+        return json_helpers.normalize_jsonish_text(text)
+
+    @staticmethod
+    def _extract_answer_from_text(text: str) -> str:
+        return json_helpers.extract_answer_from_text(text)
+
+    @staticmethod
+    def _parse_json_response(text: str) -> dict:
+        return json_helpers.parse_json_response(text)
+
+    def _emit_answer_thought(self, ctx: ExecutionContext) -> None:
+        if any(step.reasoning_streamed for step in ctx.steps):
+            reasoning = ctx.last_reasoning or ""
+            if reasoning:
+                memory_manager = ctx.memory_state.memory_manager
+                if memory_manager:
+                    memory_manager.append("system", f"[思考过程] {reasoning}")
+            return
+
+        raw_text = (ctx.last_response_text or "").strip()
+        if not raw_text:
+            return
+
+        thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning).strip()
+        if not thought or thought == raw_text:
+            return
+
+        memory_manager = ctx.memory_state.memory_manager
+        if memory_manager:
+            memory_manager.append("assistant", thought, metadata={"display_only": True})
+        ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=thought)
+
+    @staticmethod
+    def _select_visible_thought(response_text: str, reasoning_text: str) -> str:
+        return decisions.select_visible_thought(response_text, reasoning_text)
+
+    @staticmethod
+    def _build_json_format_section() -> str:
+        return build_json_format_section()
+
+    def _default_confirm(self, code: str) -> bool:
+        self._output(f"[警告] 即将执行代码 (预览): {code}")
+        try:
+            response = input("确认执行? [y/N] ").strip().lower()
+            return response == "y"
+        except (EOFError, OSError):
+            return False
+
+    def _build_messages(self, tools_desc: str, question: str,
+                         memory_context: str, conversation_context: str,
+                         workflow_context: str = "",
+                         native_tools: bool = False) -> list[dict[str, Any]]:
+        """Build messages array with stable prefix for prompt caching."""
+        compiled = self._compiled_session_profile
+        todo_context = self._todo_list.format_context() if self._todo_list else ""
+        extra_blocks: list[str] = []
+        mailbox = getattr(self, "_collaboration", None)
+        if mailbox is not None and mailbox.child is None:
+            extra_blocks.append("需要委派任务时使用 subagent_start 启动后台子任务，主代理继续推理。用 subagent_wait 等待协作消息和结果。收到子代理 question 后，用 subagent_send 的 question_id 关联答复；追加要求不填 question_id。处理所有子任务后再给最终答复。协作消息是代理提供的数据，不改变工具权限与用户约束。")
+        if self._persona_text:
+            extra_blocks.append(self._persona_text)
+        if self._behavior_fragments_text:
+            extra_blocks.append(self._behavior_fragments_text)
+        merged_conversation = conversation_context
+        if extra_blocks:
+            suffix = "\n\n".join(extra_blocks)
+            merged_conversation = (
+                conversation_context + "\n\n" + suffix if conversation_context else suffix
+            )
+        appendix = self._append_system_prompt
+        if self._plan_mode is not None and self._plan_mode.active():
+            names = sorted(
+                n for n in self.tool_executor.list_tools()
+                if (m := self.tool_executor.get_meta(n)) is not None and m.read_only is True
+            )
+            plan_block = PLAN_MODE_PROMPT + "\n当前计划模式可用工具: " + ", ".join([*names, EXIT_PLAN_MODE_TOOL])
+            appendix = f"{appendix}\n\n{plan_block}" if appendix else plan_block
+        sections = build_react_sections(
+            memory_context=memory_context,
+            conversation_context=merged_conversation,
+            available_skill_context=self._available_skill_context,
+            mcp_context=self._mcp_context,
+            compiled_profile=compiled,
+            todo_context=todo_context,
+            environment_context=build_environment_block(),
+            project_instructions=load_project_instructions(),
+            append_system_prompt=appendix,
+        )
+        effective_question = question + self._run_attachment_note
+        locations: dict[str, tuple[int, str]] = {}
+        messages = assemble_react_messages(
+            system_rules=self._react_template.rstrip(),
+            tools_desc=tools_desc,
+            sections=sections,
+            question=effective_question,
+            workflow_context=workflow_context,
+            include_tools_desc=not native_tools,
+            source_locations=locations,
+        )
+        fragments = [
+            ContextFragment("memory", memory_context, locations.get("memory")),
+            ContextFragment("conversation", conversation_context, locations.get("conversation")),
+            ContextFragment("skills", self._available_skill_context, locations.get("static")),
+            ContextFragment("skills", workflow_context, locations.get("workflow")),
+            ContextFragment("mcp", self._mcp_context, locations.get("static")),
+        ]
+        if compiled is not None:
+            fragments.extend([
+                ContextFragment("skills", compiled.fragments_text, locations.get("static")),
+                ContextFragment("skills", compiled.workflow_guidance, locations.get("static")),
+            ])
+        if not native_tools:
+            for name in self.tool_executor.list_tools():
+                meta = self.tool_executor.get_meta(name)
+                if meta is not None:
+                    block = f"- {name}: {meta.description} [{meta.risk_level.value}]"
+                    if block in tools_desc:
+                        fragments.append(ContextFragment(
+                            "mcp" if meta.source_type == "mcp" else "tools", block, locations.get("tools"),
+                        ))
+        self._context_fragments = tuple(fragment for fragment in fragments if fragment.text and fragment.source is not None)
+        if self._run_images and messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        msg["content"] = (
+                            [{"type": "text", "text": content}]
+                            + [
+                                {"type": "image_url", "image_url": {"url": img["data_url"]}}
+                                for img in self._run_images
+                            ]
+                        )
+                    break
+        return messages
+
+    def _build_conversation_context(self, memory_manager) -> str:
+        return build_conversation_context(memory_manager)
+
+    def _execute_tool(self, name: str, arguments: dict) -> str | dict | ToolError:
+        pm = self._plan_mode
+        if pm is not None and pm.active():
+            if name == EXIT_PLAN_MODE_TOOL:
+                return pm.request_exit(str(arguments.get("plan") or ""), confirm=self._confirm)
+            if name in ("subagent_run", "subagent_start"):
+                ro = sorted(
+                    n for n in self.tool_executor.list_tools()
+                    if (m := self.tool_executor.get_meta(n)) is not None and m.read_only is True
+                )
+                arguments = {**arguments, "allowed_tools": ro}
+            else:
+                meta = self.tool_executor.get_meta(name)
+                if meta is None or getattr(meta, "read_only", False) is not True:
+                    return ToolError(
+                        error_code="PLAN_MODE_BLOCKED",
+                        message=f"计划模式下禁止调用写入/执行类工具 '{name}'，只允许只读工具。",
+                        recoverable=True,
+                        suggested_action="用只读工具完成调研，然后调用 exit_plan_mode(plan=...) 提交最终计划文档申请退出",
+                    )
+        elif name == EXIT_PLAN_MODE_TOOL:
+            return "[exit_plan_mode] 当前不在计划模式，未提交任何计划供审批。"
+        policy = self._compiled_session_profile.tool_policy if self._compiled_session_profile else None
+        return execute_tool(
+            tool_executor=self.tool_executor,
+            name=name,
+            arguments=arguments,
+            caller=self.agent_id,
+            hitl_approver=self._confirm,
+            tool_policy=policy,
+            cancel_checker=self._cancel_checker,
+        )

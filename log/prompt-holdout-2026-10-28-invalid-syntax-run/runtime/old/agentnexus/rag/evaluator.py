@@ -1,0 +1,801 @@
+import random
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from agentnexus.core.judge_llm import get_judge_llm
+from agentnexus.core.llm import AgentLLM
+from agentnexus.prompts import load_prompt
+from agentnexus.rag.ingestion import ChunkStrategy, chunk_text, ingest_document
+from agentnexus.rag.retriever import HybridRetriever, build_knowledge_base, result_display_text
+from agentnexus.storage.chroma import delete_collection, search
+
+
+@dataclass
+class EvalSample:
+    question: str
+    ground_truth: str
+    reference_contexts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EvalRun:
+    def check_passed(self, thresholds: dict[str, float] | None = None) -> bool:
+        t = thresholds or THRESHOLD_PROFILES["balanced"]
+        return (
+            self.faithfulness >= t.get("faithfulness", 0.0)
+            and self.answer_relevancy >= t.get("answer_relevancy", 0.0)
+            and self.answer_correctness >= t.get("answer_correctness", 0.0)
+            and self.hit_rate >= t.get("hit_rate", 0.0)
+            and self.mrr >= t.get("mrr", 0.0)
+            and self.rejection_rate >= t.get("rejection_rate", 0.0)
+        )
+
+    label: str
+    strategy: ChunkStrategy
+    chunk_size: int
+    use_hybrid: bool
+    faithfulness: float = 0.0
+    answer_relevancy: float = 0.0
+    answer_correctness: float = 0.0
+    context_precision: float = 0.0
+    context_recall: float = 0.0
+    context_relevancy: float = 0.0
+    citation_precision: float = 0.0
+    hit_rate: float = 0.0
+    mrr: float = 0.0
+    retriever_recall: float = 0.0
+    reranker_mrr: float = 0.0
+    task_success_rate: float = 0.0
+    hallucination_rate: float = 0.0
+    avg_latency_ms: float = 0.0
+    p50_latency_ms: float = 0.0
+    p95_latency_ms: float = 0.0
+    p99_latency_ms: float = 0.0
+    faithfulness_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    answer_relevancy_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    answer_correctness_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    context_precision_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    context_recall_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    context_relevancy_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    citation_precision_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    hit_rate_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    mrr_ci: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    rejection_rate: float = 0.0
+
+
+EVAL_GENERATE_PROMPT = load_prompt("eval_generate")
+EVAL_FAITHFULNESS_PROMPT = load_prompt("eval_faithfulness")
+EVAL_CORRECTNESS_PROMPT = load_prompt("eval_correctness")
+EVAL_ANSWER_RELEVANCY_PROMPT = load_prompt("eval_answer_relevancy")
+EVAL_PRECISION_PROMPT = load_prompt("eval_precision")
+EVAL_RECALL_PROMPT = load_prompt("eval_recall")
+EVAL_QUALITY_BATCH_PROMPT = load_prompt("eval_quality_batch")
+EVAL_CITATION_PROMPT = load_prompt("eval_citation")
+EVAL_REFUSAL_PROMPT = load_prompt("eval_refusal")
+
+_REFUSAL_KEYWORDS = [
+    "无法", "没有找到", "不能", "不确定", "不包含",
+    "i don't know", "not found", "cannot", "unable",
+    "无可奉告", "无法回答", "暂无", "无相关信息",
+]
+
+
+def _text_contains_reference(retrieved_chunks: list[str], reference: str, threshold: float = 0.6) -> bool:
+    """Check if any retrieved chunk contains the reference context.
+
+    Uses substring match first, then falls back to token overlap.
+    """
+    if not reference or not retrieved_chunks:
+        return False
+    ref_stripped = reference.strip()
+    for chunk in retrieved_chunks:
+        if ref_stripped in chunk:
+            return True
+    ref_tokens = set(_simple_tokenize(ref_stripped))
+    if not ref_tokens:
+        return False
+    for chunk in retrieved_chunks:
+        chunk_tokens = set(_simple_tokenize(chunk))
+        if not chunk_tokens:
+            continue
+        overlap = len(ref_tokens & chunk_tokens) / len(ref_tokens)
+        if overlap >= threshold:
+            return True
+    return False
+
+
+def _simple_tokenize(text: str) -> list[str]:
+    """Minimal tokenizer for text matching: splits on whitespace + CJK chars."""
+    import re
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return []
+    return re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
+
+
+THRESHOLD_PROFILES: dict[str, dict[str, float]] = {
+    "strict": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.85,
+        "answer_correctness": 0.80,
+        "context_precision": 0.80,
+        "context_recall": 0.80,
+        "context_relevancy": 0.75,
+        "citation_precision": 0.75,
+        "hit_rate": 0.90,
+        "mrr": 0.80,
+        "rejection_rate": 0.85,
+        "task_success_rate": 0.80,
+    },
+    "balanced": {
+        "faithfulness": 0.80,
+        "answer_relevancy": 0.75,
+        "answer_correctness": 0.70,
+        "context_precision": 0.70,
+        "context_recall": 0.70,
+        "context_relevancy": 0.60,
+        "citation_precision": 0.60,
+        "hit_rate": 0.85,
+        "mrr": 0.70,
+        "rejection_rate": 0.75,
+        "task_success_rate": 0.65,
+    },
+    "relaxed": {
+        "faithfulness": 0.70,
+        "answer_relevancy": 0.65,
+        "answer_correctness": 0.60,
+        "context_precision": 0.60,
+        "context_recall": 0.60,
+        "context_relevancy": 0.50,
+        "citation_precision": 0.50,
+        "hit_rate": 0.75,
+        "mrr": 0.60,
+        "rejection_rate": 0.65,
+        "task_success_rate": 0.50,
+    },
+}
+
+DEFAULT_RAG_THRESHOLDS = THRESHOLD_PROFILES["balanced"]
+
+
+class RAGEvaluator:
+    def __init__(self, documents: list[str], samples: list[EvalSample]):
+        self._docs = documents
+        self._samples = samples
+        self._llm = AgentLLM()
+        self._judge_llm = get_judge_llm()
+
+    def _think_timeout(self, llm, messages, timeout=0):
+        """LLM call with timeout protection. timeout<=0 means no timeout."""
+        if timeout <= 0:
+            return llm.think(messages, silent=True)
+        result = [None]
+        error = [None]
+        def _target():
+            try:
+                result[0] = llm.think(messages, silent=True)
+            except Exception as e:
+                error[0] = e
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            return None
+        if error[0] is not None:
+            raise error[0]
+        return result[0]
+
+    def run_combination(
+        self,
+        strategy: ChunkStrategy,
+        chunk_size: int,
+        chunk_overlap: int,
+        use_hybrid: bool,
+        _token_budget: int | None = None,
+        top_k: int = 10,
+        max_workers: int = 1,
+        verbose: bool = False,
+        call_timeout: int = 0,
+    ) -> EvalRun:
+        label = f"{strategy.value}-{chunk_size}-{'hybrid' if use_hybrid else 'dense'}"
+        run = EvalRun(label=label, strategy=strategy, chunk_size=chunk_size, use_hybrid=use_hybrid)
+
+        def _log(msg: str):
+            if verbose:
+                import sys
+                print(msg, file=sys.stderr, flush=True)
+
+        t_total = time.perf_counter()
+
+        _log(f"    [1/4] 分块中 (strategy={strategy.value}, size={chunk_size}, overlap={chunk_overlap})...")
+        t0 = time.perf_counter()
+        chunks = self._chunk_all(strategy, chunk_size, chunk_overlap)
+        _log(f"    [1/4] 分块完成: {len(chunks)} 个 chunk ({time.perf_counter() - t0:.1f}s)")
+
+        _log("    [2/4] 构建索引 (ChromaDB + BM25)...")
+        t0 = time.perf_counter()
+        delete_collection(namespace="eval")
+        build_knowledge_base(chunks, load_reranker=False, namespace="eval")
+        retriever = HybridRetriever(namespace="eval")
+        retriever.rebuild_from_catalog()
+        _log(f"    [2/4] 索引完成 ({time.perf_counter() - t0:.1f}s)")
+
+        positive_samples = [
+            s for s in self._samples
+            if s.ground_truth and s.reference_contexts
+        ]
+        negative_samples = [
+            s for s in self._samples
+            if not s.ground_truth or not s.reference_contexts
+        ]
+
+        effective_workers = max(1, max_workers)
+        token_budget = _token_budget
+
+        def _token_max(sample):
+            if token_budget is not None and token_budget > 0:
+                return token_budget
+            return max(len(sample.question) * 5, 100)
+
+        def _eval_positive(sample):
+            max_tokens = _token_max(sample)
+            t0 = time.perf_counter()
+            full_ranked, truncated = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
+            latency_ms = (time.perf_counter() - t0) * 1000
+            if not full_ranked and not truncated:
+                return None
+            ret_precision, ret_hit, ret_mrr = self._score_retrieval_ranked(
+                sample, full_ranked, top_k=top_k,
+            )
+            retriever_recall = self._score_retriever_recall(sample, full_ranked, top_k=50)
+            reranker_mrr = self._score_reranker_mrr(sample, full_ranked, top_k=10)
+            recall = 0.0
+            context_relevancy = 0.0
+            if truncated:
+                recall = self._score_recall(sample, truncated)
+                context_relevancy = self._score_context_relevancy(sample.question, truncated)
+            answer = self._generate_answer(sample.question, truncated, _timeout=call_timeout)
+            faithfulness, answer_relevancy, correctness = self._score_quality_batch(
+                sample.question, answer, truncated, sample.ground_truth, _timeout=call_timeout,
+            )
+            citation_precision = self._score_citation_precision(
+                sample.question, answer, truncated, _timeout=call_timeout,
+            )
+            return {
+                "faithfulness": faithfulness,
+                "correctness": correctness,
+                "answer_relevancy": answer_relevancy,
+                "precision": ret_precision,
+                "recall": recall,
+                "context_relevancy": context_relevancy,
+                "citation_precision": citation_precision,
+                "hit_rate": ret_hit,
+                "mrr": ret_mrr,
+                "retriever_recall": retriever_recall,
+                "reranker_mrr": reranker_mrr,
+                "latency_ms": latency_ms,
+            }
+
+        def _eval_negative(sample):
+            max_tokens = _token_max(sample)
+            _, retrieved = self._retrieve(
+                sample.question, retriever, use_hybrid,
+                max_tokens=max_tokens, top_k=top_k,
+            )
+            if not retrieved:
+                return "reject", False
+            answer = self._generate_answer(sample.question, retrieved, _timeout=call_timeout)
+            verdict = self._judge_refusal(sample.question, answer, retrieved, _timeout=call_timeout)
+            is_hallucination = verdict == "hallucinate"
+            return verdict, is_hallucination
+
+        faithfulness_scores = []
+        correctness_scores = []
+        answer_relevancy_scores = []
+        precision_scores = []
+        recall_scores = []
+        context_relevancy_scores = []
+        citation_precision_scores = []
+        hit_rates = []
+        mrrs = []
+        retriever_recalls = []
+        reranker_mrrs = []
+        latencies = []
+
+        _log(f"    [3/4] 评估正样本 ({len(positive_samples)} 个, workers={effective_workers})...")
+        t_eval = time.perf_counter()
+
+        if effective_workers <= 1:
+            for idx, sample in enumerate(positive_samples, 1):
+                _log(f"      正样本 {idx}/{len(positive_samples)}: {sample.question[:40]}...")
+                result = _eval_positive(sample)
+                if result is None:
+                    _log(f"      正样本 {idx}: 跳过 (无检索结果)")
+                    continue
+                _log(f"      正样本 {idx}: faith={result['faithfulness']:.2f} "
+                     f"hit={result['hit_rate']:.0f} lat={result['latency_ms']:.0f}ms")
+                faithfulness_scores.append(result["faithfulness"])
+                correctness_scores.append(result["correctness"])
+                answer_relevancy_scores.append(result["answer_relevancy"])
+                precision_scores.append(result["precision"])
+                hit_rates.append(result["hit_rate"])
+                mrrs.append(result["mrr"])
+                recall_scores.append(result["recall"])
+                context_relevancy_scores.append(result["context_relevancy"])
+                citation_precision_scores.append(result["citation_precision"])
+                retriever_recalls.append(result["retriever_recall"])
+                reranker_mrrs.append(result["reranker_mrr"])
+                latencies.append(result["latency_ms"])
+        else:
+            done_count = 0
+            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                futures = {pool.submit(_eval_positive, s): s for s in positive_samples}
+                for future in as_completed(futures):
+                    done_count += 1
+                    result = future.result()
+                    if result is None:
+                        _log(f"      正样本 {done_count}/{len(positive_samples)}: 跳过")
+                        continue
+                    _log(f"      正样本 {done_count}/{len(positive_samples)}: "
+                         f"faith={result['faithfulness']:.2f} hit={result['hit_rate']:.0f} "
+                         f"lat={result['latency_ms']:.0f}ms")
+                    faithfulness_scores.append(result["faithfulness"])
+                    correctness_scores.append(result["correctness"])
+                    answer_relevancy_scores.append(result["answer_relevancy"])
+                    precision_scores.append(result["precision"])
+                    hit_rates.append(result["hit_rate"])
+                    mrrs.append(result["mrr"])
+                    recall_scores.append(result["recall"])
+                    context_relevancy_scores.append(result["context_relevancy"])
+                    citation_precision_scores.append(result["citation_precision"])
+                    retriever_recalls.append(result["retriever_recall"])
+                    reranker_mrrs.append(result["reranker_mrr"])
+                    latencies.append(result["latency_ms"])
+
+        _log(f"    [3/4] 正样本完成 ({time.perf_counter() - t_eval:.1f}s)")
+
+        _log(f"    [4/4] 评估负样本 ({len(negative_samples)} 个, Judge LLM)...")
+        t_neg = time.perf_counter()
+        correct_refusals = 0
+        hallucination_count = 0
+        if effective_workers <= 1:
+            for idx, sample in enumerate(negative_samples, 1):
+                _log(f"      负样本 {idx}/{len(negative_samples)}: {sample.question[:40]}...")
+                verdict, is_hallucination = _eval_negative(sample)
+                if verdict == "reject":
+                    correct_refusals += 1
+                    _log(f"      负样本 {idx}: 正确拒绝")
+                elif is_hallucination:
+                    hallucination_count += 1
+                    _log(f"      负样本 {idx}: 幻觉！")
+                else:
+                    _log(f"      负样本 {idx}: 未拒绝 (answered)")
+        else:
+            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                futures_list = [pool.submit(_eval_negative, s) for s in negative_samples]
+                for idx, future in enumerate(as_completed(futures_list), 1):
+                    verdict, is_hallucination = future.result()
+                    if verdict == "reject":
+                        correct_refusals += 1
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 正确拒绝")
+                    elif is_hallucination:
+                        hallucination_count += 1
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 幻觉！")
+                    else:
+                        _log(f"      负样本 {idx}/{len(negative_samples)}: 未拒绝")
+
+        _log(f"    [4/4] 负样本完成 ({time.perf_counter() - t_neg:.1f}s)")
+
+        run.faithfulness = _safe_mean(faithfulness_scores)
+        run.answer_relevancy = _safe_mean(answer_relevancy_scores)
+        run.answer_correctness = _safe_mean(correctness_scores)
+        run.context_precision = _safe_mean(precision_scores)
+        run.context_recall = _safe_mean(recall_scores)
+        run.context_relevancy = _safe_mean(context_relevancy_scores)
+        run.citation_precision = _safe_mean(citation_precision_scores)
+        run.hit_rate = _safe_mean(hit_rates)
+        run.mrr = _safe_mean(mrrs)
+        run.retriever_recall = _safe_mean(retriever_recalls)
+        run.reranker_mrr = _safe_mean(reranker_mrrs)
+        run.avg_latency_ms = _safe_mean(latencies)
+        sorted_lat = sorted(latencies)
+        if sorted_lat:
+            run.p50_latency_ms = _percentile(sorted_lat, 50)
+            run.p95_latency_ms = _percentile(sorted_lat, 95)
+            run.p99_latency_ms = _percentile(sorted_lat, 99)
+
+        run.faithfulness_ci = _bootstrap_ci(faithfulness_scores)
+        run.answer_relevancy_ci = _bootstrap_ci(answer_relevancy_scores)
+        run.answer_correctness_ci = _bootstrap_ci(correctness_scores)
+        run.context_precision_ci = _bootstrap_ci(precision_scores)
+        run.context_recall_ci = _bootstrap_ci(recall_scores)
+        run.context_relevancy_ci = _bootstrap_ci(context_relevancy_scores)
+        run.citation_precision_ci = _bootstrap_ci(citation_precision_scores)
+        run.hit_rate_ci = _bootstrap_ci(hit_rates)
+        run.mrr_ci = _bootstrap_ci(mrrs)
+
+        if negative_samples:
+            run.rejection_rate = correct_refusals / len(negative_samples)
+            run.hallucination_rate = hallucination_count / len(negative_samples)
+
+        success_count = sum(
+            1 for f, c, r in zip(faithfulness_scores, correctness_scores, answer_relevancy_scores)
+            if f >= 0.8 and c >= 0.7 and r >= 0.75
+        )
+        total_positive = len(faithfulness_scores)
+        run.task_success_rate = success_count / total_positive if total_positive else 0.0
+
+        total_elapsed = time.perf_counter() - t_total
+        _log(f"    总耗时: {total_elapsed:.1f}s (faithfulness={run.faithfulness:.3f})")
+
+        return run
+    def _chunk_all(self, strategy: ChunkStrategy, size: int, overlap: int) -> list[str]:
+        if self._docs and all(self._looks_like_file_path(item) for item in self._docs):
+            chunks: list[str] = []
+            for path in self._docs:
+                artifacts = ingest_document(
+                    path,
+                    strategy=strategy,
+                    chunk_size=size,
+                    chunk_overlap=overlap,
+                )
+                chunks.extend(artifacts.legacy_chunks())
+            return chunks or self._docs
+
+        full_text = "\n\n".join(self._docs)
+        chunks = chunk_text(full_text, strategy=strategy, chunk_size=size, chunk_overlap=overlap)
+        if not chunks:
+            return self._docs
+        return chunks
+
+    @staticmethod
+    def _looks_like_file_path(value: str) -> bool:
+        candidate = Path(value)
+        return candidate.suffix.lower() in {".pdf", ".md", ".txt"} and candidate.exists()
+
+    RELEVANCE_FILTER_THRESHOLD = 0.35
+
+    def _filter_and_budget(
+        self, pairs: list[tuple[str, float]], full_ranked: list[str], max_tokens: int,
+    ) -> tuple[list[str], list[str]]:
+        """Shared retrieval tail: threshold-filter, fall back to the first
+        candidate, then fit the token budget."""
+        filtered = [text for text, score in pairs if score >= self.RELEVANCE_FILTER_THRESHOLD]
+        if not filtered:
+            filtered = [pairs[0][0]] if pairs else []
+        return full_ranked, _fit_token_budget(filtered, max_tokens)
+
+    def _retrieve(
+        self, query, retriever, use_hybrid, max_tokens: int,
+        min_score: float = 0.3, top_k: int = 10,
+    ) -> tuple[list[str], list[str]]:
+        """Retrieve chunks.
+
+        Returns (full_ranked, truncated):
+          - full_ranked: top_k candidate chunks before token budget fitting
+            (used for hit_rate / MRR computation)
+          - truncated: chunks after relevance filtering + token budget fitting
+            (used for generation + precision / recall)
+        """
+        if not use_hybrid:
+            raw = search(query, limit=top_k, namespace="eval")
+            full_ranked = [r["text"] for r in raw]
+            pairs = [(r["text"], r.get("score", 0)) for r in raw]
+            return self._filter_and_budget(pairs, full_ranked, max_tokens)
+        dense_results = search(query, limit=top_k * 2, namespace="eval")
+        dense = [(r["id"], r["score"]) for r in dense_results]
+        results = retriever.search(query, dense, top_k=top_k, min_score=min_score)
+        full_ranked = [r.text for r in results]
+        expanded = retriever.expand_contexts(results) if hasattr(retriever, "expand_contexts") else results
+        pairs = [(result_display_text(r), getattr(r, "score", 0)) for r in expanded]
+        return self._filter_and_budget(pairs, full_ranked, max_tokens)
+
+    def _generate_answer(self, question: str, contexts: list[str], _timeout: int = 0) -> str:
+        ctx = "\n---\n".join(contexts)
+        prompt = EVAL_GENERATE_PROMPT.format(context=ctx, question=question)
+        return self._think_timeout(self._llm, [{"role": "user", "content": prompt}], _timeout) or ""
+
+    def _score_faithfulness(self, answer: str, contexts: list[str], _timeout: int = 0) -> float:
+        ctx = "\n".join(contexts)
+        prompt = EVAL_FAITHFULNESS_PROMPT.format(context=ctx, answer=answer)
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
+
+    def _score_quality_batch(
+        self, question: str, answer: str, contexts: list[str], ground_truth: str, _timeout: int = 0,
+    ) -> tuple[float, float, float]:
+        """Batch LLM call: faithfulness + answer_relevancy + answer_correctness in one request.
+
+        Returns (faithfulness, answer_relevancy, answer_correctness).
+        Falls back to individual calls if batch parsing fails.
+        """
+        if not answer:
+            return (0.0, 0.0, 0.0)
+        ctx = "\n".join(contexts)
+        prompt = EVAL_QUALITY_BATCH_PROMPT.format(
+            context=ctx, question=question, ground_truth=ground_truth, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        parsed = _parse_quality_batch(result)
+        if parsed is not None:
+            return parsed
+        faith = self._score_faithfulness(answer, contexts, _timeout)
+        rel = self._score_answer_relevancy(question, answer, _timeout)
+        corr = self._score_correctness(question, answer, ground_truth, _timeout)
+        return (faith, rel, corr)
+
+    def _score_correctness(self, question: str, answer: str, ground_truth: str, _timeout: int = 0) -> float:
+        prompt = EVAL_CORRECTNESS_PROMPT.format(question=question, ground_truth=ground_truth, answer=answer)
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
+
+    def _score_answer_relevancy(self, question: str, answer: str, _timeout: int = 0) -> float:
+        """Judge whether the answer addresses the question (no ground truth needed)."""
+        if not answer:
+            return 0.0
+        prompt = EVAL_ANSWER_RELEVANCY_PROMPT.format(question=question, answer=answer)
+        return _parse_score(self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout))
+
+    def _score_retrieval_ranked(
+        self, sample: EvalSample, full_ranked: list[str], top_k: int = 10, _timeout: int = 0,
+    ) -> tuple[float, float, float]:
+        """Compute precision, hit_rate@k, and MRR@k via text matching.
+
+        Uses reference_contexts for deterministic matching instead of LLM calls.
+        """
+        if not full_ranked:
+            return (0.0, 0.0, 0.0)
+        candidates = full_ranked[:top_k] if top_k > 0 else full_ranked
+
+        if not sample.reference_contexts:
+            return (0.0, 0.0, 0.0)
+
+        relevant_flags = []
+        for chunk in candidates:
+            is_relevant = any(
+                _text_contains_reference([chunk], ref)
+                for ref in sample.reference_contexts
+            )
+            relevant_flags.append(is_relevant)
+
+        total = len(candidates)
+        n_relevant = sum(relevant_flags)
+        precision = n_relevant / total if total > 0 else 0.0
+        hit = 1.0 if n_relevant > 0 else 0.0
+        first_rank = next((i + 1 for i, flag in enumerate(relevant_flags) if flag), None)
+        mrr = 1.0 / first_rank if first_rank else 0.0
+
+        return (precision, hit, mrr)
+
+    def _score_precision(self, sample: EvalSample, retrieved: list[str]) -> float:
+        """LLM-based context precision: what fraction of retrieved chunks are relevant.
+
+        For each retrieved chunk, asks Judge whether it helps answer the question.
+        """
+        if not retrieved:
+            return 0.0
+        scores = []
+        for chunk in retrieved:
+            prompt = EVAL_PRECISION_PROMPT.format(chunk=chunk, question=sample.question)
+            try:
+                result = self._judge_llm.think([{"role": "user", "content": prompt}], silent=True)
+            except Exception:
+                result = None
+            scores.append(_parse_score(result))
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def _score_context_relevancy(self, query: str, retrieved: list[str]) -> float:
+        """Score what fraction of retrieved chunks are relevant to the query.
+
+        Uses embedding similarity (not keyword overlap) for semantic relevance.
+        """
+        if not retrieved or not query.strip():
+            return 0.0
+        try:
+            from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
+            model = get_embedding_model()
+            query_vec = embedding_to_list(model.encode(query, normalize_embeddings=True))
+            if not query_vec:
+                return 0.0
+            scores = []
+            for chunk in retrieved:
+                chunk_vec = embedding_to_list(model.encode(chunk, normalize_embeddings=True))
+                if not chunk_vec:
+                    scores.append(0.0)
+                    continue
+                sim = sum(a * b for a, b in zip(query_vec, chunk_vec))
+                scores.append(max(0.0, min(1.0, sim)))
+            return sum(scores) / len(scores) if scores else 0.0
+        except Exception:
+            query_terms = set(_simple_tokenize(query))
+            if not query_terms:
+                return 0.0
+            scores = []
+            for chunk in retrieved:
+                chunk_tokens = set(_simple_tokenize(chunk))
+                if not chunk_tokens:
+                    scores.append(0.0)
+                    continue
+                overlap = len(query_terms & chunk_tokens) / len(query_terms)
+                scores.append(overlap)
+            return sum(scores) / len(scores) if scores else 0.0
+
+    def _judge_refusal(self, question: str, answer: str, contexts: list[str], _timeout: int = 0) -> str:
+        """Judge whether a negative-sample answer is a refusal, answer, or hallucination.
+
+        Returns: 'reject', 'answer', or 'hallucinate'.
+        Uses Judge LLM with structured prompt for nuanced detection.
+        """
+        ctx = "\n---\n".join(contexts)
+        prompt = EVAL_REFUSAL_PROMPT.format(
+            question=question, context=ctx, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        if not result:
+            return "reject" if _is_refusal(answer) else "answer"
+        normalized = result.strip().lower()
+        if "reject" in normalized or "拒绝" in normalized or "无法回答" in normalized:
+            return "reject"
+        if "hallucinate" in normalized or "幻觉" in normalized:
+            return "hallucinate"
+        return "answer"
+
+    def _score_citation_precision(
+        self, question: str, answer: str, contexts: list[str], _timeout: int = 0,
+    ) -> float:
+        """Citation precision: what fraction of facts in the answer are grounded in retrieved contexts.
+
+        Uses Judge LLM to check each factual claim against the contexts.
+        """
+        if not answer or not contexts:
+            return 0.0
+        ctx = "\n---\n".join(contexts[:5])
+        prompt = EVAL_CITATION_PROMPT.format(
+            question=question, context=ctx, answer=answer,
+        )
+        result = self._think_timeout(self._judge_llm, [{"role": "user", "content": prompt}], _timeout)
+        return _parse_score(result)
+
+    def _score_retriever_recall(self, sample: EvalSample, full_ranked: list[str], top_k: int = 50) -> float:
+        """Retriever recall@50: what fraction of reference contexts appear in the broad candidate set.
+
+        This measures the raw retriever quality before reranking.
+        """
+        if not sample.reference_contexts or not full_ranked:
+            return 0.0
+        candidates = full_ranked[:top_k]
+        hits = sum(
+            1 for ref in sample.reference_contexts
+            if _text_contains_reference(candidates, ref)
+        )
+        return hits / len(sample.reference_contexts)
+
+    def _score_reranker_mrr(self, sample: EvalSample, full_ranked: list[str], top_k: int = 10) -> float:
+        """Reranker MRR@10: how well the top-10 ranking places relevant chunks.
+
+        This measures the reranker's ability to push relevant chunks to the top.
+        """
+        if not full_ranked:
+            return 0.0
+        candidates = full_ranked[:top_k]
+        for i, chunk in enumerate(candidates):
+            if any(_text_contains_reference([chunk], ref) for ref in sample.reference_contexts):
+                return 1.0 / (i + 1)
+        return 0.0
+
+
+def _parse_quality_batch(text: str | None) -> tuple[float, float, float] | None:
+    """Parse batch quality score JSON. Returns (faith, rel, corr) or None on failure."""
+    if not text:
+        return None
+    import json
+    import re
+    stripped = text.strip()
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict):
+            f = float(obj.get("faithfulness", 0))
+            r = float(obj.get("answer_relevancy", 0))
+            c = float(obj.get("answer_correctness", 0))
+            return (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)), max(0.0, min(1.0, c)))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    nums = re.findall(r"(\d+\.?\d*)", stripped)
+    if len(nums) >= 3:
+        try:
+            f, r, c = float(nums[0]), float(nums[1]), float(nums[2])
+            return (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)), max(0.0, min(1.0, c)))
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _parse_score(text: str | None) -> float:
+    """Extract the score from an LLM response.
+
+    Extracts from the LAST non-empty line, since eval prompts instruct
+    the model to put the score on the final line after CoT reasoning.
+    Falls back to last-number-in-full-text for backward compatibility.
+    """
+    if not text:
+        return 0.0
+    import re
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if lines:
+        m = re.search(r"(\d+\.?\d*)", lines[-1])
+        if m:
+            return max(0.0, min(1.0, float(m.group(1))))
+    matches = re.findall(r"(\d+\.?\d*)", text.strip())
+    if matches:
+        return max(0.0, min(1.0, float(matches[-1])))
+    return 0.0
+
+
+def _percentile(sorted_values: list[float], pct: int) -> float:
+    idx = max(0, int(len(sorted_values) * pct / 100) - 1)
+    return round(sorted_values[idx], 1)
+
+
+def _safe_mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _bootstrap_ci(scores: list[float], n_resamples: int = 1000, ci: float = 0.95) -> tuple[float, float]:
+    """Compute bootstrap confidence interval for a list of scores (Change 3).
+
+    Resamples with replacement n_resamples times, computes mean of each resample,
+    then returns (lower_percentile, upper_percentile) based on the CI level.
+
+    If fewer than 3 scores, returns (mean, mean).
+    """
+    if len(scores) < 3:
+        m = _safe_mean(scores)
+        return (m, m)
+
+    lower_pct = ((1.0 - ci) / 2.0) * 100
+    upper_pct = (1.0 - (1.0 - ci) / 2.0) * 100
+
+    n = len(scores)
+    means = []
+    rng = random.Random(42)
+    for _ in range(n_resamples):
+        sample = [scores[rng.randint(0, n - 1)] for _ in range(n)]
+        means.append(sum(sample) / n)
+
+    means.sort()
+    lo_idx = max(0, int(len(means) * lower_pct / 100))
+    hi_idx = min(len(means) - 1, int(len(means) * upper_pct / 100))
+    return (round(means[lo_idx], 4), round(means[hi_idx], 4))
+
+
+def _fit_token_budget(chunks: list[str], max_tokens: int) -> list[str]:
+    """Accumulate chunks until approximate token count reaches max_tokens (Change 2).
+
+    Token estimation for Chinese: len(chunk) // 2 (approx).
+    """
+    if not chunks:
+        return []
+    result = []
+    used = 0
+    for chunk in chunks:
+        cost = len(chunk) // 2
+        if used + cost > max_tokens and result:
+            break
+        result.append(chunk)
+        used += cost
+    return result
+
+
+def _is_refusal(answer: str) -> bool:
+    """Check if the answer indicates the LLM could not / refused to answer (Change 4)."""
+    if not answer or len(answer.strip()) < 10:
+        return True
+    answer_lower = answer.lower()
+    for kw in _REFUSAL_KEYWORDS:
+        if kw.lower() in answer_lower:
+            return True
+    return False

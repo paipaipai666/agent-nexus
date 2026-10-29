@@ -1,0 +1,827 @@
+import json
+import logging
+import math
+import sqlite3
+import threading
+from datetime import datetime, timezone
+
+from agentnexus.core.config import get_settings
+from agentnexus.observability.tracer import trace_span
+
+logger = logging.getLogger(__name__)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS long_term_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    category TEXT DEFAULT 'general',
+    content TEXT NOT NULL,
+    importance REAL DEFAULT 0.5,
+    metadata_json TEXT DEFAULT '{}',
+    chroma_id TEXT,
+    last_accessed_at TEXT,
+    superseded_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memories(session_id);
+CREATE INDEX IF NOT EXISTS idx_ltm_category ON long_term_memories(category);
+
+CREATE TABLE IF NOT EXISTS schema_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL,
+    applied_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Quarantine: curator-proposed memories awaiting user approval.
+-- Approved user-scope rows are saved into long_term_memories (superseding
+-- source_ids); approved project-scope rows are written to that workspace's
+-- .agentnexus/ files. Rejected rows are kept for audit.
+CREATE TABLE IF NOT EXISTS pending_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL DEFAULT 'user',
+    workspace_path TEXT DEFAULT '',
+    kind TEXT DEFAULT '',
+    category TEXT DEFAULT 'fact',
+    content TEXT NOT NULL,
+    context TEXT DEFAULT '',
+    importance REAL DEFAULT 0.8,
+    source TEXT DEFAULT 'curator',
+    source_ids TEXT DEFAULT '[]',
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_memories(status);
+"""
+
+
+LTM_COLLECTION = "long_term_memories"
+_ltm_collection = None
+
+
+def _get_ltm_collection():
+    global _ltm_collection
+    from agentnexus.storage.chroma import chroma_operation_lock, get_collection
+
+    with chroma_operation_lock():
+        if _ltm_collection is None:
+            _ltm_collection = get_collection(
+                name=LTM_COLLECTION,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return _ltm_collection
+
+
+_ltm_instances: dict[str, "LongTermMemory"] = {}
+
+
+def get_long_term_memory():
+    """Return a singleton LongTermMemory instance keyed by db_path."""
+    settings = get_settings()
+    db_path = settings.memory_db_path
+    if db_path not in _ltm_instances:
+        _ltm_instances[db_path] = LongTermMemory()
+    return _ltm_instances[db_path]
+
+
+def _reset_long_term_memory():
+    """Close connections and clear the singleton cache. Used by tests."""
+    global _ltm_collection
+    for inst in _ltm_instances.values():
+        try:
+            inst._conn.close()
+        except Exception:
+            pass
+    _ltm_instances.clear()
+    _ltm_collection = None
+
+
+class LongTermMemory:
+    def __init__(self):
+        settings = get_settings()
+        db_path = settings.memory_db_path
+        self._max_memories = settings.max_memories
+        self._ttl_days = settings.memory_ttl_days
+        from pathlib import Path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(SCHEMA)
+        self._migrate()
+        self._conn.commit()
+        self._chroma_col = None
+        self._write_counter: int = 0
+        self._lock = threading.RLock()
+
+    def _get_schema_version(self) -> int:
+        """Get the current schema version."""
+        try:
+            row = self._conn.execute(
+                "SELECT MAX(version) as ver FROM schema_versions"
+            ).fetchone()
+            return row["ver"] if row and row["ver"] else 0
+        except Exception:
+            return 0
+
+    def _set_schema_version(self, version: int) -> None:
+        """Record a schema version."""
+        self._conn.execute(
+            "INSERT INTO schema_versions (version) VALUES (?)", (version,)
+        )
+        self._conn.commit()
+
+    _CATEGORY_TTL: dict[str, int | None] = {
+        "fact": None,
+        "preference": None,
+        "note": 90,
+        "entity_fact": None,
+        "conclusion": None,
+        "user_preference": None,
+        "tool_preference": None,
+        "task_progress": 90,
+        "error_pattern": 90,
+        "conversation": 90,
+    }
+
+    _CATEGORY_HALF_LIFE_HOURS: dict[str, int | None] = {
+        "fact": None,
+        "preference": None,
+        "note": 48,
+        "entity_fact": None,
+        "conclusion": None,
+        "user_preference": None,
+        "tool_preference": None,
+        "task_progress": 48,
+        "error_pattern": 48,
+        "conversation": 48,
+    }
+
+    def _migrate(self) -> None:
+        """Apply versioned migrations."""
+        current = self._get_schema_version()
+
+        if current < 1:
+            self._migrate_v1()
+            self._set_schema_version(1)
+        if current < 2:
+            self._migrate_v2()
+            self._set_schema_version(2)
+        if current < 3:
+            self._migrate_v3()
+            self._set_schema_version(3)
+
+    def _migrate_v1(self) -> None:
+        """Migration v1: Ensure all current columns exist."""
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "chroma_id" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN chroma_id TEXT")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_ltm_chroma_id ON long_term_memories(chroma_id)")
+        if "metadata_json" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN metadata_json TEXT DEFAULT '{}'")
+        if "last_accessed_at" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN last_accessed_at TEXT")
+
+    def _migrate_v2(self) -> None:
+        """Migration v2: Add access_count and superseded_by columns."""
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "access_count" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN access_count INTEGER DEFAULT 0")
+        if "superseded_by" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN superseded_by INTEGER")
+
+    def _migrate_v3(self) -> None:
+        """Migration v3: Add embedding_synced flag for ChromaDB consistency tracking."""
+        cur = self._conn.execute("PRAGMA table_info(long_term_memories)")
+        cols = {r["name"] for r in cur.fetchall()}
+        if "embedding_synced" not in cols:
+            self._conn.execute("ALTER TABLE long_term_memories ADD COLUMN embedding_synced INTEGER DEFAULT 1")
+
+    @property
+    def write_counter(self) -> int:
+        return self._write_counter
+
+    def _ensure_chroma(self):
+        if self._chroma_col is None:
+            self._chroma_col = _get_ltm_collection()
+
+    def _update_last_accessed(self, ids: list[int]):
+        """Update last_accessed_at and increment access_count for the given memory ids."""
+        if not ids:
+            return
+        with self._lock:
+            placeholders = ",".join("?" for _ in ids)
+            self._conn.execute(
+                f"UPDATE long_term_memories SET last_accessed_at = datetime('now'), "
+                f"access_count = COALESCE(access_count, 0) + 1 WHERE id IN ({placeholders})",
+                ids,
+            )
+            self._conn.commit()
+
+    @staticmethod
+    def _effective_importance(row: dict) -> float:
+        """Compute dynamic importance: base + access boost - age decay."""
+        base = row.get("importance", 0.5) or 0.5
+        access_count = row.get("access_count", 0) or 0
+        access_boost = 0.1 * min(2.0, math.log(1 + access_count))
+        return min(1.0, base + access_boost)
+
+    @trace_span("ltm_save",
+                lambda self, session_id, content, category="general",
+                importance=0.5, metadata=None, embedding=None:
+                {"category": category, "content_len": len(content)})
+    def save(self, session_id: str, content: str, category: str = "general",
+             importance: float = 0.5, metadata: dict | None = None,
+             embedding: list[float] | None = None):
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_LTM_SAVE, {
+            "session_id": session_id, "content": content,
+            "category": category, "importance": importance,
+        })
+
+        with self._lock:
+            count_row_pre = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            if count_row_pre["cnt"] >= self._max_memories * 1.1:
+                self._evict_if_needed()
+
+            cur = self._conn.execute(
+                "SELECT id, importance, chroma_id FROM long_term_memories WHERE content = ? AND category = ?",
+                (content, category)
+            )
+            existing = cur.fetchone()
+            if existing:
+                boosted = min(existing["importance"] + 0.05, 1.0)
+                new_importance = max(boosted, importance)
+                self._conn.execute(
+                    "UPDATE long_term_memories "
+                    "SET importance = ?, last_accessed_at = datetime('now') "
+                    "WHERE id = ?",
+                    (new_importance, existing["id"]),
+                )
+                chroma_id = existing["chroma_id"]
+                row_id = existing["id"]
+            else:
+                import uuid
+                chroma_id = uuid.uuid4().hex
+                self._conn.execute(
+                    "INSERT INTO long_term_memories "
+                    "(session_id, category, content, importance, metadata_json, chroma_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id,
+                        category,
+                        content,
+                        importance,
+                        json.dumps(metadata or {}, ensure_ascii=False),
+                        chroma_id,
+                    ),
+                )
+                self._write_counter += 1
+                row_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+            self._conn.commit()
+
+            count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            if count_row["cnt"] > self._max_memories:
+                self._evict_if_needed()
+
+        if embedding:
+            self._ensure_chroma()
+            try:
+                self._chroma_col.upsert(
+                    ids=[chroma_id],
+                    embeddings=[embedding],
+                    documents=[content],
+                    metadatas=[{"category": category, "importance": importance}],
+                )
+            except Exception as e:
+                logger.warning("ChromaDB upsert failed for memory %s: %s", chroma_id, e)
+                self._conn.execute(
+                    "UPDATE long_term_memories SET embedding_synced = 0 WHERE chroma_id = ?",
+                    (chroma_id,),
+                )
+                self._conn.commit()
+
+        hook_mgr.fire(HookType.AFTER_LTM_SAVE, {
+            "session_id": session_id, "content": content,
+            "category": category, "importance": importance,
+            "chroma_id": chroma_id, "total_count": count_row["cnt"],
+        })
+
+        return row_id
+
+    def _evict_if_needed(self):
+        """Evict oldest/lowest-importance memories when over max_memories."""
+        with self._lock:
+            self._compact_low_score()
+
+            count_row = self._conn.execute("SELECT COUNT(*) as cnt FROM long_term_memories").fetchone()
+            current = count_row["cnt"]
+            if current <= self._max_memories:
+                return
+
+            excess = current - self._max_memories
+            to_evict = self._conn.execute(
+                "SELECT id, chroma_id, category, importance, access_count, "
+                "COALESCE(last_accessed_at, created_at) as ref_time "
+                "FROM long_term_memories "
+                "ORDER BY (importance + 0.1 * MIN(2.0, LOG(1 + COALESCE(access_count, 0)))) * 0.6 "
+                "+ POWER(0.5, (julianday('now') - julianday("
+                "COALESCE(last_accessed_at, created_at))) * 24.0 / 48.0) * 0.4 ASC "
+                "LIMIT ?",
+                (excess,)
+            ).fetchall()
+            chroma_ids = [r["chroma_id"] for r in to_evict if r["chroma_id"]]
+            ids_to_delete = [r["id"] for r in to_evict]
+
+            if chroma_ids:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=chroma_ids)
+                except Exception as e:
+                    logger.warning("ChromaDB eviction failed, skipping SQLite delete to avoid orphans: %s", e)
+                    return
+
+            placeholders = ",".join("?" for _ in ids_to_delete)
+            self._conn.execute(
+                f"DELETE FROM long_term_memories WHERE id IN ({placeholders})", ids_to_delete
+            )
+            self._conn.commit()
+            logger.info("Evicted %d memories (limit: %d)", len(ids_to_delete), self._max_memories)
+
+            self._cleanup_expired()
+
+    def _compact_low_score(self):
+        """Compress medium-importance memories: merge same-category entries >5 into one.
+
+        Low importance (<0.3) is left for eviction. High (>0.6) is preserved.
+        Medium (0.3-0.6) with >5 entries in a category → merge oldest into a single summary.
+        """
+        rows = self._conn.execute(
+            "SELECT category, COUNT(*) as cnt FROM long_term_memories "
+            "WHERE importance BETWEEN 0.3 AND 0.6 "
+            "GROUP BY category HAVING cnt > 5"
+        ).fetchall()
+
+        for row in rows:
+            category = row["category"]
+            entries = self._conn.execute(
+                "SELECT id, content, importance FROM long_term_memories "
+                "WHERE category = ? AND importance BETWEEN 0.3 AND 0.6 "
+                "ORDER BY created_at ASC",
+                (category,)
+            ).fetchall()
+
+            if len(entries) <= 5:
+                continue
+
+            to_merge = entries[:-3]
+            merged_content = "; ".join(e["content"] for e in to_merge)[:1000]
+            avg_importance = sum(e["importance"] for e in to_merge) / len(to_merge)
+
+            for e in to_merge:
+                self.delete(e["id"])
+
+            self.save(
+                session_id="system",
+                content=f"[合并记忆] {merged_content}",
+                category=category,
+                importance=min(avg_importance, 0.6),
+            )
+            logger.info("Compacted %d medium-score '%s' memories into one", len(to_merge), category)
+
+    def _cleanup_expired(self):
+        """Delete memories that have exceeded their category-specific TTL.
+
+        Uses last_accessed_at (if set) instead of created_at for age calculation,
+        so accessed memories get their TTL refreshed.
+        Categories with ttl=None (fact, preference) never expire.
+        """
+        rows = self._conn.execute(
+            "SELECT id, chroma_id, category, COALESCE(last_accessed_at, created_at) as ref_time "
+            "FROM long_term_memories"
+        ).fetchall()
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        ids_to_delete: list[int] = []
+        chroma_ids: list[str] = []
+
+        for r in rows:
+            ttl_days = self._CATEGORY_TTL.get(r["category"])
+            if ttl_days is None:
+                continue
+            try:
+                ref = datetime.fromisoformat(r["ref_time"])
+            except (ValueError, TypeError):
+                continue
+            age_days = (now - ref).total_seconds() / 86400
+            if age_days > ttl_days:
+                ids_to_delete.append(r["id"])
+                if r["chroma_id"]:
+                    chroma_ids.append(r["chroma_id"])
+
+        if not ids_to_delete:
+            return
+
+        if chroma_ids:
+            try:
+                self._ensure_chroma()
+                self._chroma_col.delete(ids=chroma_ids)
+            except Exception as e:
+                logger.warning("ChromaDB cleanup of expired memories failed: %s", e)
+
+        placeholders = ",".join("?" for _ in ids_to_delete)
+        self._conn.execute(
+            f"DELETE FROM long_term_memories WHERE id IN ({placeholders})",
+            ids_to_delete,
+        )
+        self._conn.commit()
+        logger.info("Cleaned up %d expired memories (category-based TTL)", len(ids_to_delete))
+
+    @trace_span("ltm_search",
+                lambda self, query_embedding=None, category=None, limit=5,
+                min_similarity=0.3: {"category": category, "limit": limit})
+    def search(self, query_embedding: list[float] | None = None, category: str | None = None,
+               limit: int = 5, min_similarity: float = 0.3) -> list[dict]:
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_LTM_SEARCH, {
+            "category": category, "limit": limit, "min_similarity": min_similarity,
+        })
+
+        if query_embedding is None:
+            sql = "SELECT * FROM long_term_memories WHERE superseded_by IS NULL"
+            params = []
+            if category:
+                sql += " AND category = ?"
+                params.append(category)
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            with self._lock:
+                rows = self._conn.execute(sql, params).fetchall()
+            results = [dict(r) for r in rows]
+            if results:
+                self._update_last_accessed([r["id"] for r in results])
+            return results
+
+        self._ensure_chroma()
+        where_filter = None
+        if category:
+            where_filter = {"category": category}
+
+        try:
+            chroma_results = self._chroma_col.query(
+                query_embeddings=[query_embedding],
+                n_results=max(limit * 5, 50),
+                where=where_filter,
+            )
+        except Exception as e:
+            logger.warning("ChromaDB query failed, falling back to cosine search: %s", e)
+            return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
+
+        if not chroma_results["ids"] or not chroma_results["ids"][0]:
+            return self._fallback_cosine_search(query_embedding, category, limit, min_similarity)
+
+        chroma_ids = chroma_results["ids"][0]
+        chroma_distances = chroma_results["distances"][0]
+        id_sim_map = {cid: 1.0 - dist for cid, dist in zip(chroma_ids, chroma_distances)}
+
+        placeholders = ",".join("?" for _ in chroma_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM long_term_memories WHERE chroma_id IN ({placeholders})",
+                chroma_ids,
+            ).fetchall()
+
+        row_map = {r["chroma_id"]: r for r in rows}
+        scored = []
+        for cid, sim in id_sim_map.items():
+            r = row_map.get(cid)
+            if r is None:
+                continue
+            r = dict(r)
+            if sim < min_similarity or r.get("superseded_by"):
+                continue
+            try:
+                ref_time = r.get("last_accessed_at") or r["created_at"]
+                ref = datetime.fromisoformat(ref_time)
+            except (ValueError, KeyError):
+                ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
+            half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
+            decay = 2 ** (-age_hours / half_life) if half_life else 1.0
+            eff_imp = self._effective_importance(r)
+            score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
+            scored.append((score, dict(r)))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for s in scored[:limit]:
+            d = s[1]
+            d["_score"] = round(s[0], 3)
+            results.append(d)
+
+        hook_mgr.fire(HookType.AFTER_LTM_SEARCH, {
+            "category": category, "limit": limit,
+            "result_count": len(results),
+        })
+        if results:
+            self._update_last_accessed([r["id"] for r in results])
+        return results
+
+    def _fallback_cosine_search(self, query_embedding: list[float], category: str | None,
+                                 limit: int, min_similarity: float) -> list[dict]:
+        sql = "SELECT * FROM long_term_memories WHERE chroma_id IS NOT NULL AND superseded_by IS NULL"
+        params = []
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+        with self._lock:
+            rows = [dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        if not rows:
+            return []
+
+        all_ids = [r["chroma_id"] for r in rows]
+        try:
+            chroma_results = self._chroma_col.get(ids=all_ids, include=["embeddings"])
+        except Exception as e:
+            logger.warning("ChromaDB batch get failed in fallback search: %s", e)
+            return []
+
+        id_vec_map: dict[str, list[float]] = {}
+        result_ids = chroma_results.get("ids", [])
+        raw_embs = chroma_results.get("embeddings")
+        result_embeddings = raw_embs if raw_embs is not None else []
+        for cid, emb in zip(result_ids, result_embeddings):
+            if emb is not None:
+                id_vec_map[cid] = emb
+
+        norm_q = math.sqrt(sum(a * a for a in query_embedding))
+        if norm_q == 0:
+            return []
+
+        scored = []
+        for r in rows:
+            cid = r["chroma_id"]
+            vec = id_vec_map.get(cid)
+            if vec is None:
+                continue
+            dot = sum(a * b for a, b in zip(query_embedding, vec))
+            norm_e = math.sqrt(sum(b * b for b in vec))
+            sim = dot / (norm_q * norm_e) if norm_e else 0.0
+            if sim < min_similarity:
+                continue
+
+            try:
+                ref_time = r.get("last_accessed_at") or r["created_at"]
+                ref = datetime.fromisoformat(ref_time)
+            except (ValueError, KeyError):
+                ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - ref).total_seconds() / 3600
+            half_life = self._CATEGORY_HALF_LIFE_HOURS.get(r.get("category", ""), 48)
+            decay = 2 ** (-age_hours / half_life) if half_life else 1.0
+            eff_imp = self._effective_importance(r)
+            score = sim * 0.55 + eff_imp * 0.25 + decay * 0.20
+            scored.append((score, dict(r)))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for s in scored[:limit]:
+            d = s[1]
+            d["_score"] = round(s[0], 3)
+            results.append(d)
+        if results:
+            self._update_last_accessed([r["id"] for r in results])
+        return results
+
+    def list_recent(self, limit: int = 10) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, category, content, importance, access_count, created_at, last_accessed_at "
+                "FROM long_term_memories ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "category": r["category"],
+                "content": r["content"],
+                "importance": r["importance"],
+                "access_count": r["access_count"] or 0,
+                "effective_importance": round(self._effective_importance(dict(r)), 3),
+                "created_at": r["created_at"],
+                "last_accessed_at": r["last_accessed_at"],
+            }
+            for r in rows
+        ]
+
+    def mark_superseded(self, old_id: int, new_id: int) -> None:
+        """Mark an old memory as superseded by a new one. Idempotent: skips if already superseded."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE long_term_memories SET superseded_by = ? "
+                "WHERE id = ? AND superseded_by IS NULL",
+                (new_id, old_id),
+            )
+            self._conn.commit()
+
+    def delete(self, memory_id: int):
+        with self._lock:
+            row = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE id = ?", (memory_id,)).fetchone()
+            if row and row["chroma_id"]:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=[row["chroma_id"]])
+                except Exception as e:
+                    logger.warning("ChromaDB delete failed for memory %s: %s", memory_id, e)
+            self._conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))
+            self._conn.commit()
+
+    def clear_all(self):
+        """Delete all LTM entries from both SQLite and ChromaDB."""
+        with self._lock:
+            rows = self._conn.execute("SELECT chroma_id FROM long_term_memories WHERE chroma_id IS NOT NULL").fetchall()
+            chroma_ids = [r["chroma_id"] for r in rows]
+            if chroma_ids:
+                try:
+                    self._ensure_chroma()
+                    self._chroma_col.delete(ids=chroma_ids)
+                except Exception as e:
+                    logger.warning("ChromaDB batch delete failed in clear_all: %s", e)
+            self._conn.execute("DELETE FROM long_term_memories")
+            self._conn.commit()
+            self._write_counter = 0
+            logger.info("Cleared all long-term memories")
+
+    def add_pending(self, content: str, scope: str = "user", category: str = "fact",
+                    kind: str = "", workspace_path: str = "", context: str = "",
+                    importance: float = 0.8, source: str = "curator",
+                    source_ids: list[int] | None = None) -> int | None:
+        """Add a curator-proposed memory to the quarantine area.
+
+        Returns the new row id, or None if an identical pending row exists.
+        """
+        with self._lock:
+            dup = self._conn.execute(
+                "SELECT id FROM pending_memories WHERE content = ? AND status = 'pending'",
+                (content,),
+            ).fetchone()
+            if dup:
+                return None
+            cur = self._conn.execute(
+                "INSERT INTO pending_memories "
+                "(scope, workspace_path, kind, category, content, context, importance, source, source_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (scope, workspace_path, kind, category, content, context,
+                 importance, source, json.dumps(source_ids or [])),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def list_pending(self, status: str = "pending", limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM pending_memories WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending(self, pending_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM pending_memories WHERE id = ?", (pending_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_pending_status(self, pending_id: int, status: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE pending_memories SET status = ? WHERE id = ?",
+                (status, pending_id),
+            )
+            self._conn.commit()
+
+    def approve_pending(self, pending_id: int, embed_model=None) -> dict:
+        """Commit a pending memory: user-scope → LTM, project-scope → .agentnexus/.
+
+        Returns {"status": "approved", ...} or an error dict. Never raises.
+        """
+        row = self.get_pending(pending_id)
+        if row is None:
+            return {"status": "error", "error": f"pending id {pending_id} not found"}
+        if row["status"] != "pending":
+            return {"status": "error", "error": f"already {row['status']}"}
+
+        if row["scope"] == "project":
+            workspace = row["workspace_path"]
+            if not workspace:
+                return {"status": "error", "error": "project-scope pending row has no workspace_path"}
+            try:
+                from agentnexus.memory.project import ProjectMemory
+                pm = ProjectMemory(workspace)
+                pm.add_entry(row["kind"] or "memo", row["content"])
+            except Exception as e:
+                return {"status": "error", "error": f"project write failed: {e}"}
+            self.set_pending_status(pending_id, "approved")
+            return {"status": "approved", "scope": "project", "target": str(pm.root)}
+
+        vec: list[float] = []
+        if embed_model is not None:
+            try:
+                from agentnexus.rag.embeddings import embedding_to_list
+                vec = embedding_to_list(
+                    embed_model.encode(row["content"], normalize_embeddings=True)
+                )
+            except Exception:
+                vec = []
+        new_id = self.save(
+            session_id="curator",
+            content=row["content"],
+            category=row["category"] or "fact",
+            importance=row["importance"] or 0.8,
+            metadata={"context": row["context"]} if row["context"] else None,
+            embedding=vec or None,
+        )
+        try:
+            for sid in json.loads(row["source_ids"] or "[]"):
+                self.mark_superseded(int(sid), new_id)
+        except (ValueError, TypeError):
+            pass
+        self.set_pending_status(pending_id, "approved")
+        return {"status": "approved", "scope": "user", "memory_id": new_id}
+
+    def stats(self) -> dict:
+        """Store health metrics: volume, freshness, retrieval usage, quarantine."""
+        with self._lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NULL"
+            ).fetchone()["c"]
+            by_category = {
+                r["category"]: r["c"]
+                for r in self._conn.execute(
+                    "SELECT category, COUNT(*) c FROM long_term_memories "
+                    "WHERE superseded_by IS NULL GROUP BY category"
+                ).fetchall()
+            }
+            never_accessed = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories "
+                "WHERE superseded_by IS NULL AND COALESCE(access_count, 0) = 0"
+            ).fetchone()["c"]
+            superseded = self._conn.execute(
+                "SELECT COUNT(*) c FROM long_term_memories WHERE superseded_by IS NOT NULL"
+            ).fetchone()["c"]
+            pending = self._conn.execute(
+                "SELECT COUNT(*) c FROM pending_memories WHERE status = 'pending'"
+            ).fetchone()["c"]
+        return {
+            "total": total,
+            "by_category": by_category,
+            "never_accessed": never_accessed,
+            "never_accessed_rate": round(never_accessed / total, 3) if total else 0.0,
+            "superseded": superseded,
+            "pending": pending,
+        }
+
+    def sync_unembedded(self, embed_model) -> int:
+        """Repair: re-embed memories where embedding_synced=0.
+
+        Returns the number of memories successfully re-synced.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, chroma_id, content, category, importance "
+                "FROM long_term_memories WHERE embedding_synced = 0"
+            ).fetchall()
+        if not rows:
+            return 0
+
+        synced = 0
+        for r in rows:
+            try:
+                from agentnexus.rag.embeddings import embedding_to_list
+                vec = embedding_to_list(
+                    embed_model.encode(r["content"], normalize_embeddings=True)
+                )
+                self._ensure_chroma()
+                self._chroma_col.upsert(
+                    ids=[r["chroma_id"]],
+                    embeddings=[vec],
+                    documents=[r["content"]],
+                    metadatas=[{"category": r["category"], "importance": r["importance"]}],
+                )
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE long_term_memories SET embedding_synced = 1 WHERE id = ?",
+                        (r["id"],),
+                    )
+                    self._conn.commit()
+                synced += 1
+            except Exception as e:
+                logger.warning("Re-sync failed for memory %d: %s", r["id"], e)
+        if synced:
+            logger.info("Re-synced %d / %d unembedded memories", synced, len(rows))
+        return synced

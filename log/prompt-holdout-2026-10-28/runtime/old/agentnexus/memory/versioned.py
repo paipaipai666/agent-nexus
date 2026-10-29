@@ -1,0 +1,894 @@
+"""Conversation version control — linear checkpoint system for chat sessions.
+
+Each user question → agent answer turn creates a checkpoint. Checkpoints form a
+linear chain (parent → child). STM is stored as full JSON snapshots.
+"""
+
+import logging
+import sqlite3
+import threading
+import uuid
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversation_checkpoints (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    parent_id TEXT,
+    stm_snapshot TEXT NOT NULL DEFAULT '',
+    question TEXT,
+    answer TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    message_count INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+    session_id TEXT PRIMARY KEY,
+    workspace_path TEXT NOT NULL,
+    profile TEXT,
+    head_checkpoint_id TEXT,
+    preview TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_redo (
+    session_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cp_session ON conversation_checkpoints(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON conversation_sessions(workspace_path, updated_at);
+CREATE INDEX IF NOT EXISTS idx_msg_session ON conversation_messages(session_id, id);
+"""
+_MIGRATION_SQL = """
+ALTER TABLE conversation_sessions ADD COLUMN head_checkpoint_id TEXT;
+"""
+_MIGRATION_MSG_COUNT_SQL = """
+ALTER TABLE conversation_checkpoints ADD COLUMN message_count INTEGER;
+"""
+_MIGRATION_PREVIEW_SQL = """
+ALTER TABLE conversation_sessions ADD COLUMN preview TEXT NOT NULL DEFAULT '';
+"""
+
+
+_MIGRATION_STATS_INPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_input_tokens INTEGER DEFAULT 0"
+_MIGRATION_STATS_OUTPUT_SQL = "ALTER TABLE conversation_sessions ADD COLUMN total_output_tokens INTEGER DEFAULT 0"
+_MIGRATION_STATS_STEPS_SQL = "ALTER TABLE conversation_sessions ADD COLUMN step_count INTEGER DEFAULT 0"
+
+
+class ConversationVersionManager:
+    """Linear checkpoint manager for chat conversations.
+
+    Usage:
+        mgr = ConversationVersionManager(session_id, db_path)
+        # ... agent answers ...
+        mgr.commit(stm, question, answer)
+        mgr.undo()      # back to parent checkpoint
+        mgr.redo()      # forward again
+        mgr.log()       # list checkpoints
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        db_path: str,
+        workspace_path: str | None = None,
+        profile: str | None = None,
+    ):
+        self.session_id = session_id
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(SCHEMA)
+        self._migrate()
+        self._conn.commit()
+        self._workspace_path = self.normalize_workspace_path(workspace_path) if workspace_path else ""
+        self._profile = profile or ""
+        if self._workspace_path:
+            self.register_session(self._workspace_path, self._profile)
+
+    def commit_with_messages(
+        self,
+        messages: list[dict],
+        question: str = "",
+        answer: str = "",
+    ) -> str:
+        """Atomically append messages and create a checkpoint in one transaction.
+
+        This prevents the race where messages are written but the checkpoint's
+        message_count is stale (or vice versa).
+        """
+        import time as _time
+
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_CHECKPOINT, {
+            "session_id": self.session_id, "question": question,
+        })
+
+        with self._lock, self._conn:
+            head = self._current_checkpoint()
+            head_count = head.get("message_count") if head else None
+            if head_count is not None:
+                self._conn.execute(
+                    "DELETE FROM conversation_messages WHERE session_id = ? AND id NOT IN ("
+                    "SELECT id FROM conversation_messages WHERE session_id = ? ORDER BY id LIMIT ?"
+                    ")",
+                    (self.session_id, self.session_id, head_count),
+                )
+
+            rows = [
+                (self.session_id, m.get("role", ""), m.get("content", ""), m.get("ts", _time.time()))
+                for m in messages
+            ]
+            if rows:
+                self._conn.executemany(
+                    "INSERT INTO conversation_messages (session_id, role, content, ts) "
+                    "VALUES (?, ?, ?, ?)",
+                    rows,
+                )
+            total_count_row = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM conversation_messages WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            total_count = total_count_row["cnt"] if total_count_row else 0
+
+            cp_id = uuid.uuid4().hex[:8]
+            parent_id = self._current_head_id()
+            self._conn.execute(
+                "INSERT INTO conversation_checkpoints (id, session_id, parent_id, "
+                "stm_snapshot, question, answer, message_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (cp_id, self.session_id, parent_id, "", question, answer, total_count),
+            )
+            self._set_head(cp_id)
+            self._touch_session()
+            self._replace_redo([])
+            self._conn.commit()
+
+        hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
+            "session_id": self.session_id, "cp_id": cp_id,
+            "parent_id": parent_id, "question": question,
+        })
+        return cp_id
+
+    def commit(self, stm_snapshot: str = "", question: str = "", answer: str = "", new_ltm_ids: list | None = None, message_count: int | None = None) -> str:
+        """Create a checkpoint. Returns the new checkpoint ID.
+
+        Args:
+            stm_snapshot: Full STM JSON (legacy, pass '' for new journal-based checkpoints).
+            question: The user question for this turn.
+            answer: The agent answer for this turn.
+            new_ltm_ids: Unused, kept for API compat.
+            message_count: Total message count in the journal at checkpoint time.
+        """
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_CHECKPOINT, {
+            "session_id": self.session_id, "question": question,
+        })
+
+        with self._lock, self._conn:
+            cp_id = uuid.uuid4().hex[:8]
+            parent_id = self._current_head_id()
+
+            self._conn.execute(
+                "INSERT INTO conversation_checkpoints (id, session_id, parent_id, "
+                "stm_snapshot, question, answer, message_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (cp_id, self.session_id, parent_id, stm_snapshot, question, answer, message_count),
+            )
+
+            self._set_head(cp_id)
+            self._touch_session()
+            self._replace_redo([])
+            self._conn.commit()
+
+        hook_mgr.fire(HookType.AFTER_CHECKPOINT, {
+            "session_id": self.session_id, "cp_id": cp_id,
+            "parent_id": parent_id, "question": question,
+        })
+        return cp_id
+
+    def register_session(self, workspace_path: str, profile: str = "") -> None:
+        """Record the workspace that owns this conversation session."""
+        normalized = self.normalize_workspace_path(workspace_path)
+        self._workspace_path = normalized
+        self._profile = profile or self._profile
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO conversation_sessions (session_id, workspace_path, profile) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET "
+                "workspace_path = excluded.workspace_path, "
+                "profile = COALESCE(NULLIF(excluded.profile, ''), conversation_sessions.profile)",
+                (self.session_id, normalized, self._profile),
+            )
+            self._conn.commit()
+
+    def append_message(self, role: str, content: str, ts: float | None = None) -> int:
+        """Append a single message to the journal. Returns the message row id."""
+        import time as _time
+        ts = ts or _time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO conversation_messages (session_id, role, content, ts) "
+                "VALUES (?, ?, ?, ?)",
+                (self.session_id, role, content, ts),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def append_messages(self, messages: list[dict]) -> int:
+        """Batch-append messages to the journal. Each dict needs role, content, ts.
+        Returns the number of messages inserted."""
+        import time as _time
+        rows = []
+        for m in messages:
+            rows.append((
+                self.session_id,
+                m.get("role", ""),
+                m.get("content", ""),
+                m.get("ts", _time.time()),
+            ))
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO conversation_messages (session_id, role, content, ts) "
+                "VALUES (?, ?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+            return len(rows)
+
+    def get_messages(self, limit: int = 0) -> list[dict]:
+        """Read messages from the journal. limit=0 means all messages.
+
+        Reads are HEAD-aware: after undo/jump, rows past the HEAD
+        checkpoint's message_count are hidden (the future of the timeline).
+        A NULL message_count (pre-column legacy checkpoints) means no
+        truncation.
+        """
+        with self._lock:
+            head = self._current_checkpoint()
+            head_count = head.get("message_count") if head else None
+
+            if limit > 0:
+                effective = limit if head_count is None else min(limit, head_count)
+                rows = self._conn.execute(
+                    "SELECT role, content, ts FROM conversation_messages "
+                    "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                    (self.session_id, effective),
+                ).fetchall()
+                return [dict(r) for r in reversed(rows)]
+
+            if head_count is not None:
+                rows = self._conn.execute(
+                    "SELECT role, content, ts FROM conversation_messages "
+                    "WHERE session_id = ? ORDER BY id LIMIT ?",
+                    (self.session_id, head_count),
+                ).fetchall()
+                return [dict(r) for r in rows]
+
+            rows = self._conn.execute(
+                "SELECT role, content, ts FROM conversation_messages "
+                "WHERE session_id = ? ORDER BY id",
+                (self.session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_messages_with_answers(self, limit: int = 0) -> list[dict]:
+        """Journal messages with missing per-turn answers backfilled from checkpoints.
+
+        Turns written before the identity-boundary journal fix (and turns
+        whose STM/journal mirrors diverged) have user rows but no
+        ``[最终答案]`` row — the answer exists only as checkpoint metadata.
+        Synthesize the marker row right after the user message so restored
+        history shows the reply (and prompt rebuilding sees it as assistant).
+        """
+        messages = self.get_messages(limit=limit)
+        with self._lock:
+            out: list[dict] = []
+            for i, m in enumerate(messages):
+                out.append(m)
+                if m.get("role") != "user":
+                    continue
+                has_answer = False
+                for r in messages[i + 1:]:
+                    if r.get("role") == "user":
+                        break
+                    if r.get("role") == "system" and str(r.get("content", "")).startswith("[最终答案]"):
+                        has_answer = True
+                        break
+                if has_answer:
+                    continue
+                question = str(m.get("content", ""))
+                row = self._conn.execute(
+                    "SELECT answer FROM conversation_checkpoints "
+                    "WHERE session_id = ? AND question = ? AND answer != '' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (self.session_id, question),
+                ).fetchone()
+                if row and row["answer"]:
+                    out.append({
+                        "role": "system",
+                        "content": f"[最终答案] {row['answer']}",
+                        "ts": m.get("ts"),
+                    })
+            return out
+
+    def get_message_count(self) -> int:
+        """Return total message count for this session's journal."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM conversation_messages WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            return row["cnt"] if row else 0
+
+    @staticmethod
+    def normalize_workspace_path(workspace_path: str | None = None) -> str:
+        """Normalize workspace paths so session ownership checks are stable."""
+        path = Path(workspace_path or Path.cwd()).expanduser().resolve()
+        normalized = str(path)
+        return normalized.casefold() if Path(normalized).drive else normalized
+
+    @classmethod
+    def find_latest_session(cls, db_path: str, workspace_path: str | None) -> str | None:
+        """Return the most recently updated session, if any.
+
+        ``workspace_path=None`` searches across all workspaces (desktop
+        per-session workspace model).
+        """
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            params: tuple = ()
+            if workspace_path is not None:
+                where_sql = "WHERE s.workspace_path = ? AND EXISTS ("
+                params = (cls.normalize_workspace_path(workspace_path),)
+            else:
+                where_sql = "WHERE EXISTS ("
+            row = conn.execute(
+                "SELECT s.session_id FROM conversation_sessions s "
+                + where_sql
+                + "  SELECT 1 FROM conversation_checkpoints c "
+                "  WHERE c.session_id = s.session_id"
+                ") "
+                "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
+                "LIMIT 1",
+                params,
+            ).fetchone()
+            return row["session_id"] if row else None
+        finally:
+            conn.close()
+
+    @classmethod
+    def find_recent_sessions(
+        cls, db_path: str, workspace_path: str | None, limit: int = 5,
+        query: str = "", offset: int = 0,
+    ) -> list[dict]:
+        """Return recent sessions with preview info.
+
+        ``workspace_path=None`` lists sessions across all workspaces (the
+        desktop per-session workspace model); pass a path to scope the list
+        to one workspace (CLI/TUI behavior).
+        """
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        try:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions'"
+            ).fetchone() is None:
+                conn.executescript(SCHEMA)
+            content_filter = (
+                "(EXISTS ("
+                "  SELECT 1 FROM conversation_checkpoints c WHERE c.session_id = s.session_id"
+                ") OR EXISTS ("
+                "  SELECT 1 FROM conversation_messages m WHERE m.session_id = s.session_id"
+                ") OR (s.preview IS NOT NULL AND s.preview != ''))"
+            )
+            conditions = [content_filter]
+            params: list[object] = []
+            if workspace_path is not None:
+                conditions.append("s.workspace_path = ?")
+                params.append(cls.normalize_workspace_path(workspace_path))
+            needle = query.strip()
+            if needle:
+                conditions.append(
+                    "(instr(lower(COALESCE(s.preview, '')), lower(?)) > 0 "
+                    "OR instr(lower(s.workspace_path), lower(?)) > 0 "
+                    "OR EXISTS (SELECT 1 FROM conversation_messages m "
+                    "WHERE m.session_id = s.session_id "
+                    "AND instr(lower(m.content), lower(?)) > 0) "
+                    "OR EXISTS (SELECT 1 FROM conversation_checkpoints c "
+                    "WHERE c.session_id = s.session_id "
+                    "AND (instr(lower(c.question), lower(?)) > 0 "
+                    "OR instr(lower(c.answer), lower(?)) > 0)))"
+                )
+                params.extend([needle] * 5)
+            where_sql = "WHERE " + " AND ".join(conditions)
+            params.extend([limit, offset])
+            rows = conn.execute(
+                "SELECT s.session_id, s.created_at, s.updated_at, s.profile, s.preview, s.workspace_path "
+                "FROM conversation_sessions s " + where_sql + " "
+                "ORDER BY s.updated_at DESC, s.created_at DESC, s.rowid DESC "
+                "LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
+
+            sessions = []
+            pending_previews: list[tuple[str, str]] = []
+            for row in rows:
+                session_id = row["session_id"]
+                preview = row["preview"] or ""
+                last_message_at = row["updated_at"]
+
+                if not preview:
+                    last_cp = conn.execute(
+                        "SELECT question, answer, created_at "
+                        "FROM conversation_checkpoints "
+                        "WHERE session_id = ? "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (session_id,),
+                    ).fetchone()
+
+                    if last_cp:
+                        preview = last_cp["question"] or last_cp["answer"] or ""
+                        if len(preview) > 100:
+                            preview = preview[:100] + "..."
+                        last_message_at = last_cp["created_at"] or row["updated_at"]
+
+                    if not preview:
+                        last_msg = conn.execute(
+                            "SELECT content FROM conversation_messages "
+                            "WHERE session_id = ? AND role = 'user' "
+                            "ORDER BY id DESC LIMIT 1",
+                            (session_id,),
+                        ).fetchone()
+                        if last_msg:
+                            preview = last_msg["content"][:100] or ""
+
+                    if preview:
+                        pending_previews.append((preview, session_id))
+
+                sessions.append({
+                    "session_id": session_id,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "last_message_at": last_message_at,
+                    "preview": preview,
+                    "profile": row["profile"],
+                    "workspace_path": row["workspace_path"],
+                })
+
+            if pending_previews:
+                try:
+                    conn.executemany(
+                        "UPDATE conversation_sessions SET preview = ? WHERE session_id = ?",
+                        pending_previews,
+                    )
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    conn.rollback()
+            return sessions
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_session_workspace(cls, db_path: str, session_id: str) -> str | None:
+        """Return the workspace a session is registered under, if any."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            row = conn.execute(
+                "SELECT workspace_path FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row["workspace_path"] if row else None
+        finally:
+            conn.close()
+
+    @classmethod
+    def update_session_preview(cls, db_path: str, session_id: str, preview: str) -> None:
+        """Update the preview text for a session. Typically called on first user message."""
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return
+            truncated = preview[:100] + "..." if len(preview) > 100 else preview
+            conn.execute(
+                "UPDATE conversation_sessions SET preview = ?, updated_at = datetime('now') "
+                "WHERE session_id = ?",
+                (truncated, session_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def session_belongs_to_workspace(cls, db_path: str, session_id: str, workspace_path: str) -> bool:
+        """Return True only when a session is registered for the given workspace."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return False
+            normalized = cls.normalize_workspace_path(workspace_path)
+            row = conn.execute(
+                "SELECT 1 FROM conversation_sessions "
+                "WHERE session_id = ? AND workspace_path = ?",
+                (session_id, normalized),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    @classmethod
+    def session_exists(cls, db_path: str, session_id: str) -> bool:
+        """Return True when a row exists in conversation_sessions for the session."""
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    @classmethod
+    def delete_session(cls, db_path: str, session_id: str) -> None:
+        """Cascade-delete every per-session table row for a session.
+
+        Timeline tables are created lazily by their stores — skip when absent.
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            existing = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ("conversation_messages", "conversation_checkpoints",
+                          "conversation_sessions", "session_events",
+                          "context_snapshots", "session_todos", "conversation_redo"):
+                if table in existing:
+                    conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def latest_workspace_for_sessions(cls, db_path: str, session_ids: list[str]) -> str | None:
+        """Most recently updated non-empty workspace across the given sessions."""
+        if not session_ids:
+            return None
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                return None
+            placeholders = ",".join("?" for _ in session_ids)
+            try:
+                row = conn.execute(
+                    f"SELECT workspace_path, MAX(updated_at) AS latest "
+                    f"FROM conversation_sessions WHERE session_id IN ({placeholders}) "
+                    f"AND workspace_path != '' GROUP BY workspace_path ORDER BY latest DESC LIMIT 1",
+                    session_ids,
+                ).fetchone()
+            except Exception:
+                return None
+            return row["workspace_path"] if row else None
+        finally:
+            conn.close()
+
+    def undo(self) -> dict | None:
+        """Move HEAD to parent checkpoint. Returns the new current checkpoint, or None."""
+        with self._lock, self._conn:
+            current = self._current_checkpoint()
+            if current is None or current["parent_id"] is None:
+                return None
+
+            parent = self._get_checkpoint(current["parent_id"])
+            if parent is None:
+                return None
+
+            self._set_head(parent["id"])
+            self._replace_redo([*self._redo_ids(), current["id"]])
+            self._conn.commit()
+
+            return dict(parent)
+
+    def redo(self) -> dict | None:
+        """Re-apply a previously undone checkpoint."""
+        with self._lock, self._conn:
+            redo_ids = self._redo_ids()
+            if not redo_ids:
+                return None
+
+            cp_id = redo_ids.pop()
+            cp = self._get_checkpoint(cp_id)
+            if cp is None:
+                return None
+
+            self._set_head(cp_id)
+            self._replace_redo(redo_ids)
+            self._conn.commit()
+
+            return dict(cp)
+
+    def jump_to(self, cp_id: str) -> dict | None:
+        """Move HEAD directly to a checkpoint. Returns it, or None if unreachable.
+
+        Backward (target is an ancestor of HEAD): bypassed checkpoints are
+        pushed onto the redo stack, nearest-first. Forward (target is on the
+        redo stack): settles on its timeline and clears redo, like a new
+        commit. Checkpoints from other sessions (or unknown ids) are rejected
+        and leave HEAD untouched.
+        """
+        with self._lock, self._conn:
+            target = self._get_checkpoint(cp_id)
+            if target is None or target["session_id"] != self.session_id:
+                return None
+
+            head_id = self._current_head_id()
+            if head_id == cp_id:
+                return dict(target)
+
+            chain_ids = [r["id"] for r in self._ancestor_chain(head_id)]
+            if cp_id in chain_ids:
+                idx = chain_ids.index(cp_id)
+                self._replace_redo([*self._redo_ids(), *chain_ids[:idx]])
+                self._set_head(cp_id)
+                self._conn.commit()
+                return dict(target)
+
+            if cp_id in self._redo_ids():
+                self._replace_redo([])
+                self._set_head(cp_id)
+                self._conn.commit()
+                return dict(target)
+
+            return None
+
+    def log(self) -> list[dict]:
+        """List checkpoints for current session, newest first."""
+        with self._lock:
+            head_id = self._current_head_id()
+            rows = self._ancestor_chain(head_id)
+
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["is_head"] = (r["id"] == head_id)
+                result.append(d)
+            return result
+
+    def status(self) -> dict:
+        """Return current HEAD and undo/redo availability."""
+        with self._lock:
+            head = self._current_checkpoint()
+            return {
+                "session_id": self.session_id,
+                "head": head if head else None,
+                "can_undo": head is not None and head.get("parent_id") is not None,
+                "can_redo": bool(self._redo_ids()),
+            }
+
+    def get_head_stm(self) -> str:
+        """Legacy alias — delegates to restore_stm()."""
+        return self.restore_stm()
+
+    def restore_stm(self, max_messages: int = 50) -> str:
+        """Reconstruct STM JSON for the current HEAD checkpoint.
+
+        Strategy:
+        1. If HEAD has a non-empty stm_snapshot (legacy data), return it directly.
+        2. Otherwise, replay messages from conversation_messages journal
+           up to the checkpoint's message_count, return as STM JSON.
+        """
+        with self._lock:
+            head = self._current_checkpoint()
+            if head is None:
+                row = self._conn.execute(
+                    "SELECT stm_snapshot, message_count FROM conversation_checkpoints "
+                    "WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (self.session_id,),
+                ).fetchone()
+                if row is None:
+                    return ""
+                head = dict(row)
+
+            snapshot = head.get("stm_snapshot", "")
+            if snapshot:
+                return snapshot
+
+            msg_count = head.get("message_count")
+            if msg_count is None or msg_count <= 0:
+                return ""
+
+            limit = min(msg_count, max_messages)
+            rows = self._conn.execute(
+                "SELECT role, content, ts FROM conversation_messages "
+                "WHERE session_id = ? ORDER BY id LIMIT ?",
+                (self.session_id, limit),
+            ).fetchall()
+
+            messages = [dict(r) for r in rows]
+            import json
+            return json.dumps({"messages": messages, "summary": ""}, ensure_ascii=False)
+
+    def reset(self):
+        """Delete all checkpoints and journal messages for this session."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM conversation_checkpoints WHERE session_id = ?",
+                (self.session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM conversation_messages WHERE session_id = ?",
+                (self.session_id,),
+            )
+            self._replace_redo([])
+            self._set_head(None)
+            self._conn.commit()
+
+    def _redo_ids(self) -> list[str]:
+        rows = self._conn.execute("SELECT checkpoint_id FROM conversation_redo WHERE session_id = ? ORDER BY position", (self.session_id,)).fetchall()
+        return [row["checkpoint_id"] for row in rows]
+
+    def _replace_redo(self, checkpoint_ids: list[str]) -> None:
+        self._conn.execute("DELETE FROM conversation_redo WHERE session_id = ?", (self.session_id,))
+        self._conn.executemany("INSERT INTO conversation_redo (session_id, position, checkpoint_id) VALUES (?, ?, ?)", [(self.session_id, position, checkpoint_id) for position, checkpoint_id in enumerate(checkpoint_ids)])
+
+    def _migrate(self):
+        """Apply schema migrations for existing databases."""
+        try:
+            self._conn.execute(_MIGRATION_SQL)
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(_MIGRATION_MSG_COUNT_SQL)
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(_MIGRATION_PREVIEW_SQL)
+        except sqlite3.OperationalError:
+            pass
+        for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
+            try:
+                self._conn.execute(_sql)
+            except sqlite3.OperationalError:
+                pass
+
+    def _current_head_id(self) -> str | None:
+        """Get the current HEAD checkpoint ID from conversation_sessions."""
+        row = self._conn.execute(
+            "SELECT head_checkpoint_id FROM conversation_sessions WHERE session_id = ?",
+            (self.session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["head_checkpoint_id"]
+
+    def _set_head(self, cp_id: str | None):
+        """Update the HEAD checkpoint ID in conversation_sessions."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO conversation_sessions (session_id, workspace_path, profile) "
+            "VALUES (?, ?, ?)",
+            (self.session_id, self._workspace_path or "", self._profile),
+        )
+        self._conn.execute(
+            "UPDATE conversation_sessions SET head_checkpoint_id = ?, updated_at = datetime('now') "
+            "WHERE session_id = ?",
+            (cp_id, self.session_id),
+        )
+
+    def _current_checkpoint(self) -> dict | None:
+        head_id = self._current_head_id()
+        if head_id is None:
+            return None
+        return self._get_checkpoint(head_id)
+
+    def _get_checkpoint(self, cp_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM conversation_checkpoints WHERE id = ?", (cp_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _touch_session(self):
+        if not self._workspace_path:
+            return
+        self._conn.execute(
+            "UPDATE conversation_sessions SET updated_at = datetime('now') WHERE session_id = ?",
+            (self.session_id,),
+        )
+
+    def update_session_stats(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        step_count: int = 0,
+    ) -> None:
+        """Persist cumulative runtime stats for this session."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversation_sessions SET "
+                "total_input_tokens = ?, total_output_tokens = ?, step_count = ?, "
+                "updated_at = datetime('now') WHERE session_id = ?",
+                (input_tokens, output_tokens, step_count, self.session_id),
+            )
+            self._conn.commit()
+
+    @classmethod
+    def get_session_stats(cls, db_path: str, session_id: str) -> dict:
+        """Read persisted runtime stats for a session. Returns zeros if not found."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.executescript(SCHEMA)
+            except sqlite3.OperationalError:
+                pass
+            for _sql in (_MIGRATION_STATS_INPUT_SQL, _MIGRATION_STATS_OUTPUT_SQL, _MIGRATION_STATS_STEPS_SQL):
+                try:
+                    conn.execute(_sql)
+                except sqlite3.OperationalError:
+                    pass
+            row = conn.execute(
+                "SELECT total_input_tokens, total_output_tokens, step_count "
+                "FROM conversation_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row:
+                return {
+                    "input_tokens": row["total_input_tokens"] or 0,
+                    "output_tokens": row["total_output_tokens"] or 0,
+                    "step_count": row["step_count"] or 0,
+                }
+            return {"input_tokens": 0, "output_tokens": 0, "step_count": 0}
+        finally:
+            conn.close()
+
+    def _ancestor_chain(self, head_id: str | None) -> list[sqlite3.Row]:
+        """Walk the parent chain from head_id back to root."""
+        rows = []
+        seen: set[str] = set()
+        current = head_id
+        while current and current not in seen:
+            row = self._conn.execute(
+                "SELECT * FROM conversation_checkpoints WHERE id = ?", (current,)
+            ).fetchone()
+            if row is None:
+                break
+            seen.add(current)
+            rows.append(row)
+            current = row["parent_id"]
+        return rows

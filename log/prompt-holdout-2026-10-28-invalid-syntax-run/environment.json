@@ -1,0 +1,12 @@
+{
+  "python": "3.13.6 (tags/v3.13.6:4e66535, Aug  6 2025, 14:36:00) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "packages": {
+    "openai": "2.24.0",
+    "pydantic": "2.13.4",
+    "httpx": "0.28.1",
+    "pytest": "9.1.1",
+    "jsonschema": "4.23.0",
+    "tiktoken": "0.12.0"
+  }
+}

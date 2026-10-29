@@ -1,0 +1,30 @@
+id: eval_agent_011
+description: 重构这个计算器：将 if-else 改为策略模式
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+- edit
+input:
+  prompt: 重构这个计算器：将 if-else 改为策略模式
+  tools:
+  - read
+  - write
+  - edit
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 读取当前计算器代码，识别策略接口，为每个运算创建策略类，更新调用方。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 读取当前计算器代码，识别策略接口，为每个运算创建策略类，更新调用方。

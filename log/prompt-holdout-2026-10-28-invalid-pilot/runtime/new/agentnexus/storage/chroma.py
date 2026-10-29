@@ -1,0 +1,342 @@
+"""Shared ChromaDB storage primitives.
+
+This module owns Chroma client, collection, locking, and metadata normalization
+for both RAG and long-term memory.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import threading
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
+
+from agentnexus.core.config import get_settings
+
+
+def _get_embedding_service():
+    from agentnexus.rag import embeddings as embedding_service
+    return embedding_service
+
+logger = logging.getLogger(__name__)
+
+COLLECTION_NAME = "documents"
+DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
+
+_client = None
+_client_path: str | None = None
+_collections: dict[str, Any] = {}
+_chroma_lock = threading.RLock()
+
+
+@contextmanager
+def chroma_operation_lock() -> Iterator[None]:
+    """Serialize ChromaDB Rust binding calls within this process."""
+    with _chroma_lock:
+        yield
+
+
+class ThreadSafeChromaCollection:
+    def __init__(self, collection):
+        self._collection = collection
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._collection, name)
+        if not callable(attr):
+            return attr
+
+        def _locked_call(*args, **kwargs):
+            with chroma_operation_lock():
+                return attr(*args, **kwargs)
+
+        return _locked_call
+
+
+def base_collection_name(namespace: str) -> str:
+    settings = get_settings()
+    normalized = re.sub(r"[^0-9A-Za-z_.-]+", "_", namespace.strip()).strip("_.-")
+    normalized = normalized or settings.rag_default_namespace
+    return f"{settings.rag_collection_prefix}{normalized}"
+
+
+def resolve_collection_name(name: str | None = None, namespace: str | None = None) -> str:
+    if name:
+        return name
+    if namespace:
+        return base_collection_name(namespace)
+    return COLLECTION_NAME
+
+
+def _active_collection_name(name: str | None, namespace: str | None) -> str:
+    if namespace and name is None:
+        from agentnexus.rag.store import get_knowledge_base_catalog
+
+        kb = get_knowledge_base_catalog().get_knowledge_base(namespace)
+        if kb is not None:
+            return kb.collection_name
+    return resolve_collection_name(name=name, namespace=namespace)
+
+
+def get_chroma_client():
+    global _client, _client_path, _collections
+    settings = get_settings()
+    with chroma_operation_lock():
+        if _client is None or _client_path != settings.chroma_persist_dir:
+            import chromadb
+
+            _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+            _client_path = settings.chroma_persist_dir
+            _collections = {}
+        return _client
+
+
+def get_collection(
+    name: str | None = None,
+    namespace: str | None = None,
+    metadata: dict | None = None,
+):
+    collection_name = _active_collection_name(name, namespace)
+    with chroma_operation_lock():
+        if collection_name not in _collections:
+            client = get_chroma_client()
+            collection = client.get_or_create_collection(
+                name=collection_name,
+                metadata=metadata or DEFAULT_COLLECTION_METADATA,
+            )
+            _collections[collection_name] = ThreadSafeChromaCollection(collection)
+        return _collections[collection_name]
+
+
+def normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (str, int, float)):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def normalize_metadata_for_chroma(metadata: dict[str, Any] | None) -> dict[str, str | int | float | bool]:
+    if not metadata:
+        return {}
+
+    normalized: dict[str, str | int | float | bool] = {}
+    for key, value in metadata.items():
+        if key == "heading_path":
+            path_parts = [part for part in value if isinstance(part, str) and part] if isinstance(value, list) else []
+            if path_parts:
+                normalized["heading_path_text"] = " / ".join(path_parts)
+                normalized["heading_depth"] = len(path_parts)
+            continue
+        if value is None:
+            continue
+        normalized[key] = normalize_chroma_metadata_value(value)
+    return normalized
+
+
+def chunk_metadata_to_chroma(chunk) -> dict[str, str | int | float | bool]:
+    metadata = normalize_metadata_for_chroma(chunk.metadata)
+    metadata.setdefault("chunk_id", chunk.chunk_id)
+    metadata.setdefault("document_id", chunk.document_id)
+    metadata.setdefault("document_version", chunk.document_version)
+    metadata.setdefault("chunk_index", chunk.chunk_index)
+    if chunk.section_index is not None:
+        metadata["section_index"] = chunk.section_index
+    if chunk.page_number is not None:
+        metadata["page_number"] = chunk.page_number
+    return metadata
+
+
+def delete_collection(name: str | None = None, namespace: str | None = None):
+    collection_name = _active_collection_name(name, namespace)
+    client = get_chroma_client()
+    with chroma_operation_lock():
+        try:
+            client.delete_collection(collection_name)
+        except Exception as exc:
+            if "does not exist" not in str(exc).lower():
+                logger.warning("ChromaDB 删除集合异常: %s", exc)
+        _collections.pop(collection_name, None)
+
+
+def reset_storage_client() -> None:
+    global _client, _client_path, _collections
+    with chroma_operation_lock():
+        _client = None
+        _client_path = None
+        _collections = {}
+
+
+def _validate_payload_lengths(
+    texts: list[str],
+    metadatas: list[dict] | None = None,
+    ids: list[str] | None = None,
+):
+    if metadatas is not None and len(metadatas) != len(texts):
+        raise ValueError("metadatas length must match texts length")
+    if ids is not None and len(ids) != len(texts):
+        raise ValueError("ids length must match texts length")
+
+
+def _build_ids(texts: list[str], ids: list[str] | None = None) -> list[str]:
+    if ids is not None:
+        return ids
+    return [uuid.uuid4().hex for _ in range(len(texts))]
+
+
+def _embed_texts(texts: list[str]) -> list[list[float]]:
+    return _get_embedding_service().embed_texts(texts)
+
+
+def _write_document_batches(collection, operation: str, texts: list[str], ids: list[str],
+                            metadatas: list[dict] | None, embed_texts_provider) -> None:
+    with chroma_operation_lock():
+        batch_size = collection._client.get_max_batch_size()
+    if batch_size <= 0:
+        raise ValueError("Chroma batch size must be positive")
+    if len(set(ids)) != len(ids):
+        raise ValueError("Document ids must be unique")
+    write = getattr(collection, operation)
+    for start in range(0, len(texts), batch_size):
+        end = start + batch_size
+        batch = texts[start:end]
+        write(
+            ids=ids[start:end],
+            embeddings=embed_texts_provider(batch),
+            documents=batch,
+            metadatas=metadatas[start:end] if metadatas is not None else None,
+        )
+
+
+def insert_documents(
+    texts: list[str],
+    metadatas: list[dict] | None = None,
+    ids: list[str] | None = None,
+    name: str | None = None,
+    namespace: str | None = None,
+    metadata: dict | None = None,
+    *,
+    collection_provider=get_collection,
+    embed_texts_provider=_embed_texts,
+) -> list[str]:
+    if not texts:
+        return []
+    _validate_payload_lengths(texts, metadatas=metadatas, ids=ids)
+    resolved_ids = _build_ids(texts, ids=ids)
+    resolved_metadatas = (
+        [normalize_metadata_for_chroma(item) for item in metadatas]
+        if metadatas is not None
+        else None
+    )
+    collection = collection_provider(name=name, namespace=namespace, metadata=metadata)
+    _write_document_batches(collection, "add", texts, resolved_ids, resolved_metadatas, embed_texts_provider)
+    return resolved_ids
+
+
+def upsert_documents(
+    texts: list[str],
+    metadatas: list[dict] | None = None,
+    ids: list[str] | None = None,
+    name: str | None = None,
+    namespace: str | None = None,
+    metadata: dict | None = None,
+    *,
+    collection_provider=get_collection,
+    embed_texts_provider=_embed_texts,
+) -> list[str]:
+    if not texts:
+        return []
+    _validate_payload_lengths(texts, metadatas=metadatas, ids=ids)
+    resolved_ids = _build_ids(texts, ids=ids)
+    resolved_metadatas = (
+        [normalize_metadata_for_chroma(item) for item in metadatas]
+        if metadatas is not None
+        else None
+    )
+    collection = collection_provider(name=name, namespace=namespace, metadata=metadata)
+    _write_document_batches(collection, "upsert", texts, resolved_ids, resolved_metadatas, embed_texts_provider)
+    return resolved_ids
+
+
+def search(
+    query: str,
+    limit: int = 5,
+    name: str | None = None,
+    namespace: str | None = None,
+    where: dict[str, Any] | None = None,
+    *,
+    collection_provider=get_collection,
+    embedding_model_provider=None,
+) -> list[dict]:
+    try:
+        collection = collection_provider(name=name, namespace=namespace)
+    except Exception as exc:
+        logger.error("ChromaDB collection access failed (namespace=%s): %s", namespace, exc)
+        return []
+    if embedding_model_provider is None:
+        embedding_model_provider = _get_embedding_service().get_embedding_model
+    model = embedding_model_provider()
+    query_vec = _get_embedding_service().embedding_to_list(model.encode(query, normalize_embeddings=True))
+    try:
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=limit,
+            include=["documents", "distances", "metadatas"],
+            where=where,
+        )
+    except Exception as exc:
+        logger.error("ChromaDB query failed (namespace=%s): %s", namespace, exc)
+        return []
+    if not results["ids"] or not results["ids"][0]:
+        return []
+
+    metadatas = results.get("metadatas") or []
+    metadata_rows = metadatas[0] if metadatas else []
+    payload = []
+    for index, rid in enumerate(results["ids"][0]):
+        payload.append(
+            {
+                "id": rid,
+                "score": 1.0 - results["distances"][0][index],
+                "text": results["documents"][0][index],
+                "metadata": metadata_rows[index] if index < len(metadata_rows) and metadata_rows[index] else {},
+            }
+        )
+    return payload
+
+
+def delete_documents(
+    ids: list[str] | None = None,
+    where: dict[str, Any] | None = None,
+    name: str | None = None,
+    namespace: str | None = None,
+    *,
+    collection_provider=get_collection,
+):
+    if not ids and not where:
+        return
+    collection = collection_provider(name=name, namespace=namespace)
+    collection.delete(ids=ids, where=where)
+
+
+__all__ = [
+    "COLLECTION_NAME",
+    "DEFAULT_COLLECTION_METADATA",
+    "ThreadSafeChromaCollection",
+    "chroma_operation_lock",
+    "chunk_metadata_to_chroma",
+    "delete_collection",
+    "delete_documents",
+    "get_chroma_client",
+    "get_collection",
+    "insert_documents",
+    "normalize_chroma_metadata_value",
+    "normalize_metadata_for_chroma",
+    "reset_storage_client",
+    "resolve_collection_name",
+    "search",
+    "upsert_documents",
+]

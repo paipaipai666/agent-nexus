@@ -1,0 +1,386 @@
+{
+  "answer-000": {
+    "case_id": "repair-todo-completion",
+    "arm": "old"
+  },
+  "answer-001": {
+    "case_id": "repair-blocked-first",
+    "arm": "new"
+  },
+  "answer-002": {
+    "case_id": "evidence-current-6",
+    "arm": "old"
+  },
+  "answer-003": {
+    "case_id": "evidence-aggregate-1",
+    "arm": "old"
+  },
+  "answer-004": {
+    "case_id": "evidence-current-4",
+    "arm": "old"
+  },
+  "answer-005": {
+    "case_id": "repair-stream-fragments",
+    "arm": "old"
+  },
+  "answer-006": {
+    "case_id": "evidence-current-0",
+    "arm": "new"
+  },
+  "answer-007": {
+    "case_id": "evidence-current-5",
+    "arm": "old"
+  },
+  "answer-008": {
+    "case_id": "repair-blocked-trim",
+    "arm": "new"
+  },
+  "answer-009": {
+    "case_id": "evidence-current-3",
+    "arm": "new"
+  },
+  "answer-010": {
+    "case_id": "repair-blocked-filter",
+    "arm": "new"
+  },
+  "answer-011": {
+    "case_id": "evidence-current-6",
+    "arm": "new"
+  },
+  "answer-012": {
+    "case_id": "evidence-missing-0",
+    "arm": "old"
+  },
+  "answer-013": {
+    "case_id": "recovery-query-0",
+    "arm": "new"
+  },
+  "answer-014": {
+    "case_id": "repair-overlap-merge",
+    "arm": "new"
+  },
+  "answer-015": {
+    "case_id": "repair-pagination",
+    "arm": "new"
+  },
+  "answer-016": {
+    "case_id": "repair-suffix-match",
+    "arm": "old"
+  },
+  "answer-017": {
+    "case_id": "repair-bounded-window",
+    "arm": "new"
+  },
+  "answer-018": {
+    "case_id": "repair-overlap-merge",
+    "arm": "old"
+  },
+  "answer-019": {
+    "case_id": "recovery-query-1",
+    "arm": "new"
+  },
+  "answer-020": {
+    "case_id": "evidence-missing-1",
+    "arm": "new"
+  },
+  "answer-021": {
+    "case_id": "evidence-aggregate-1",
+    "arm": "new"
+  },
+  "answer-022": {
+    "case_id": "evidence-missing-2",
+    "arm": "old"
+  },
+  "answer-023": {
+    "case_id": "recovery-query-1",
+    "arm": "old"
+  },
+  "answer-024": {
+    "case_id": "repair-explicit-default",
+    "arm": "new"
+  },
+  "answer-025": {
+    "case_id": "repair-retry-count",
+    "arm": "new"
+  },
+  "answer-026": {
+    "case_id": "repair-version-order",
+    "arm": "new"
+  },
+  "answer-027": {
+    "case_id": "recovery-query-5",
+    "arm": "old"
+  },
+  "answer-028": {
+    "case_id": "repair-blocked-filter",
+    "arm": "old"
+  },
+  "answer-029": {
+    "case_id": "repair-suffix-match",
+    "arm": "new"
+  },
+  "answer-030": {
+    "case_id": "recovery-query-3",
+    "arm": "new"
+  },
+  "answer-031": {
+    "case_id": "evidence-current-7",
+    "arm": "new"
+  },
+  "answer-032": {
+    "case_id": "evidence-missing-1",
+    "arm": "old"
+  },
+  "answer-033": {
+    "case_id": "repair-explicit-default",
+    "arm": "old"
+  },
+  "answer-034": {
+    "case_id": "evidence-missing-0",
+    "arm": "new"
+  },
+  "answer-035": {
+    "case_id": "evidence-current-5",
+    "arm": "new"
+  },
+  "answer-036": {
+    "case_id": "repair-rate-window",
+    "arm": "old"
+  },
+  "answer-037": {
+    "case_id": "recovery-query-0",
+    "arm": "old"
+  },
+  "answer-038": {
+    "case_id": "recovery-query-6",
+    "arm": "old"
+  },
+  "answer-039": {
+    "case_id": "repair-blocked-last",
+    "arm": "old"
+  },
+  "answer-040": {
+    "case_id": "repair-blocked-first",
+    "arm": "old"
+  },
+  "answer-041": {
+    "case_id": "evidence-aggregate-2",
+    "arm": "old"
+  },
+  "answer-042": {
+    "case_id": "evidence-aggregate-3",
+    "arm": "old"
+  },
+  "answer-043": {
+    "case_id": "evidence-current-1",
+    "arm": "old"
+  },
+  "answer-044": {
+    "case_id": "repair-chunk-sizing",
+    "arm": "new"
+  },
+  "answer-045": {
+    "case_id": "recovery-query-4",
+    "arm": "old"
+  },
+  "answer-046": {
+    "case_id": "evidence-missing-3",
+    "arm": "new"
+  },
+  "answer-047": {
+    "case_id": "repair-usage-average",
+    "arm": "old"
+  },
+  "answer-048": {
+    "case_id": "repair-blocked-key",
+    "arm": "new"
+  },
+  "answer-049": {
+    "case_id": "repair-blocked-stop",
+    "arm": "new"
+  },
+  "answer-050": {
+    "case_id": "evidence-missing-3",
+    "arm": "old"
+  },
+  "answer-051": {
+    "case_id": "recovery-query-3",
+    "arm": "old"
+  },
+  "answer-052": {
+    "case_id": "evidence-current-2",
+    "arm": "new"
+  },
+  "answer-053": {
+    "case_id": "repair-blocked-weight",
+    "arm": "old"
+  },
+  "answer-054": {
+    "case_id": "repair-bounded-window",
+    "arm": "old"
+  },
+  "answer-055": {
+    "case_id": "recovery-query-7",
+    "arm": "old"
+  },
+  "answer-056": {
+    "case_id": "repair-blocked-trim",
+    "arm": "old"
+  },
+  "answer-057": {
+    "case_id": "repair-remaining-budget",
+    "arm": "old"
+  },
+  "answer-058": {
+    "case_id": "evidence-current-1",
+    "arm": "new"
+  },
+  "answer-059": {
+    "case_id": "repair-stream-fragments",
+    "arm": "new"
+  },
+  "answer-060": {
+    "case_id": "repair-ranking",
+    "arm": "new"
+  },
+  "answer-061": {
+    "case_id": "repair-blocked-stop",
+    "arm": "old"
+  },
+  "answer-062": {
+    "case_id": "recovery-query-7",
+    "arm": "new"
+  },
+  "answer-063": {
+    "case_id": "recovery-query-5",
+    "arm": "new"
+  },
+  "answer-064": {
+    "case_id": "repair-batch-partition",
+    "arm": "new"
+  },
+  "answer-065": {
+    "case_id": "evidence-aggregate-3",
+    "arm": "new"
+  },
+  "answer-066": {
+    "case_id": "repair-pagination",
+    "arm": "old"
+  },
+  "answer-067": {
+    "case_id": "recovery-query-4",
+    "arm": "new"
+  },
+  "answer-068": {
+    "case_id": "repair-blocked-last",
+    "arm": "new"
+  },
+  "answer-069": {
+    "case_id": "evidence-aggregate-0",
+    "arm": "new"
+  },
+  "answer-070": {
+    "case_id": "recovery-query-2",
+    "arm": "old"
+  },
+  "answer-071": {
+    "case_id": "repair-blocked-bool",
+    "arm": "new"
+  },
+  "answer-072": {
+    "case_id": "repair-blocked-weight",
+    "arm": "new"
+  },
+  "answer-073": {
+    "case_id": "repair-stable-dedup",
+    "arm": "new"
+  },
+  "answer-074": {
+    "case_id": "repair-chunk-sizing",
+    "arm": "old"
+  },
+  "answer-075": {
+    "case_id": "repair-todo-completion",
+    "arm": "new"
+  },
+  "answer-076": {
+    "case_id": "repair-version-order",
+    "arm": "old"
+  },
+  "answer-077": {
+    "case_id": "evidence-current-7",
+    "arm": "old"
+  },
+  "answer-078": {
+    "case_id": "repair-retry-count",
+    "arm": "old"
+  },
+  "answer-079": {
+    "case_id": "evidence-current-0",
+    "arm": "old"
+  },
+  "answer-080": {
+    "case_id": "repair-blocked-bool",
+    "arm": "old"
+  },
+  "answer-081": {
+    "case_id": "evidence-aggregate-2",
+    "arm": "new"
+  },
+  "answer-082": {
+    "case_id": "repair-usage-average",
+    "arm": "new"
+  },
+  "answer-083": {
+    "case_id": "evidence-aggregate-0",
+    "arm": "old"
+  },
+  "answer-084": {
+    "case_id": "repair-batch-partition",
+    "arm": "old"
+  },
+  "answer-085": {
+    "case_id": "recovery-query-6",
+    "arm": "new"
+  },
+  "answer-086": {
+    "case_id": "repair-rate-window",
+    "arm": "new"
+  },
+  "answer-087": {
+    "case_id": "evidence-current-2",
+    "arm": "old"
+  },
+  "answer-088": {
+    "case_id": "recovery-query-2",
+    "arm": "new"
+  },
+  "answer-089": {
+    "case_id": "repair-blocked-key",
+    "arm": "old"
+  },
+  "answer-090": {
+    "case_id": "evidence-missing-2",
+    "arm": "new"
+  },
+  "answer-091": {
+    "case_id": "repair-ranking",
+    "arm": "old"
+  },
+  "answer-092": {
+    "case_id": "evidence-current-3",
+    "arm": "old"
+  },
+  "answer-093": {
+    "case_id": "repair-remaining-budget",
+    "arm": "new"
+  },
+  "answer-094": {
+    "case_id": "repair-stable-dedup",
+    "arm": "old"
+  },
+  "answer-095": {
+    "case_id": "evidence-current-4",
+    "arm": "new"
+  }
+}

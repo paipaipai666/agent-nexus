@@ -1,0 +1,476 @@
+"""Compaction engine — the 5-layer compaction pyramid, extracted from MemoryManager.
+
+Owns all compaction state (circuit breaker, snip budget, recent file reads,
+compact callbacks) and implements the pipeline:
+
+  Layer 2: snip (drop oldest messages)
+  Layer 3: time-decay microcompact
+  Layer 3b: microcompact before LLM summarization
+  Layer 4: read-time projection (non-destructive)
+  Layer 5: full LLM summarization (transcript backup + LTM drain first)
+
+The engine borrows session-scoped dependencies (STM, LTM, LLM, settings)
+from the owning MemoryManager via ``self._mgr``; compaction state lives here.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from agentnexus.core.hooks import HookType, get_hook_manager
+from agentnexus.memory.circuit_breaker import CircuitBreaker
+from agentnexus.memory.compaction import is_recoverable_tool
+from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
+from agentnexus.memory.projection import build_projection as build_projected_messages
+from agentnexus.memory.projection import microcompact_messages
+from agentnexus.memory.short_term import compute_importance
+from agentnexus.observability.tracer import trace_span
+from agentnexus.prompts import load_prompt
+
+if TYPE_CHECKING:
+    from agentnexus.memory.manager import MemoryManager
+
+logger = logging.getLogger(__name__)
+
+SEGMENT_PROMPT = load_prompt("memory_segment_summarize")
+
+
+@dataclass
+class SegmentIndexResult:
+    """分段索引结果：条目 + 被移出 STM 的原文（带全局序号，供归档）。"""
+    entries: list[tuple[int, int, str]]
+    archived: list[tuple[int, dict]]
+
+
+def segment_summarize(
+    messages: list[dict],
+    llm: Any,
+    *,
+    keep_recent: int,
+    seg_size: int,
+    custom_instructions: str = "",
+) -> SegmentIndexResult | None:
+    """把未索引消息分段总结为索引条目。
+
+    - 已有索引条目（memory_index，含归档目录）不参与——序号从既有最大 seg_end 续排
+    - 单段失败降级为截断原文条目（信息不凭空消失）
+    - 全部失败返回 None（调用方应中止压缩，不得破坏现有上下文）
+    - archived 列出将被移出 STM 的原文消息及其全局序号，供写 history 归档
+    """
+    raw = [m for m in messages if not m.get("metadata", {}).get("memory_index")]
+    indexed_upto = 0
+    for m in messages:
+        md = m.get("metadata") or {}
+        if md.get("memory_index"):
+            indexed_upto = max(indexed_upto, int(md.get("seg_end", 0)))
+    to_index = raw[:-keep_recent] if keep_recent > 0 else raw
+    if not to_index:
+        return SegmentIndexResult([], [])
+    entries: list[tuple[int, int, str]] = []
+    failures = 0
+    for offset in range(0, len(to_index), seg_size):
+        seg = to_index[offset:offset + seg_size]
+        seg_start = indexed_upto + offset
+        seg_end = seg_start + len(seg)
+        history = "\n".join(f"{m['role']}: {m['content']}" for m in seg)
+        prompt_text = SEGMENT_PROMPT.format(history=history)
+        if custom_instructions:
+            prompt_text = f"[压缩指令] {custom_instructions}\n\n{prompt_text}"
+        resp = ""
+        try:
+            resp = (llm.think([{"role": "user", "content": prompt_text}],
+                              silent=True) or "").strip()
+        except Exception as e:
+            logger.debug("Segment summarize failed at %d: %s", seg_start, e)
+        if resp:
+            entries.append((seg_start, seg_end, resp))
+        else:
+            failures += 1
+            excerpt = "\n".join(f"{m['role']}: {m['content'][:200]}" for m in seg)
+            entries.append((seg_start, seg_end, f"[未压缩原文]\n{excerpt}"))
+    if failures == len(entries):
+        return None
+    archived = [(indexed_upto + i, m) for i, m in enumerate(to_index)]
+    return SegmentIndexResult(entries, archived)
+
+
+def _extract_xml_tag(text: str, tag: str) -> str | None:
+    """Extract content between <tag> and </tag> from text. Returns None if not found."""
+    pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
+    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+class _EmptySummaryResult(Exception):
+    """LLM summarizer returned nothing — a failure, but not an error."""
+
+
+class CompactionEngine:
+    """Session-scoped compaction state machine (see module docstring for layers)."""
+
+    def __init__(self, mgr: MemoryManager):
+        self._mgr = mgr
+        self.circuit = CircuitBreaker(failure_threshold=3, exponential_backoff=True)
+        self.microcompacts_since_open: int = 0
+        self.compacting: bool = False
+        self.snip_freed_tokens: int = 0
+        self.recent_reads: list[tuple[str, str, float]] = []
+        self.last_api_call_ts: float = 0.0
+        self.on_compact: Callable[[dict], None] | None = None
+        self.on_after_compact: Callable[[], None] | None = None
+        self.ctx_max: int = 128000
+        self.compact_threshold: int = 120000
+        self.transcript_dir: str = ""
+        self.history_dir: str = ""
+
+    @property
+    def effective_threshold(self) -> int:
+        """Return the automatic threshold after accounting for freed tokens."""
+        threshold = self.compact_threshold
+        if self.snip_freed_tokens > 0:
+            return max(threshold - self.snip_freed_tokens, threshold // 2)
+        return threshold
+
+    def _fire_compact(self, event_type: str, **kwargs):
+        """Fire compact event callback if set."""
+        if self.on_compact:
+            try:
+                self.on_compact({"event": event_type, **kwargs})
+            except Exception as e:
+                logger.debug("Compact event callback failed: %s", e)
+
+    def _restore_files(self):
+        settings = self._mgr._settings
+        max_files = settings.post_compact_max_files
+        per_file = settings.post_compact_token_per_file
+        budget = settings.post_compact_token_budget
+        if max_files <= 0 or not self.recent_reads:
+            return
+        seen: set[str] = set()
+        recent: list[tuple[str, str]] = []
+        for fp, preview, _ts in reversed(self.recent_reads):
+            if fp not in seen:
+                seen.add(fp)
+                recent.insert(0, (fp, preview))
+            if len(recent) >= max_files:
+                break
+        total_tokens = 0
+        restored = 0
+        for fp, preview in recent:
+            if total_tokens + per_file > budget:
+                break
+            try:
+                raw = Path(fp).read_text(encoding="utf-8")
+                content = raw[:per_file * 4]
+            except Exception as e:
+                logger.debug("Failed to read file %s for restore: %s", fp, e)
+                content = preview or f"[无法读取文件] {fp}"
+            self._mgr.short_term.append("system", f"[恢复文件] {fp}\n{content}")
+            total_tokens += per_file
+            restored += 1
+        if restored:
+            self._fire_compact("file_restore", restored=restored, files=[fp for fp, _ in recent[:restored]])
+
+    def _archive_history(self, archived: list[tuple[int, dict]]) -> None:
+        """把被移出 STM 的原文消息追加到会话历史归档（append-only JSONL）。
+
+        行序号与索引条目的消息区间一致，history_search 按此定位原文。
+        """
+        if not archived or not self.history_dir:
+            return
+        try:
+            path = Path(self.history_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            fpath = path / f"{self._mgr.session_id}.jsonl"
+            with fpath.open("a", encoding="utf-8") as f:
+                for idx, msg in archived:
+                    f.write(json.dumps({
+                        "i": idx,
+                        "role": msg.get("role", ""),
+                        "content": msg.get("content", ""),
+                        "ts": msg.get("ts", 0),
+                    }, ensure_ascii=False) + "\n")
+            self._fire_compact("history_archived", path=str(fpath), count=len(archived))
+        except Exception as e:
+            logger.debug("History archive failed: %s", e)
+
+    def _write_transcript(self):
+        if not self._mgr._settings.transcript_enabled:
+            return
+        Path(self.transcript_dir).mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        fname = f"{self._mgr.session_id}_compact_{ts}.jsonl"
+        fpath = Path(self.transcript_dir) / fname
+        messages = self._mgr.short_term.get_all()
+        lines = [json.dumps(m, ensure_ascii=False) for m in messages]
+        fpath.write_text("\n".join(lines), encoding="utf-8")
+        self._fire_compact("transcript_saved", path=str(fpath), message_count=len(messages))
+
+    def _drain_to_ltm(self, messages: list[dict]):
+        """Sink high-importance messages to LTM before destructive compaction.
+
+        This ensures critical information (user constraints, key decisions)
+        survives even if the LLM summary loses them.
+        """
+        if not self._mgr.long_term:
+            return
+        embed_model = None
+        try:
+            embed_model = self._mgr._get_embed_model(timeout=5)
+        except Exception:
+            pass
+
+        drained = 0
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "")
+            if role == "tool":
+                continue
+            imp = compute_importance(msg, i, len(messages))
+            if imp < 0.7:
+                continue
+            content = msg.get("content", "")
+            if len(content) < 20:
+                continue
+            save_content = content[:2000]
+            try:
+                embedding = None
+                if embed_model:
+                    from agentnexus.rag.embeddings import embedding_to_list
+                    embedding = embedding_to_list(
+                        embed_model.encode(save_content, normalize_embeddings=True)
+                    )
+                self._mgr.long_term.save(
+                    session_id=self._mgr.session_id,
+                    content=save_content,
+                    category="note",
+                    importance=imp,
+                    embedding=embedding,
+                )
+                drained += 1
+            except Exception as e:
+                logger.debug("LTM drain failed for message %d: %s", i, e)
+
+        if drained:
+            self._fire_compact("ltm_drain", drained=drained)
+
+    def mark_api_call(self) -> None:
+        """Record that an API call just happened for time-based microcompact tracking."""
+        self.last_api_call_ts = time.time()
+
+    def bridge_read(self, filepath: str, content_preview: str = "") -> None:
+        self.recent_reads.append((filepath, content_preview[:5000], time.time()))
+        if len(self.recent_reads) > 20:
+            self.recent_reads = self.recent_reads[-20:]
+
+    def snip(self, keep_recent: int = 10) -> int:
+        if not self._mgr._settings.snip_enabled:
+            return 0
+        stm = self._mgr.short_term
+        all_msgs = stm.get_all()
+        if len(all_msgs) <= keep_recent + 4:
+            return 0
+        tokens_before = stm.token_count or stm.estimate_tokens()
+        removed = stm.snip(keep_recent)
+        if removed:
+            tokens_after = stm.token_count or stm.estimate_tokens()
+            freed = max(0, tokens_before - tokens_after)
+            self.snip_freed_tokens += freed
+            self._fire_compact("snip", removed=removed, freed_tokens=freed)
+        return removed
+
+    def microcompact_time_based(self, interval: int | None = None) -> bool:
+        """Layer 3: time-decay based microcompact. Clears recoverable tool results
+        when the last API call was more than `interval` seconds ago.
+
+        Returns True if microcompact was performed.
+        """
+        if interval is None:
+            interval = self._mgr._settings.time_microcompact_interval
+        if self.last_api_call_ts <= 0:
+            return False
+        elapsed = time.time() - self.last_api_call_ts
+        if elapsed < interval:
+            return False
+        stm = self._mgr.short_term
+        tokens_before = stm.token_count or stm.estimate_tokens()
+        self.microcompact()
+        tokens_after = stm.token_count or stm.estimate_tokens()
+        self._fire_compact("time_microcompact", tokens_before=tokens_before, elapsed=elapsed)
+        return tokens_before != tokens_after
+
+    def build_projection(self, messages: list[dict]) -> list[dict]:
+        """Layer 4: non-destructive read-time projection. Returns a compressed view
+        of messages without modifying STM. Called before every LLM API call.
+
+        90% ctx used → mild compression. 95% → aggressive compression.
+        """
+        tokens = self._mgr.short_term.estimate_tokens()
+        return build_projected_messages(
+            messages,
+            token_count=tokens,
+            ctx_max=self.ctx_max,
+            parse_tool_message=_parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+            importance_fn=compute_importance,
+        )
+
+    def microcompact(self) -> None:
+        stm = self._mgr.short_term
+        compacted, cleaned = microcompact_messages(
+            stm.get_all(),
+            parse_tool_message=_parse_tool_message,
+            is_recoverable_tool=is_recoverable_tool,
+            importance_fn=compute_importance,
+        )
+        if cleaned:
+            stm.replace_messages(compacted)
+
+    def maybe_compact(self, threshold: int | None = None, custom_instructions: str = "",
+                      is_auto: bool = True) -> int:
+        """5-layer compaction pyramid. Returns tokens saved, or 0.
+
+        is_auto=False enables manual /compact mode (accepts custom_instructions,
+        does not suppress follow-up questions).
+        """
+        mgr = self._mgr
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.BEFORE_COMPACT, {
+            "is_auto": is_auto, "threshold": threshold,
+        })
+
+        circuit = self.circuit
+        half_open_probe = False
+
+        if circuit.is_open:
+            remaining = circuit.backoff_remaining()
+            if remaining > 0:
+                logger.debug("Circuit breaker in cooldown (%.0fs remaining)", remaining)
+                self.microcompact()
+                return 0
+            half_open_probe = True
+            self._fire_compact("circuit_half_open", elapsed=remaining)
+
+        if threshold is None:
+            threshold = self.effective_threshold
+
+        stm = mgr.short_term
+        tokens_before = stm.token_count or stm.estimate_tokens()
+
+        if not half_open_probe:
+            if tokens_before < threshold:
+                if mgr._settings.time_microcompact_interval > 0:
+                    self.microcompact_time_based()
+                return 0
+
+            all_msgs = stm.get_all()
+            if len(all_msgs) <= 4:
+                return 0
+        else:
+            all_msgs = stm.get_all()
+
+        self.snip()
+
+        if mgr._settings.time_microcompact_interval > 0:
+            self.microcompact_time_based()
+
+        self.microcompact()
+
+        all_msgs_after = stm.get_all()
+        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in all_msgs_after)
+        if not history_text.strip():
+            return 0
+
+        self._write_transcript()
+
+        self._drain_to_ltm(all_msgs_after)
+
+        self._fire_compact("start", tokens_before=tokens_before)
+
+        self.compacting = True
+        try:
+            with circuit.protect(on_open=lambda: self._fire_compact("circuit_open")):
+                tokens_saved = self._llm_compact(
+                    all_msgs_after, custom_instructions, tokens_before, hook_mgr,
+                    is_auto=is_auto,
+                )
+                if tokens_saved is None:
+                    if half_open_probe:
+                        logger.warning("Half-open probe got empty response, re-opening circuit")
+                    raise _EmptySummaryResult()
+                if half_open_probe:
+                    logger.info("Circuit breaker closed after successful half-open probe")
+                    self._fire_compact("circuit_reset")
+                return tokens_saved
+        except _EmptySummaryResult:
+            return 0
+        except Exception as e:
+            logger.warning("Compaction failed: %s", e)
+            if half_open_probe:
+                logger.warning("Half-open probe failed, re-opening circuit breaker")
+            return 0
+        finally:
+            self.compacting = False
+
+    @trace_span("memory_compact", lambda *a, **k: {"is_auto": k["is_auto"]})
+    def _llm_compact(
+        self,
+        all_msgs_after: list[dict],
+        custom_instructions: str,
+        tokens_before: int,
+        hook_mgr: Any,
+        *,
+        is_auto: bool,
+    ) -> int | None:
+        """Layer 5: full LLM rewrite of history. Returns tokens saved, or None
+        when the summarizer produced nothing (failure, reported by caller)."""
+        mgr = self._mgr
+        stm = mgr.short_term
+
+        seg_size = getattr(mgr._settings, "memory_index_segment_size", 20)
+        if not isinstance(seg_size, int):
+            seg_size = 20
+        result = segment_summarize(
+            all_msgs_after, mgr._llm,
+            keep_recent=6,
+            seg_size=seg_size,
+            custom_instructions=custom_instructions,
+        )
+        if result is None:
+            return None
+
+        self._archive_history(result.archived)
+        stm.compact_indexed(result.entries, keep_recent=6)
+        index_budget = getattr(mgr._settings, "memory_index_max_tokens", 4000)
+        if not isinstance(index_budget, int):
+            index_budget = 4000
+        folded = stm.fold_index(index_budget)
+        if folded:
+            self._fire_compact("index_folded", folded=folded)
+        self.microcompacts_since_open = 0
+        self.snip_freed_tokens = 0
+        self.recent_reads.clear()
+
+        self._restore_files()
+
+        if self.on_after_compact:
+            try:
+                self.on_after_compact()
+            except Exception as e:
+                logger.debug("After-compact callback failed: %s", e)
+
+        tokens_after = stm.token_count or stm.estimate_tokens()
+        tokens_saved = max(0, tokens_before - tokens_after)
+        self._fire_compact("complete", tokens_before=tokens_before, tokens_after=tokens_after)
+
+        hook_mgr.fire(HookType.AFTER_COMPACT, {
+            "is_auto": is_auto, "tokens_saved": tokens_saved,
+            "tokens_before": tokens_before, "tokens_after": tokens_after,
+        })
+        return tokens_saved

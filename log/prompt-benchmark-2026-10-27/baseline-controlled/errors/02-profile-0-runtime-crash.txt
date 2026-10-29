@@ -1,0 +1,6 @@
+Captured traceback excerpt from the baseline process:
+case: profile-0, repeat: 2 (next position after 36 saved attempts)
+re_act_agent.py, line 943, _on_emit_answer
+subagent_answer: str((tool_state.last_subagent_payload or {}).get(answer, empty))[:500]
+AttributeError: ToolError object has no attribute get
+Original request/response and usage were lost before persistence; no metrics are imputed.

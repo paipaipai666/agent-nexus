@@ -1,0 +1,25 @@
+id: eval_agent_005
+description: 解释 git rebase 和 merge 的区别
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 解释 git rebase 和 merge 的区别
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解释 rebase 和 merge 的概念、用途和主要区别。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解释 rebase 和 merge 的概念、用途和主要区别。

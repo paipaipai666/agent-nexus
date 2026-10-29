@@ -1,0 +1,137 @@
+"""Memory extraction pipeline — two-level gate (rules + LLM) and LTM extraction.
+
+Extracted from MemoryManager. Owns the gate circuit breaker and the
+extraction decision logic; session-scoped dependencies (LLM, LTM, embed
+model) are borrowed from the owning MemoryManager via ``self._mgr``.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from agentnexus.core.pii import contains_pii as _contains_pii
+from agentnexus.core.pii import mask_pii as _mask_pii
+from agentnexus.memory.circuit_breaker import CircuitBreaker, CircuitOpenError
+from agentnexus.memory.extraction import extract_and_save_memories
+from agentnexus.memory.metrics import get_metrics
+from agentnexus.prompts import load_prompt
+
+if TYPE_CHECKING:
+    from agentnexus.memory.manager import MemoryManager
+
+logger = logging.getLogger(__name__)
+
+GATE_PROMPT = load_prompt("memory_gate")
+
+
+class MemoryExtractionPipeline:
+    """Decides whether a Q&A pair is worth memorizing, then extracts to LTM."""
+
+    _SKIP_PATTERNS = frozenset(["怎么", "如何", "帮我", "查一下", "搜索", "运行", "执行"])
+    _STRONG_SIGNALS = frozenset([
+        "记住", "我叫", "我的名字", "我是",
+        "我喜欢", "我不喜欢", "我讨厌",
+        "以后都", "以后", "别再", "总是", "永远", "习惯用", "偏好",
+    ])
+    _QUESTION_SUFFIXES = ("？", "?", "吗", "呢")
+
+    def __init__(self, mgr: MemoryManager):
+        self._mgr = mgr
+        self.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+
+    def run(self, question: str, answer: str, allow_memory: bool = True) -> None:
+        """Extract memories from a concluded Q&A pair (never raises)."""
+        from agentnexus.core.hooks import HookType, get_hook_manager
+
+        hook_mgr = get_hook_manager()
+        hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
+            "op": "conclude", "question": question[:200],
+            "allow_memory": allow_memory,
+        })
+
+        try:
+            self._conclude_impl(question, answer, allow_memory)
+        except Exception as e:
+            logger.warning("LTM extraction failed (non-fatal): %s", e, exc_info=True)
+
+    def should_extract_rules(self, question: str, answer: str) -> str:
+        """First-level rule filter. Returns 'yes' / 'no' / 'uncertain'.
+
+        Whitelist semantics: only explicit durable-intent signals pass ('yes').
+        Strong signals are checked FIRST to avoid killing short but valuable answers
+        (e.g. "我叫张三" → answer "张三" is <5 chars but contains strong signal "我叫").
+        """
+        combined = question + answer
+        if any(sig in combined for sig in self._STRONG_SIGNALS):
+            return "yes"
+        if len(answer.strip()) < 5:
+            return "no"
+        if any(p in question for p in self._SKIP_PATTERNS) and len(answer.strip()) < 50:
+            return "no"
+        if question.strip().endswith(self._QUESTION_SUFFIXES):
+            return "no"
+        return "uncertain"
+
+    def should_extract(self, question: str, answer: str) -> bool:
+        """Two-tier admission.
+
+        Rules decide who MAY reach the LLM gate; the gate (when enabled)
+        decides the final answer. "no" from rules is final; strong-signal
+        "yes" auto-admits ONLY in rules-only deployments (gate disabled) —
+        signal words appear inside questions, quotes and code, where
+        keyword-first admission leaked 152/152 pollution negatives
+        (gate_bench class I, see evaluation/gate_bench.py).
+        """
+        metrics = get_metrics()
+
+        rule_result = self.should_extract_rules(question, answer)
+        if rule_result == "no":
+            return False
+
+        settings = getattr(self._mgr, "_settings", None)
+        if not getattr(settings, "memory_llm_gate", False):
+            if rule_result == "uncertain":
+                metrics.incr("writes_skipped_gate")
+            return rule_result == "yes"
+
+        gate = self.gate_circuit
+        try:
+            with gate.protect():
+                prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
+                result = self._mgr._llm.think([{"role": "user", "content": prompt}], silent=True)
+                normalized = result.strip().lower().strip('"').strip("'").strip(".")
+                if normalized == "yes" or normalized.startswith("yes"):
+                    return True
+                if normalized == "no" or normalized.startswith("no"):
+                    metrics.incr("writes_skipped_gate")
+                    return False
+                logger.warning("Gate returned unexpected format: %s", result[:100])
+                metrics.incr("writes_skipped_gate_format_error")
+                return False
+        except CircuitOpenError:
+            metrics.incr("writes_skipped_gate")
+            return False
+        except Exception:
+            metrics.incr("writes_skipped_gate_error")
+            return False
+
+    def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
+        mgr = self._mgr
+        if not answer or not mgr.long_term:
+            return
+        if not allow_memory:
+            return
+        if not self._mgr._should_extract(question, answer):
+            return
+        if _contains_pii(question) or _contains_pii(answer):
+            question = _mask_pii(question)
+            answer = _mask_pii(answer)
+        extract_and_save_memories(
+            llm=mgr._llm,
+            embed_model=mgr._get_embed_model(),
+            long_term=mgr.long_term,
+            session_id=mgr.session_id,
+            question=question,
+            answer=answer,
+        )

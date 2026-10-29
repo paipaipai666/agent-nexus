@@ -1,0 +1,29 @@
+{
+  "baseline-controlled": {
+    "outcomes": 45,
+    "passed": 36,
+    "agent_errors": 1,
+    "reproduced": 1,
+    "repair_outcomes": 18,
+    "archived_api_errors": 2,
+    "missing_usage": 0
+  },
+  "optimized-controlled": {
+    "outcomes": 45,
+    "passed": 43,
+    "agent_errors": 0,
+    "reproduced": 0,
+    "repair_outcomes": 18,
+    "archived_api_errors": 1,
+    "missing_usage": 0
+  },
+  "wiring-controlled": {
+    "outcomes": 45,
+    "passed": 41,
+    "agent_errors": 0,
+    "reproduced": 0,
+    "repair_outcomes": 18,
+    "archived_api_errors": 0,
+    "missing_usage": 0
+  }
+}

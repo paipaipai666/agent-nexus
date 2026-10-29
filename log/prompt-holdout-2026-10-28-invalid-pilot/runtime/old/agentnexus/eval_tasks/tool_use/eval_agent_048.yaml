@@ -1,0 +1,25 @@
+id: eval_agent_048
+description: 在远程服务器上执行命令（SSH）
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 在远程服务器上执行命令（SSH）
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 SSH 连接到远程服务器并执行指定命令。注意：此操作可能需要用户确认。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 SSH 连接到远程服务器并执行指定命令。注意：此操作可能需要用户确认。

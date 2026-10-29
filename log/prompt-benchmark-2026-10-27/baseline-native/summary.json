@@ -1,0 +1,23 @@
+{
+  "attempts": 3,
+  "valid_attempts": 2,
+  "api_errors": 1,
+  "passed": 2,
+  "pass_rate": 1.0,
+  "wilson_95": [
+    0.34237195288961925,
+    1.0
+  ],
+  "mean_input_tokens": 9205,
+  "mean_output_tokens": 183,
+  "mean_llm_calls": 4,
+  "mean_tool_calls": 3,
+  "mean_wall_s": 19.90523870009929,
+  "mean_api_s": 16.71874334977474,
+  "categories": {
+    "authorized": {
+      "valid": 2,
+      "passed": 2
+    }
+  }
+}

@@ -1,0 +1,28 @@
+id: eval_agent_045
+description: 搜索 Python 的 asyncio 最佳实践
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+- search
+input:
+  prompt: 搜索 Python 的 asyncio 最佳实践
+  tools:
+  - web_search
+  - search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  - tool: search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 搜索 asyncio 的最佳实践资料，总结事件循环管理和协程使用要点。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 搜索 asyncio 的最佳实践资料，总结事件循环管理和协程使用要点。

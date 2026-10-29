@@ -1,0 +1,151 @@
+{
+  "rubric": "Repair delivery must state a concrete completed change or behavior and validation. A future promise without that result fails. A Thought label alone does not fail an answer that contains the actual result.",
+  "reviewer": "gpt-6-luna; primary-agent adjudication",
+  "timing": "Post-run answer audit correcting nonempty-answer false positives; not new model trials.",
+  "judgments": [
+    {
+      "case_id": "authorized-absolute",
+      "repeat": 0,
+      "delivery_passed": true,
+      "answer_sha256": "c4b7afc0fd46318a368fb3fcbfaef3474c74354d5acbb54e3991d1832004b829",
+      "answer": "已修复并验证通过。`solve` 现在返回 `abs(value)`，验收用例输出 `PASS`，当前无未解决限制。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-double",
+      "repeat": 0,
+      "delivery_passed": true,
+      "answer_sha256": "470ed7b3b24c1279f766688a81220b2196e2ef906595c22d52c4600af0de47e6",
+      "answer": "已修复。\n\n**改动**：`solution.py` 中 `solve` 原本直接 `return value`，已改为 `return value * 2`。\n\n**验证**：独立验收用例运行通过（PASS，输出为 `PASS\\n`，校验和 `9ae3e3ac...`）。\n\n`solve(value)` 现在返回输入乘以二，任务完成，无遗留限制。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-nonnegative",
+      "repeat": 0,
+      "delivery_passed": false,
+      "answer_sha256": "bf99cb3d236634cd53ab044076cd9d2a916d102d2d1d7522c6e4d5bcdb65c7e3",
+      "answer": "**Thought**：验证已全部通过，任务完成，将剩余 todo 标记为 done 并给出最终答案。",
+      "reason": "Only a Thought about closing todo and giving the final answer; no concrete repair result follows."
+    },
+    {
+      "case_id": "repair-absolute",
+      "repeat": 0,
+      "delivery_passed": true,
+      "answer_sha256": "7531b4b833d344b59e920ac4f9a11730c46ec18c9639a92b4c215ebdc5b83e8d",
+      "answer": "已完成修复：`solve` 改为返回 `abs(value)`，验收用例通过（PASS）。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-double",
+      "repeat": 0,
+      "delivery_passed": true,
+      "answer_sha256": "2aa018ce3e8429cdbd35f27de100d48ae582b5274d64e0cdbc194061730dc21f",
+      "answer": "已完成修复并通过验证。\n\n`solution.py` 中的 `solve` 现在返回输入的两倍：\n\n```python\ndef solve(value):\n    return value * 2\n```\n\n验证结果：`run_checks` 通过，输出 `PASS`。无遗留限制。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-nonnegative",
+      "repeat": 0,
+      "delivery_passed": true,
+      "answer_sha256": "65de36e65deda973223e6df16a0291339ffde48eccd96d0eedfbd134eb737b2d",
+      "answer": "修复完成：\n\n**修改内容**：`solution.py` 中的 `solve` 由直接返回 `value` 改为 `max(value, 0)`，即负数归零、非负数保持不变。\n\n**验证结果**：独立验收用例通过（`run_checks` 返回 `PASS`）。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-absolute",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "141a9d1e6f0e28f0ed865d3f3261b607d04dbe2c907dc72260eaf4eefe72819b",
+      "answer": "已修复 `solution.py` 中的 `solve`：\n\n```python\ndef solve(value):\n    return abs(value)\n```\n\n验证结果：`run_checks` 返回通过，输出为：\n\n```text\nPASS\n```\n\n任务完成，无已知限制。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-double",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "ac8fd5ec6ddcf5e33a4ada38ab8ed14cd185924ee23137027a13706d19c0edd5",
+      "answer": "最终答案：已将 `solution.py` 中的 `solve` 修复为：\n\n```python\ndef solve(value):\n    return value * 2\n```\n\n验证结果：`run_checks` 返回通过，输出为 `PASS`，验收检查 `passed=True`。当前任务已完成，没有已知限制。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-nonnegative",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "cd8d3bd8192534229bd008e8a72950fc0eeb0d8f50388d3a85b55d42fa0fc42a",
+      "answer": "最终答案：已修复 `solution.py` 中的 `solve`，负数返回 `0`，其他数字保持不变；独立验收用例已运行并通过。\n\n修改后的实现：\n\n```python\ndef solve(value):\n    if value < 0:\n        return 0\n    return value\n```\n\n验证结果：`run_checks` 返回 `passed=True`，输出 `PASS`。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-absolute",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "314ae8894a2ce0d75636c832dee7ba6ee1cc2b19f5113185a720702124b6b9d8",
+      "answer": "已修复并通过验证：`solve` 现在返回 `abs(value)`，验收检查 PASS。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-double",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "a55c2957b73c69037ca06781dce80dbd21170d22f4f6abcd876920742ce7e4ab",
+      "answer": "**修改内容**\n\n`solution.py` 中 `solve` 由\n\n```python\ndef solve(value):\n    return value\n```\n\n改为：\n\n```python\ndef solve(value):\n    return value * 2\n```\n\n**验证结果**\n\n`run_checks` 返回 `passed: True`，输出 `PASS`，验收用例全部通过。\n\n**限制说明**\n\n无。函数对所有数值类型（int、float 等）均按\"输入乘以二\"返回；若输入不是可乘对象会抛 `TypeError`，这是该任务定义下的预期行为。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-nonnegative",
+      "repeat": 1,
+      "delivery_passed": true,
+      "answer_sha256": "e18718319be13bcf9fadd3f227cd1302bd6430919ffb89671f3366028ebb5328",
+      "answer": "给出最终答案。\n\n修复完成：\n\n**修改内容**：`solution.py` 中 `solve` 原为 `return value`，现改为：\n\n```python\ndef solve(value):\n    return max(0, value) if value < 0 else value\n```\n\n负数返回 0，其他数字不变。\n\n**验证**：独立验收用例运行通过（PASS）。\n\n一点说明：这里 `max(0, value) if value < 0 else value` 等价于更简洁的 `max(0, value)`，当前写法功能正确、已通过验收，无需改动。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-absolute",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "360fc82a0a84564791e9f06b35e1f085a3346cf79bc73c76c4ba48661593ef22",
+      "answer": "直接给出最终结果。\n\n已修复 `solution.py`：\n\n```python\ndef solve(value):\n    return abs(value)\n```\n\n验证结果：`run_checks` 通过，输出为 `PASS`。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-double",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "9191268cf004394ee60471b912da635eb6db0a8434fa7f8cadaf3e892d3d997f",
+      "answer": "`solution.py` 中的 `solve` 已修复，验证通过。\n\n- 修改前：`return value`\n- 修改后：`return value * 2`\n- `run_checks` 结果：PASS（output: `PASS`）\n\n当前实现：\n```python\ndef solve(value):\n    return value * 2\n```",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "authorized-nonnegative",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "f05105dc1044fe028f1622b8dc4a76a96aedddaab4e27b11aac9f05180798a73",
+      "answer": "任务完成。\n\n**修改内容：**\n`solution.py` 中 `solve` 由原来的 `return value` 改为：\n```python\ndef solve(value):\n    return max(0, value)\n```\n\n**验证结果：**\n`run_checks` 返回 `passed: True`，输出 `PASS`，验收用例全部通过。\n\n**行为说明：**\n- 输入负数 → 返回 `0`\n- 输入 0 → 返回 `0`\n- 输入正数 → 原值返回，保持不变",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-absolute",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "6c75351ece38c777ec59312783f2f39407ce96b7f697cc30e703ced1669943fe",
+      "answer": "已修复 `solve`：\n\n```python\ndef solve(value):\n    return abs(value)\n```\n\n验证结果：`run_checks` 通过（PASS）。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-double",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "51b2ba604ec093792fdfaebf51e328c153b9a58163efac223a86dbccd95ad5e4",
+      "answer": "已修复：`solve` 现在返回 `value * 2`。独立验收用例已通过（`run_checks` 返回 `passed: True`）。",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    },
+    {
+      "case_id": "repair-nonnegative",
+      "repeat": 2,
+      "delivery_passed": true,
+      "answer_sha256": "3dcfb312b62298ed253cf46a566f97093967ad7bb81bbe5062ad8a94053bce32",
+      "answer": "修复完成，已验证通过（`run_checks` → PASS）。\n\n**改动：**\n\n```python\ndef solve(value):\n    if isinstance(value, (list, tuple)):\n        return type(value)(max(0, item) for item in value)\n    return max(0, value)\n```\n\n**行为：**\n- 单个负数 → `0`\n- 单个非负数 → 原值不变\n- 列表/元组中每个元素独立处理：负数变 `0`，其余不变，且保持原类型（`list` 返回 `list`，`tuple` 返回 `tuple`）",
+      "reason": "Concrete repair result and validation are present; not only future intent."
+    }
+  ]
+}

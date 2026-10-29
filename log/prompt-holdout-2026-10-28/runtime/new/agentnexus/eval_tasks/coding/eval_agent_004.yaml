@@ -1,0 +1,28 @@
+id: eval_agent_004
+description: 帮我写一个 Dockerfile 部署 Flask 应用
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+- read
+input:
+  prompt: 帮我写一个 Dockerfile 部署 Flask 应用
+  tools:
+  - write
+  - read
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 生成一个包含 Flask 依赖安装和启动命令的 Dockerfile。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 生成一个包含 Flask 依赖安装和启动命令的 Dockerfile。

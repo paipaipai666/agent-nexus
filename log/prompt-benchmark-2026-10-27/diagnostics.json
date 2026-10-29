@@ -1,0 +1,38 @@
+{
+  "baseline-controlled": {
+    "outcomes": 45,
+    "passed": 35,
+    "agent_errors": 1,
+    "reproduced": 1,
+    "repair_outcomes": 18,
+    "archived_api_errors": 2,
+    "missing_usage": 0,
+    "automatic_passed": 36,
+    "reviewed_passed": 35,
+    "reviewed_repair_answers": 18
+  },
+  "optimized-controlled": {
+    "outcomes": 45,
+    "passed": 43,
+    "agent_errors": 0,
+    "reproduced": 0,
+    "repair_outcomes": 18,
+    "archived_api_errors": 1,
+    "missing_usage": 0,
+    "automatic_passed": 43,
+    "reviewed_passed": 43,
+    "reviewed_repair_answers": 18
+  },
+  "wiring-controlled": {
+    "outcomes": 45,
+    "passed": 40,
+    "agent_errors": 0,
+    "reproduced": 0,
+    "repair_outcomes": 18,
+    "archived_api_errors": 0,
+    "missing_usage": 0,
+    "automatic_passed": 41,
+    "reviewed_passed": 40,
+    "reviewed_repair_answers": 18
+  }
+}

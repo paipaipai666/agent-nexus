@@ -62,3 +62,6 @@ experiments/
 **/.codegraph/
 **/paper/
 .research_tmp/
+log/prompt-*/call-lock.bin
+log/prompt-*/last-call.txt
+log/prompt-*/started/

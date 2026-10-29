@@ -1,0 +1,1333 @@
+"""Chat service facade over ReActAgent.
+
+The first implementation intentionally stays thin: it exposes stable handles
+and event types for future GUI/Web adapters while preserving the existing TUI
+path that still consumes the raw ReActAgent directly.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import queue
+import threading
+import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Iterator
+
+from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.agents.plan_mode import PlanModeBinding, PlanModeManager
+from agentnexus.core.text_utils import collapse_and_truncate
+from agentnexus.observability.timeline import get_timeline_store
+from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
+from agentnexus.services.turn import TurnRecord, TurnRuntime
+
+if TYPE_CHECKING:
+    from agentnexus.capabilities.runtime import CapabilityRuntime
+    from agentnexus.memory.versioned import ConversationVersionManager
+    from agentnexus.services.skill import SkillService
+    from agentnexus.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
+
+_MAX_ATTACHMENTS = 10
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+
+def _human_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+def _prepare_attachments(
+    attachments: list[dict] | None, *, vision_ok: bool,
+) -> tuple[list[dict] | None, tuple[str, ...], str]:
+    """Validate user attachments; return (images, allowed_paths, note).
+
+    All-or-nothing: collects every offending path into one ValueError, raised
+    before any message is committed or run started. `note` is the agent-only
+    attachment manifest — injected into the LLM prompt by ReActAgent, NEVER
+    appended to the user's message (it must not show in bubbles/history).
+    images is None unless at least one vision-enabled image was attached.
+    """
+    import base64
+    from pathlib import Path
+
+    if not attachments:
+        return None, (), ""
+
+    if len(attachments) > _MAX_ATTACHMENTS:
+        raise ValueError(f"附件过多: 最多 {_MAX_ATTACHMENTS} 个，收到 {len(attachments)} 个")
+
+    missing: list[str] = []
+    oversize: list[str] = []
+    images: list[dict] = []
+    note_lines: list[str] = []
+    for a in attachments:
+        path = str(a.get("path") or "")
+        name = str(a.get("name") or Path(path).name or path)
+        mime = str(a.get("mime") or "application/octet-stream")
+        if not path or not Path(path).is_file():
+            missing.append(path or name)
+            continue
+        size = Path(path).stat().st_size
+        is_image = mime.startswith("image/") and Path(path).suffix.lower() in _IMAGE_EXTS
+        if is_image and size > _MAX_IMAGE_BYTES:
+            oversize.append(path)
+            continue
+        if is_image and vision_ok:
+            try:
+                data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            except OSError:
+                missing.append(path)
+                continue
+            images.append({"media_type": mime, "data_url": f"data:{mime};base64,{data}"})
+            line_note = "— 图片内容已随本条消息直接提供给模型"
+        elif is_image:
+            line_note = "— 当前模型未启用视觉（config.yaml 模型 override 设 supports_vision: true 后可用），仅提供路径"
+        else:
+            line_note = "— 已授权读取，用 file_read 工具打开此绝对路径"
+        note_lines.append(f"- {path} ({mime}, {_human_size(size)}) {line_note}")
+
+    if missing or oversize:
+        parts = []
+        if missing:
+            parts.append("附件不存在: " + "; ".join(missing))
+        if oversize:
+            parts.append(f"图片超过 {_MAX_IMAGE_BYTES // (1024 * 1024)}MB: " + "; ".join(oversize))
+        raise ValueError("附件不可用: " + "；".join(parts))
+
+    return (images or None), tuple(str(a.get("path")) for a in attachments), "\n\n[附件]\n" + "\n".join(note_lines)
+
+
+def _bind_optional(agent: Any, method: str, value: Any) -> None:
+    """Duck-typed setter guard. The agent interface has no contract for these
+    hooks — agents may be mocks or legacy implementations — so probe with
+    hasattr before invoking. Replaces the seven hand-spelled guard blocks."""
+    if hasattr(agent, method):
+        getattr(agent, method)(value)
+
+
+@dataclass(frozen=True)
+class SessionHandle:
+    id: str
+    skill: str | None = None
+    profile: str | None = None
+    workspace: str | None = None
+
+
+@dataclass(frozen=True)
+class RunHandle:
+    id: str
+    session_id: str
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    type: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    run_id: str | None = None
+    session_id: str | None = None
+    seq: int = 0
+    tok_seq: int = 0
+    step_id: int = 0
+
+
+@dataclass
+class _RunSetup:
+    """State _prepare_run establishes and _teardown_run must restore — one
+    bundle instead of the god method's dozen loose locals."""
+    session_id: str
+    agent: Any
+    memory: Any
+    run: RunHandle
+    turn: TurnRuntime
+    events: queue.Queue[AgentEvent | None]
+    images: list[dict] | None
+    attach_paths: tuple[str, ...]
+    attach_note: str
+    version_mgr: ConversationVersionManager | None
+    subagent_bridge: Any
+    ws_token: Any
+    old_on_event: Any
+    old_output: Any
+
+
+_EVENT_QUEUE_MAX = 10_000
+
+
+def _enqueue_bounded(q: "queue.Queue | asyncio.Queue", event: AgentEvent | None) -> bool:
+    """``put_nowait``; when the queue is full, evict the oldest item to make
+    room. Returns False when an eviction happened (consumer gone or too
+    slow — typically a WS that disconnected mid-run)."""
+    try:
+        q.put_nowait(event)
+        return True
+    except (queue.Full, asyncio.QueueFull):
+        try:
+            q.get_nowait()
+        except (queue.Empty, asyncio.QueueEmpty):
+            pass
+        try:
+            q.put_nowait(event)
+        except (queue.Full, asyncio.QueueFull):
+            pass
+        return False
+
+
+class ChatService:
+    """UI-neutral interaction facade for chat sessions."""
+
+    def __init__(
+        self,
+        agent_factory: Callable[[str | None], Any],
+        memory_factory_builder: Callable[[str], Callable[[], Any]],
+        version_manager: "ConversationVersionManager | None" = None,
+        skill_service: "SkillService | None" = None,
+        tool_executor: "ToolRegistry | None" = None,
+        capability_runtime: "CapabilityRuntime | None" = None,
+    ):
+        self._agent_factory = agent_factory
+        self._memory_factory_builder = memory_factory_builder
+        self._version = version_manager
+        self._tool_executor = tool_executor
+        self._capability_runtime = capability_runtime
+        self._skill_service = skill_service
+        self._session_skill_services: dict[str, SkillService] = {}
+        self._sessions: dict[str, SessionHandle] = {}
+        self._run_events: dict[str, queue.Queue[AgentEvent | None]] = {}
+        self._async_run_events: dict[str, asyncio.Queue[AgentEvent | None]] = {}
+        self._dropped_events: dict[str, int] = {}
+        self._run_event_seq: dict[str, int] = {}
+        self._session_last_run: dict[str, str] = {}
+        self._turns: dict[str, TurnRuntime] = {}
+        self._run_snapshots: dict[str, TurnRecord] = {}
+        self._message_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._session_locks: dict[str, threading.Lock] = {}
+        self._locks_lock = threading.Lock()
+        self._processing_lock = threading.Lock()
+        self._processing_sessions: set[str] = set()
+        self._agents: dict[str, Any] = {}
+        self._memory_managers: dict[str, Any] = {}
+        self._token_buffers: dict[str, str] = {}
+        self._token_cursors: dict[str, int] = {}
+        self._token_step_base: dict[str, int] = {}
+        self._run_token_seq: dict[str, int] = {}
+        self._version_managers: dict[str, Any] = {}
+        self._plan_mode = PlanModeManager()
+        self._subagents = SubagentRegistry()
+        self._collaborations: dict[str, Any] = {}
+        self._put_event_lock = threading.RLock()
+        self._thinking_effort: dict[str, str | None] = {}
+        self._submission_lock = threading.Lock()
+        self._cancelled_submissions: set[str] = set()
+        self._recovery_save_errors: dict[str, str] = {}
+
+    def set_plan_mode(self, session_id: str, enabled: bool) -> bool:
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        (self._plan_mode.enable if enabled else self._plan_mode.disable)(session_id)
+        return self._plan_mode.is_active(session_id)
+
+    def is_plan_mode(self, session_id: str) -> bool:
+        return self._plan_mode.is_active(session_id)
+
+    def set_thinking_effort(self, session_id: str, effort: str | None) -> str | None:
+        """Set this session's thinking-effort override.
+
+        ``effort`` is one of ``none|low|medium|high``, or ``None`` to follow
+        the Settings default. Raises KeyError for unknown sessions.
+        """
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        if effort is not None and effort not in ("none", "low", "medium", "high"):
+            raise ValueError(f"不支持的思考强度: {effort}，可选: none, low, medium, high, 或 null")
+        self._thinking_effort[session_id] = effort
+        agent = self._agents.get(session_id)
+        if agent is not None and hasattr(agent, "set_thinking_effort"):
+            agent.set_thinking_effort(effort)
+        return effort
+
+    def get_thinking_effort(self, session_id: str) -> str | None:
+        return self._thinking_effort.get(session_id)
+
+    def start_session(
+        self,
+        skill: str | None = None,
+        profile: str | None = None,
+        workspace: str | None = None,
+    ) -> SessionHandle:
+        if workspace:
+            from agentnexus.memory.versioned import ConversationVersionManager
+            workspace = ConversationVersionManager.normalize_workspace_path(workspace)
+        handle = SessionHandle(
+            id=f"session_{uuid.uuid4().hex[:12]}",
+            skill=skill, profile=profile, workspace=workspace or None,
+        )
+        self._sessions[handle.id] = handle
+        return handle
+
+    def get_session_workspace(self, session_id: str) -> str | None:
+        """Return the session's explicit workspace, or None for the default."""
+        handle = self._sessions.get(session_id)
+        return handle.workspace if handle else None
+
+    def attach_session(self, handle: SessionHandle, *, agent=None, memory=None, version=None) -> SessionHandle:
+        """Adopt a runtime's initial session without creating a second identity."""
+        if self.is_session_processing(handle.id):
+            raise ValueError("无法替换正在执行的会话")
+        self._sessions[handle.id] = handle
+        if agent is not None:
+            self._agents[handle.id] = agent
+        if memory is not None:
+            self._memory_managers[handle.id] = memory
+        if version is not None:
+            self._version_managers[handle.id] = version
+        return handle
+
+    def session_agent(self, session_id: str):
+        """Resolve the agent belonging to a registered session."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return self._get_or_create_agent(session_id)
+
+    def session_skills(self, session_id: str) -> "SkillService | None":
+        """Return skills scoped to the session's workspace and agent."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        session = self._sessions[session_id]
+        if self._skill_service is None:
+            return None
+        agent = self._get_or_create_agent(session_id)
+        with self._get_session_lock(session_id):
+            if session_id not in self._session_skill_services:
+                self._session_skill_services[session_id] = self._skill_service.for_workspace(
+                    session.workspace, agent=agent,
+                )
+            service = self._session_skill_services[session_id]
+            service.synchronize()
+            return service
+
+    def _get_session_lock(self, session_id: str) -> threading.Lock:
+        """Get or create a per-session lock. Thread-safe creation via meta-lock."""
+        with self._locks_lock:
+            if session_id not in self._session_locks:
+                self._session_locks[session_id] = threading.Lock()
+            return self._session_locks[session_id]
+
+    def _get_or_create_agent(self, session_id: str) -> Any:
+        """Get or create a per-session ReActAgent instance."""
+        lock = self._get_session_lock(session_id)
+        with lock:
+            if session_id not in self._agents:
+                self._agents[session_id] = self._agent_factory(session_id)
+            return self._agents[session_id]
+
+    def _get_or_create_memory(self, session_id: str) -> Any:
+        """Get or create a per-session MemoryManager.
+        R7: factory_builder returns a closure that absorbs STM on first call."""
+        lock = self._get_session_lock(session_id)
+        with lock:
+            if session_id not in self._memory_managers:
+                factory = self._memory_factory_builder(session_id)
+                self._memory_managers[session_id] = factory()
+            return self._memory_managers[session_id]
+
+    def delete_session(self, session_id: str) -> None:
+        """Explicit cleanup for all per-session state (R3). Lock ordering: acquire session lock first."""
+        session_lock = self._get_session_lock(session_id)
+        with session_lock:
+            self._agents.pop(session_id, None)
+            self._memory_managers.pop(session_id, None)
+            self._session_skill_services.pop(session_id, None)
+            self._token_buffers.pop(session_id, None)
+            self._token_cursors.pop(session_id, None)
+        with self._locks_lock:
+            self._session_locks.pop(session_id, None)
+        with self._processing_lock:
+            self._processing_sessions.discard(session_id)
+        self._plan_mode.clear(session_id)
+        self._thinking_effort.pop(session_id, None)
+
+    def is_session_processing(self, session_id: str) -> bool:
+        """Check if a specific session is currently processing."""
+        with self._processing_lock:
+            return session_id in self._processing_sessions
+
+    @property
+    def is_processing(self) -> bool:
+        """Check if ANY session is currently processing."""
+        with self._processing_lock:
+            return len(self._processing_sessions) > 0
+
+    @property
+    def queue_size(self) -> int:
+        return self._message_queue.qsize()
+
+    def enqueue_message(self, session_id: str, text: str) -> int:
+        """Enqueue a message for later processing. Returns queue position."""
+        self._message_queue.put((session_id, text))
+        return self._message_queue.qsize()
+
+    def dequeue_message(self) -> tuple[str, str] | None:
+        """Dequeue the next message. Returns (session_id, text) or None."""
+        try:
+            return self._message_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def mark_processing(self, processing: bool, session_id: str | None = None) -> None:
+        """Mark whether a session is currently processing. Backward-compatible: if no session_id, affects all."""
+        with self._processing_lock:
+            if session_id is not None:
+                if processing:
+                    self._processing_sessions.add(session_id)
+                else:
+                    self._processing_sessions.discard(session_id)
+            else:
+                if not processing:
+                    self._processing_sessions.clear()
+
+    def _put_event(self, run_id: str, event: AgentEvent, persist: bool = True) -> None:
+        """Put event into both sync and async queues (thread-safe).
+
+        `persist=False` skips the timeline write — used for high-volume
+        subagent token/reasoning streams, mirroring `_SKIP_TYPES` (main-agent
+        stream_token events are likewise not persisted). The SQLite write
+        stays OUTSIDE the seq/queue lock: a slow commit must never stall
+        other producers behind the lock.
+        """
+        if event is not None:
+            with self._put_event_lock:
+                seq = self._run_event_seq.get(run_id, 0) + 1
+                self._run_event_seq[run_id] = seq
+                object.__setattr__(event, "seq", seq)
+            if persist:
+                try:
+                    get_timeline_store().record_event(
+                        event.session_id, run_id, seq, event.type,
+                        event.payload, step_id=event.step_id,
+                    )
+                except Exception as e:
+                    logger.debug("Timeline persist failed: %s", e)
+        with self._put_event_lock:
+            sync_q = self._run_events.get(run_id)
+            if sync_q is not None and not _enqueue_bounded(sync_q, event):
+                self._count_dropped(run_id)
+            async_q = self._async_run_events.get(run_id)
+            if async_q is not None and not _enqueue_bounded(async_q, event):
+                self._count_dropped(run_id)
+
+    def _count_dropped(self, run_id: str) -> None:
+        n = self._dropped_events.get(run_id, 0) + 1
+        self._dropped_events[run_id] = n
+        if n == 1 or n % 100 == 0:
+            logger.debug(
+                "Event queue full for %s; evicted oldest events (%d so far) — consumer gone?",
+                run_id, n,
+            )
+
+    def _subagent_emit(self, entry, kind: str, status: str | None = None,
+                       **fields) -> None:
+        """Update registry state and forward a child-agent event into the
+        parent run's queue as a `subagent_event` AgentEvent."""
+        updates = {}
+        if status is not None:
+            updates["status"] = status
+        if kind == "tool_call":
+            updates["current_tool"] = fields.get("tool_name", "")
+        elif status is not None and status != "tool_calling":
+            updates["current_tool"] = ""
+        if kind == "finished":
+            updates["steps_used"] = fields.get("steps_used", 0)
+            updates["error"] = fields.get("error", "")
+        if fields.get("step_id"):
+            updates["steps_used"] = fields["step_id"]
+        if kind == "communication":
+            updates["waiting_questions"] = fields.get("waiting_questions", 0)
+            progress = [m for m in fields.get("messages", []) if m["kind"] == "progress"]
+            if progress:
+                updates["latest_progress"] = progress[-1]["content"]
+        if updates:
+            self._subagents.update(entry, **updates)
+        self._put_event(entry.run_id, AgentEvent(
+            "subagent_event",
+            {**SubagentRegistry.to_dict(entry), "kind": kind, **fields},
+            run_id=entry.run_id, session_id=entry.session_id,
+            step_id=fields.get("step_id", 0),
+        ), persist=kind not in ("token", "reasoning"))
+
+    def cancel_subagent(self, session_id: str, subagent_id: str) -> bool:
+        entry = self._subagents.get(subagent_id)
+        if entry is None or entry.session_id != session_id:
+            return False
+        accepted = self._subagents.cancel(subagent_id)
+        if accepted:
+            self._subagent_emit(entry, "cancelling", status="cancelling")
+        return accepted
+
+    def list_subagents(self, session_id: str) -> list[dict]:
+        summaries = {s["subagent_id"]: s for s in get_timeline_store().list_subagent_summaries(session_id)}
+        summaries.update({e.subagent_id: SubagentRegistry.to_dict(e) for e in self._subagents.list_for_session(session_id)})
+        return list(summaries.values())
+
+    def send_subagent_message(self, session_id: str, subagent_id: str, content: str, request_id: str, child_run_id: str, question_id: int | None = None) -> dict:
+        """Users supplement the current child attempt through its durable inbox."""
+        receipts = get_timeline_store().list_collaboration_messages(session_id, subagent_id)
+        receipt = next((m for m in receipts if m["sender"] == "user" and m["request_id"] == request_id), None)
+        if receipt is not None:
+            if receipt["content"] != content or receipt["child_run_id"] != child_run_id or receipt["question_id"] != (question_id or ""):
+                raise ValueError("消息 ID 已用于其他内容")
+            return receipt
+        entry = self._subagents.get(subagent_id)
+        if entry is None or entry.session_id != session_id:
+            raise ValueError("子任务不属于当前会话")
+        collaboration = self._collaborations.get(entry.run_id)
+        if collaboration is None:
+            raise ValueError("父运行已结束，无法追加消息")
+        return collaboration.send(subagent_id, content, request_id, question_id, child_run_id=child_run_id, sender="user")
+
+    def _evaluate_run_alerts(self) -> None:
+        """Feed recent run metrics into the alert pipeline (non-fatal)."""
+        try:
+            from agentnexus.core.config import get_settings
+            from agentnexus.observability.alerting import evaluate_stats
+            from agentnexus.observability.stats import compute_stats
+
+            traces_dir = get_settings().traces_dir
+            if not traces_dir:
+                return
+            evaluate_stats(compute_stats(traces_dir, days=1))
+        except Exception as e:
+            logger.debug("Post-run alert evaluation failed: %s", e)
+
+    def send_message(
+        self,
+        session_id: str,
+        text: str,
+        on_run_started: Callable[[RunHandle], None] | None = None,
+        *,
+        attachments: list[dict] | None = None,
+        client_message_id: str | None = None,
+    ) -> RunHandle:
+        requested_run_id = None
+        if client_message_id:
+            with self._submission_lock:
+                if session_id not in self._sessions:
+                    raise KeyError(f"Unknown session_id: {session_id}")
+                receipt = get_timeline_store().get_submission(session_id, client_message_id)
+                if receipt is None and self.is_session_processing(session_id):
+                    raise ValueError("此会话仍在执行任务，请先停止任务或等待完成")
+                requested_run_id, created = get_timeline_store().claim_submission(session_id, client_message_id, text, attachments)
+                if created:
+                    self.mark_processing(True, session_id=session_id)
+            if not created:
+                return RunHandle(id=requested_run_id, session_id=session_id)
+        try:
+            setup = self._prepare_run(session_id, text, attachments, on_run_started, requested_run_id)
+        except Exception as exc:
+            self.mark_processing(False, session_id=session_id)
+            if requested_run_id:
+                get_timeline_store().save_run_record({
+                    "run_id": requested_run_id, "session_id": session_id, "question": text,
+                    "answer": "", "status": "failed", "reason": "任务未能开始", "detail": str(exc),
+                    "journal": [], "persisted": False, "save_error": "", "started": False,
+                })
+            raise
+        agent, memory = setup.agent, setup.memory
+        run, turn = setup.run, setup.turn
+        wrapper_settled = False
+        try:
+            if requested_run_id in self._cancelled_submissions:
+                turn.cancel("cancelled")
+                self._run_snapshots[run.id] = turn.record_snapshot
+                self._put_event(run.id, AgentEvent("run_interrupted", {**self.get_run_recovery(run.id), "error": "cancelled"}, run_id=run.id, session_id=session_id))
+                self._emit_save_result(turn)
+                wrapper_settled = True
+                raise AgentCancelled()
+            agent_text, todo_list = self._wire_agent_for_run(setup, text)
+            from agentnexus.observability.tracer import trace_manager as _tm
+            _tm.start_trace(agent_text, metadata={
+                "user_goal": text,
+                "model_version": agent.llm_client.model,
+                "agent_id": agent.agent_id,
+                "max_steps": agent.max_steps,
+                "session_id": session_id,
+            })
+            try:
+                if setup.images or setup.attach_note:
+                    result = agent.run(
+                        agent_text, memory_manager=memory,
+                        images=setup.images, attachment_note=setup.attach_note or None,
+                    )
+                else:
+                    result = agent.run(agent_text, memory_manager=memory)
+            finally:
+                _tm.end_trace()
+                self._evaluate_run_alerts()
+                if todo_list is not None:
+                    todo_list.on_change = None
+            answer = getattr(result, "answer", result)
+            record = turn.finish(answer or "")
+            try:
+                usage = getattr(agent, "_total_usage", {}) or {}
+                setup.version_mgr.update_session_stats(
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    step_count=getattr(agent, "_step_count", 0),
+                )
+            except Exception as e:
+                logger.warning("Failed to persist session stats: %s", e)
+            self._run_snapshots[run.id] = record
+            llm_error = ""
+            llm_client = getattr(agent, "llm_client", None)
+            if not answer and llm_client is not None:
+                llm_error = getattr(llm_client, "last_error", "") or ""
+            self._put_event(run.id, AgentEvent(
+                "message_delta", {"text": answer or ""},
+                run_id=run.id, session_id=session_id,
+            ))
+            self._put_event(run.id, AgentEvent(
+                "run_finished",
+                {
+                    **self.get_run_recovery(run.id),
+                    "answer": answer or "",
+                    "status": record.status,
+                    "error": llm_error,
+                    "reason": getattr(record, "reason", "") or "",
+                    "detail": getattr(record, "detail", "") or "",
+                },
+                run_id=run.id,
+                session_id=session_id,
+            ))
+            self._emit_save_result(turn)
+            wrapper_settled = True
+        except Exception as exc:
+            already_settled = turn.record_snapshot.status != "running"
+            if turn.cancel_checker() or isinstance(exc, AgentCancelled):
+                record = turn.cancel("cancelled")
+                event_type = "run_interrupted"
+            else:
+                from agentnexus.core.failure import failure_advice
+                record = turn.fail(failure_advice(exc).message, str(exc))
+                event_type = "run_failed"
+            self._run_snapshots[run.id] = record
+            if not already_settled:
+                payload = {
+                    **self.get_run_recovery(run.id),
+                    "error": str(exc),
+                    "status": record.status,
+                    "answer": record.answer,
+                    "reason": record.reason,
+                }
+                self._put_event(run.id, AgentEvent(
+                    event_type, payload,
+                    run_id=run.id, session_id=session_id,
+                ))
+                self._emit_save_result(turn)
+            wrapper_settled = not already_settled
+            raise
+        finally:
+            self._teardown_run(setup, put_sentinel=wrapper_settled)
+        return run
+
+    def _prepare_run(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[dict] | None,
+        on_run_started: Callable[[RunHandle], None] | None,
+        requested_run_id: str | None = None,
+    ) -> _RunSetup:
+        """Everything that must exist before the run's try scope: session
+        resolution, attachment validation, workspace contextvar, token-buffer
+        reset, pre-persistence, turn begin, subagent bridge. Runs BEFORE the
+        try on purpose — a failure here has no run to settle and no
+        teardown debt yet (same leak profile as the original method)."""
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        agent = self._get_or_create_agent(session_id)
+        memory = self._get_or_create_memory(session_id)
+        _bind_optional(agent, "set_plan_mode", PlanModeBinding(self._plan_mode, session_id))
+        _bind_optional(agent, "set_thinking_effort", self._thinking_effort.get(session_id))
+        from agentnexus.core.capabilities import detect_capabilities
+        llm = getattr(agent, "llm_client", None)
+        model_id = getattr(llm, "model", "") or ""
+        base_url = getattr(llm, "base_url", "") or ""
+        caps = detect_capabilities(model_id, base_url) if model_id else None
+        vision_ok = bool(caps and getattr(caps, "supports_vision", False))
+        images, attach_paths, attach_note = _prepare_attachments(attachments, vision_ok=vision_ok)
+        from agentnexus.tools.workspace import (
+            current_workspace,
+            register_attachment_paths,
+        )
+        ws_token = current_workspace.set(self._sessions[session_id].workspace)
+        register_attachment_paths(attach_paths)
+        with self._get_session_lock(session_id):
+            self._token_buffers[session_id] = ""
+            self._token_cursors[session_id] = 0
+            self._token_step_base[session_id] = 0
+        self.mark_processing(True, session_id=session_id)
+        version_mgr = None
+        try:
+            version_mgr = self._get_version_manager(session_id)
+            existing = version_mgr.get_messages(limit=0)
+            if not existing or existing[-1].get("content") != text:
+                version_mgr.commit_with_messages(
+                    messages=[{"role": "user", "content": text}],
+                    question=text, answer="",
+                )
+        except Exception as e:
+            logger.debug("Failed to persist user question immediately: %s", e)
+        run, events, turn = self.begin_turn(session_id, text, memory_manager=memory, run_id=requested_run_id)
+        if on_run_started is not None:
+            on_run_started(run)
+        old_on_event = getattr(agent, "_on_event", None)
+        old_output = getattr(agent, "_output", None)
+        subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
+        if subagent_bridge is not None:
+            context = SubagentRunContext(self, session_id, run.id)
+            from agentnexus.core.config import get_settings
+            from agentnexus.services.collaboration import CollaborationRun
+
+            settings = get_settings()
+            if settings.subagent_collaboration_enabled:
+                context.collaboration = CollaborationRun(context, get_timeline_store(), self._tool_executor.get_lane_pool("subagent"), turn.cancel_checker,
+                                                         max_tasks=settings.subagent_max_concurrent * 4, timeout=settings.subagent_timeout_sec)
+                self._collaborations[run.id] = context.collaboration
+                _bind_optional(agent, "set_collaboration", context.collaboration.parent)
+            subagent_bridge.set_context(context)
+        return _RunSetup(
+            session_id=session_id, agent=agent, memory=memory, run=run, turn=turn,
+            events=events, images=images, attach_paths=attach_paths,
+            attach_note=attach_note, version_mgr=version_mgr,
+            subagent_bridge=subagent_bridge, ws_token=ws_token,
+            old_on_event=old_on_event, old_output=old_output,
+        )
+
+    def _wire_agent_for_run(self, setup: _RunSetup, text: str) -> tuple[str, Any]:
+        """Per-run agent wiring, inside the run's try scope so a failure here
+        still settles the turn and tears down. Returns (agent_text, todo_list)
+        — todo_list is detached from the agent in send_message's run-finally."""
+        agent, memory = setup.agent, setup.memory
+        run, turn, session_id, events = (
+            setup.run, setup.turn, setup.session_id, setup.events,
+        )
+        if self._capability_runtime is not None:
+            self._capability_runtime.refresh_if_stale()
+        _bind_optional(agent, "set_cancel_checker", turn.cancel_checker)
+        agent_text = self._prepare_message(text, events, run.id, session_id, agent=agent, memory_manager=memory)
+        self._install_agent_event_bridge(turn, events, run.id, session_id, setup.old_on_event, agent=agent)
+        _bind_optional(agent, "set_round_persist", turn.commit_round)
+        _bind_optional(
+            agent, "set_context_observer",
+            lambda step_id, messages: get_timeline_store().record_snapshot(
+                session_id, run.id, step_id, messages,
+            ),
+        )
+        todo_list = getattr(agent, "_todo_list", None)
+        if todo_list is not None:
+            def _on_todo_change(action, item, _run_id=run.id):
+                self._put_event(_run_id, AgentEvent(
+                    "todo_change",
+                    {"action": action, "id": item.id,
+                     "description": item.description, "status": item.status},
+                    run_id=_run_id, session_id=session_id,
+                    step_id=getattr(agent, "_step_count", 0),
+                ))
+            todo_list.on_change = _on_todo_change
+        try:
+            agent._output = lambda _msg: None
+        except Exception as e:
+            logger.debug("Failed to suppress agent output: %s", e)
+        return agent_text, todo_list
+
+    def _teardown_run(self, setup: _RunSetup, put_sentinel: bool = True) -> None:
+        """Restore everything prepare/wire touched — runs on every exit path
+        (success, failure, cancel) via send_message's finally."""
+        from agentnexus.tools.workspace import (
+            current_workspace,
+            unregister_attachment_paths,
+        )
+        agent, run, session_id = setup.agent, setup.run, setup.session_id
+        collaboration = self._collaborations.pop(run.id, None)
+        if collaboration is not None:
+            try:
+                collaboration.close("parent_finished")
+            except Exception as exc:
+                logger.error("Failed to close collaboration for %s: %s", run.id, exc)
+        _bind_optional(agent, "set_collaboration", None)
+        if setup.subagent_bridge is not None:
+            setup.subagent_bridge.set_context(None)
+        current_workspace.reset(setup.ws_token)
+        unregister_attachment_paths(setup.attach_paths)
+        self.mark_processing(False, session_id=session_id)
+        if setup.turn.record_snapshot.status != "running":
+            try:
+                get_timeline_store().save_run_record(self.get_run_recovery(run.id))
+            except Exception as exc:
+                logger.warning("Failed to update settled recovery state for %s: %s", run.id, exc)
+        _bind_optional(agent, "set_cancel_checker", None)
+        try:
+            agent._on_event = setup.old_on_event
+        except Exception as e:
+            logger.debug("Failed to restore agent _on_event: %s", e)
+        try:
+            agent._output = setup.old_output
+        except Exception as e:
+            logger.debug("Failed to restore agent _output: %s", e)
+        try:
+            _bind_optional(agent, "set_round_persist", None)
+        except Exception as e:
+            logger.debug("Failed to clear round persist: %s", e)
+        with self._get_session_lock(session_id):
+            self._token_buffers.pop(session_id, None)
+            self._token_cursors.pop(session_id, None)
+            self._token_step_base.pop(session_id, None)
+        if put_sentinel:
+            self._put_event(run.id, None)
+
+    def _get_version_manager(self, session_id: str):
+        """Return a per-session ConversationVersionManager, creating one if needed."""
+        if session_id not in self._version_managers:
+            from agentnexus.core.config import get_settings
+            from agentnexus.memory.versioned import ConversationVersionManager
+            settings = get_settings()
+            handle = self._sessions.get(session_id)
+            workspace = (handle.workspace if handle else None) or ""
+            if not workspace and self._version is not None:
+                workspace = getattr(self._version, "_workspace_path", "")
+            self._version_managers[session_id] = ConversationVersionManager(
+                session_id,
+                settings.memory_db_path,
+                workspace_path=workspace,
+            )
+        return self._version_managers[session_id]
+
+    def _emit_save_result(self, turn: TurnRuntime) -> None:
+        record = turn.record_snapshot
+        recovery = self.get_run_recovery(record.run_id)
+        recovery.update(persisted=turn.persisted, save_error=turn.last_commit_error)
+        try:
+            get_timeline_store().save_run_record(recovery)
+            self._recovery_save_errors.pop(record.run_id, None)
+        except Exception as exc:
+            self._recovery_save_errors[record.run_id] = str(exc)
+            logger.warning("Failed to save recovery state for %s: %s", record.run_id, exc)
+        saved = turn.persisted and record.run_id not in self._recovery_save_errors
+        self._put_event(record.run_id, AgentEvent(
+            "run_persisted" if saved else "run_save_failed",
+            {"status": record.status, "persisted": saved, "save_error": turn.last_commit_error or self._recovery_save_errors.get(record.run_id, ""),
+             "execution_active": record.status == "interrupted" and self.is_session_processing(record.session_id)},
+            run_id=record.run_id, session_id=record.session_id,
+        ))
+
+    def get_run_recovery(self, run_id: str) -> dict | None:
+        """Return task outcome and save state for recovery clients."""
+        from dataclasses import asdict
+
+        record = self.get_run_snapshot(run_id)
+        if record is None:
+            stored = get_timeline_store().get_run_record(run_id)
+            if stored is not None:
+                stored["execution_active"] = False
+                if stored["status"] == "running":
+                    stored.update(status="interrupted", reason="server_restarted")
+            return stored
+        turn = self._turns.get(run_id)
+        from agentnexus.core.failure import failure_advice
+        advice = failure_advice(record.detail or record.reason) if record.status in ("failed", "empty_answer") else None
+        return {
+            **asdict(record),
+            "persisted": (turn.persisted if turn else True) and run_id not in self._recovery_save_errors,
+            "save_error": (turn.last_commit_error if turn else "") or self._recovery_save_errors.get(run_id, ""),
+            "started": True,
+            "execution_active": self.is_session_processing(record.session_id),
+            "failure_code": advice.code if advice else "",
+            "next_action": advice.action if advice else "",
+        }
+
+    def get_submission_receipt(self, session_id: str, client_message_id: str) -> dict | None:
+        """Resolve an uncertain send without repeating its side effects."""
+        receipt = get_timeline_store().get_submission(session_id, client_message_id)
+        if receipt is None:
+            return None
+        recovery = self.get_run_recovery(receipt["run_id"])
+        if recovery is None:
+            recovery = {
+                "run_id": receipt["run_id"], "session_id": session_id, "question": receipt["question"],
+                "status": "running" if self.is_session_processing(session_id) else "interrupted",
+                "answer": "", "reason": "" if self.is_session_processing(session_id) else "server_restarted",
+                "detail": "", "journal": [], "persisted": False, "save_error": "", "started": False,
+            }
+        return {**receipt, "recovery": recovery}
+
+    def get_session_recovery(self, session_id: str) -> dict | None:
+        """Return the latest task independently of whether the UI stayed open."""
+        run_id = self._session_last_run.get(session_id) or get_timeline_store().latest_run_id(session_id)
+        return self.get_run_recovery(run_id) if run_id else None
+
+    def request_submission_cancel(self, session_id: str, client_message_id: str) -> dict:
+        """Stop a submission even while its task identity is still unacknowledged."""
+        run_id = get_timeline_store().submission_run_id(session_id, client_message_id)
+        with self._submission_lock:
+            self._cancelled_submissions.add(run_id)
+        if self.is_run_active(run_id):
+            self.cancel_run(run_id, reason="cancelled")
+        return {"status": "requested", "run_id": run_id, "client_message_id": client_message_id}
+
+    def retry_run_save(self, run_id: str) -> dict:
+        """Retry only storage; never execute the task or tools again."""
+        with self._put_event_lock:
+            turn = self._turns.get(run_id)
+            if turn is None:
+                raise KeyError(run_id)
+            turn.persist_snapshot()
+            self._emit_save_result(turn)
+            return self.get_run_recovery(run_id)
+
+    def restore_session_stm(self, session_id: str, snapshot: str) -> None:
+        """Inject a checkpoint STM snapshot into the session's MemoryManager.
+
+        Used by the server restore paths (WS connect / POST /session/restore):
+        sessions are discovered at connect time, so restore happens here — not
+        at build time like the TUI's restore_session. No-op when the in-memory
+        STM already holds messages, so a mid-run reconnect never clobbers
+        fresher state with an older snapshot.
+        """
+        memory = self._get_or_create_memory(session_id)
+        if getattr(memory, "short_term", None) is None or memory.short_term._messages:
+            return
+        from agentnexus.memory.short_term import ShortTermMemory
+        restored = ShortTermMemory.from_json(snapshot)
+        memory.short_term._messages = restored._messages
+        memory.short_term._summary = restored._summary
+
+    def session_version(self, session_id: str):
+        """Resolve version history without falling back to another session."""
+        if session_id not in self._sessions and not self.ensure_session_restored(session_id):
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return self._get_version_manager(session_id)
+
+    def session_memory(self, session_id: str):
+        """Resolve this session's memory independently of the process-global context."""
+        self.session_version(session_id)
+        return self._get_or_create_memory(session_id)
+
+    def restore_checkpoint_memory(self, session_id: str) -> None:
+        """Replace this session's context after an explicit history operation."""
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        version = self.session_version(session_id)
+        memory = self._get_or_create_memory(session_id)
+        snapshot = version.get_head_stm()
+        restored = ShortTermMemory.from_json(snapshot) if snapshot else ShortTermMemory()
+        memory.short_term.restore(restored)
+
+    def ensure_session_restored(self, session_id: str) -> bool:
+        """Register a DB-backed session (if unknown) and inject its head STM.
+
+        Idempotent — safe on every WS connect / restore call. Returns False
+        only when the session does not exist in the database. Needed because
+        AppRuntime.build adopts recent sessions into chat._sessions at startup
+        (handles only, no STM) — without this, the ws restore branch was
+        skipped for adopted sessions and the agent lost all context on
+        service restart.
+        """
+        from agentnexus.core.config import get_settings
+        from agentnexus.memory.versioned import ConversationVersionManager
+        settings = get_settings()
+        stored_workspace = ConversationVersionManager.get_session_workspace(
+            settings.memory_db_path, session_id
+        )
+        if stored_workspace is None:
+            return False
+        if session_id not in self._sessions:
+            self._sessions[session_id] = SessionHandle(
+                id=session_id, workspace=stored_workspace or None,
+            )
+        version = ConversationVersionManager(
+            session_id, settings.memory_db_path,
+            workspace_path=stored_workspace or None,
+        )
+        snapshot = version.get_head_stm()
+        if snapshot:
+            self.restore_session_stm(session_id, snapshot)
+        return True
+
+    def begin_turn(self, session_id: str, text: str, memory_manager: Any = None, *, run_id: str | None = None) -> tuple[RunHandle, queue.Queue[AgentEvent | None], TurnRuntime]:
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        prev_run = self._session_last_run.get(session_id)
+        previous_turn = self._turns.get(prev_run)
+        if previous_turn and (previous_turn.last_commit_error or prev_run in self._recovery_save_errors) and not self.get_run_recovery(prev_run)["persisted"]:
+            raise ValueError("上一轮结果尚未保存，请先重试保存并保留结果副本")
+        if prev_run:
+            self._run_events.pop(prev_run, None)
+            self._async_run_events.pop(prev_run, None)
+            self._dropped_events.pop(prev_run, None)
+            self._turns.pop(prev_run, None)
+            self._run_event_seq.pop(prev_run, None)
+            self._run_token_seq.pop(prev_run, None)
+            self._run_snapshots.pop(prev_run, None)
+        run = RunHandle(id=run_id or f"run_{uuid.uuid4().hex[:12]}", session_id=session_id)
+        events: queue.Queue[AgentEvent | None] = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
+        async_events: asyncio.Queue[AgentEvent | None] = asyncio.Queue(maxsize=_EVENT_QUEUE_MAX)
+        self._run_events[run.id] = events
+        self._async_run_events[run.id] = async_events
+        self._run_event_seq[run.id] = 0
+        self._run_token_seq[run.id] = 0
+        self._session_last_run[session_id] = run.id
+        version_mgr = self._get_version_manager(session_id)
+        turn = TurnRuntime(
+            run_id=run.id,
+            session_id=session_id,
+            question=text,
+            memory_manager=memory_manager,
+            version_manager=version_mgr,
+        )
+        self._turns[run.id] = turn
+        events.put(AgentEvent("message_started", {"text": text}, run_id=run.id, session_id=session_id))
+        return run, events, turn
+
+    def record_agent_event(self, run_id: str, event) -> None:
+        turn = self._turns.get(run_id)
+        if turn is not None:
+            self._record_agent_event(turn, event)
+
+    def record_workflow_event(self, run_id: str, event) -> None:
+        turn = self._turns.get(run_id)
+        if turn is None:
+            return
+        summary = f"{event.step_type}:{event.step_id} {event.status}"
+        if getattr(event, "summary", ""):
+            summary = f"{summary} - {event.summary}"
+        turn.record("workflow", summary)
+
+    def _prepare_message(
+        self,
+        text: str,
+        events: queue.Queue[AgentEvent | None],
+        run_id: str,
+        session_id: str,
+        agent: Any = None,
+        memory_manager: Any = None,
+    ) -> str:
+        service = self.session_skills(session_id)
+        agent = agent or getattr(self, "_agent", None)
+        memory_manager = memory_manager or getattr(self, "_memory", None)
+        if service is None:
+            return text
+        session = self._sessions[session_id]
+        if session.skill:
+            service.use(session.skill)
+        recommendations = service.get_recommendations(text)
+
+        if agent is not None and hasattr(agent, "set_available_skill_context"):
+            agent.set_available_skill_context(
+                service.available_skill_context(recommendations=recommendations),
+            )
+
+        if not session.skill:
+            service.maybe_auto_select(text)
+
+        if agent is not None and hasattr(agent, "set_session_profile"):
+            profile = service.current.workflow.to_session_profile() if service.current is not None else None
+            agent.set_session_profile(profile)
+
+        result = service.prepare_message(
+            text,
+            tool_executor=self._tool_executor,
+            memory_manager=memory_manager,
+            auto_select=False,
+        )
+        snapshot = service.snapshot()
+        if snapshot.auto_route_reason:
+            self._put_event(run_id, AgentEvent(
+                "skill_auto_selected",
+                {
+                    "skill": snapshot.current,
+                    "score": snapshot.auto_route_score,
+                    "source": snapshot.auto_route_source,
+                    "reason": snapshot.auto_route_reason,
+                },
+                run_id=run_id,
+                session_id=session_id,
+            ))
+        for event in result.events:
+            self.record_workflow_event(run_id, event)
+            self._put_event(run_id, AgentEvent(
+                "workflow_step",
+                {
+                    "step_id": event.step_id,
+                    "step_type": event.step_type,
+                    "status": event.status,
+                    "summary": event.summary,
+                },
+                run_id=run_id,
+                session_id=session_id,
+            ))
+        workflow_ctx = getattr(result, "workflow_context", None)
+        if agent is not None and hasattr(agent, "set_workflow_context"):
+            agent.set_workflow_context(workflow_ctx or "")
+        return result.enhanced_question
+
+    def _install_agent_event_bridge(
+        self,
+        turn: TurnRuntime,
+        events: queue.Queue[AgentEvent | None],
+        run_id: str,
+        session_id: str,
+        previous,
+        agent: Any = None,
+    ) -> None:
+        agent = agent or getattr(self, "_agent", None)
+        has_reasoning = False
+        stream_counts = {"content": 0, "reasoning": 0}
+
+        def _on_event(event, from_state, to_state):
+            nonlocal has_reasoning
+            if event is None:
+                if previous is not None:
+                    previous(event, from_state, to_state)
+                return
+            event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
+            payload = getattr(event, "payload", {}) or {}
+
+            if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
+                token = payload.get("token", "")
+                if token:
+                    bucket = "content" if event_type == "STREAM_TOKEN" else "reasoning"
+                    stream_counts[bucket] += len(token)
+                    if event_type == "STREAM_TOKEN":
+                        tok_seq = self._run_token_seq.get(run_id, 0) + 1
+                        self._run_token_seq[run_id] = tok_seq
+                        token_event = AgentEvent(
+                            "stream_token",
+                            {"token": token},
+                            run_id=run_id,
+                            session_id=session_id,
+                            tok_seq=tok_seq,
+                        )
+                        self._put_event(run_id, token_event)
+                        with self._get_session_lock(session_id):
+                            self._token_buffers[session_id] = \
+                                self._token_buffers.get(session_id, "") + token
+                            self._token_cursors[session_id] = \
+                                self._token_cursors.get(session_id, 0) + 1
+                    else:
+                        has_reasoning = True
+                        self._put_event(run_id, AgentEvent(
+                            "stream_reasoning",
+                            {"token": token},
+                            run_id=run_id,
+                            session_id=session_id,
+                        ))
+                return
+
+            if event_type in ("TOOLS_REQUESTED", "ANSWER_READY", "ANSWER_THOUGHT", "FAULT") and (
+                stream_counts["content"] or stream_counts["reasoning"]
+            ):
+                self._put_event(run_id, AgentEvent(
+                    "token_summary",
+                    {"content_chars": stream_counts["content"],
+                     "reasoning_chars": stream_counts["reasoning"]},
+                    run_id=run_id, session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
+                ))
+                stream_counts["content"] = 0
+                stream_counts["reasoning"] = 0
+
+            self._record_agent_event(turn, event)
+
+            if event_type in ("TOOLS_REQUESTED", "ANSWER_THOUGHT") and has_reasoning:
+                has_reasoning = False
+                return
+
+            if event_type == "TOOL_START":
+                with self._get_session_lock(session_id):
+                    self._token_step_base[session_id] = \
+                        len(self._token_buffers.get(session_id, ""))
+                self._put_event(run_id, AgentEvent(
+                    "tool_start",
+                    {"name": payload.get("name", ""), "arguments": payload.get("arguments", {}),
+                     "id": payload.get("id", ""), "risk_level": payload.get("risk_level", "")},
+                    run_id=run_id,
+                    session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
+                ))
+                return
+            if event_type == "TOOL_DONE":
+                self._put_event(run_id, AgentEvent(
+                    "tool_done",
+                    {
+                        "name": payload.get("name", ""),
+                        "arguments": payload.get("arguments", {}),
+                        "result": collapse_and_truncate(payload.get("result", ""), 300),
+                        "raw_result": str(payload.get("result", "")),
+                        "id": payload.get("id", ""),
+                        "duration_ms": payload.get("duration_ms", 0),
+                        "risk_level": payload.get("risk_level", ""),
+                        "error": bool(payload.get("error", False)),
+                    },
+                    run_id=run_id,
+                    session_id=session_id,
+                    step_id=getattr(event, "step_id", 0),
+                ))
+                return
+
+            agent_event = AgentEvent(
+                "turn_journal",
+                {**payload,
+                 "event": event_type,
+                 "thought": payload.get("thought") or ""},
+                run_id=run_id,
+                session_id=session_id,
+                step_id=getattr(event, "step_id", 0),
+            )
+            self._put_event(run_id, agent_event)
+            if previous is not None:
+                previous(event, from_state, to_state)
+
+        try:
+            if agent is not None:
+                agent._on_event = _on_event
+        except Exception as e:
+            logger.debug("Failed to install agent event bridge: %s", e)
+
+    @staticmethod
+    def _record_agent_event(turn: TurnRuntime, event) -> None:
+        event_type = getattr(getattr(event, "type", None), "name", "")
+        payload = getattr(event, "payload", {}) or {}
+        if event_type in {"TOOLS_REQUESTED", "ANSWER_THOUGHT"}:
+            thought = payload.get("thought")
+            if thought:
+                turn.record("thought", thought)
+        elif event_type == "TOOL_START":
+            turn.record("tool start", f"{payload.get('name', '')} {payload.get('arguments', {})}")
+        elif event_type == "TOOL_DONE":
+            result = collapse_and_truncate(payload.get("result", ""), 300)
+            turn.record("tool done", f"{payload.get('name', '')} -> {result}")
+        elif event_type == "THOUGHT_MISSING":
+            turn.record("retry", "model thought missing; requested retry")
+        elif event_type == "RETRIES_LEFT":
+            turn.record("retry", payload.get("reason", ""))
+        elif event_type == "DEGRADED":
+            turn.record("degraded", payload.get("strategy", ""))
+
+    def stream_events(self, run_id: str, timeout: float | None = 30.0) -> Iterator[AgentEvent]:
+        events = self._run_events.get(run_id)
+        if events is None:
+            raise KeyError(f"Unknown run_id: {run_id}")
+        while True:
+            try:
+                event = events.get(timeout=timeout)
+            except queue.Empty:
+                logger.warning("stream_events timed out for run_id=%s", run_id)
+                break
+            if event is None:
+                break
+            yield event
+
+    async def astream_events(self, run_id: str):
+        """Async generator that yields events in real-time."""
+        events = self._async_run_events.get(run_id)
+        if events is None:
+            raise KeyError(f"Unknown run_id: {run_id}")
+        while True:
+            event = await events.get()
+            if event is None:
+                break
+            yield event
+
+    def get_run_token_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Current-step token text + absolute token cursor for WS reconnect (R8).
+
+        content is scoped to the CURRENT step (buffer[_token_step_base:]) so a
+        mid-run reconnect never injects earlier steps' raw text into the
+        in-flight answer draft; cursor counts content tokens only (reasoning
+        resumes via seq-based replay, not the snapshot).
+        """
+        lock = self._get_session_lock(session_id)
+        with lock:
+            buffer = self._token_buffers.get(session_id, "")
+            base = self._token_step_base.get(session_id, 0)
+            return {
+                "content": buffer[base:],
+                "cursor": self._token_cursors.get(session_id, 0),
+            }
+
+    def is_run_active(self, run_id: str) -> bool:
+        """True while the run is still executing (not finished/failed/cancelled).
+
+        Used by connection-lifecycle code to cancel only live runs — calling
+        cancel_run on a completed run would re-emit terminal events.
+        """
+        turn = self._turns.get(run_id)
+        return turn is not None and turn.record_snapshot.status == "running"
+
+    def cancel_all_runs(self, reason: str = "server_shutdown") -> None:
+        """Cancel every still-active run (graceful shutdown / process exit).
+
+        Each cancellation persists results and queues terminal events, so
+        nothing is lost when the server goes down.
+        """
+        for run_id in list(self._turns.keys()):
+            try:
+                if self.is_run_active(run_id):
+                    self.cancel_run(run_id, reason=reason)
+            except Exception:
+                logger.exception("Failed to cancel run %s during shutdown", run_id)
+
+    def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
+        with self._put_event_lock:
+            self._cancel_run_locked(run_id, reason)
+
+    def _cancel_run_locked(self, run_id: str, reason: str = "cancelled") -> None:
+        turn = self._turns.get(run_id)
+        if turn is not None and turn.record_snapshot.status != "running":
+            return
+        if turn is not None:
+            record = turn.cancel(reason)
+            self._run_snapshots[run_id] = record
+            self._put_event(run_id, AgentEvent(
+                "run_interrupted",
+                {**self.get_run_recovery(run_id), "error": reason},
+                run_id=run_id,
+                session_id=record.session_id,
+            ))
+            self._emit_save_result(turn)
+        else:
+            self._put_event(run_id, AgentEvent("run_interrupted", {"error": reason}, run_id=run_id))
+        sync_q = self._run_events.get(run_id)
+        if sync_q is not None:
+            _enqueue_bounded(sync_q, None)
+        async_q = self._async_run_events.get(run_id)
+        if async_q is not None:
+            _enqueue_bounded(async_q, None)
+
+    def confirm_tool_call(self, run_id: str, approved: bool) -> None:
+        events = self._run_events.get(run_id)
+        if events is not None:
+            _enqueue_bounded(
+                events, AgentEvent("confirmation_requested", {"approved": approved}, run_id=run_id)
+            )
+
+    def get_session_snapshot(self, session_id: str) -> dict[str, Any]:
+        if session_id not in self._sessions:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return {
+            "session": self._sessions[session_id],
+            "memory": self._memory_managers.get(session_id),
+            "version": self._version_managers.get(session_id),
+        }
+
+    def get_run_snapshot(self, run_id: str) -> TurnRecord | None:
+        turn = self._turns.get(run_id)
+        if turn is not None:
+            return turn.record_snapshot
+        return self._run_snapshots.get(run_id)

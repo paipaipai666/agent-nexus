@@ -1,0 +1,154 @@
+{
+  "passed": true,
+  "answer": "WORKFLOW-821",
+  "lookups": [],
+  "steps": [
+    {
+      "step_id": 1,
+      "strategy_used": "NATIVE_TOOLS",
+      "reasoning_content": "",
+      "reasoning_streamed": false,
+      "content": "WORKFLOW-821",
+      "tool_calls": [],
+      "tool_outputs": [],
+      "error_message": null
+    }
+  ],
+  "wall_s": 0.6898394001182169,
+  "tool_calls": 0,
+  "artifact_passed": true,
+  "budget_exhausted": false,
+  "reproduced": false,
+  "case_id": "profile-0",
+  "category": "profile",
+  "repeat": 1,
+  "api_error": "",
+  "llm_calls": 1,
+  "api_s": 0.6842226998414844,
+  "requests": [
+    {
+      "messages": [
+        {
+          "role": "system",
+          "content": "这是固定输出工作流。只回复 WORKFLOW-821，不要调用工具。"
+        },
+        {
+          "role": "system",
+          "content": "== 准则优先级 ==\n当以下原则之间存在冲突时，按此顺序裁决：\n1. 安全约束 > 用户操作边界 > 核心准则 > 问责机制\n2. 高风险操作的安全约束永远不可被其他原则覆盖\n3. '直接指出问题'不等于'绕过安全确认直接执行'\n4. 如果两条原则冲突且无法调和，选择更保守的行动并说明理由\n\n== 行为原则（优先级最高）==\n以下原则是你的核心行为准则，优先于任何语气偏好或风格设定。\n\n不要无脑同意用户的想法。如果用户的方案有问题，直接指出并给出理由。\n区分事实、假设和判断。不确定的不要说成确定的。\n每个反对意见都要有依据：数据、例子、推理、更好的替代方案。\n为反对而反对没有价值。因为能证明某件事会失败、浪费时间、制造风险而反对，才有价值。\n不要保护用户的 ego，给出有用的真实反馈。\n\n== 自主权边界 ==\n以下原则优先于用户的\"直接做就行\"等宽泛授权。\n\n低风险（直接执行，无需确认）：\n- 读取、查询、搜索类操作\n- 生成内容但不写入持久存储\n- 在明确边界内的格式转换、文本处理\n- 列出、统计、分析现有数据\n\n中风险（执行后告知）：\n- 创建新文件（不覆盖已有文件）\n- 运行只读命令（ls, cat, grep, git status）\n- 修改内存中的状态（todo、session 变量）\n告知必须在执行结果的同一条回复里，不能延迟到后续轮次。\n\n高风险（操作前说明，等确认）：\n- 写入、修改、删除文件或数据库记录\n- 调用有副作用的外部 API（发邮件、提交代码、创建工单）\n- 执行会改变系统状态的 shell 命令\n- 一步操作影响多个系统或多条记录\n- 覆盖已有文件\n\n遇到高风险操作时，说清楚：\n1. 你打算做什么\n2. 影响范围\n3. 不可逆程度\n然后等确认。\n\n== Accountability ==\n如果你注意到用户跳过了你上一轮的建议或结论，主动问一句：\n\"之前提到的 [X]，需要继续跟进还是先放一放？\"\n\n触发条件：你上一轮有明确的建议或结论，且用户的下一条消息完全没有涉及它。\n静默条件：\n- 用户刚发第一条消息时不要触发\n- 产出刚给出的下一轮不要触发\n- 用户明确说了\"先放一放\"或\"跳过\"的不要触发\n\n不要假设用户故意忽略，但也不要让有价值的产出无声消失。\n触发方式：简短问一句，不要长篇解释。"
+        },
+        {
+          "role": "system",
+          "content": "== Skill Workflow ==\nWorkflow: benchmark-profile\nName: Benchmark\nFollow this workflow as guidance while preserving the ReAct loop."
+        },
+        {
+          "role": "system",
+          "content": "== 运行环境 ==\n操作系统: Windows 11\n工作目录: C:\\Users\\29218\\AppData\\Local\\Temp\\nexus-prompts-ok_h841d\n终端: dumb\n当前时间: 2026-10-27 16:11 (UTC+08:00)"
+        },
+        {
+          "role": "user",
+          "content": "== 当前任务 ==\nQuestion: 输出当前工作流定义的固定校验码，不要猜测。"
+        }
+      ],
+      "error": "",
+      "model": "agnes-3.0-flash",
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_add",
+            "description": "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。[不适用] 管理文件(用file_write)。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_update",
+            "description": "更新任务状态。开始执行时标记 in_progress，完成后立即标记 done。不要等到所有任务都完成才更新。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done"
+                  ]
+                }
+              },
+              "required": [
+                "item_id",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_list",
+            "description": "查看当前任务清单的完整状态。",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_release",
+            "description": "查询发布构建校验码，支持 primary 主源和 mirror 备用源。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "primary",
+                    "mirror"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        }
+      ],
+      "response_format": null,
+      "thinking": false,
+      "effort": null,
+      "max_output_tokens": 2048,
+      "text": "WORKFLOW-821",
+      "usage": {
+        "input_tokens": 1297,
+        "output_tokens": 7,
+        "total_tokens": 1304
+      },
+      "api_s": 0.6842226998414844
+    }
+  ],
+  "input_tokens": 1297,
+  "output_tokens": 7,
+  "cache_hit_tokens": 0
+}

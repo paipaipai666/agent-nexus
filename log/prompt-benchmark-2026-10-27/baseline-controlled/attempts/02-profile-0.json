@@ -1,0 +1,20 @@
+{
+  "case_id": "profile-0",
+  "category": "profile",
+  "repeat": 2,
+  "passed": false,
+  "artifact_passed": false,
+  "api_error": "",
+  "agent_error": "AttributeError: ToolError object has no attribute get",
+  "answer": "",
+  "steps": [],
+  "requests": [],
+  "telemetry_missing": true,
+  "evidence": "errors/02-profile-0-runtime-crash.txt",
+  "input_tokens": null,
+  "output_tokens": null,
+  "llm_calls": null,
+  "tool_calls": null,
+  "wall_s": null,
+  "api_s": null
+}

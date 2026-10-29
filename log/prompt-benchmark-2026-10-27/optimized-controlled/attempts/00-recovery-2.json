@@ -1,0 +1,510 @@
+{
+  "passed": true,
+  "answer": "查询结果：\n\n- **key**: `release-2`\n- **构建校验码 (checksum)**: `NX-771`\n\n说明：primary 主源当前不可用，已改用 mirror 备用源完成查询。以上为从备用源获取的准确值。",
+  "lookups": [
+    {
+      "key": "release-2",
+      "source": "primary"
+    },
+    {
+      "key": "release-2",
+      "source": "mirror"
+    }
+  ],
+  "steps": [
+    {
+      "step_id": 1,
+      "strategy_used": "NATIVE_TOOLS",
+      "reasoning_content": "",
+      "reasoning_streamed": false,
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_48aa355347cc4816b87cdea4",
+          "name": "lookup_release",
+          "arguments": {
+            "key": "release-2",
+            "source": "primary"
+          }
+        }
+      ],
+      "tool_outputs": [
+        {
+          "tool": "lookup_release",
+          "output": "{'error': 'primary unavailable; retrying primary will not help; mirror is available'}"
+        }
+      ],
+      "error_message": null
+    },
+    {
+      "step_id": 2,
+      "strategy_used": "NATIVE_TOOLS",
+      "reasoning_content": "",
+      "reasoning_streamed": false,
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_914a4cbacff24a6090d387c8",
+          "name": "lookup_release",
+          "arguments": {
+            "key": "release-2",
+            "source": "mirror"
+          }
+        }
+      ],
+      "tool_outputs": [
+        {
+          "tool": "lookup_release",
+          "output": "{'key': 'release-2', 'checksum': 'NX-771', 'source': 'mirror'}"
+        }
+      ],
+      "error_message": null
+    },
+    {
+      "step_id": 3,
+      "strategy_used": "NATIVE_TOOLS",
+      "reasoning_content": "",
+      "reasoning_streamed": false,
+      "content": "查询结果：\n\n- **key**: `release-2`\n- **构建校验码 (checksum)**: `NX-771`\n\n说明：primary 主源当前不可用，已改用 mirror 备用源完成查询。以上为从备用源获取的准确值。",
+      "tool_calls": [],
+      "tool_outputs": [],
+      "error_message": null
+    }
+  ],
+  "wall_s": 24.194381200009957,
+  "tool_calls": 2,
+  "artifact_passed": true,
+  "budget_exhausted": false,
+  "reproduced": false,
+  "case_id": "recovery-2",
+  "category": "recovery",
+  "repeat": 0,
+  "api_error": "",
+  "llm_calls": 3,
+  "api_s": 12.399469399824739,
+  "requests": [
+    {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是 Nexus，AgentNexus 内置的 AI 开发搭档，使用 ReAct 的行动与观察循环完成用户任务。\n若上下文存在 Persona，身份、语气和关注项目以 Persona 为准。\n\n== 输出契约 ==\n- 使用用户的语言，直接说明结果，不寒暄，不复述问题。\n- 执行期间只在发现、方案变化或阻碍值得告知时简短更新；说明行动意图和关键依据，不展示详细推理链，不强制 Thought 标签。\n- 最终答案完整、自包含，区分已完成、已验证、尚未验证和受阻事项。\n- 不编造工具观察、测试通过、文件修改或来源。代码、命令和路径使用代码格式。\n\n== 任务执行 ==\n1. 先确定用户要得到的结果与约束，读取必要的现状和项目约定。只询问影响执行且无法从已有信息查明的缺失信息。\n2. 用户要求执行任务时，使用当前可用工具实际完成，不能停在计划、建议或承诺。已获得的具体授权在任务范围内持续有效。\n3. 每次工具返回后以最新结果决定下一步。已经读到且没有变化的信息直接使用，不因进入新回合重新开始整个任务。\n4. 修改代码前定位原因；可复现的问题先复现。修改后运行相关验收或测试，检查边界情况；最后一次修改之后的验证才有效。\n5. 检索任务核对来源、版本和具体证据。查不到就说明缺口，不用猜测补足。\n6. 失败时检查错误与参数，按错误提示修正或换可用方法。已知同样输入仍会失败时不要原样重试；达到工具或授权边界时清楚说明阻碍。\n7. 仅在用户要求的产物已完成且必要验证已执行后收尾。若验证无法执行，明确说明原因和未验证部分，不能声称通过。若还有可执行的必要步骤，继续完成。\n\n== 工具与委派 ==\n- 只调用当前工具列表中实际存在的工具，严格使用其参数名和结果，不猜测接口。\n- 工具协议以系统提供的输出格式为准。格式要求与任务内容分开理解。\n- 协议支持时，同回合发起互不依赖的操作；修改和依赖其结果的检查按顺序执行。\n- 仅在有可用委派工具且子任务边界清晰、输入充分、能独立完成时委派。按当前协作模式的工具指南选择接口，不混用同步和后台协作流程。\n- 委派说明目标、上下文、输出要求和范围；主代理检查证据、处理未完成事项并整合交付。未完成的子任务不能报告为已完成。\n\n== 任务清单 ==\n- 当前存在 todo 工具且任务需要多个可独立跟踪的阶段时，先创建简短清单。单次查询或直接回答无需清单。\n- 开始时标记 in_progress，完成并确认结果后标记 done。清单状态不能替代产物验证。\n- 最后一个 todo 标记 done 且本回合带有可见文本时，运行会结束。该回合必须包含完整最终答案；必须先完成所有必要操作、观察其结果并验证，再关闭最后一个 todo。\n- 有未完成项时优先推进下一项；受阻时如实报告，不能用全部标记 done 掩盖缺口。\n\n== 记忆 ==\n- 用户明确要求记住，或主动告知身份、跨项目长期偏好时，才使用 memory_save scope=user；拿不准不存。\n- 项目构建与测试命令、目录约定、确认的决策和踩坑使用 scope=project；仅在当前存在相应工具时写入或查询记忆。"
+        },
+        {
+          "role": "system",
+          "content": "== 准则优先级 ==\n当以下原则之间存在冲突时，按此顺序裁决：\n1. 安全约束 > 用户操作边界 > 核心准则 > 问责机制\n2. 高风险操作的安全约束永远不可被其他原则覆盖\n3. '直接指出问题'不等于'绕过安全确认直接执行'\n4. 如果两条原则冲突且无法调和，选择更保守的行动并说明理由\n\n== 行为原则（优先级最高）==\n以下原则是你的核心行为准则，优先于任何语气偏好或风格设定。\n\n不要无脑同意用户的想法。如果用户的方案有问题，直接指出并给出理由。\n区分事实、假设和判断。不确定的不要说成确定的。\n每个反对意见都要有依据：数据、例子、推理、更好的替代方案。\n为反对而反对没有价值。因为能证明某件事会失败、浪费时间、制造风险而反对，才有价值。\n不要保护用户的 ego，给出有用的真实反馈。\n\n== 自主权边界 ==\n先核对用户已经批准的任务目标、操作对象和范围。具体授权在该范围内持续有效；不得推断用户授权了范围外的操作。平台权限与项目约束仍然必须遵守。\n\n低风险（直接执行，无需确认）：\n- 读取、查询、搜索类操作\n- 生成内容但不写入持久存储\n- 在明确边界内的格式转换、文本处理\n- 列出、统计、分析现有数据\n\n中风险（执行后告知）：\n- 在任务范围内创建新文件（不覆盖已有文件）\n- 运行只读命令（ls, cat, grep, git status）\n- 修改内存中的状态（todo、session 变量）\n告知必须在执行结果的同一条回复里，不能延迟到后续轮次。\n\n以下操作需要核对明确授权；尚未获得时，操作前说明并等确认：\n- 删除数据、破坏性操作，或覆盖与任务无关的已有改动\n- 调用有副作用的外部 API（发邮件、提交代码、创建工单）\n- 修改任务范围外的文件、数据库或系统状态\n- 扩大到用户未批准的系统、对象或记录\n\n用户明确要求修改某个文件或修复指定问题时，可以在该范围内执行必要的编辑和验证，无需对同一操作重复确认。工具或项目要求单独审批时，必须遵守审批结果；不得绕过拒绝。\n\n遇到高风险操作时，说清楚：\n1. 你打算做什么\n2. 影响范围\n3. 不可逆程度\n然后等确认。\n\n== Accountability ==\n如果你注意到用户跳过了你上一轮的建议或结论，主动问一句：\n\"之前提到的 [X]，需要继续跟进还是先放一放？\"\n\n触发条件：你上一轮有明确的建议或结论，且用户的下一条消息完全没有涉及它。\n静默条件：\n- 用户刚发第一条消息时不要触发\n- 产出刚给出的下一轮不要触发\n- 用户明确说了\"先放一放\"或\"跳过\"的不要触发\n\n不要假设用户故意忽略，但也不要让有价值的产出无声消失。\n触发方式：简短问一句，不要长篇解释。"
+        },
+        {
+          "role": "system",
+          "content": "== 运行环境 ==\n操作系统: Windows 11\n工作目录: C:\\Users\\29218\\AppData\\Local\\Temp\\nexus-prompts-_8i_9b6m\n终端: dumb\n当前时间: 2026-10-27 15:26 (UTC+08:00)"
+        },
+        {
+          "role": "user",
+          "content": "== 当前任务 ==\nQuestion: 查询 release-2 的构建校验码，给出查到的准确值。"
+        }
+      ],
+      "error": "",
+      "model": "agnes-3.0-flash",
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_add",
+            "description": "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。[不适用] 管理文件(用file_write)。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_update",
+            "description": "更新任务状态。开始执行时标记 in_progress，完成后立即标记 done。不要等到所有任务都完成才更新。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done"
+                  ]
+                }
+              },
+              "required": [
+                "item_id",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_list",
+            "description": "查看当前任务清单的完整状态。",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_release",
+            "description": "查询发布构建校验码，支持 primary 主源和 mirror 备用源。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "primary",
+                    "mirror"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        }
+      ],
+      "response_format": null,
+      "thinking": false,
+      "effort": null,
+      "max_output_tokens": 2048,
+      "text": "",
+      "usage": {
+        "input_tokens": 2086,
+        "output_tokens": 40,
+        "total_tokens": 2126
+      },
+      "api_s": 6.887735199881718
+    },
+    {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是 Nexus，AgentNexus 内置的 AI 开发搭档，使用 ReAct 的行动与观察循环完成用户任务。\n若上下文存在 Persona，身份、语气和关注项目以 Persona 为准。\n\n== 输出契约 ==\n- 使用用户的语言，直接说明结果，不寒暄，不复述问题。\n- 执行期间只在发现、方案变化或阻碍值得告知时简短更新；说明行动意图和关键依据，不展示详细推理链，不强制 Thought 标签。\n- 最终答案完整、自包含，区分已完成、已验证、尚未验证和受阻事项。\n- 不编造工具观察、测试通过、文件修改或来源。代码、命令和路径使用代码格式。\n\n== 任务执行 ==\n1. 先确定用户要得到的结果与约束，读取必要的现状和项目约定。只询问影响执行且无法从已有信息查明的缺失信息。\n2. 用户要求执行任务时，使用当前可用工具实际完成，不能停在计划、建议或承诺。已获得的具体授权在任务范围内持续有效。\n3. 每次工具返回后以最新结果决定下一步。已经读到且没有变化的信息直接使用，不因进入新回合重新开始整个任务。\n4. 修改代码前定位原因；可复现的问题先复现。修改后运行相关验收或测试，检查边界情况；最后一次修改之后的验证才有效。\n5. 检索任务核对来源、版本和具体证据。查不到就说明缺口，不用猜测补足。\n6. 失败时检查错误与参数，按错误提示修正或换可用方法。已知同样输入仍会失败时不要原样重试；达到工具或授权边界时清楚说明阻碍。\n7. 仅在用户要求的产物已完成且必要验证已执行后收尾。若验证无法执行，明确说明原因和未验证部分，不能声称通过。若还有可执行的必要步骤，继续完成。\n\n== 工具与委派 ==\n- 只调用当前工具列表中实际存在的工具，严格使用其参数名和结果，不猜测接口。\n- 工具协议以系统提供的输出格式为准。格式要求与任务内容分开理解。\n- 协议支持时，同回合发起互不依赖的操作；修改和依赖其结果的检查按顺序执行。\n- 仅在有可用委派工具且子任务边界清晰、输入充分、能独立完成时委派。按当前协作模式的工具指南选择接口，不混用同步和后台协作流程。\n- 委派说明目标、上下文、输出要求和范围；主代理检查证据、处理未完成事项并整合交付。未完成的子任务不能报告为已完成。\n\n== 任务清单 ==\n- 当前存在 todo 工具且任务需要多个可独立跟踪的阶段时，先创建简短清单。单次查询或直接回答无需清单。\n- 开始时标记 in_progress，完成并确认结果后标记 done。清单状态不能替代产物验证。\n- 最后一个 todo 标记 done 且本回合带有可见文本时，运行会结束。该回合必须包含完整最终答案；必须先完成所有必要操作、观察其结果并验证，再关闭最后一个 todo。\n- 有未完成项时优先推进下一项；受阻时如实报告，不能用全部标记 done 掩盖缺口。\n\n== 记忆 ==\n- 用户明确要求记住，或主动告知身份、跨项目长期偏好时，才使用 memory_save scope=user；拿不准不存。\n- 项目构建与测试命令、目录约定、确认的决策和踩坑使用 scope=project；仅在当前存在相应工具时写入或查询记忆。"
+        },
+        {
+          "role": "system",
+          "content": "== 准则优先级 ==\n当以下原则之间存在冲突时，按此顺序裁决：\n1. 安全约束 > 用户操作边界 > 核心准则 > 问责机制\n2. 高风险操作的安全约束永远不可被其他原则覆盖\n3. '直接指出问题'不等于'绕过安全确认直接执行'\n4. 如果两条原则冲突且无法调和，选择更保守的行动并说明理由\n\n== 行为原则（优先级最高）==\n以下原则是你的核心行为准则，优先于任何语气偏好或风格设定。\n\n不要无脑同意用户的想法。如果用户的方案有问题，直接指出并给出理由。\n区分事实、假设和判断。不确定的不要说成确定的。\n每个反对意见都要有依据：数据、例子、推理、更好的替代方案。\n为反对而反对没有价值。因为能证明某件事会失败、浪费时间、制造风险而反对，才有价值。\n不要保护用户的 ego，给出有用的真实反馈。\n\n== 自主权边界 ==\n先核对用户已经批准的任务目标、操作对象和范围。具体授权在该范围内持续有效；不得推断用户授权了范围外的操作。平台权限与项目约束仍然必须遵守。\n\n低风险（直接执行，无需确认）：\n- 读取、查询、搜索类操作\n- 生成内容但不写入持久存储\n- 在明确边界内的格式转换、文本处理\n- 列出、统计、分析现有数据\n\n中风险（执行后告知）：\n- 在任务范围内创建新文件（不覆盖已有文件）\n- 运行只读命令（ls, cat, grep, git status）\n- 修改内存中的状态（todo、session 变量）\n告知必须在执行结果的同一条回复里，不能延迟到后续轮次。\n\n以下操作需要核对明确授权；尚未获得时，操作前说明并等确认：\n- 删除数据、破坏性操作，或覆盖与任务无关的已有改动\n- 调用有副作用的外部 API（发邮件、提交代码、创建工单）\n- 修改任务范围外的文件、数据库或系统状态\n- 扩大到用户未批准的系统、对象或记录\n\n用户明确要求修改某个文件或修复指定问题时，可以在该范围内执行必要的编辑和验证，无需对同一操作重复确认。工具或项目要求单独审批时，必须遵守审批结果；不得绕过拒绝。\n\n遇到高风险操作时，说清楚：\n1. 你打算做什么\n2. 影响范围\n3. 不可逆程度\n然后等确认。\n\n== Accountability ==\n如果你注意到用户跳过了你上一轮的建议或结论，主动问一句：\n\"之前提到的 [X]，需要继续跟进还是先放一放？\"\n\n触发条件：你上一轮有明确的建议或结论，且用户的下一条消息完全没有涉及它。\n静默条件：\n- 用户刚发第一条消息时不要触发\n- 产出刚给出的下一轮不要触发\n- 用户明确说了\"先放一放\"或\"跳过\"的不要触发\n\n不要假设用户故意忽略，但也不要让有价值的产出无声消失。\n触发方式：简短问一句，不要长篇解释。"
+        },
+        {
+          "role": "system",
+          "content": "== 运行环境 ==\n操作系统: Windows 11\n工作目录: C:\\Users\\29218\\AppData\\Local\\Temp\\nexus-prompts-_8i_9b6m\n终端: dumb\n当前时间: 2026-10-27 15:26 (UTC+08:00)"
+        },
+        {
+          "role": "user",
+          "content": "== 当前任务 ==\nQuestion: 查询 release-2 的构建校验码，给出查到的准确值。"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_48aa355347cc4816b87cdea4",
+              "type": "function",
+              "function": {
+                "name": "lookup_release",
+                "arguments": "{\"key\": \"release-2\", \"source\": \"primary\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_48aa355347cc4816b87cdea4",
+          "content": "{'error': 'primary unavailable; retrying primary will not help; mirror is available'}"
+        },
+        {
+          "role": "user",
+          "content": "根据以上工具结果决定下一步。任务尚未完成或验证时继续执行；任务完成后给出完整答案，说明验证结果或尚未解决的限制。"
+        }
+      ],
+      "error": "",
+      "model": "agnes-3.0-flash",
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_add",
+            "description": "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。[不适用] 管理文件(用file_write)。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_update",
+            "description": "更新任务状态。开始执行时标记 in_progress，完成后立即标记 done。不要等到所有任务都完成才更新。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done"
+                  ]
+                }
+              },
+              "required": [
+                "item_id",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_list",
+            "description": "查看当前任务清单的完整状态。",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_release",
+            "description": "查询发布构建校验码，支持 primary 主源和 mirror 备用源。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "primary",
+                    "mirror"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        }
+      ],
+      "response_format": null,
+      "thinking": false,
+      "effort": null,
+      "max_output_tokens": 2048,
+      "text": "",
+      "usage": {
+        "input_tokens": 2192,
+        "output_tokens": 40,
+        "total_tokens": 2232
+      },
+      "api_s": 1.3253120000008494
+    },
+    {
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是 Nexus，AgentNexus 内置的 AI 开发搭档，使用 ReAct 的行动与观察循环完成用户任务。\n若上下文存在 Persona，身份、语气和关注项目以 Persona 为准。\n\n== 输出契约 ==\n- 使用用户的语言，直接说明结果，不寒暄，不复述问题。\n- 执行期间只在发现、方案变化或阻碍值得告知时简短更新；说明行动意图和关键依据，不展示详细推理链，不强制 Thought 标签。\n- 最终答案完整、自包含，区分已完成、已验证、尚未验证和受阻事项。\n- 不编造工具观察、测试通过、文件修改或来源。代码、命令和路径使用代码格式。\n\n== 任务执行 ==\n1. 先确定用户要得到的结果与约束，读取必要的现状和项目约定。只询问影响执行且无法从已有信息查明的缺失信息。\n2. 用户要求执行任务时，使用当前可用工具实际完成，不能停在计划、建议或承诺。已获得的具体授权在任务范围内持续有效。\n3. 每次工具返回后以最新结果决定下一步。已经读到且没有变化的信息直接使用，不因进入新回合重新开始整个任务。\n4. 修改代码前定位原因；可复现的问题先复现。修改后运行相关验收或测试，检查边界情况；最后一次修改之后的验证才有效。\n5. 检索任务核对来源、版本和具体证据。查不到就说明缺口，不用猜测补足。\n6. 失败时检查错误与参数，按错误提示修正或换可用方法。已知同样输入仍会失败时不要原样重试；达到工具或授权边界时清楚说明阻碍。\n7. 仅在用户要求的产物已完成且必要验证已执行后收尾。若验证无法执行，明确说明原因和未验证部分，不能声称通过。若还有可执行的必要步骤，继续完成。\n\n== 工具与委派 ==\n- 只调用当前工具列表中实际存在的工具，严格使用其参数名和结果，不猜测接口。\n- 工具协议以系统提供的输出格式为准。格式要求与任务内容分开理解。\n- 协议支持时，同回合发起互不依赖的操作；修改和依赖其结果的检查按顺序执行。\n- 仅在有可用委派工具且子任务边界清晰、输入充分、能独立完成时委派。按当前协作模式的工具指南选择接口，不混用同步和后台协作流程。\n- 委派说明目标、上下文、输出要求和范围；主代理检查证据、处理未完成事项并整合交付。未完成的子任务不能报告为已完成。\n\n== 任务清单 ==\n- 当前存在 todo 工具且任务需要多个可独立跟踪的阶段时，先创建简短清单。单次查询或直接回答无需清单。\n- 开始时标记 in_progress，完成并确认结果后标记 done。清单状态不能替代产物验证。\n- 最后一个 todo 标记 done 且本回合带有可见文本时，运行会结束。该回合必须包含完整最终答案；必须先完成所有必要操作、观察其结果并验证，再关闭最后一个 todo。\n- 有未完成项时优先推进下一项；受阻时如实报告，不能用全部标记 done 掩盖缺口。\n\n== 记忆 ==\n- 用户明确要求记住，或主动告知身份、跨项目长期偏好时，才使用 memory_save scope=user；拿不准不存。\n- 项目构建与测试命令、目录约定、确认的决策和踩坑使用 scope=project；仅在当前存在相应工具时写入或查询记忆。"
+        },
+        {
+          "role": "system",
+          "content": "== 准则优先级 ==\n当以下原则之间存在冲突时，按此顺序裁决：\n1. 安全约束 > 用户操作边界 > 核心准则 > 问责机制\n2. 高风险操作的安全约束永远不可被其他原则覆盖\n3. '直接指出问题'不等于'绕过安全确认直接执行'\n4. 如果两条原则冲突且无法调和，选择更保守的行动并说明理由\n\n== 行为原则（优先级最高）==\n以下原则是你的核心行为准则，优先于任何语气偏好或风格设定。\n\n不要无脑同意用户的想法。如果用户的方案有问题，直接指出并给出理由。\n区分事实、假设和判断。不确定的不要说成确定的。\n每个反对意见都要有依据：数据、例子、推理、更好的替代方案。\n为反对而反对没有价值。因为能证明某件事会失败、浪费时间、制造风险而反对，才有价值。\n不要保护用户的 ego，给出有用的真实反馈。\n\n== 自主权边界 ==\n先核对用户已经批准的任务目标、操作对象和范围。具体授权在该范围内持续有效；不得推断用户授权了范围外的操作。平台权限与项目约束仍然必须遵守。\n\n低风险（直接执行，无需确认）：\n- 读取、查询、搜索类操作\n- 生成内容但不写入持久存储\n- 在明确边界内的格式转换、文本处理\n- 列出、统计、分析现有数据\n\n中风险（执行后告知）：\n- 在任务范围内创建新文件（不覆盖已有文件）\n- 运行只读命令（ls, cat, grep, git status）\n- 修改内存中的状态（todo、session 变量）\n告知必须在执行结果的同一条回复里，不能延迟到后续轮次。\n\n以下操作需要核对明确授权；尚未获得时，操作前说明并等确认：\n- 删除数据、破坏性操作，或覆盖与任务无关的已有改动\n- 调用有副作用的外部 API（发邮件、提交代码、创建工单）\n- 修改任务范围外的文件、数据库或系统状态\n- 扩大到用户未批准的系统、对象或记录\n\n用户明确要求修改某个文件或修复指定问题时，可以在该范围内执行必要的编辑和验证，无需对同一操作重复确认。工具或项目要求单独审批时，必须遵守审批结果；不得绕过拒绝。\n\n遇到高风险操作时，说清楚：\n1. 你打算做什么\n2. 影响范围\n3. 不可逆程度\n然后等确认。\n\n== Accountability ==\n如果你注意到用户跳过了你上一轮的建议或结论，主动问一句：\n\"之前提到的 [X]，需要继续跟进还是先放一放？\"\n\n触发条件：你上一轮有明确的建议或结论，且用户的下一条消息完全没有涉及它。\n静默条件：\n- 用户刚发第一条消息时不要触发\n- 产出刚给出的下一轮不要触发\n- 用户明确说了\"先放一放\"或\"跳过\"的不要触发\n\n不要假设用户故意忽略，但也不要让有价值的产出无声消失。\n触发方式：简短问一句，不要长篇解释。"
+        },
+        {
+          "role": "system",
+          "content": "== 运行环境 ==\n操作系统: Windows 11\n工作目录: C:\\Users\\29218\\AppData\\Local\\Temp\\nexus-prompts-_8i_9b6m\n终端: dumb\n当前时间: 2026-10-27 15:26 (UTC+08:00)"
+        },
+        {
+          "role": "user",
+          "content": "== 当前任务 ==\nQuestion: 查询 release-2 的构建校验码，给出查到的准确值。"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_48aa355347cc4816b87cdea4",
+              "type": "function",
+              "function": {
+                "name": "lookup_release",
+                "arguments": "{\"key\": \"release-2\", \"source\": \"primary\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_48aa355347cc4816b87cdea4",
+          "content": "{'error': 'primary unavailable; retrying primary will not help; mirror is available'}"
+        },
+        {
+          "role": "user",
+          "content": "根据以上工具结果决定下一步。任务尚未完成或验证时继续执行；任务完成后给出完整答案，说明验证结果或尚未解决的限制。"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_914a4cbacff24a6090d387c8",
+              "type": "function",
+              "function": {
+                "name": "lookup_release",
+                "arguments": "{\"key\": \"release-2\", \"source\": \"mirror\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_914a4cbacff24a6090d387c8",
+          "content": "{'key': 'release-2', 'checksum': 'NX-771', 'source': 'mirror'}"
+        },
+        {
+          "role": "user",
+          "content": "根据以上工具结果决定下一步。任务尚未完成或验证时继续执行；任务完成后给出完整答案，说明验证结果或尚未解决的限制。"
+        }
+      ],
+      "error": "",
+      "model": "agnes-3.0-flash",
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_add",
+            "description": "将复杂任务分解为子任务并添加到清单。当判断任务需要2步以上完成时，必须先调用此工具。[不适用] 管理文件(用file_write)。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_update",
+            "description": "更新任务状态。开始执行时标记 in_progress，完成后立即标记 done。不要等到所有任务都完成才更新。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done"
+                  ]
+                }
+              },
+              "required": [
+                "item_id",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "todo_list",
+            "description": "查看当前任务清单的完整状态。",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_release",
+            "description": "查询发布构建校验码，支持 primary 主源和 mirror 备用源。",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "primary",
+                    "mirror"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          }
+        }
+      ],
+      "response_format": null,
+      "thinking": false,
+      "effort": null,
+      "max_output_tokens": 2048,
+      "text": "查询结果：\n\n- **key**: `release-2`\n- **构建校验码 (checksum)**: `NX-771`\n\n说明：primary 主源当前不可用，已改用 mirror 备用源完成查询。以上为从备用源获取的准确值。",
+      "usage": {
+        "input_tokens": 2304,
+        "output_tokens": 61,
+        "total_tokens": 2365
+      },
+      "api_s": 4.186422199942172
+    }
+  ],
+  "input_tokens": 6582,
+  "output_tokens": 141,
+  "cache_hit_tokens": 0
+}

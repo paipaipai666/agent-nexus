@@ -1,0 +1,67 @@
+Screen {
+    layout: vertical;
+}
+
+#top-bar {
+    height: 1;
+}
+
+#middle {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#chat-area {
+    width: 1fr;
+    height: 100%;
+    padding: 1 2 0 2;
+    overflow-y: auto;
+    scrollbar-size-vertical: 1;
+}
+
+#side-panel {
+    display: none;
+    width: 38;
+    height: 100%;
+    border-left: solid $foreground;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#hud {
+    height: 1;
+}
+
+#welcome {
+    height: auto;
+    padding: 0 0 1 0;
+}
+
+#new-output {
+    height: 1;
+    min-width: 0;
+    width: 100%;
+    border: none;
+    background: $surface;
+    color: $primary;
+    padding: 0;
+}
+
+#command-palette {
+    display: none;
+    height: auto;
+    max-height: 10;
+    padding: 0 2;
+    background: $surface;
+    border-top: solid $foreground;
+    overflow-y: auto;
+    scrollbar-size-vertical: 1;
+}
+
+#command-palette-options {
+    height: auto;
+    max-height: 8;
+    border: none;
+    padding: 0;
+    background: transparent;
+}

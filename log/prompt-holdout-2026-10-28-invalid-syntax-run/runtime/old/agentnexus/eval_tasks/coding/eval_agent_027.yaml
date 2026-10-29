@@ -1,0 +1,25 @@
+id: eval_agent_027
+description: 创建一个 Python 装饰器用于记录函数执行时间
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- write
+input:
+  prompt: 创建一个 Python 装饰器用于记录函数执行时间
+  tools:
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 编写一个 timer 装饰器，记录函数的执行时间并输出日志。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 编写一个 timer 装饰器，记录函数的执行时间并输出日志。

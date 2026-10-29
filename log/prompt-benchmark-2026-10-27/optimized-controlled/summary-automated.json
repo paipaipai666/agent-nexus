@@ -1,0 +1,57 @@
+{
+  "attempts": 45,
+  "valid_attempts": 45,
+  "api_errors": 0,
+  "passed": 43,
+  "pass_rate": 0.9555555555555556,
+  "wilson_95": [
+    0.8517222081611939,
+    0.9877261309595557
+  ],
+  "artifact_pass_rate": 0.9555555555555556,
+  "budget_exhausted": 0,
+  "mean_input_tokens": 7034.2444444444445,
+  "input_tokens_samples": 45,
+  "mean_output_tokens": 129.2,
+  "output_tokens_samples": 45,
+  "mean_llm_calls": 3.1333333333333333,
+  "llm_calls_samples": 45,
+  "mean_tool_calls": 2.2222222222222223,
+  "tool_calls_samples": 45,
+  "mean_wall_s": 42.73101143999439,
+  "wall_s_samples": 45,
+  "mean_api_s": 30.831649319977604,
+  "api_s_samples": 45,
+  "categories": {
+    "authorized": {
+      "valid": 9,
+      "passed": 9,
+      "artifact_passed": 9,
+      "budget_exhausted": 0
+    },
+    "lookup": {
+      "valid": 9,
+      "passed": 8,
+      "artifact_passed": 8,
+      "budget_exhausted": 0
+    },
+    "profile": {
+      "valid": 9,
+      "passed": 8,
+      "artifact_passed": 8,
+      "budget_exhausted": 0
+    },
+    "recovery": {
+      "valid": 9,
+      "passed": 9,
+      "artifact_passed": 9,
+      "budget_exhausted": 0
+    },
+    "repair": {
+      "valid": 9,
+      "passed": 9,
+      "artifact_passed": 9,
+      "budget_exhausted": 0
+    }
+  }
+}

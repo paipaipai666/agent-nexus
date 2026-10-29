@@ -1,0 +1,44 @@
+"""Execution tool provider — shell execution."""
+
+from __future__ import annotations
+
+from agentnexus.tools.providers.base import ProviderSpec, ToolProviderContext
+from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
+
+
+class ExecutionToolProvider:
+    def metadata(self) -> ProviderSpec:
+        return ProviderSpec(
+            "execution",
+            description="High-risk shell execution tools.",
+        )
+
+    def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
+        from agentnexus.tools.shell import get_os_info, shell_exec
+
+        before = set(executor.list_tools())
+        os_info = get_os_info()
+        if context.want("shell_exec"):
+            executor.register(
+                ToolMeta(
+                    name="shell_exec",
+                    description=f"执行控制台命令（当前系统: {os_info}）。参数: command(命令字符串,必填), "
+                                "cwd(工作目录,可选,默认项目根目录), timeout(超时秒数,默认30)。"
+                                "可直接运行Python代码(如 python script.py / python -c)。"
+                                "[!] 此工具需要用户确认才能执行，同时受安全黑名单保护。",
+                    param_schema={
+                        "type": "object",
+                        "properties": {
+                            "command": {"type": "string", "description": "要执行的 shell 命令"},
+                            "cwd": {"type": "string", "description": "工作目录（相对于项目根目录）", "default": None},
+                            "timeout": {"type": "integer", "description": "超时秒数 (默认 30)", "default": 30},
+                        },
+                        "required": ["command"],
+                    },
+                    risk_level=RiskLevel.HIGH,
+                    require_hitl=not context.non_interactive,
+                    timeout_sec=60,
+                ),
+                shell_exec,
+            )
+        context.mark_registered(executor, before)

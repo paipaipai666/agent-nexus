@@ -1,0 +1,20 @@
+{
+  "baseline-controlled": {
+    "automatic_passed": 36,
+    "reviewed_passed": 35,
+    "artifact_passed": 36,
+    "reviewed_repair_answers": 18
+  },
+  "optimized-controlled": {
+    "automatic_passed": 43,
+    "reviewed_passed": 43,
+    "artifact_passed": 43,
+    "reviewed_repair_answers": 18
+  },
+  "wiring-controlled": {
+    "automatic_passed": 41,
+    "reviewed_passed": 40,
+    "artifact_passed": 41,
+    "reviewed_repair_answers": 18
+  }
+}

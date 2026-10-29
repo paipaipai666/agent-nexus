@@ -1,0 +1,25 @@
+id: eval_agent_042
+description: 解释 OAuth 2.0 的授权码流程
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 解释 OAuth 2.0 的授权码流程
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 详细说明授权码流程的步骤：用户授权、重定向、授权码换令牌。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 详细说明授权码流程的步骤：用户授权、重定向、授权码换令牌。

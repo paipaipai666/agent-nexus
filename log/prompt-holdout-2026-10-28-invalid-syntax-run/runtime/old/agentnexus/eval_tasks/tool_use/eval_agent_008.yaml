@@ -1,0 +1,28 @@
+id: eval_agent_008
+description: 搜索关于 FastAPI 依赖注入的资料并总结
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- search
+- web_search
+input:
+  prompt: 搜索关于 FastAPI 依赖注入的资料并总结
+  tools:
+  - search
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: search
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 搜索知识库和网络，总结 FastAPI 依赖注入的核心概念和用法。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 搜索知识库和网络，总结 FastAPI 依赖注入的核心概念和用法。

@@ -1,0 +1,25 @@
+id: eval_agent_023
+description: 设置环境变量并运行测试
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 设置环境变量并运行测试
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 bash 设置环境变量后运行 pytest，确保环境变量在子进程中生效。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 bash 设置环境变量后运行 pytest，确保环境变量在子进程中生效。

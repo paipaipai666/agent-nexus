@@ -1,0 +1,45 @@
+"""CLI command: nexus serve — start the HTTP/WebSocket API server."""
+
+import json
+import logging
+
+import typer
+
+from . import app, console
+
+logger = logging.getLogger(__name__)
+
+
+@app.command("serve")
+def serve(
+    port: int = typer.Option(18765, help="监听端口"),
+    host: str = typer.Option("127.0.0.1", help="绑定主机"),
+    no_auth: bool = typer.Option(False, help="禁用 API key 认证"),
+):
+    """启动桌面 GUI 的 HTTP/WebSocket API 服务。"""
+    import uvicorn
+
+    from agentnexus.server.app import create_app
+
+    try:
+        fastapi_app = create_app()
+
+        auth_token = None
+        if not no_auth:
+            from agentnexus.server.auth import generate_token
+            auth_token = generate_token()
+
+        ready_msg = json.dumps({"status": "ready", "port": port, "auth_token": auth_token})
+        print(ready_msg, flush=True)
+
+        uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
+    except OSError as e:
+        if "address already in use" in str(e).lower() or "only one usage" in str(e).lower():
+            console.print(f"[red]Port {port} is already in use. Try --port with a different number.[/red]")
+        else:
+            console.print(f"[red]Server failed to start: {e}[/red]")
+        raise SystemExit(1)
+    except Exception:
+        logger.exception("Unexpected server startup error")
+        console.print("[red]Server failed to start. Check logs for details.[/red]")
+        raise SystemExit(1)

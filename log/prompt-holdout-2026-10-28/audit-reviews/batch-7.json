@@ -1,0 +1,95 @@
+{
+  "judgments": [
+    {
+      "id": "answer-003",
+      "answer_sha256": "8c1766517888162721bf6328b086b166eba31c4e7f304f9854d215bcfce82e1a",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "总量32正确并提到来源记录，但没有按题目要求提交value/source JSON字段。"
+    },
+    {
+      "id": "answer-021",
+      "answer_sha256": "ba2d413fbda917b4774705e6a9f982316bdf7f61d28c68a839cb88386b15ce1b",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON总量32及来源ID与去重后的记录数据一致。"
+    },
+    {
+      "id": "answer-027",
+      "answer_sha256": "86fc881b9e6f4b66fbceba401bf9619bfbf2606b23dde9f03f7d2d22d71f2b7f",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-042",
+      "answer_sha256": "7895c5e43d5740f075a5ec15899d786882fbbb6d7dcdd7753f3a7b8dfb6afee7",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "去重后的总量36及来源记录ID与返回数据一致。"
+    },
+    {
+      "id": "answer-045",
+      "answer_sha256": "fe82ec10ac884e27662af49e09eaaf3bd420d4c31bf1e8e0d09eb2b3cdf5f854",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-046",
+      "answer_sha256": "62a8fba7ebc186b2ea5e3e1831ad46aa42c5f84c703b7c7ddc16dec3141c422b",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON中的UNKNOWN和draft-3来源与pending记录一致；工具错误提示正文未随包提供，未据此判错。"
+    },
+    {
+      "id": "answer-050",
+      "answer_sha256": "d12d9626e7074a82c3533d8b38393ae0a4c6b0d5c79d564456f94234b6f08864",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "最终JSON正确报告无确认值及draft-3来源，查询记录支持该结果。"
+    },
+    {
+      "id": "answer-063",
+      "answer_sha256": "6093d57af15cbe7329d006e92138a274a2a5c7c0f79f5ad217000621eabed662",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON中的修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-065",
+      "answer_sha256": "2ab47a92701f62846a46fe20a8037f967dcae4b15cc345d514d1c0ee0a2d36f4",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "答复value为50，且正文算式写14 + 22 + 0 = 50；记录支持的总量为36。"
+    },
+    {
+      "id": "answer-067",
+      "answer_sha256": "545da3e48f694b0662021cbe52908101c930c6cfdb91451861258fc17d8ec948",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-073",
+      "answer_sha256": "37cddeec9e39600ab230b80982716d3a6f6f3d27f1c54c67c10c090fbb9fa717",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "具体说明保序去重修改；事件记录显示首次检查语法拒绝，修正后真实入口检查通过。"
+    },
+    {
+      "id": "answer-078",
+      "answer_sha256": "d51a5a43f6a6cbad21e0b25d4209ffd37dc900fac2706580607eea87896f169f",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "说明零起始编号及非正次数返回空列表的实现，真实入口检查通过。"
+    },
+    {
+      "id": "answer-094",
+      "answer_sha256": "0d75ae19eb3d176c907e42794919bef8f88ce3af0c374aba6690622e9c18e63f",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "具体说明保序去重实现，工具记录显示真实入口验收通过。"
+    }
+  ]
+}

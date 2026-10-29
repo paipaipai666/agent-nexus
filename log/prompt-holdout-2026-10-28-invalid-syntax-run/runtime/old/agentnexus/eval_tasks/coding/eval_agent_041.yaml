@@ -1,0 +1,30 @@
+id: eval_agent_041
+description: 合并两个 Git 分支并解决冲突
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+- read
+- edit
+input:
+  prompt: 合并两个 Git 分支并解决冲突
+  tools:
+  - bash
+  - read
+  - edit
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  - tool: read
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 执行 git merge，检查冲突文件，手动解决冲突后提交。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 执行 git merge，检查冲突文件，手动解决冲突后提交。

@@ -1,0 +1,28 @@
+id: "search_and_summarize"
+description: "使用 web_search 工具搜索信息并总结"
+category: "tool_use"
+difficulty: "medium"
+eval_type: "capability"
+tags: ["web-search", "summarization"]
+
+input:
+  prompt: "搜索 Python 3.12 的主要新特性，并用中文总结 3 个最重要的改进。"
+  tools: ["web_search", "web_fetch"]
+
+graders:
+  - type: "tool_calls"
+    required_tools:
+      - tool: "web_search"
+    weight: 0.3
+  - type: "llm_rubric"
+    name: "accuracy"
+    assertions:
+      - "总结包含 Python 3.12 的真实新特性"
+      - "信息准确，没有编造"
+      - "用中文回答"
+    weight: 0.5
+  - type: "transcript"
+    max_turns: 8
+    weight: 0.2
+
+timeout_sec: 120

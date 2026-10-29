@@ -1,0 +1,16 @@
+你是评估专家。请对以下回答进行三个维度的评分，每个维度 0.0-1.0 的小数。
+
+评分标准:
+- faithfulness（忠实度）: 回答是否完全基于给定上下文，1=每个陈述都有上下文依据，0=完全无关
+- answer_relevancy（切题度）: 回答是否切题且充分解答了问题，1=完全切题，0=完全跑题
+- answer_correctness（正确度）: 回答与标准答案在语义上的一致程度，1=完全一致，0=完全不相关
+
+请严格按以下 JSON 格式输出，不要输出其他内容:
+{{"faithfulness": 0.0, "answer_relevancy": 0.0, "answer_correctness": 0.0}}
+
+上下文:
+{context}
+
+问题: {question}
+标准答案: {ground_truth}
+待评回答: {answer}

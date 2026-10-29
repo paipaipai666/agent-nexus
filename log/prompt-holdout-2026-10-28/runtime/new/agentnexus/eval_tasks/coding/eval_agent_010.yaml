@@ -1,0 +1,28 @@
+id: eval_agent_010
+description: 把项目依赖导出到 requirements.txt
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+- write
+input:
+  prompt: 把项目依赖导出到 requirements.txt
+  tools:
+  - bash
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 运行 pip freeze 或 pip list 命令导出当前环境的依赖列表。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 运行 pip freeze 或 pip list 命令导出当前环境的依赖列表。

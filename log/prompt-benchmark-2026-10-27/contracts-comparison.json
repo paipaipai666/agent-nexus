@@ -1,0 +1,6 @@
+{
+  "before_passed": 0,
+  "after_passed": 4,
+  "total": 4,
+  "note": "Deterministic request contracts, not a live task success rate"
+}

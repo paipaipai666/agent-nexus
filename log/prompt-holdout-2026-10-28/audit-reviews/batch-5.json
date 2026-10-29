@@ -1,0 +1,74 @@
+{
+  "judgments": [
+    {
+      "id": "answer-007",
+      "answer_sha256": "912814251acc92b025e0600dac081b913e7fb4389b22ca3abe41d6cd468ed002",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON值和source与primary返回的当前生效记录一致。"
+    },
+    {
+      "id": "answer-013",
+      "answer_sha256": "f053079f94fe95ec0463aa55325e76ec52bd0ccbcc9d208f8ba1d99915c83e48",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "按工具提示改用归档查询后获得记录；修订号与来源ID正确。"
+    },
+    {
+      "id": "answer-015",
+      "answer_sha256": "541bcfa3d3e2788b956d13c1c38e0dc13a08941d92a7b5271d6712bf14069826",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "最终回答只称验收通过，没有说明已完成的具体修复行为。"
+    },
+    {
+      "id": "answer-016",
+      "answer_sha256": "654a348483c16cc8d5a79d3bc53a8e5c4b985e5536d061e6b08da38a3d76a507",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "artifact使用大小写折叠后的endswith，符合后缀匹配要求；报告的入口检查通过，示例与实现相符。"
+    },
+    {
+      "id": "answer-019",
+      "answer_sha256": "f2c3b0a949774a7ed16ab7277c6d949e290699f0e01c18ef6318972b2a824999",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-023",
+      "answer_sha256": "f2986a9aaf91e09d2c29ca7936e06eac8cf6dab55dad31e8cbb338b9fabebcd2",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-029",
+      "answer_sha256": "8b56f85bb3bb3226a104ff6c97596f71b902198a05e136c5bd07163de6cf5840",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "artifact按大小写不敏感的endswith判定，所述实现和PASS记录均一致。"
+    },
+    {
+      "id": "answer-035",
+      "answer_sha256": "3cd22332f35165ef41dc0c7f171a72dc2b4f3ee6d74b92449fffc6296ed995ac",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON字段和primary当前生效记录一致；archive不可用的限制也如实说明。"
+    },
+    {
+      "id": "answer-037",
+      "answer_sha256": "5173615df08649c1c4234046bba709a1d0a546791dc3474e7bff986dc2f1a399",
+      "delivery_passed": true,
+      "serious_error": false,
+      "reason": "JSON修订号和source与成功的archive查询记录一致。"
+    },
+    {
+      "id": "answer-066",
+      "answer_sha256": "ed0bc259587efe27f29f56ded8db4a04eed966ff1e661cb20900fe68f9eea4cc",
+      "delivery_passed": false,
+      "serious_error": false,
+      "reason": "只说准备完成待办并称检查通过，没有说明完成的具体修复行为或结果细节。"
+    }
+  ]
+}

@@ -1,0 +1,201 @@
+"""Memory API routes."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from agentnexus.server.deps import get_ltm, get_runtime
+from agentnexus.server.error_handlers import APIError
+
+router = APIRouter(tags=["memory"])
+
+
+class SearchMemoryRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+
+@router.get("/long")
+def list_long_term_memories(limit: int = 20, ltm=Depends(get_ltm)):
+    memories = ltm.list_recent(limit)
+    return {"memories": memories, "count": len(memories)}
+
+
+@router.post("/search")
+def search_memories(req: SearchMemoryRequest, ltm=Depends(get_ltm)):
+    from agentnexus.services.memories import search_memories as query_memories
+
+    try:
+        results = query_memories(ltm, req.query, req.limit)
+        return {"results": results, "query": req.query}
+    except Exception as e:
+        raise APIError(500, "internal_error", str(e))
+
+
+@router.delete("/clear")
+def clear_memories(ltm=Depends(get_ltm)):
+    ltm.clear_all()
+    return {"status": "cleared"}
+
+
+@router.delete("/{memory_id}")
+def delete_memory(memory_id: str, ltm=Depends(get_ltm)):
+    try:
+        ltm.delete(memory_id)
+        return {"status": "deleted", "memory_id": memory_id}
+    except Exception as e:
+        raise APIError(404, "not_found", str(e))
+
+
+def _strip_workflow_context(content: str) -> str:
+    """Remove legacy workflow context prefix from user messages.
+
+    Old sessions stored enhanced_question which prepended workflow context
+    to the user's actual question. This strips that prefix so the frontend
+    displays only the user's real question.
+    """
+    marker = "== User Question =="
+    idx = content.find(marker)
+    if idx >= 0:
+        return content[idx + len(marker):].lstrip("\n")
+    return content
+
+
+@router.get("/short")
+def list_short_term_memories(runtime=Depends(get_runtime)):
+    stm = runtime.memory_manager.short_term
+    messages = stm.get_all()
+    result = []
+    for m in messages:
+        role = m.get("role", "")
+        content = m.get("content", "")
+        if role == "user":
+            content = _strip_workflow_context(content)
+        result.append({"role": role, "content": content, "ts": m.get("ts")})
+    return {"messages": result, "count": len(result)}
+
+
+@router.post("/short/clear")
+def clear_short_term_memory(session_id: str | None = None, runtime=Depends(get_runtime)):
+    """Clear short-term memory. If session_id is provided, clears only that session's STM."""
+    if session_id:
+        memory = runtime.chat._memory_managers.get(session_id)
+        if memory is not None:
+            memory.short_term.clear()
+    else:
+        runtime.memory_manager.short_term.clear()
+    return {"status": "cleared"}
+
+
+@router.get("/short/history")
+def list_session_history(limit: int = 0, session_id: str | None = None, runtime=Depends(get_runtime)):
+    """Read full conversation history from the message journal.
+
+    Unlike /short (which reads from the in-memory STM deque, max 50 messages),
+    this reads from the durable conversation_messages table — no message loss
+    after compaction.
+
+    Args:
+        limit: Max messages to return (0 = all).
+        session_id: Optional session ID to read from. If not provided,
+                    uses the first active session or finds the latest.
+    """
+    from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
+
+    settings = get_settings()
+    workspace = str(__import__("pathlib").Path.cwd())
+
+    if not session_id:
+        chat = runtime.chat
+        if chat._sessions:
+            session_id = next(iter(chat._sessions.keys()))
+
+    if not session_id:
+        session_id = ConversationVersionManager.find_latest_session(
+            settings.memory_db_path, None
+        )
+    if not session_id:
+        return {"messages": [], "count": 0}
+
+    version = ConversationVersionManager(
+        session_id, settings.memory_db_path,
+        workspace_path=(
+            ConversationVersionManager.get_session_workspace(
+                settings.memory_db_path, session_id
+            ) or workspace
+        ),
+    )
+    messages = version.get_messages_with_answers(limit=limit)
+    result = []
+    for m in messages:
+        role = m.get("role", "")
+        content = m.get("content", "")
+        if role == "user":
+            content = _strip_workflow_context(content)
+        result.append({"role": role, "content": content, "ts": m.get("ts")})
+    return {"messages": result, "count": len(result), "session_id": session_id}
+
+
+@router.post("/reflect")
+def run_reflection(days: int = 7, max_memories: int = 50, ltm=Depends(get_ltm)):
+    """Curator: batch-distill patterns from recent note memories into quarantine.
+
+    Reviews note-category memories from the last N days, identifies recurring patterns,
+    and writes proposals to pending_memories. Nothing enters LTM or project files
+    until a pending proposal is explicitly approved.
+    """
+    from agentnexus.core.llm import AgentLLM
+    from agentnexus.memory.reflection import run_reflection as _run_reflection
+    from agentnexus.rag.embeddings import get_embedding_model
+
+    llm = AgentLLM()
+    embed_model = get_embedding_model()
+
+    result = _run_reflection(
+        llm=llm,
+        embed_model=embed_model,
+        long_term=ltm,
+        session_id="reflection",
+        days=days,
+        max_memories=max_memories,
+    )
+    return result
+
+
+@router.get("/pending")
+def list_pending_memories(limit: int = 50, ltm=Depends(get_ltm)):
+    """List curator-proposed memories awaiting approval."""
+    rows = ltm.list_pending(limit=limit)
+    return {"pending": rows, "count": len(rows)}
+
+
+@router.post("/pending/{pending_id}/approve")
+def approve_pending_memory(pending_id: int, ltm=Depends(get_ltm)):
+    """Approve a pending memory: user-scope → LTM, project-scope → .agentnexus/."""
+    from agentnexus.rag.embeddings import get_embedding_model
+
+    try:
+        embed_model = get_embedding_model()
+    except Exception:
+        embed_model = None
+    result = ltm.approve_pending(pending_id, embed_model=embed_model)
+    if result.get("status") == "error":
+        raise APIError(404, "not_found", result.get("error"))
+    return result
+
+
+@router.post("/pending/{pending_id}/reject")
+def reject_pending_memory(pending_id: int, ltm=Depends(get_ltm)):
+    """Reject a pending memory (kept for audit)."""
+    if ltm.get_pending(pending_id) is None:
+        raise APIError(404, "not_found", f"pending id {pending_id} not found")
+    ltm.set_pending_status(pending_id, "rejected")
+    return {"status": "rejected", "pending_id": pending_id}
+
+
+@router.get("/stats")
+def memory_stats(ltm=Depends(get_ltm)):
+    """Store health: volume, never-retrieved rate, superseded count, pending count."""
+    return ltm.stats()

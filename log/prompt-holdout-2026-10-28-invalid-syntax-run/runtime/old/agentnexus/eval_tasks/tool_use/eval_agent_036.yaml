@@ -1,0 +1,25 @@
+id: eval_agent_036
+description: 查询系统资源使用情况
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- bash
+input:
+  prompt: 查询系统资源使用情况
+  tools:
+  - bash
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 使用 top、free、df 等命令查看 CPU、内存、磁盘使用情况。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 使用 top、free、df 等命令查看 CPU、内存、磁盘使用情况。

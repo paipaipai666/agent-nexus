@@ -1,0 +1,30 @@
+id: eval_agent_006
+description: 帮我调试这个代码：运行 test.py 后报错 ImportError
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- bash
+- web_search
+input:
+  prompt: 帮我调试这个代码：运行 test.py 后报错 ImportError
+  tools:
+  - read
+  - bash
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: bash
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 读取 test.py 内容，检查导入的模块是否已安装，给出修复建议。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 读取 test.py 内容，检查导入的模块是否已安装，给出修复建议。

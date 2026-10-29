@@ -1,0 +1,28 @@
+id: eval_agent_017
+description: 把 Markdown 文档中的代码块提取到单独文件
+category: coding
+difficulty: medium
+eval_type: capability
+tags:
+- read
+- write
+input:
+  prompt: 把 Markdown 文档中的代码块提取到单独文件
+  tools:
+  - read
+  - write
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: read
+  - tool: write
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解析 Markdown 文件，提取每个代码块的语言和内容，按文件名保存。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解析 Markdown 文件，提取每个代码块的语言和内容，按文件名保存。

@@ -1,0 +1,103 @@
+{
+  "planned_pairs": 48,
+  "paired": 48,
+  "complete": true,
+  "review_applied": false,
+  "review_complete": false,
+  "decision": "unreviewed",
+  "cluster_count": 8,
+  "cluster_sign_flip_p": 0.1875,
+  "serious_regressions": [],
+  "improved": 5,
+  "regressed": 2,
+  "old_passed": 43,
+  "new_passed": 46,
+  "delta": 0.0625,
+  "one_sided_exact_p": 0.2265625,
+  "cluster_bootstrap_95": [
+    -0.02702702702702703,
+    0.12280701754385964
+  ],
+  "failures": [
+    {
+      "case_id": "evidence-aggregate-1",
+      "arm": "old",
+      "answer": "Thought：记录 `usage-ledger-1` 中，事件 ID a、b、c 去重后 tokens 为 12、20、缺失按 0，总量为 32。",
+      "agent_error": null
+    },
+    {
+      "case_id": "evidence-aggregate-2",
+      "arm": "new",
+      "answer": "{\n  \"value\": 44,\n  \"source\": \"usage-ledger-2\"\n}",
+      "agent_error": null
+    },
+    {
+      "case_id": "evidence-aggregate-3",
+      "arm": "new",
+      "answer": "{\"value\": 50, \"source\": \"usage-ledger-3\"}\n\n验证：`a` 与重复的 `a` 只计一次为 14，`b` 为 22，`c` 缺失按 0 计，总量 14 + 22 + 0 = 50。",
+      "agent_error": null
+    },
+    {
+      "case_id": "evidence-current-1",
+      "arm": "old",
+      "answer": "Thought：Primary 记录已显示 `service-1` 有两条记录：旧编号 `BUILD-1001` 状态为 `superseded`，最新生效编号为 `BUILD-4266`；archive 不可用，因此无法二次核对存档，但 primary 已足以回答当前生效构建编号。任务完成，标记 done 并给出最终 JSON。",
+      "agent_error": null
+    },
+    {
+      "case_id": "repair-blocked-last",
+      "arm": "old",
+      "answer": "准备从 `service.handle` 入口验收：验证非空列表返回最后一条记录，以及空列表返回 `None`。",
+      "agent_error": null
+    },
+    {
+      "case_id": "repair-explicit-default",
+      "arm": "old",
+      "answer": "**Thought（思考）**：`logic.py` 已修改完成，标记 todo 为 done，然后运行 `run_checks` 从 `service.handle` 真实入口验收，验证 0、False、\"\"、None、以及正常值的返回结果。",
+      "agent_error": null
+    },
+    {
+      "case_id": "repair-remaining-budget",
+      "arm": "old",
+      "answer": "先查看项目入口与业务逻辑，确认“剩余预算、过期为零、非负”的实际语义和现有错误。",
+      "agent_error": null
+    }
+  ],
+  "categories": {
+    "aggregation": {
+      "old": 3,
+      "new": 2
+    },
+    "blocked_checks": {
+      "old": 7,
+      "new": 8
+    },
+    "missing_evidence": {
+      "old": 4,
+      "new": 4
+    },
+    "repair": {
+      "old": 14,
+      "new": 16
+    },
+    "source_conflict": {
+      "old": 7,
+      "new": 8
+    },
+    "tool_recovery": {
+      "old": 8,
+      "new": 8
+    }
+  },
+  "input_tokens": {
+    "old": 14632.770833333334,
+    "new": 15659.354166666666
+  },
+  "output_tokens": {
+    "old": 415.1458333333333,
+    "new": 438.0208333333333
+  },
+  "llm_calls": {
+    "old": 5.395833333333333,
+    "new": 5.645833333333333
+  }
+}

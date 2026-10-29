@@ -1,0 +1,25 @@
+id: eval_agent_029
+description: 解释 Kubernetes Pod 和 Deployment 的区别
+category: tool_use
+difficulty: medium
+eval_type: capability
+tags:
+- web_search
+input:
+  prompt: 解释 Kubernetes Pod 和 Deployment 的区别
+  tools:
+  - web_search
+graders:
+- type: tool_calls
+  required_tools:
+  - tool: web_search
+  weight: 0.3
+- type: llm_rubric
+  name: answer_quality
+  assertions:
+  - '回答应包含: 解释 Pod 是最小部署单元，Deployment 管理 Pod 的副本和滚动更新策略。'
+  weight: 0.5
+- type: transcript
+  max_turns: 10
+  weight: 0.2
+reference_solution: 解释 Pod 是最小部署单元，Deployment 管理 Pod 的副本和滚动更新策略。

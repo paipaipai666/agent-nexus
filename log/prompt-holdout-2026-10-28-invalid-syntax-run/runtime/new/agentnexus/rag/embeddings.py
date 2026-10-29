@@ -1,0 +1,205 @@
+"""Embedding model access shared by RAG and memory subsystems."""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import threading
+from collections.abc import Callable
+from hashlib import blake2b
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+from agentnexus.core.config import get_settings
+
+
+def _resolve_local_model_path(model_name: str) -> str | None:
+    """Return a complete local snapshot without triggering a network request."""
+    from agentnexus.rag.model_assets import cached_snapshot
+
+    snapshot = cached_snapshot(model_name)
+    return snapshot.path if snapshot is not None else None
+
+VECTOR_DIM = 512
+_EMBED_BATCH_SIZE = 1024
+_EMBED_TORCH_THREADS_CAP = 12
+
+_model = None
+_model_name: str | None = None
+_model_device: str | None = None
+_model_lock = threading.Lock()
+
+
+class _FallbackEmbeddingModel:
+    def __init__(self, dim: int = VECTOR_DIM):
+        self.dim = dim
+
+    def _encode_one(self, text: str, normalize_embeddings: bool = True) -> list[float]:
+        vector = [0.0] * self.dim
+        for token in _fallback_tokenize(text):
+            index = int.from_bytes(blake2b(token.encode("utf-8"), digest_size=8).digest(), "big") % self.dim
+            vector[index] += 1.0
+        if normalize_embeddings:
+            norm = sum(value * value for value in vector) ** 0.5
+            if norm > 0:
+                return [value / norm for value in vector]
+        return vector
+
+    def encode(
+        self,
+        texts,
+        normalize_embeddings: bool = True,
+        batch_size: int | None = None,
+        show_progress_bar: bool = False,
+    ):
+        del batch_size, show_progress_bar
+        if isinstance(texts, str):
+            return self._encode_one(texts, normalize_embeddings=normalize_embeddings)
+        return [self._encode_one(text, normalize_embeddings=normalize_embeddings) for text in texts]
+
+
+def _fallback_tokenize(text: str) -> list[str]:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return []
+    raw_tokens = re.findall(r"[\u4e00-\u9fff]+|[a-z0-9_]+", normalized)
+    if not raw_tokens:
+        return [normalized]
+
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if re.fullmatch(r"[\u4e00-\u9fff]+", token):
+            chars = [char for char in token if char.strip()]
+            tokens.extend(chars)
+            if len(chars) >= 2:
+                tokens.extend("".join(chars[index:index + 2]) for index in range(len(chars) - 1))
+            if len(chars) >= 3:
+                tokens.extend("".join(chars[index:index + 3]) for index in range(len(chars) - 2))
+            continue
+        tokens.append(token)
+    return tokens or [normalized]
+
+
+def _resolve_embedding_device() -> str:
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+
+    return "cpu"
+
+
+def _configure_embedding_runtime(device: str) -> None:
+    if device != "cpu":
+        return
+    try:
+        import torch
+    except ImportError:
+        return
+
+    target_threads = min(max(os.cpu_count() or 1, 1), _EMBED_TORCH_THREADS_CAP)
+    if torch.get_num_threads() != target_threads:
+        torch.set_num_threads(target_threads)
+
+
+def resolve_embedding_device() -> str:
+    return _resolve_embedding_device()
+
+
+def configure_embedding_runtime(device: str) -> None:
+    _configure_embedding_runtime(device)
+
+
+def get_embedding_model(
+    *,
+    settings_provider: Callable[[], Any] = get_settings,
+    device_resolver: Callable[[], str] | None = None,
+    runtime_configurer: Callable[[str], None] | None = None,
+):
+    global _model, _model_name, _model_device
+
+    settings = settings_provider()
+    resolved_device = (device_resolver or _resolve_embedding_device)()
+    if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
+        return _model
+    with _model_lock:
+        if _model is not None and _model_name == settings.embedding_model and _model_device == resolved_device:
+            return _model
+        (runtime_configurer or _configure_embedding_runtime)(resolved_device)
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            local_path = _resolve_local_model_path(settings.embedding_model)
+            if local_path is not None:
+                logger.info("Embedding model '%s' found in local cache, loading offline.", settings.embedding_model)
+                model_source = local_path
+            else:
+                raise FileNotFoundError(f"Embedding model '{settings.embedding_model}' is not cached")
+
+            _model = SentenceTransformer(model_source, device="cpu", local_files_only=True)
+            if resolved_device != "cpu":
+                try:
+                    _model = _model.to(resolved_device)
+                    _model = _model.half()
+                except Exception as move_err:
+                    logger.warning("Failed to move embedding model to %s, staying on CPU: %s", resolved_device, move_err)
+                    resolved_device = "cpu"
+        except Exception as e:
+            logger.warning("SentenceTransformer model failed to load, falling back to hash-based embeddings: %s", e)
+            _model = _FallbackEmbeddingModel()
+        if hasattr(_model, 'get_sentence_embedding_dimension'):
+            actual_dim = _model.get_sentence_embedding_dimension()
+            if actual_dim != VECTOR_DIM:
+                logger.warning("Embedding model dimension mismatch: expected %d, got %d. "
+                               "This may cause ChromaDB query failures.", VECTOR_DIM, actual_dim)
+        _model_name = settings.embedding_model
+        _model_device = resolved_device
+    return _model
+
+
+def embedding_to_list(value):
+    return value.tolist() if hasattr(value, "tolist") else value
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    model = get_embedding_model()
+    embeddings = model.encode(
+        texts,
+        normalize_embeddings=True,
+        batch_size=_EMBED_BATCH_SIZE,
+        show_progress_bar=False,
+    )
+    return embedding_to_list(embeddings)
+
+
+def reset_embedding_model() -> None:
+    global _model, _model_name, _model_device
+    _model = None
+    _model_name = None
+    _model_device = None
+
+
+__all__ = [
+    "VECTOR_DIM",
+    "_FallbackEmbeddingModel",
+    "_configure_embedding_runtime",
+    "_fallback_tokenize",
+    "_resolve_embedding_device",
+    "configure_embedding_runtime",
+    "embed_texts",
+    "embedding_to_list",
+    "get_embedding_model",
+    "reset_embedding_model",
+    "resolve_embedding_device",
+]

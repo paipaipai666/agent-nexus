@@ -1,0 +1,114 @@
+"""AgentNexus CLI."""
+# ruff: noqa: E402,F401
+import sys
+from pathlib import Path
+
+import typer
+from rich.console import Console
+
+app = typer.Typer(
+    name="nexus",
+    help="AgentNexus 命令行工具",
+)
+console = Console()
+
+kb_app = typer.Typer(help="知识库管理")
+app.add_typer(kb_app, name="kb")
+
+wiki_app = typer.Typer(help="混合 Wiki + RAG 知识系统")
+app.add_typer(wiki_app, name="wiki")
+
+memory_app = typer.Typer(help="记忆管理")
+app.add_typer(memory_app, name="memory")
+
+logs_app = typer.Typer(help="Trace 日志查看器")
+app.add_typer(logs_app, name="logs")
+
+eval_app = typer.Typer(help="评估系统")
+app.add_typer(eval_app, name="eval")
+
+skill_app = typer.Typer(help="技能 / 工作流管理")
+app.add_typer(skill_app, name="skill")
+
+hooks_app = typer.Typer(help="命令钩子管理")
+app.add_typer(hooks_app, name="hooks")
+
+import agentnexus.cli.eval  # noqa: E402,F401
+from agentnexus.cli import (
+    alerts_cmd,  # noqa: E402
+    audit,  # noqa: E402
+    config,  # noqa: E402
+    eval_cmd,  # noqa: E402
+    health_cmd,  # noqa: E402
+    hooks,  # noqa: E402
+    kb,  # noqa: E402
+    logs,  # noqa: E402
+    memory_cmd,  # noqa: E402
+    serve_cmd,  # noqa: E402
+    sessions,  # noqa: E402
+    skill_cmd,  # noqa: E402
+    stats,  # noqa: E402
+    tui_cmd,  # noqa: E402
+    wiki_cmd,  # noqa: E402
+)
+
+
+def _continue_session(session_id: str | None) -> None:
+    import tempfile as _tf
+
+    from agentnexus.core.config import get_settings
+    from agentnexus.memory.versioned import ConversationVersionManager
+
+    settings = get_settings()
+    try:
+        workspace = str(Path.cwd())
+    except (FileNotFoundError, OSError):
+        workspace = _tf.gettempdir()
+
+    if session_id:
+        if not ConversationVersionManager.session_belongs_to_workspace(
+            settings.memory_db_path,
+            session_id,
+            workspace,
+        ):
+            console.print(f"[red]Session not found in this directory:[/red] {session_id}")
+            raise SystemExit(1)
+    else:
+        session_id = ConversationVersionManager.find_latest_session(settings.memory_db_path, workspace)
+        if not session_id:
+            console.print("[yellow]No previous session found in this directory.[/yellow]")
+            raise SystemExit(1)
+
+    from agentnexus.cli.tui_cmd import launch_tui
+
+    launch_tui(session_id=session_id, restore_session=True)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Console-script entrypoint with pre-parsing for `nexus --continue [session_id]`."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and (args[0] == "--continue" or args[0].startswith("--continue=")):
+        if args[0].startswith("--continue="):
+            session_id = args[0].split("=", 1)[1] or None
+            extra = args[1:]
+        else:
+            session_id = args[1] if len(args) > 1 else None
+            extra = args[2:]
+        if extra:
+            console.print("[red]--continue accepts at most one session_id.[/red]")
+            raise SystemExit(2)
+        _continue_session(session_id)
+        return
+    app(args=args, prog_name="nexus")
+
+
+@app.command()
+def version():
+    """显示版本。"""
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+    try:
+        ver = _pkg_version("agentnexus")
+    except PackageNotFoundError:
+        ver = "unknown"
+    console.print(f"[bold]AgentNexus[/bold] v{ver}")

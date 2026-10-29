@@ -113,7 +113,7 @@ class TestSystemPromptProtection:
         )
         all_text = " ".join(m["content"] for m in messages)
         assert payload in all_text
-        assert messages[0]["content"].startswith("你是一个遵循")
+        assert messages[0] == {"role": "system", "content": REACT_PROMPT_TEMPLATE}
 
 
 class TestMemoryContentInjection:
@@ -311,7 +311,7 @@ class TestConversationContextInjection:
             memory_context="",
             conversation_context=conv_ctx,
         )
-        assert messages[0]["content"].startswith("你是一个遵循")
+        assert messages[0] == {"role": "system", "content": REACT_PROMPT_TEMPLATE}
         all_text = " ".join(m["content"] for m in messages)
         assert "== 近期对话 ==" in all_text or "== 对话历史摘要 ==" in all_text
 
