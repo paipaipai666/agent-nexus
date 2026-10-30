@@ -5,20 +5,29 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from agentnexus.cli import app
 from agentnexus.cli.logs import _read_trace_spans
-from agentnexus.observability import audit_log as audit_mod
-from agentnexus.observability.audit_log import append_audit, get_audit_log
+from agentnexus.core.telemetry import AuditLog, append_audit, get_audit_log
 from agentnexus.tools.registry import AuditEntry
 
 runner = CliRunner()
 
 
 class TestAudit:
-    def setup_method(self):
-        audit_mod._global_audit_log.clear()
+    @pytest.fixture(autouse=True)
+    def audit_owner(self):
+        from agentnexus.core.modules import get_module_host
+
+        host = get_module_host()
+        try:
+            with host.activate():
+                AuditLog().clear()
+                yield
+        finally:
+            host.close()
 
     def test_audit_empty(self):
         result = runner.invoke(app, ["audit"])

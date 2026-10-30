@@ -205,11 +205,11 @@ class TestWikiServiceRagIntegration:
         )
 
     @patch("agentnexus.wiki.wiki_service.get_settings")
-    def test_on_rag_ingest_skips_when_wiki_disabled(self, mock_settings):
+    def test_selected_service_does_not_recheck_the_global_enable_flag(self, mock_settings):
         mock_settings.return_value = MagicMock(wiki_enabled=False)
         with patch.object(self.service.propagation, "on_chunk_update") as mock_update:
             self.service.on_rag_ingest(["c1"])
-        mock_update.assert_not_called()
+        mock_update.assert_called_once_with(["c1"])
 
     @patch("agentnexus.wiki.wiki_service.get_settings")
     def test_on_rag_ingest_triggers_propagation(self, mock_settings):

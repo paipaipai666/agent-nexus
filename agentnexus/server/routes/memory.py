@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from agentnexus.core.modules import ModuleUnavailable
 from agentnexus.server.deps import get_ltm, get_runtime
 from agentnexus.server.error_handlers import APIError
 
@@ -64,7 +65,7 @@ def _strip_workflow_context(content: str) -> str:
 
 @router.get("/short")
 def list_short_term_memories(runtime=Depends(get_runtime)):
-    stm = runtime.memory_manager.short_term
+    stm = _require_short_term(runtime.memory_manager)
     messages = stm.get_all()
     result = []
     for m in messages:
@@ -80,12 +81,20 @@ def list_short_term_memories(runtime=Depends(get_runtime)):
 def clear_short_term_memory(session_id: str | None = None, runtime=Depends(get_runtime)):
     """Clear short-term memory. If session_id is provided, clears only that session's STM."""
     if session_id:
-        memory = runtime.chat._memory_managers.get(session_id)
-        if memory is not None:
-            memory.short_term.clear()
+        try:
+            memory = runtime.chat.session_memory(session_id)
+        except KeyError as exc:
+            raise APIError(404, "not_found", str(exc)) from exc
     else:
-        runtime.memory_manager.short_term.clear()
+        memory = runtime.memory_manager
+    _require_short_term(memory).clear()
     return {"status": "cleared"}
+
+
+def _require_short_term(memory):
+    if memory is None or getattr(memory, "retention_enabled", True) is False:
+        raise ModuleUnavailable("short_term", "disabled or unavailable")
+    return memory.short_term
 
 
 @router.get("/short/history")
@@ -104,7 +113,7 @@ def list_session_history(limit: int = 0, session_id: str | None = None, runtime=
     from agentnexus.core.config import get_settings
     from agentnexus.memory.versioned import ConversationVersionManager
 
-    settings = get_settings()
+    settings = runtime.settings if getattr(runtime, "settings", None) is not None else get_settings()
     workspace = str(__import__("pathlib").Path.cwd())
 
     if not session_id:
@@ -146,22 +155,7 @@ def run_reflection(days: int = 7, max_memories: int = 50, ltm=Depends(get_ltm)):
     and writes proposals to pending_memories. Nothing enters LTM or project files
     until a pending proposal is explicitly approved.
     """
-    from agentnexus.core.llm import AgentLLM
-    from agentnexus.memory.reflection import run_reflection as _run_reflection
-    from agentnexus.rag.embeddings import get_embedding_model
-
-    llm = AgentLLM()
-    embed_model = get_embedding_model()
-
-    result = _run_reflection(
-        llm=llm,
-        embed_model=embed_model,
-        long_term=ltm,
-        session_id="reflection",
-        days=days,
-        max_memories=max_memories,
-    )
-    return result
+    return ltm.reflect(days=days, max_memories=max_memories)
 
 
 @router.get("/pending")
@@ -174,13 +168,7 @@ def list_pending_memories(limit: int = 50, ltm=Depends(get_ltm)):
 @router.post("/pending/{pending_id}/approve")
 def approve_pending_memory(pending_id: int, ltm=Depends(get_ltm)):
     """Approve a pending memory: user-scope → LTM, project-scope → .agentnexus/."""
-    from agentnexus.rag.embeddings import get_embedding_model
-
-    try:
-        embed_model = get_embedding_model()
-    except Exception:
-        embed_model = None
-    result = ltm.approve_pending(pending_id, embed_model=embed_model)
+    result = ltm.approve_pending(pending_id)
     if result.get("status") == "error":
         raise APIError(404, "not_found", result.get("error"))
     return result

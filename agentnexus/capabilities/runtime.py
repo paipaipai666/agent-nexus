@@ -38,6 +38,7 @@ class CapabilityRuntime:
         register_tools: Any = None,
         llm_client: Any = None,
         subagent_confirm: Any = None,
+        modules: Any = None,
     ):
         self.settings = settings
         self.executor = executor
@@ -47,6 +48,7 @@ class CapabilityRuntime:
         self.register_tools = register_tools
         self.llm_client = llm_client
         self.subagent_confirm = subagent_confirm
+        self.modules = modules
         self._lock = threading.RLock()
         self.states = self._load_states()
 
@@ -142,14 +144,18 @@ class CapabilityRuntime:
         if self.register_tools is None:
             return "no register_tools hook"
         self.executor.unregister_source_type("builtin")
-        self.register_tools(
-            self.executor,
-            llm_client=self.llm_client,
-            subagent_confirm=self.subagent_confirm,
-            mcp_manager=self.mcp_manager,
-            extra_providers=[],
-            todo_list=getattr(self.agent, "_todo_list", None),
-        )
+        from contextlib import nullcontext
+
+        with self.modules.activate() if self.modules is not None else nullcontext():
+            self.register_tools(
+                self.executor,
+                llm_client=self.llm_client,
+                subagent_confirm=self.subagent_confirm,
+                mcp_manager=self.mcp_manager,
+                extra_providers=[],
+                todo_list=getattr(self.agent, "todo_list", None),
+                modules=self.modules,
+            )
         return "reloaded"
 
     def reload_skills(self) -> str:
@@ -221,17 +227,19 @@ class CapabilityRuntime:
             raise ValueError(f"Unknown capability kind: {kind}")
         return normalized
 
-    @staticmethod
-    def _capability_config() -> dict:
+    def _capability_config(self) -> dict:
         from agentnexus.core.config import get_settings
 
-        caps = get_settings().capabilities
+        settings = self.modules.settings if self.modules is not None else get_settings()
+        caps = settings.capabilities
         return caps.model_dump()
 
-    @staticmethod
-    def _write_capability_config(cfg: dict) -> None:
+    def _write_capability_config(self, cfg: dict) -> None:
+        from contextlib import nullcontext
+
         from agentnexus.core.config import load_config_yaml, write_config_yaml
 
         data = load_config_yaml()
         data["capabilities"] = cfg
-        write_config_yaml(data)
+        with self.modules.activate() if self.modules is not None else nullcontext():
+            write_config_yaml(data)

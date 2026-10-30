@@ -9,12 +9,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentnexus.observability import timeline
-from agentnexus.observability.timeline import TimelineStore
 from agentnexus.server.error_handlers import register_error_handlers
 from agentnexus.server.routes.chat import router
 from agentnexus.services.chat import ChatService
 from agentnexus.services.subagents import SubagentRunContext
+from agentnexus.storage import timeline
+from agentnexus.storage.timeline import TimelineStore
 from agentnexus.tools.confirm_bridge import SubagentBridge
 from agentnexus.tools.subagent import make_subagent_run
 from agentnexus.tools.workspace import current_workspace

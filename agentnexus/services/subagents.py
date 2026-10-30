@@ -171,7 +171,7 @@ class SubagentRunContext:
                  messages: list[dict]) -> None:
         """Persist one attempt's model input under its own run and step ids."""
         try:
-            from agentnexus.observability.timeline import get_timeline_store
+            from agentnexus.storage.timeline import get_timeline_store
 
             get_timeline_store().record_snapshot(
                 entry.session_id, child_run_id, step_id, messages,

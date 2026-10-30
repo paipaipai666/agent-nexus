@@ -246,7 +246,7 @@ class TestMemorySave:
     """memory_save with edge-case content (HTML, long, unicode)."""
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_html_injection(self, mock_get_emb, mock_get_ltm):
         """HTML/script content saved as-is — no injection vector since it's text."""
         mock_model = MagicMock()
@@ -256,7 +256,7 @@ class TestMemorySave:
         assert "已保存" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_long_string(self, mock_get_emb, mock_get_ltm):
         """Very long content is truncated in response message but saved in full."""
         mock_model = MagicMock()
@@ -265,11 +265,11 @@ class TestMemorySave:
         long_content = "A" * 10000
         result = memory_save(long_content, category="entity_fact")
         assert "已保存" in result
-        _, kwargs = mock_get_ltm.return_value.save.call_args
+        _, kwargs = mock_get_ltm.return_value.save_text.call_args
         assert len(kwargs["content"]) == 10000
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_unicode_injection(self, mock_get_emb, mock_get_ltm):
         """Unicode special characters saved correctly."""
         mock_model = MagicMock()
@@ -279,7 +279,7 @@ class TestMemorySave:
         assert "已保存" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_html_injection_all_categories(self, mock_get_emb, mock_get_ltm):
         """HTML content saved under all valid categories."""
         mock_model = MagicMock()
@@ -399,7 +399,7 @@ class TestSqlInjection:
     """memory/memory_save with SQL injection vectors."""
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_sql_injection_content(self, mock_get_emb, mock_get_ltm):
         """SQL injection attempt in content is safely stored as text."""
         mock_model = MagicMock()
@@ -408,11 +408,11 @@ class TestSqlInjection:
         payload = "\"'; DROP TABLE long_term_memories; --"
         result = memory_save(payload, category="entity_fact")
         assert "已保存" in result
-        _, kwargs = mock_get_ltm.return_value.save.call_args
+        _, kwargs = mock_get_ltm.return_value.save_text.call_args
         assert kwargs["content"] == payload
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_sql_injection_category(self, mock_get_emb, mock_get_ltm):
         """SQL-like category string is rejected by category validation (not SQLi)."""
         mock_model = MagicMock()
@@ -422,7 +422,7 @@ class TestSqlInjection:
         assert "无效分类" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_union_injection(self, mock_get_emb, mock_get_ltm):
         """UNION SELECT injection attempt is safely stored."""
         mock_model = MagicMock()
@@ -431,7 +431,7 @@ class TestSqlInjection:
         payload = "UNION SELECT * FROM long_term_memories"
         result = memory_save(payload, category="entity_fact")
         assert "已保存" in result
-        _, kwargs = mock_get_ltm.return_value.save.call_args
+        _, kwargs = mock_get_ltm.return_value.save_text.call_args
         assert kwargs["content"] == payload
 
 
@@ -439,7 +439,7 @@ class TestMemorySaveHugeContent:
     """memory_save with extreme content sizes."""
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_huge_content(self, mock_get_emb, mock_get_ltm):
         """memory_save with 1MB content does not OOM."""
         mock_model = MagicMock()
@@ -448,11 +448,11 @@ class TestMemorySaveHugeContent:
         huge = "x" * (1024 * 1024)
         result = memory_save(huge, category="entity_fact")
         assert "已保存" in result
-        _, kwargs = mock_get_ltm.return_value.save.call_args
+        _, kwargs = mock_get_ltm.return_value.save_text.call_args
         assert len(kwargs["content"]) == 1024 * 1024
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_max_importance_clamped(self, mock_get_emb, mock_get_ltm):
         """Importance value > 1.0 is clamped to 1.0."""
         mock_model = MagicMock()
@@ -462,7 +462,7 @@ class TestMemorySaveHugeContent:
         assert "已保存" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_min_importance_clamped(self, mock_get_emb, mock_get_ltm):
         """Importance value < 0.0 is clamped to 0.0."""
         mock_model = MagicMock()
@@ -472,7 +472,7 @@ class TestMemorySaveHugeContent:
         assert "已保存" in result
 
     @patch("agentnexus.tools.memory_save.get_long_term_memory")
-    @patch("agentnexus.tools.memory_save.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     def test_memory_save_empty_content(self, mock_get_emb, mock_get_ltm):
         """Empty content returns error, not crash."""
         mock_model = MagicMock()

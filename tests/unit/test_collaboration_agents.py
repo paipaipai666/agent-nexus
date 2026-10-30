@@ -4,10 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.observability.timeline import TimelineStore
 from agentnexus.services.chat import ChatService
 from agentnexus.services.collaboration import CollaborationRun
 from agentnexus.services.subagents import SubagentRunContext
+from agentnexus.storage.timeline import TimelineStore
 from agentnexus.tools.providers.base import ToolProviderContext
 from agentnexus.tools.providers.subagent_provider import SubagentToolProvider
 from agentnexus.tools.registry import ToolRegistry
@@ -30,7 +30,7 @@ def model():
 def test_real_agents_exchange_question_reply_progress_and_instruction(tmp_path, monkeypatch):
     store = TimelineStore(str(tmp_path / "timeline.db"))
     monkeypatch.setattr("agentnexus.services.chat.get_timeline_store", lambda: store)
-    monkeypatch.setattr("agentnexus.observability.timeline.get_timeline_store", lambda: store)
+    monkeypatch.setattr("agentnexus.storage.timeline.get_timeline_store", lambda: store)
     registry = ToolRegistry()
     parent = model()
     received_instruction = threading.Event()

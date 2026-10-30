@@ -1,8 +1,5 @@
 """CLI logs list/view commands"""
-import json
-import time
 from datetime import datetime
-from pathlib import Path
 
 import typer
 from rich import box
@@ -10,38 +7,14 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from agentnexus.core.config import get_settings
-
 from . import console, logs_app
 
 
 def _read_trace_spans(days: int):
     """Read spans from JSONL trace files, filtered by days."""
-    traces_dir = Path(get_settings().traces_dir)
-    if not traces_dir.exists():
-        return []
+    from agentnexus.core.modules import get_module_host
 
-    cutoff = time.time() - days * 86400
-    all_spans: list[dict] = []
-
-    jsonl_files = sorted(traces_dir.glob("*.jsonl"), reverse=True)
-    for f in jsonl_files:
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if span.get("start_time", 0) >= cutoff:
-                        all_spans.append(span)
-        except Exception:
-            continue
-
-    return all_spans
+    return get_module_host().require("observability").read_trace_spans(days)
 
 
 @logs_app.command("list")
@@ -109,27 +82,9 @@ def logs_list(days: int = typer.Option(7, "--days", "-d", help="回溯最近 N �
 @logs_app.command("view")
 def logs_view(trace_id: str = typer.Option(..., "--trace-id", "-t", help="要查看的 Trace ID")):
     """查看指定 trace 的完整 span 树。"""
-    traces_dir = Path(get_settings().traces_dir)
-    if not traces_dir.exists():
-        console.print("[dim]No trace records[/dim]")
-        return
+    from agentnexus.core.modules import get_module_host
 
-    spans: list[dict] = []
-    for f in sorted(traces_dir.glob("*.jsonl")):
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        span = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if span.get("trace_id") == trace_id:
-                        spans.append(span)
-        except Exception:
-            continue
+    spans = get_module_host().require("observability").get_trace(trace_id)["spans"]
 
     if not spans:
         console.print(f"[red]Trace not found: {trace_id}[/red]")

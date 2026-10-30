@@ -1,11 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.observability.tracer import (
     TraceContext,
     TraceManager,
     TraceSpan,
-    trace_manager,
 )
 from agentnexus.tools.subagent import make_subagent_run
 
@@ -63,10 +63,11 @@ class TestTraceContext:
 
 
 class TestTraceManager:
-    def test_singleton(self):
+    def test_instances_do_not_share_active_trace(self):
         tm1 = TraceManager()
         tm2 = TraceManager()
-        assert tm1 is tm2
+        tm1.start_trace("first")
+        assert tm2.active is None
 
     def test_start_and_end_trace(self, tmp_path):
         tm = TraceManager()
@@ -141,10 +142,10 @@ class TestTraceManager:
         tm.configure(str(tmp_path))
         tm.start_trace("order test")
 
-        s1 = trace_manager.active.start_span("first")
-        trace_manager.active.end_span(s1)
-        s2 = trace_manager.active.start_span("second")
-        trace_manager.active.end_span(s2)
+        s1 = tm.active.start_span("first")
+        tm.active.end_span(s1)
+        s2 = tm.active.start_span("second")
+        tm.active.end_span(s2)
 
         tm.end_trace()
         jsonl_files = list(tmp_path.glob("*.jsonl"))
@@ -154,7 +155,7 @@ class TestTraceManager:
         assert first_idx < second_idx
 
     def test_subagent_trace_contains_parent_and_attempt_spans(self, tmp_path, monkeypatch):
-        tm = TraceManager()
+        tm = trace_manager
         tm.configure(str(tmp_path))
         tm.start_trace("subagent trace test")
 
@@ -165,7 +166,7 @@ class TestTraceManager:
                 llm_span.metadata = {"status": "ok"}
             return SimpleNamespace(answer="child answer", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         payload = tool(task="请总结 README", role="explorer")
@@ -179,13 +180,13 @@ class TestTraceManager:
         assert '"name": "llm"' in content
 
     def test_subagent_trace_records_recovery_metadata(self, tmp_path, monkeypatch):
-        tm = TraceManager()
+        tm = trace_manager
         tm.configure(str(tmp_path))
         tm.start_trace("subagent recovery trace")
 
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
         monkeypatch.setattr(
-            "agentnexus.tools.subagent.ReActAgent.run",
+            "agentnexus.agents.re_act_agent.ReActAgent.run",
             lambda self, question, memory_manager=None: SimpleNamespace(answer="fallback answer", steps=[]),
         )
 
@@ -203,7 +204,7 @@ class TestTraceManager:
         from agentnexus.agents.react_types import ExecutionContext, ReActEvent, ReActEventType
         from agentnexus.tools.registry import ToolRegistry
 
-        tm = TraceManager()
+        tm = trace_manager
         tm.configure(str(tmp_path))
         tm.start_trace("parent adoption trace")
 

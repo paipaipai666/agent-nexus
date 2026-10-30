@@ -6,9 +6,9 @@ from . import console, memory_app
 
 
 def get_long_term_memory():
-    from agentnexus.memory.long_term import get_long_term_memory as _get_long_term_memory
+    from agentnexus.core.modules import get_module_host
 
-    return _get_long_term_memory()
+    return get_module_host().require("long_term")
 
 
 @memory_app.command("list")

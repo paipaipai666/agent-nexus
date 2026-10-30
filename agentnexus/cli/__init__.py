@@ -4,11 +4,32 @@ import sys
 from pathlib import Path
 
 import typer
+from click import ClickException
 from rich.console import Console
+from typer.core import TyperGroup
+
+
+class ModuleCommandGroup(TyperGroup):
+    """Keep one selected module owner active throughout a CLI invocation."""
+
+    def invoke(self, context):
+        from agentnexus.core.modules import ModuleHost, ModuleLoadError, ModuleUnavailable, active_module_host
+
+        active = active_module_host()
+        owner = active if active is not None else ModuleHost()
+        try:
+            with owner.activate():
+                return super().invoke(context)
+        except (ModuleUnavailable, ModuleLoadError) as exc:
+            raise ClickException(str(exc)) from exc
+        finally:
+            if active is None:
+                owner.close()
 
 app = typer.Typer(
     name="nexus",
     help="AgentNexus 命令行工具",
+    cls=ModuleCommandGroup,
 )
 console = Console()
 

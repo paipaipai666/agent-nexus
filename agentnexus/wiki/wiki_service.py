@@ -56,12 +56,66 @@ class WikiService:
         store: WikiStore | None = None,
         verifier: MechanicalVerifier | None = None,
         router: ConfidenceRouter | None = None,
+        *,
+        owns_store: bool = False,
+        settings=None,
     ):
         self.store = store or get_wiki_store()
+        self._owns_store = owns_store
+        self._settings = settings
         self.verifier = verifier or MechanicalVerifier()
         self.router = router or ConfidenceRouter()
         self.propagation = PropagationEngine(self.store, self.verifier, self.router)
         self.linter = WikiLinter(self.store)
+
+    def close(self) -> None:
+        """Close storage created specifically for this service owner."""
+        if self._owns_store:
+            self._owns_store = False
+            self.store.close()
+
+    def list_pages(self, source_namespace: str = "", limit: int = 100):
+        """List pages through the selected Wiki storage implementation."""
+        return self.store.list_pages(source_namespace=source_namespace, limit=limit)
+
+    def get_page(self, page_id: str, include_statements: bool = True):
+        """Read a page and its statements."""
+        return self.store.get_page(page_id, include_statements=include_statements)
+
+    def delete_page(self, page_id: str) -> None:
+        """Delete a persisted page."""
+        self.store.delete_page(page_id)
+
+    def list_review_items(self, status: str = "pending", limit: int = 50):
+        """List the review queue without exposing its store."""
+        return self.store.list_review_items(status=status, limit=limit)
+
+    def resolve_review_item(self, item_id: str) -> None:
+        """Resolve a queued review item."""
+        self.store.resolve_review_item(item_id)
+
+    def get_latest_calibration(self):
+        """Read the latest threshold calibration."""
+        return self.store.get_latest_calibration()
+
+    def initialize_namespace(self, namespace: str) -> dict:
+        """Validate a knowledge namespace and return its Wiki statistics."""
+        from agentnexus.rag.store import get_knowledge_base_catalog
+
+        if get_knowledge_base_catalog().get_knowledge_base(namespace) is None:
+            raise ValueError(f"No RAG knowledge base for namespace '{namespace}'")
+        return self.get_stats(namespace)
+
+    def backfill(self, namespace: str) -> dict:
+        """Rebuild Wiki pages for an existing knowledge namespace."""
+        from agentnexus.services.wiki import backfill_wiki
+
+        return backfill_wiki(self, namespace)
+
+    def calibrate_records(self, records: list[dict]) -> dict:
+        """Calibrate thresholds from serialized human annotations."""
+        samples = [CalibrationSample(**record) for record in records]
+        return self.calibrate(samples)
 
     def ingest_source(
         self,
@@ -194,7 +248,7 @@ class WikiService:
 
     def search_wiki_pages(self, query: str, source_namespace: str, limit: int = 5) -> list[WikiPage]:
         """Search wiki pages by semantic similarity."""
-        settings = get_settings()
+        settings = self._settings or get_settings()
         wiki_namespace = settings.wiki_namespace
 
         from agentnexus.storage.chroma import search as chroma_search
@@ -241,7 +295,7 @@ class WikiService:
 
     def check_calibration_needed(self, source_namespace: str = "") -> bool:
         """Check if wiki has grown enough to warrant re-calibration."""
-        settings = get_settings()
+        settings = self._settings or get_settings()
         stats = self.store.get_stats(source_namespace)
         calibration = self.store.get_latest_calibration()
 
@@ -258,9 +312,6 @@ class WikiService:
 
     def on_rag_ingest(self, chunk_ids: list[str]):
         """Hook: called after RAG ingestion to trigger wiki re-verification."""
-        settings = get_settings()
-        if not settings.wiki_enabled:
-            return
         self.propagation.on_chunk_update(chunk_ids)
 
     def get_stats(self, source_namespace: str = "") -> dict:
@@ -447,7 +498,7 @@ class WikiService:
 
     def _index_page_in_chroma(self, page: WikiPage):
         """Index wiki page in ChromaDB for semantic search."""
-        settings = get_settings()
+        settings = self._settings or get_settings()
         wiki_namespace = settings.wiki_namespace
 
         from agentnexus.storage.chroma import upsert_documents

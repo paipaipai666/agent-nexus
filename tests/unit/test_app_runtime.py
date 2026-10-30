@@ -19,7 +19,7 @@ def test_runtime_build_assembles_core_services():
          patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=MagicMock()), \
          patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=MagicMock()), \
          patch("agentnexus.skills.SkillRegistry.from_settings") as mock_skill_registry, \
-         patch("agentnexus.observability.tracer.trace_manager") as mock_trace:
+         patch("agentnexus.core.telemetry.trace_manager") as mock_trace:
         registry = MagicMock()
         registry.discover.return_value = []
         mock_skill_registry.return_value = registry
@@ -30,7 +30,8 @@ def test_runtime_build_assembles_core_services():
     assert runtime.session_id.startswith("tui_")
     assert runtime.chat is not None
     assert runtime.skill is not None
-    mock_trace.configure.assert_called_once_with("/tmp/traces")
+    assert runtime.modules.settings is mock_settings
+    mock_trace.configure.assert_not_called()
 
 
 def test_runtime_build_uses_supplied_session_id_and_restores_stm():
@@ -62,7 +63,7 @@ def test_runtime_build_uses_supplied_session_id_and_restores_stm():
          patch("agentnexus.memory.versioned.ConversationVersionManager", return_value=version) as mock_version_cls, \
          patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=MagicMock()), \
          patch("agentnexus.skills.SkillRegistry.from_settings") as mock_skill_registry, \
-         patch("agentnexus.observability.tracer.trace_manager"):
+         patch("agentnexus.core.telemetry.trace_manager"):
         registry = MagicMock()
         registry.discover.return_value = []
         mock_skill_registry.return_value = registry
@@ -71,7 +72,7 @@ def test_runtime_build_uses_supplied_session_id_and_restores_stm():
         runtime = AppRuntime.build(profile="tui", session_id="tui_existing", restore_session=True)
 
     assert runtime.session_id == "tui_existing"
-    mock_memory_cls.assert_called_once_with("tui_existing", llm=ANY, workspace_path=ANY)
+    mock_memory_cls.assert_called_once_with("tui_existing", llm=ANY, workspace_path=ANY, modules=runtime.modules)
     mock_version_cls.assert_called_once_with(
         "tui_existing",
         "/tmp/memory.db",

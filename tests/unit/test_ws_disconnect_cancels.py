@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import WebSocketDisconnect
 
-from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.server.routes.chat import ws_agent
 from agentnexus.services.chat import ChatService
 
@@ -21,7 +21,7 @@ from agentnexus.services.chat import ChatService
 @pytest.fixture(autouse=True)
 def _mock_trace_manager():
     mock_tm = MagicMock()
-    with patch("agentnexus.observability.tracer.trace_manager", mock_tm):
+    with patch("agentnexus.core.telemetry.trace_manager", mock_tm):
         yield
 
 

@@ -311,12 +311,12 @@ class TestChatService:
         agent = MagicMock()
 
         def run(_text, memory_manager=None):
-            agent._on_event(
+            agent.event_handler(
                 ReActEvent(ReActEventType.TOOL_START, {"name": "web_search", "arguments": {"query": "x"}}),
                 None,
                 None,
             )
-            agent._on_event(
+            agent.event_handler(
                 ReActEvent(ReActEventType.TOOL_DONE, {"name": "web_search", "result": "result"}),
                 None,
                 None,

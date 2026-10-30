@@ -23,7 +23,7 @@ class TestMultiTurnContext:
 
         if mock_ltm is None:
             mock_ltm = MagicMock()
-            mock_ltm.search.return_value = []
+            mock_ltm.search_text.return_value = []
             mock_ltm.write_counter = 0
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
@@ -45,7 +45,7 @@ class TestMultiTurnContext:
         """Information from turn 1 appears in turn 2's LTM query."""
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        mock_ltm.search.return_value = [
+        mock_ltm.search_text.return_value = [
             {"category": "user_preference", "_score": 0.8, "content": "用户要求使用Python"},
         ]
 
@@ -84,7 +84,7 @@ class TestMultiTurnContext:
     def test_conclude_does_not_lose_prior_context(self, temp_agentnexus_home):
         """Conclude in turn N does not corrupt turn N-1 memory."""
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
@@ -98,7 +98,7 @@ class TestMultiTurnContext:
             '```json\n{"fact": [{"content": "定义了User模型"}]}\n```',
         ]
         mgr.conclude("定义User模型", "class User(Base): ...")
-        turn1_save_count = mock_ltm.save.call_count
+        turn1_save_count = mock_ltm.save_text.call_count
 
         mgr.short_term.append("user", "添加email字段")
         mgr.short_term.append("assistant", "email = Column(String)")
@@ -107,10 +107,10 @@ class TestMultiTurnContext:
             '```json\n{"fact": [{"content": "添加了email字段"}]}\n```',
         ]
         mgr.conclude("添加email字段", "email = Column(String)")
-        turn2_save_count = mock_ltm.save.call_count
+        turn2_save_count = mock_ltm.save_text.call_count
 
         assert turn2_save_count > turn1_save_count
-        all_save_calls = mock_ltm.save.call_args_list
+        all_save_calls = mock_ltm.save_text.call_args_list
         contents = [c[1]["content"] for c in all_save_calls]
         assert "定义了User模型" in contents
         assert "添加了email字段" in contents
@@ -119,7 +119,7 @@ class TestMultiTurnContext:
         """Multiple LTM-recalled contexts merge correctly."""
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        mock_ltm.search.side_effect = [
+        mock_ltm.search_text.side_effect = [
             [],
             [{"category": "entity_fact", "_score": 0.7, "content": "用户有一个Flask项目"}],
             [
@@ -156,7 +156,7 @@ class TestMultiTurnContext:
         """A 10-turn conversation still preserves early context."""
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
@@ -176,7 +176,7 @@ class TestMultiTurnContext:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_embed, mock_ltm)

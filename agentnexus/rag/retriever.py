@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from agentnexus.core.config import get_settings
 from agentnexus.core.llm import AgentLLM
-from agentnexus.observability.tracer import trace_span
+from agentnexus.core.telemetry import trace_span
 from agentnexus.prompts import load_prompt
 from agentnexus.storage.chroma import resolve_collection_name, upsert_documents
 from agentnexus.storage.chroma import search as chroma_search

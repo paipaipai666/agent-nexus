@@ -14,11 +14,11 @@ class _FakeAgent:
     """Simulates a per-session agent that has run queries and accumulated stats."""
     model_id = "test-model"
     total_usage = {"input_tokens": 0, "output_tokens": 0}
-    _step_count = 0
+    step_count = 0
 
     def __init__(self, input_tokens=0, output_tokens=0, step_count=0):
         self.total_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
-        self._step_count = step_count
+        self.step_count = step_count
 
 
 class _FakeMemoryManager:

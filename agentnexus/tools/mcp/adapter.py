@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from agentnexus.core.config import MCPServerConfig
-from agentnexus.observability.tracer import trace_span
+from agentnexus.core.telemetry import trace_span
 from agentnexus.tools.mcp import (
     call as mcp_call,
 )

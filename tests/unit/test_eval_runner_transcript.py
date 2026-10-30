@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.evaluation.runner import ReActAgentRunner
-from agentnexus.observability.tracer import trace_manager
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def clean_trace():
 class _FakeAgent:
     """模拟 ReActAgent: 在 active trace 下产生 plan_node/tool/final_answer spans。"""
 
-    def __init__(self, llm_client=None, tool_executor=None, max_steps=5):
+    def __init__(self, llm_client=None, tool_executor=None, max_steps=5, **kwargs):
         self._total_usage = {"input_tokens": 10, "output_tokens": 5}
 
     def run(self, question: str):
@@ -49,10 +49,8 @@ def _patch_agent_deps(monkeypatch):
     monkeypatch.setattr("agentnexus.core.llm.AgentLLM", lambda: object())
     monkeypatch.setattr("agentnexus.tools.registry.ToolRegistry", lambda: object())
     monkeypatch.setattr("agentnexus.tools.register_all_tools", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "agentnexus.core.config.get_settings",
-        lambda: SimpleNamespace(max_agent_steps=5, llm_model_id="fake-model"),
-    )
+    settings = SimpleNamespace(max_agent_steps=5, llm_model_id="fake-model")
+    monkeypatch.setattr("agentnexus.core.config.get_settings", lambda: settings)
 
 
 def test_transcript_uses_real_clock(monkeypatch, clean_trace):

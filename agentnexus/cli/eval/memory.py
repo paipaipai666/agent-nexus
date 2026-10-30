@@ -8,7 +8,14 @@ from agentnexus.cli import console, eval_app
 
 
 @eval_app.command("memory")
-def eval_memory(
+def eval_memory(ci: bool=typer.Option(False, '--ci', help='探针失败时以非零码退出（CI 门禁）'), judge: bool=typer.Option(False, '--judge', help='启用 LLM judge 质量探针（需要真实模型配置）')):
+    '记忆系统评测：LTM / STM / 项目记忆的确定性探针（无需 LLM，离线可跑）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_memory(ci, judge)
+
+
+def _default_eval_memory(
     ci: bool = typer.Option(False, "--ci", help="探针失败时以非零码退出（CI 门禁）"),
     judge: bool = typer.Option(False, "--judge", help="启用 LLM judge 质量探针（需要真实模型配置）"),
 ):
@@ -33,7 +40,14 @@ def eval_memory(
 
 
 @eval_app.command("memory-audit")
-def eval_memory_audit(
+def eval_memory_audit(db: str | None=typer.Option(None, '--db', help='memory.db 路径（默认取配置 memory_db_path）'), sample_csv: str | None=typer.Option(None, '--sample-csv', help='导出分层抽样 CSV 供标注，计算线上 P_write'), n_per_category: int=typer.Option(10, '--n-per-cat', help='每类抽样条数')):
+    '审计真实 LTM 库：类别/写入者分布、强信号占比、标注采样（GateCal P3，只读）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_memory_audit(db, sample_csv, n_per_category)
+
+
+def _default_eval_memory_audit(
     db: str | None = typer.Option(None, "--db", help="memory.db 路径（默认取配置 memory_db_path）"),
     sample_csv: str | None = typer.Option(
         None, "--sample-csv", help="导出分层抽样 CSV 供标注，计算线上 P_write"),

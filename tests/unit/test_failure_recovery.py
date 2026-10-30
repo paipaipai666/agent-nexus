@@ -23,7 +23,7 @@ from agentnexus.services.turn import TurnRuntime
 
 @pytest.fixture
 def version_client(monkeypatch):
-    monkeypatch.setattr("agentnexus.memory.short_term._get_tiktoken_encoding", lambda: SimpleNamespace(encode=str.encode))
+    monkeypatch.setattr("agentnexus.memory.short_term.get_token_encoding", lambda: SimpleNamespace(encode=str.encode))
     memories = {}
 
     def memory_factory(session_id):
@@ -87,7 +87,7 @@ def test_redo_reset_and_jump_stay_in_the_requested_session(version_client):
 
 
 def test_failed_final_save_can_retry_without_losing_or_duplicating_messages(monkeypatch):
-    monkeypatch.setattr("agentnexus.memory.short_term._get_tiktoken_encoding", lambda: SimpleNamespace(encode=str.encode))
+    monkeypatch.setattr("agentnexus.memory.short_term.get_token_encoding", lambda: SimpleNamespace(encode=str.encode))
     version = ConversationVersionManager("save-retry", get_settings().memory_db_path)
     memory = SimpleNamespace(short_term=ShortTermMemory())
     version.commit_with_messages([{"role": "user", "content": "work"}])
@@ -179,7 +179,7 @@ def test_stop_request_before_run_id_prevents_execution():
     session = service.start_session()
     response = service.request_submission_cancel(session.id, "cancel-before-ack")
     assert response["status"] == "requested"
-    from agentnexus.agents.exceptions import AgentCancelled
+    from agentnexus.core.exceptions import AgentCancelled
     with pytest.raises(AgentCancelled):
         service.send_message(session.id, "work", client_message_id="cancel-before-ack")
     assert executed == []
@@ -232,7 +232,7 @@ def test_final_answer_is_saved_without_a_memory_manager():
 
 
 def test_recovery_record_write_failure_is_not_reported_as_saved(monkeypatch):
-    from agentnexus.observability.timeline import TimelineStore
+    from agentnexus.storage.timeline import TimelineStore
 
     agent = MagicMock()
     agent.run.return_value = "retained result"
@@ -254,7 +254,7 @@ def test_cancellation_serializes_with_an_inflight_round_commit(monkeypatch):
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    monkeypatch.setattr("agentnexus.memory.short_term._get_tiktoken_encoding", lambda: SimpleNamespace(encode=str.encode))
+    monkeypatch.setattr("agentnexus.memory.short_term.get_token_encoding", lambda: SimpleNamespace(encode=str.encode))
     version = ConversationVersionManager("cancel-round", get_settings().memory_db_path)
     version.commit_with_messages([{"role": "user", "content": "work"}])
     memory = SimpleNamespace(short_term=ShortTermMemory())
@@ -324,7 +324,7 @@ def test_deleting_a_session_also_deletes_its_redo_path():
 
 
 def test_concurrent_recovery_store_initialization_shares_one_store(monkeypatch):
-    from agentnexus.observability import timeline
+    from agentnexus.storage import timeline
 
     path = get_settings().memory_db_path
     create_store = timeline.TimelineStore
@@ -361,7 +361,7 @@ def test_concurrent_recovery_store_initialization_shares_one_store(monkeypatch):
 
 
 def test_recovery_store_can_retry_after_initialization_failure(monkeypatch):
-    from agentnexus.observability import timeline
+    from agentnexus.storage import timeline
 
     path = get_settings().memory_db_path
     connect = timeline.sqlite3.connect

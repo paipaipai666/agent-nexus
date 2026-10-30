@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from agentnexus.agents.context_usage import ContextUsageSnapshot
 from agentnexus.server.deps import get_runtime
 
 router = APIRouter(tags=["runtime"])
@@ -74,9 +73,7 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
         except Exception:
             pass
 
-    step_count = 0
-    if agent and hasattr(agent, "_step_count"):
-        step_count = agent._step_count
+    step_count = getattr(agent, "step_count", 0)
 
     if session_id and agent is runtime.agent:
         db_stats = _read_db_stats(runtime, session_id)
@@ -92,7 +89,8 @@ def runtime_status(session_id: str | None = Query(None, description="Session ID 
 
     session_loaded = not session_id or session_id in getattr(runtime.chat, "_agents", {})
     context_snapshot = getattr(agent, "context_usage", None) if session_loaded else None
-    context_usage = context_snapshot.to_dict(capacity=ctx_max) if isinstance(context_snapshot, ContextUsageSnapshot) else None
+    serialize_context = getattr(context_snapshot, "to_dict", None)
+    context_usage = serialize_context(capacity=ctx_max) if callable(serialize_context) else None
     threshold = getattr(mm, "effective_compact_threshold", None) or getattr(mm, "compact_threshold", None)
     compaction = None
     if session_loaded and isinstance(threshold, int):

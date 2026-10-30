@@ -38,16 +38,13 @@ def wiki_stats(namespace: str = "default", service=Depends(get_wiki_service)):
 
 
 @router.get("/pages")
-def list_wiki_pages(namespace: str = "default", limit: int = 100):
+def list_wiki_pages(namespace: str = "default", limit: int = 100, service=Depends(get_wiki_service)):
     """List all wiki pages."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        pages = store.list_pages(source_namespace=namespace, limit=limit)
+        pages = service.list_pages(source_namespace=namespace, limit=limit)
         result_pages = []
         for p in pages:
-            full_page = store.get_page(p.page_id, include_statements=True)
+            full_page = service.get_page(p.page_id, include_statements=True)
             stmt_count = len(full_page.statements) if full_page else 0
             result_pages.append({
                 "page_id": p.page_id,
@@ -65,13 +62,10 @@ def list_wiki_pages(namespace: str = "default", limit: int = 100):
 
 
 @router.get("/pages/{page_id}")
-def get_wiki_page(page_id: str):
+def get_wiki_page(page_id: str, service=Depends(get_wiki_service)):
     """Get a single wiki page with all statements."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        page = store.get_page(page_id)
+        page = service.get_page(page_id)
         if not page:
             raise APIError(404, "not_found", f"Page {page_id} not found")
         return {
@@ -107,18 +101,17 @@ def get_wiki_page(page_id: str):
             "created_at": page.created_at,
             "updated_at": page.updated_at,
         }
+    except APIError:
+        raise
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 
 
 @router.delete("/pages/{page_id}")
-def delete_wiki_page(page_id: str):
+def delete_wiki_page(page_id: str, service=Depends(get_wiki_service)):
     """Delete a wiki page."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        store.delete_page(page_id)
+        service.delete_page(page_id)
         return {"status": "deleted", "page_id": page_id}
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
@@ -220,13 +213,10 @@ def wiki_lint(namespace: str = "default", service=Depends(get_wiki_service)):
 
 
 @router.get("/review")
-def list_review_items(status: str = "pending", limit: int = 50):
+def list_review_items(status: str = "pending", limit: int = 50, service=Depends(get_wiki_service)):
     """List review queue items."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        items = store.list_review_items(status=status, limit=limit)
+        items = service.list_review_items(status=status, limit=limit)
         return {
             "items": [
                 {
@@ -248,13 +238,10 @@ def list_review_items(status: str = "pending", limit: int = 50):
 
 
 @router.post("/review/resolve")
-def resolve_review_item(req: ReviewResolveRequest):
+def resolve_review_item(req: ReviewResolveRequest, service=Depends(get_wiki_service)):
     """Resolve a review item."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        store.resolve_review_item(req.item_id)
+        service.resolve_review_item(req.item_id)
         return {"status": "resolved", "item_id": req.item_id}
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
@@ -273,22 +260,17 @@ def process_overdue_reviews(service=Depends(get_wiki_service)):
 @router.post("/backfill")
 def wiki_backfill(namespace: str = "default", service=Depends(get_wiki_service)):
     """Rebuild wiki using the shared management operation."""
-    from agentnexus.services.wiki import backfill_wiki
-
     try:
-        return backfill_wiki(service, namespace)
+        return service.backfill(namespace)
     except ValueError as exc:
         raise APIError(404, "not_found", str(exc)) from exc
 
 
 @router.get("/calibration")
-def get_calibration_status():
+def get_calibration_status(service=Depends(get_wiki_service)):
     """Get latest calibration status."""
-    from agentnexus.wiki.store import get_wiki_store
-
     try:
-        store = get_wiki_store()
-        calibration = store.get_latest_calibration()
+        calibration = service.get_latest_calibration()
         return {"calibration": calibration}
     except Exception as e:
         raise APIError(500, "internal_error", str(e))

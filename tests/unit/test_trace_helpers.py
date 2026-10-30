@@ -99,7 +99,7 @@ class TestFlushSpan:
 
     def test_flush_span_no_traces_dir(self):
         tm = TraceManager()
-        TraceManager.configure("")
+        tm.configure("")
         ctx = TraceContext()
         span = ctx.start_span("test_op")
         ctx.end_span(span)
@@ -164,10 +164,7 @@ class TestCleanupOldTraces:
         tm = TraceManager()
         tm.configure(str(tmp_path))
 
-        mock_settings = mocker.MagicMock()
-        mock_settings.trace_retention_days = 7
-        mocker.patch("agentnexus.core.config.get_settings",
-                     return_value=mock_settings)
+        tm.retention_days = 7
 
         old_file = tmp_path / "old.jsonl"
         old_file.write_text("{}")

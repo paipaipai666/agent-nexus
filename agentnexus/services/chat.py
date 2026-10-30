@@ -15,12 +15,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
-from agentnexus.agents.exceptions import AgentCancelled
-from agentnexus.agents.plan_mode import PlanModeBinding, PlanModeManager
+from agentnexus.core.exceptions import AgentCancelled
+from agentnexus.core.plan_mode import PlanModeBinding, PlanModeManager
 from agentnexus.core.text_utils import collapse_and_truncate
-from agentnexus.observability.timeline import get_timeline_store
 from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
 from agentnexus.services.turn import TurnRecord, TurnRuntime
+from agentnexus.storage.timeline import get_timeline_store
 
 if TYPE_CHECKING:
     from agentnexus.capabilities.runtime import CapabilityRuntime
@@ -190,12 +190,14 @@ class ChatService:
         skill_service: "SkillService | None" = None,
         tool_executor: "ToolRegistry | None" = None,
         capability_runtime: "CapabilityRuntime | None" = None,
+        modules=None,
     ):
         self._agent_factory = agent_factory
         self._memory_factory_builder = memory_factory_builder
         self._version = version_manager
         self._tool_executor = tool_executor
         self._capability_runtime = capability_runtime
+        self._modules = modules
         self._skill_service = skill_service
         self._session_skill_services: dict[str, SkillService] = {}
         self._sessions: dict[str, SessionHandle] = {}
@@ -289,11 +291,18 @@ class ChatService:
             self._version_managers[handle.id] = version
         return handle
 
-    def session_agent(self, session_id: str):
-        """Resolve the agent belonging to a registered session."""
+    def session_agent(self, session_id: str, *, required: bool = True):
+        """Resolve this session's engine; read-only consumers can allow its absence."""
         if session_id not in self._sessions:
             raise KeyError(f"Unknown session_id: {session_id}")
-        return self._get_or_create_agent(session_id)
+        from agentnexus.core.modules import ModuleUnavailable
+
+        try:
+            return self._get_or_create_agent(session_id)
+        except ModuleUnavailable:
+            if required:
+                raise
+            return None
 
     def session_skills(self, session_id: str) -> "SkillService | None":
         """Return skills scoped to the session's workspace and agent."""
@@ -302,7 +311,7 @@ class ChatService:
         session = self._sessions[session_id]
         if self._skill_service is None:
             return None
-        agent = self._get_or_create_agent(session_id)
+        agent = self.session_agent(session_id, required=False)
         with self._get_session_lock(session_id):
             if session_id not in self._session_skill_services:
                 self._session_skill_services[session_id] = self._skill_service.for_workspace(
@@ -494,18 +503,31 @@ class ChatService:
     def _evaluate_run_alerts(self) -> None:
         """Feed recent run metrics into the alert pipeline (non-fatal)."""
         try:
-            from agentnexus.core.config import get_settings
-            from agentnexus.observability.alerting import evaluate_stats
-            from agentnexus.observability.stats import compute_stats
+            from agentnexus.core.telemetry import evaluate_run_alerts
 
-            traces_dir = get_settings().traces_dir
-            if not traces_dir:
-                return
-            evaluate_stats(compute_stats(traces_dir, days=1))
+            evaluate_run_alerts()
         except Exception as e:
             logger.debug("Post-run alert evaluation failed: %s", e)
 
     def send_message(
+        self,
+        session_id: str,
+        text: str,
+        on_run_started: Callable[[RunHandle], None] | None = None,
+        *,
+        attachments: list[dict] | None = None,
+        client_message_id: str | None = None,
+    ) -> RunHandle:
+        """Execute a turn inside its owning module selection."""
+        if self._modules is None:
+            return self._send_message(session_id, text, on_run_started,
+                                      attachments=attachments, client_message_id=client_message_id)
+        with self._modules.activate():
+            self.session_agent(session_id)
+            return self._send_message(session_id, text, on_run_started,
+                                      attachments=attachments, client_message_id=client_message_id)
+
+    def _send_message(
         self,
         session_id: str,
         text: str,
@@ -550,12 +572,12 @@ class ChatService:
                 wrapper_settled = True
                 raise AgentCancelled()
             agent_text, todo_list = self._wire_agent_for_run(setup, text)
-            from agentnexus.observability.tracer import trace_manager as _tm
+            from agentnexus.core.telemetry import trace_manager as _tm
             _tm.start_trace(agent_text, metadata={
                 "user_goal": text,
-                "model_version": agent.llm_client.model,
-                "agent_id": agent.agent_id,
-                "max_steps": agent.max_steps,
+                "model_version": getattr(agent, "model_id", ""),
+                "agent_id": getattr(agent, "agent_id", type(agent).__name__),
+                "max_steps": getattr(agent, "max_steps", None),
                 "session_id": session_id,
             })
             try:
@@ -574,11 +596,11 @@ class ChatService:
             answer = getattr(result, "answer", result)
             record = turn.finish(answer or "")
             try:
-                usage = getattr(agent, "_total_usage", {}) or {}
+                usage = getattr(agent, "total_usage", {}) or {}
                 setup.version_mgr.update_session_stats(
                     input_tokens=usage.get("input_tokens", 0),
                     output_tokens=usage.get("output_tokens", 0),
-                    step_count=getattr(agent, "_step_count", 0),
+                    step_count=getattr(agent, "step_count", 0),
                 )
             except Exception as e:
                 logger.warning("Failed to persist session stats: %s", e)
@@ -652,6 +674,8 @@ class ChatService:
             raise KeyError(f"Unknown session_id: {session_id}")
         agent = self._get_or_create_agent(session_id)
         memory = self._get_or_create_memory(session_id)
+        if memory is not None and hasattr(memory, "begin_turn"):
+            memory.begin_turn()
         _bind_optional(agent, "set_plan_mode", PlanModeBinding(self._plan_mode, session_id))
         _bind_optional(agent, "set_thinking_effort", self._thinking_effort.get(session_id))
         from agentnexus.core.capabilities import detect_capabilities
@@ -686,15 +710,15 @@ class ChatService:
         run, events, turn = self.begin_turn(session_id, text, memory_manager=memory, run_id=requested_run_id)
         if on_run_started is not None:
             on_run_started(run)
-        old_on_event = getattr(agent, "_on_event", None)
-        old_output = getattr(agent, "_output", None)
+        old_on_event = getattr(agent, "event_handler", None)
+        old_output = getattr(agent, "output", None)
         subagent_bridge = getattr(self._tool_executor, "subagent_bridge", None)
         if subagent_bridge is not None:
             context = SubagentRunContext(self, session_id, run.id)
             from agentnexus.core.config import get_settings
             from agentnexus.services.collaboration import CollaborationRun
 
-            settings = get_settings()
+            settings = self._modules.settings if self._modules is not None else get_settings()
             if settings.subagent_collaboration_enabled:
                 context.collaboration = CollaborationRun(context, get_timeline_store(), self._tool_executor.get_lane_pool("subagent"), turn.cancel_checker,
                                                          max_tasks=settings.subagent_max_concurrent * 4, timeout=settings.subagent_timeout_sec)
@@ -729,7 +753,7 @@ class ChatService:
                 session_id, run.id, step_id, messages,
             ),
         )
-        todo_list = getattr(agent, "_todo_list", None)
+        todo_list = getattr(agent, "todo_list", None)
         if todo_list is not None:
             def _on_todo_change(action, item, _run_id=run.id):
                 self._put_event(_run_id, AgentEvent(
@@ -737,11 +761,12 @@ class ChatService:
                     {"action": action, "id": item.id,
                      "description": item.description, "status": item.status},
                     run_id=_run_id, session_id=session_id,
-                    step_id=getattr(agent, "_step_count", 0),
+                    step_id=getattr(agent, "step_count", 0),
                 ))
             todo_list.on_change = _on_todo_change
         try:
-            agent._output = lambda _msg: None
+            if hasattr(agent, "output"):
+                agent.output = lambda _msg: None
         except Exception as e:
             logger.debug("Failed to suppress agent output: %s", e)
         return agent_text, todo_list
@@ -773,11 +798,13 @@ class ChatService:
                 logger.warning("Failed to update settled recovery state for %s: %s", run.id, exc)
         _bind_optional(agent, "set_cancel_checker", None)
         try:
-            agent._on_event = setup.old_on_event
+            if hasattr(agent, "event_handler"):
+                agent.event_handler = setup.old_on_event
         except Exception as e:
             logger.debug("Failed to restore agent _on_event: %s", e)
         try:
-            agent._output = setup.old_output
+            if hasattr(agent, "output"):
+                agent.output = setup.old_output
         except Exception as e:
             logger.debug("Failed to restore agent _output: %s", e)
         try:
@@ -796,7 +823,7 @@ class ChatService:
         if session_id not in self._version_managers:
             from agentnexus.core.config import get_settings
             from agentnexus.memory.versioned import ConversationVersionManager
-            settings = get_settings()
+            settings = self._modules.settings if self._modules is not None else get_settings()
             handle = self._sessions.get(session_id)
             workspace = (handle.workspace if handle else None) or ""
             if not workspace and self._version is not None:
@@ -900,12 +927,13 @@ class ChatService:
         fresher state with an older snapshot.
         """
         memory = self._get_or_create_memory(session_id)
-        if getattr(memory, "short_term", None) is None or memory.short_term._messages:
+        if getattr(memory, "retention_enabled", True) is False:
             return
-        from agentnexus.memory.short_term import ShortTermMemory
-        restored = ShortTermMemory.from_json(snapshot)
-        memory.short_term._messages = restored._messages
-        memory.short_term._summary = restored._summary
+        if getattr(memory, "short_term", None) is None or memory.short_term.get_all():
+            return
+        from agentnexus.core.memory_contracts import restore_snapshot
+
+        restore_snapshot(memory.short_term, snapshot)
 
     def session_version(self, session_id: str):
         """Resolve version history without falling back to another session."""
@@ -920,13 +948,20 @@ class ChatService:
 
     def restore_checkpoint_memory(self, session_id: str) -> None:
         """Replace this session's context after an explicit history operation."""
-        from agentnexus.memory.short_term import ShortTermMemory
+        from agentnexus.core.memory_contracts import restore_snapshot
 
         version = self.session_version(session_id)
         memory = self._get_or_create_memory(session_id)
+        if memory is None:
+            return
+        if getattr(memory, "retention_enabled", True) is False:
+            memory.short_term.clear()
+            return
         snapshot = version.get_head_stm()
-        restored = ShortTermMemory.from_json(snapshot) if snapshot else ShortTermMemory()
-        memory.short_term.restore(restored)
+        if snapshot:
+            restore_snapshot(memory.short_term, snapshot)
+        else:
+            memory.short_term.clear()
 
     def ensure_session_restored(self, session_id: str) -> bool:
         """Register a DB-backed session (if unknown) and inject its head STM.
@@ -940,7 +975,7 @@ class ChatService:
         """
         from agentnexus.core.config import get_settings
         from agentnexus.memory.versioned import ConversationVersionManager
-        settings = get_settings()
+        settings = self._modules.settings if self._modules is not None else get_settings()
         stored_workspace = ConversationVersionManager.get_session_workspace(
             settings.memory_db_path, session_id
         )
@@ -1089,11 +1124,11 @@ class ChatService:
         has_reasoning = False
         stream_counts = {"content": 0, "reasoning": 0}
 
-        def _on_event(event, from_state, to_state):
+        def _on_event(event, *state_args):
             nonlocal has_reasoning
             if event is None:
                 if previous is not None:
-                    previous(event, from_state, to_state)
+                    previous(event, *state_args)
                 return
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
@@ -1191,17 +1226,17 @@ class ChatService:
             )
             self._put_event(run_id, agent_event)
             if previous is not None:
-                previous(event, from_state, to_state)
+                previous(event, *state_args)
 
         try:
-            if agent is not None:
-                agent._on_event = _on_event
+            if agent is not None and hasattr(agent, "event_handler"):
+                agent.event_handler = _on_event
         except Exception as e:
             logger.debug("Failed to install agent event bridge: %s", e)
 
     @staticmethod
     def _record_agent_event(turn: TurnRuntime, event) -> None:
-        event_type = getattr(getattr(event, "type", None), "name", "")
+        event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
         payload = getattr(event, "payload", {}) or {}
         if event_type in {"TOOLS_REQUESTED", "ANSWER_THOUGHT"}:
             thought = payload.get("thought")

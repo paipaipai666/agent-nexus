@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from agentnexus.tools.providers.base import ProviderSpec, ToolProviderContext
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
@@ -11,9 +13,12 @@ class MemoryToolProvider:
         return ProviderSpec("memory", description="Long-term memory search and save tools.")
 
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
+        from agentnexus.core.modules import get_module_host
         from agentnexus.tools.history_search import history_search
         from agentnexus.tools.memory_save import memory_project_status, memory_save
         from agentnexus.tools.memory_search import memory_search
+
+        modules = context.modules if context.modules is not None else get_module_host()
 
         before = set(executor.list_tools())
         if context.want("history_search"):
@@ -54,7 +59,7 @@ class MemoryToolProvider:
                     concurrency_safe=True,
                     read_only=True,
                 ),
-                memory_search,
+                partial(memory_search, modules=modules),
             )
 
         if context.want("memory_save"):
@@ -79,7 +84,7 @@ class MemoryToolProvider:
                     risk_level=RiskLevel.LOW,
                     rate_limit_per_min=10,
                 ),
-                memory_save,
+                partial(memory_save, modules=modules),
             )
 
         if context.want("memory_project_status"):

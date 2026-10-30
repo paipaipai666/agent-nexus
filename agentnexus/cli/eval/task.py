@@ -27,16 +27,23 @@ eval_app.add_typer(suite_app, name="suite")
 
 
 @task_app.command("list")
-def task_list(
+def task_list(category: str | None=typer.Option(None, '-c', '--category', help='按类别过滤'), difficulty: str | None=typer.Option(None, '-d', '--difficulty', help='按难度过滤'), eval_type: str | None=typer.Option(None, '-t', '--type', help='按评估类型过滤'), json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '列出所有评估任务。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_task_list(category, difficulty, eval_type, json_output)
+
+
+def _default_task_list(
     category: str | None = typer.Option(None, "-c", "--category", help="按类别过滤"),
     difficulty: str | None = typer.Option(None, "-d", "--difficulty", help="按难度过滤"),
     eval_type: str | None = typer.Option(None, "-t", "--type", help="按评估类型过滤"),
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """列出所有评估任务。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
     tasks = service.list_tasks(category=category, difficulty=difficulty, eval_type=eval_type)
 
     if json_output:
@@ -69,13 +76,20 @@ def task_list(
 
 
 @task_app.command("show")
-def task_show(
+def task_show(task_id: str=typer.Argument(help='任务 ID')) -> None:
+    '显示任务详情。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_task_show(task_id)
+
+
+def _default_task_show(
     task_id: str = typer.Argument(help="任务 ID"),
 ) -> None:
     """显示任务详情。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
     task = service.get_task(task_id)
     if task is None:
         console.print(f"[red]任务未找到: {task_id}[/red]")
@@ -86,10 +100,17 @@ def task_show(
 
 @task_app.command("validate")
 def task_validate() -> None:
-    """验证数据集完整性。"""
-    from agentnexus.services.eval import EvalService
+    '验证数据集完整性。'
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    return get_eval_service().cli_task_validate()
+
+
+def _default_task_validate() -> None:
+    """验证数据集完整性。"""
+    from agentnexus.services.eval import get_eval_service
+
+    service = get_eval_service()
     result = service.validate_dataset()
 
     if result["valid"]:
@@ -109,15 +130,22 @@ def task_validate() -> None:
 
 
 @task_app.command("run")
-def task_run(
+def task_run(task_id: str=typer.Argument(help='任务 ID'), trials: int=typer.Option(1, '-n', '--trials', help='Trial 次数'), json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '运行单个任务。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_task_run(task_id, trials, json_output)
+
+
+def _default_task_run(
     task_id: str = typer.Argument(help="任务 ID"),
     trials: int = typer.Option(1, "-n", "--trials", help="Trial 次数"),
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """运行单个任务。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
 
     with console.status(f"[bold green]运行任务 {task_id} ({trials} trials)..."):
         result = service.run_task(task_id, n_trials=trials)
@@ -138,13 +166,20 @@ def task_run(
 
 
 @suite_app.command("list")
-def suite_list(
+def suite_list(json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '列出所有评估套件。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_suite_list(json_output)
+
+
+def _default_suite_list(
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """列出所有评估套件。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
     suites = service.list_suites()
 
     if json_output:
@@ -168,7 +203,14 @@ def suite_list(
 
 
 @suite_app.command("run")
-def suite_run(
+def suite_run(suite_name: str=typer.Argument(help='套件名称'), trials: int=typer.Option(1, '-n', '--trials', help='每个任务的 Trial 次数'), concurrency: int=typer.Option(4, '-j', '--concurrency', help='并发数'), ci: bool=typer.Option(False, '--ci', help='CI 模式 (失败时 exit 1)'), json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '运行评估套件。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_suite_run(suite_name, trials, concurrency, ci, json_output)
+
+
+def _default_suite_run(
     suite_name: str = typer.Argument(help="套件名称"),
     trials: int = typer.Option(1, "-n", "--trials", help="每个任务的 Trial 次数"),
     concurrency: int = typer.Option(4, "-j", "--concurrency", help="并发数"),
@@ -176,9 +218,9 @@ def suite_run(
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """运行评估套件。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
 
     with console.status(f"[bold green]运行套件 {suite_name}..."):
         result = service.run_suite(suite_name, n_trials=trials, concurrency=concurrency)
@@ -206,13 +248,20 @@ def suite_run(
 
 
 @suite_app.command("show")
-def suite_show(
+def suite_show(suite_name: str=typer.Argument(help='套件名称')) -> None:
+    '显示套件详情。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_suite_show(suite_name)
+
+
+def _default_suite_show(
     suite_name: str = typer.Argument(help="套件名称"),
 ) -> None:
     """显示套件详情。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
     suite = service.get_suite(suite_name)
     if suite is None:
         console.print(f"[red]套件未找到: {suite_name}[/red]")
@@ -227,10 +276,17 @@ suite_app.add_typer(baseline_app, name="baseline")
 
 @baseline_app.command("list")
 def baseline_list() -> None:
-    """列出所有 baseline。"""
-    from agentnexus.services.eval import EvalService
+    '列出所有 baseline。'
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    return get_eval_service().cli_baseline_list()
+
+
+def _default_baseline_list() -> None:
+    """列出所有 baseline。"""
+    from agentnexus.services.eval import get_eval_service
+
+    service = get_eval_service()
     baselines = service.list_baselines()
 
     if not baselines:
@@ -255,13 +311,20 @@ def baseline_list() -> None:
 
 
 @baseline_app.command("save")
-def baseline_save(
+def baseline_save(suite_name: str=typer.Argument(help='套件名称')) -> None:
+    '保存当前结果为 baseline。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_baseline_save(suite_name)
+
+
+def _default_baseline_save(
     suite_name: str = typer.Argument(help="套件名称"),
 ) -> None:
     """保存当前结果为 baseline。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
 
     console.print(f"[bold]运行套件 {suite_name} 以生成 baseline...[/bold]")
     result = service.run_suite(suite_name)
@@ -270,13 +333,20 @@ def baseline_save(
 
 
 @baseline_app.command("compare")
-def baseline_compare(
+def baseline_compare(suite_name: str=typer.Argument(help='套件名称')) -> None:
+    '与 baseline 对比。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_baseline_compare(suite_name)
+
+
+def _default_baseline_compare(
     suite_name: str = typer.Argument(help="套件名称"),
 ) -> None:
     """与 baseline 对比。"""
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService()
+    service = get_eval_service()
 
     console.print(f"[bold]运行套件 {suite_name} 以对比 baseline...[/bold]")
     current = service.run_suite(suite_name)

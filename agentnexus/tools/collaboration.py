@@ -29,6 +29,7 @@ def register_parent_collaboration(executor, context, task_schema):
                 subagent_confirm=context.subagent_confirm, mcp_manager=context.mcp_manager,
                 cancel_bridge=executor.cancel_bridge, subagent_ctx=run.context,
                 subagent_entry=mailbox.child.entry, mailbox=mailbox,
+                modules=context.modules,
             )
             if error is not None:
                 raise error

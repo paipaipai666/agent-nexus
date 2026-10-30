@@ -112,6 +112,8 @@ def _validate_providers(providers: list[ProviderInput]) -> list[dict[str, Any]]:
 def _apply_active_llm(runtime: Any, settings: Any) -> None:
     """Push the active provider profile into the shared LLM client (live switch —
     every per-session agent holds this same instance)."""
+    if hasattr(runtime, 'settings'):
+        runtime.settings = settings
     model_id, base_url, api_key, timeout = settings.get_active_llm_profile()
     llm = getattr(runtime, 'llm', None)
     if llm is not None and hasattr(llm, 'configure'):
@@ -237,8 +239,10 @@ def update_config(req: ConfigUpdateRequest, runtime):
         raise ConfigurationError(403, 'forbidden', f"Key '{req.key}' is security-sensitive and cannot be modified via API")
     data = load_config_yaml()
     data[req.key] = req.value
-    write_config_yaml(data)
+    write_config_yaml(data, changed_keys=(req.key,))
     _reset_settings_cache()
+    if hasattr(runtime, 'settings'):
+        runtime.settings = get_settings()
     if req.key in ('llm_model_id', 'llm_base_url', 'llm_api_key', 'llm_timeout', 'active_model'):
         _apply_active_llm(runtime, get_settings())
     elif req.key in ('model_thinking', 'model_thinking_effort'):

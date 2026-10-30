@@ -25,7 +25,6 @@ LoCoMo 式的端到端 LLM 评测不在此范围。
 
 from __future__ import annotations
 
-import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,32 +119,42 @@ class MemoryEvalReport:
 
 
 class MemorySandbox:
-    """Isolated AGENTNEXUS_HOME per run: real LTM (SQLite+Chroma) + workspaces."""
+    """Owned default-memory algorithm fixtures that leave live runtimes intact."""
 
     def __init__(self, config_overrides: dict | None = None):
+        from agentnexus.core.modules import ModuleHost, get_module_host
+
+        parent = get_module_host()
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self._tmp.name)
-        self._old_home = os.environ.get("AGENTNEXUS_HOME")
-        os.environ["AGENTNEXUS_HOME"] = str(self.root)
-        if config_overrides:
-            import yaml
-            (self.root / "config.yaml").write_text(
-                yaml.safe_dump(config_overrides, allow_unicode=True), encoding="utf-8"
-            )
-        import agentnexus.core.config as cfg
-        self._old_cache = cfg._settings_cache
-        cfg._settings_cache = None
-        from agentnexus.memory.long_term import _reset_long_term_memory
-        from agentnexus.storage.chroma import reset_storage_client
-        _reset_long_term_memory()
-        reset_storage_client()
+        settings = parent.settings.model_copy(update={
+            **(config_overrides or {}), "memory_db_path": str(self.root / "memory.db"),
+            "chroma_persist_dir": str(self.root / "chroma"), "traces_dir": str(self.root / "traces"),
+            "rag_catalog_db_path": str(self.root / "rag_catalog.db"),
+        })
+        self.modules = ModuleHost(settings, factories=parent.factories)
+        self._activation = self.modules.activate()
+        self._activation.__enter__()
+        self._closed = False
         self._ltm = None
+
+    def require_default(self, name: str) -> None:
+        """Keep implementation-specific probes from testing an unselected default."""
+        if not self.modules.is_default(name):
+            raise RuntimeError(f"Memory algorithm probe requires default {name} implementation")
+
+    def stm(self, **options):
+        """Construct a default STM fixture only when that implementation is selected."""
+        self.require_default("short_term")
+        from agentnexus.memory.short_term import ShortTermMemory
+
+        return ShortTermMemory(**options)
 
     @property
     def ltm(self):
+        self.require_default("long_term")
         if self._ltm is None:
-            from agentnexus.memory.long_term import get_long_term_memory
-            self._ltm = get_long_term_memory()
+            self._ltm = self.modules.require("long_term")
         return self._ltm
 
     @property
@@ -208,20 +217,14 @@ class MemorySandbox:
         return mgr.init_session("评估查询")
 
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
         try:
-            from agentnexus.memory.long_term import _reset_long_term_memory
-            from agentnexus.storage.chroma import reset_storage_client
-            _reset_long_term_memory()
-            reset_storage_client()
-        except Exception:
-            pass
-        import agentnexus.core.config as cfg
-        cfg._settings_cache = self._old_cache
-        if self._old_home is None:
-            os.environ.pop("AGENTNEXUS_HOME", None)
-        else:
-            os.environ["AGENTNEXUS_HOME"] = self._old_home
-        self._tmp.cleanup()
+            self.modules.close()
+        finally:
+            self._activation.__exit__(None, None, None)
+            self._tmp.cleanup()
 
 
 class MemoryEvaluator:
@@ -276,8 +279,7 @@ class MemoryEvaluator:
 
 
 def _probe_stm_compact(sb: MemorySandbox, res: CaseResult) -> None:
-    from agentnexus.memory.short_term import ShortTermMemory
-    stm = ShortTermMemory()
+    stm = sb.stm()
     for i in range(12):
         stm.append("user", f"第{i + 1}轮消息")
     stm.compact_full("前 6 轮讨论了项目结构", keep_recent=6)
@@ -296,7 +298,6 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
     """索引折叠后：上下文只剩归档目录，原文可经 history_search 取回（确定性）。"""
     import json as _json
 
-    from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.tools.history_search import history_search
 
     hdir = sb.root / "history"
@@ -310,7 +311,7 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
         "\n".join(_json.dumps(r, ensure_ascii=False) for r in records),
         encoding="utf-8")
 
-    stm = ShortTermMemory()
+    stm = sb.stm()
     for i in range(5):
         stm.append("system", f"[历史索引 消息{i * 2 + 1}-{i * 2 + 2}] " + "摘要" * 60,
                    metadata={"memory_index": True,
@@ -331,8 +332,7 @@ def _probe_index_fold_archive_search(sb: MemorySandbox, res: CaseResult) -> None
 
 
 def _probe_stm_snip(sb: MemorySandbox, res: CaseResult) -> None:
-    from agentnexus.memory.short_term import ShortTermMemory
-    stm = ShortTermMemory()
+    stm = sb.stm()
     stm.append("system", "重要约束：必须保留的上下文。" + "补" * 600)
     for i in range(5):
         stm.append("user", f"噪音{i}")
@@ -350,12 +350,11 @@ def _probe_stm_snip(sb: MemorySandbox, res: CaseResult) -> None:
 
 
 def _probe_stm_wal(sb: MemorySandbox, res: CaseResult) -> None:
-    from agentnexus.memory.short_term import ShortTermMemory
     wal = str(sb.root / "stm.wal")
-    stm = ShortTermMemory(wal_path=wal)
+    stm = sb.stm(wal_path=wal)
     for i in range(5):
         stm.append("user", f"WAL消息{i}")
-    stm2 = ShortTermMemory(wal_path=wal)
+    stm2 = sb.stm(wal_path=wal)
     recovered = [m["content"] for m in stm2.get_all()]
     for i in range(5):
         if f"WAL消息{i}" not in recovered:
@@ -504,14 +503,13 @@ def _probe_gatebench_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
 
     from agentnexus.evaluation.gate_bench import load as load_gate_bench
     from agentnexus.memory.manager import MemoryManager
-    from agentnexus.memory.short_term import ShortTermMemory
 
     mgr = MemoryManager.__new__(MemoryManager)
     mgr.session_id = "eval"
     mgr._settings = SimpleNamespace(memory_llm_gate=True)
     mgr._llm = sb.generator
     mgr.long_term = sb.ltm
-    mgr.short_term = ShortTermMemory()
+    mgr.short_term = sb.stm()
     mgr._embed_model = _StubEmbed()
     from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
     mgr._pipeline = MemoryExtractionPipeline(mgr)
@@ -659,9 +657,8 @@ def _probe_judge_project_utilization(sb: MemorySandbox, res: CaseResult) -> None
 def _run_real_compaction(sb: MemorySandbox, messages: list[tuple[str, str]]):
     """Run the production segmented-index path with the real generator, then compact."""
     from agentnexus.memory.compaction_engine import SegmentIndexResult, segment_summarize
-    from agentnexus.memory.short_term import ShortTermMemory
 
-    stm = ShortTermMemory()
+    stm = sb.stm()
     for role, content in messages:
         stm.append(role, content)
     entries = (segment_summarize(stm.get_all(), sb.generator,
@@ -681,14 +678,13 @@ def _probe_judge_admission_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
     from types import SimpleNamespace
 
     from agentnexus.memory.manager import MemoryManager
-    from agentnexus.memory.short_term import ShortTermMemory
 
     mgr = MemoryManager.__new__(MemoryManager)
     mgr.session_id = "eval"
     mgr._settings = SimpleNamespace(memory_llm_gate=False)
     mgr._llm = sb.generator
     mgr.long_term = sb.ltm
-    mgr.short_term = ShortTermMemory()
+    mgr.short_term = sb.stm()
     mgr._embed_model = _StubEmbed()
     from agentnexus.memory.extraction_pipeline import MemoryExtractionPipeline
     mgr._pipeline = MemoryExtractionPipeline(mgr)
@@ -746,7 +742,6 @@ def _probe_retention_constraint(sb: MemorySandbox, res: CaseResult) -> None:
 def _probe_retention_error_detail(sb: MemorySandbox, res: CaseResult) -> None:
     """精确细节（错误码/行号）必须在真实压缩后存活——确定性断言，非 judge。"""
     from agentnexus.memory.compaction_engine import SegmentIndexResult, segment_summarize
-    from agentnexus.memory.short_term import ShortTermMemory
 
     messages = [
         ("user", "我这边有个线上报错，帮我排查一下"),
@@ -758,7 +753,7 @@ def _probe_retention_error_detail(sb: MemorySandbox, res: CaseResult) -> None:
         ("user", "明白，我下午去加校验"),
         ("assistant", "好的，改完记得跑一遍回归测试"),
     ]
-    stm = ShortTermMemory()
+    stm = sb.stm()
     for role, content in messages:
         stm.append(role, content)
     entries = (segment_summarize(stm.get_all(), sb.generator,

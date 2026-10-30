@@ -67,17 +67,17 @@ def run(context, command, args, sid):
         chat.cancel_run(recovery["run_id"])
         return {"status": "已请求停止", "run_id": recovery["run_id"]}
     elif command == "/todo":
-        todo = getattr(chat.session_agent(sid), "_todo_list", None)
+        todo = getattr(chat.session_agent(sid, required=False), "todo_list", None)
         return [asdict(item) for item in todo.list_items()] if todo is not None else []
     elif command == "/subagents":
         return _subagents(chat, sid, args)
     elif command == "/timeline":
-        from agentnexus.observability.timeline import get_timeline_store
+        from agentnexus.storage.timeline import get_timeline_store
 
         parts = args.split()
         return get_timeline_store().list_events(sid, after_id=int(parts[0]) if parts else 0, limit=2000, agent_id=parts[1] if len(parts) > 1 else None, normalize=True)
     elif command == "/context":
-        from agentnexus.observability.timeline import get_timeline_store
+        from agentnexus.storage.timeline import get_timeline_store
 
         parts = args.split()
         if len(parts) in {2, 3}:
@@ -147,7 +147,7 @@ def _session(context, args, sid):
 
 
 def _subagents(chat, sid, args):
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     action, rest = split_action(args)
     if action == "list":

@@ -78,7 +78,7 @@ class ToolDispatcher:
             return []
 
         try:
-            from agentnexus.observability.tracer import trace_manager
+            from agentnexus.core.telemetry import trace_manager
             active = trace_manager.active
             parent_trace_id = active.trace_id if active else None
         except Exception:
@@ -182,7 +182,7 @@ class ToolDispatcher:
     ) -> ToolCallResult:
         """Execute a single tool call and capture timing/errors."""
         if parent_trace_id:
-            from agentnexus.observability.tracer import trace_manager
+            from agentnexus.core.telemetry import trace_manager
             trace_manager.set_inherited_trace(parent_trace_id)
         start = time.monotonic()
         try:

@@ -6,9 +6,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import atexit
-import functools
 import json
 import threading
 import time
@@ -95,23 +92,15 @@ class TraceContext:
 class TraceManager:
     """管理 trace 上下文的单例管理器"""
 
-    _instance: "TraceManager" | None = None
-    _lock = threading.Lock()
-    _write_lock = threading.Lock()
-    _local = threading.local()
-    _traces_dir: str = ""
+    def __init__(self):
+        self._write_lock = threading.Lock()
+        self._local = threading.local()
+        self._traces_dir = ""
+        self.retention_days = 30
 
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-
-    @classmethod
-    def configure(cls, traces_dir: str):
+    def configure(self, traces_dir: str):
         """设置 trace 文件输出目录"""
-        cls._traces_dir = traces_dir
+        self._traces_dir = traces_dir
 
     @property
     def active(self) -> TraceContext | None:
@@ -228,13 +217,7 @@ class TraceManager:
 
     def _cleanup_old_traces(self):
         """Remove JSONL files older than the configured retention period."""
-        try:
-            from agentnexus.core.config import get_settings
-            retention_days = get_settings().trace_retention_days
-        except Exception:
-            retention_days = 30
-
-        cutoff = time.time() - retention_days * 86400
+        cutoff = time.time() - self.retention_days * 86400
         traces_dir = Path(self._traces_dir)
         for f in traces_dir.glob("*.jsonl"):
             try:
@@ -293,28 +276,6 @@ class _SpanContext:
         return False
 
 
-def trace_span(name: str, attrs: dict | Callable[..., dict] | None = None):
-    """Decorator: wrap call in trace_manager.span(name, input_data).
-    attrs 为静态 dict 或 callable(*args, **kwargs) -> dict。同步/异步函数都支持。异常正常传播（span.__exit__ 原有失败记录语义不变）。"""
-    def decorator(fn):
-        if asyncio.iscoroutinefunction(fn):
-            @functools.wraps(fn)
-            async def async_wrapper(*args, **kwargs):
-                input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
-                with trace_manager.span(name, input_data):
-                    return await fn(*args, **kwargs)
-
-            return async_wrapper
-
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            input_data = attrs(*args, **kwargs) if callable(attrs) else attrs
-            with trace_manager.span(name, input_data):
-                return fn(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def _truncate(text: str, max_len: int = 5000) -> str:
@@ -325,18 +286,3 @@ def _truncate(text: str, max_len: int = 5000) -> str:
 
 def _truncate_dict(d: dict[str, Any], max_len: int = 5000) -> dict[str, Any]:
     return {k: _truncate(str(v), max_len) for k, v in d.items()}
-
-
-trace_manager = TraceManager()
-
-
-def get_trace_manager() -> TraceManager:
-    """Return the global TraceManager singleton."""
-    return trace_manager
-
-
-@atexit.register
-def _flush_on_exit():
-    ctx = trace_manager.active
-    if ctx is not None and ctx.spans:
-        trace_manager.end_trace()

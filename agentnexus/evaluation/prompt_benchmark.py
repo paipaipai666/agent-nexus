@@ -19,7 +19,6 @@ import sys
 import tempfile
 import time
 import traceback
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -239,8 +238,8 @@ def compare_runs(before: list[dict], after: list[dict]) -> dict:
 
 def contract_probe() -> list[dict]:
     """Observe actual outgoing requests through the public Agent.run boundary."""
-    from agentnexus.agents.re_act_agent import ReActAgent
     from agentnexus.core.capabilities import ModelCapabilities, SessionCapabilityTracker
+    from agentnexus.evaluation.engine import create_evaluation_agent
     from agentnexus.skills.workflow import Workflow
     from agentnexus.tools.registry import ToolMeta, ToolRegistry
 
@@ -269,30 +268,43 @@ def contract_probe() -> list[dict]:
         registry = ToolRegistry()
         registry.register(ToolMeta("inspect", "读取测试状态", {"type": "object", "properties": {}}, read_only=True),
                           lambda: "ok")
-        agent = ReActAgent(llm, registry, max_steps=3, output=lambda *_: None)
-        agent.run("读取状态后回答")
-        rows.append({"case_id": f"neutral-observation-{thinking}", "passed": not any(
-            "请先用 Thought" in str(message.get("content", ""))
-            for request in llm.requests[1:] for message in request), "requests": llm.requests})
-        profile = Workflow.model_validate({
-            "id": "contract", "version": "1", "display_name": "contract",
-            "prompt_profile": {"system": "probe_custom"}, "tool_policy": {},
-            "steps": [], "success_criteria": [],
-        }).to_session_profile()
-        with patch("agentnexus.skills.profile.load_prompt", return_value="CUSTOM-CONTRACT-9127"):
-            agent.set_session_profile(profile)
-        llm.requests.clear()
-        agent.run("读取状态后回答")
-        rows.append({"case_id": f"custom-profile-{thinking}",
-                     "passed": llm.requests[0][0]["content"] == "CUSTOM-CONTRACT-9127",
-                     "requests": llm.requests})
-        registry.close(wait=True)
+        try:
+            agent = create_evaluation_agent(llm, registry, max_steps=3, output=lambda *_: None)
+            agent.run("读取状态后回答")
+            row = {"case_id": f"neutral-observation-{thinking}", "passed": bool(llm.requests) and not any(
+                "请先用 Thought" in str(message.get("content", ""))
+                for request in llm.requests[1:] for message in request), "requests": list(llm.requests)}
+            if not llm.requests:
+                row["unsupported"] = "Selected engine does not expose requests through the supplied LLM"
+            rows.append(row)
+            configure = getattr(agent, "set_session_profile", None)
+            if not callable(configure):
+                rows.append({"case_id": f"custom-profile-{thinking}", "passed": False, "requests": [],
+                             "unsupported": "Selected engine does not support session profiles"})
+                continue
+            profile = Workflow.model_validate({
+                "id": "contract", "version": "1", "display_name": "contract",
+                "prompt_profile": {"system": "probe_custom"}, "tool_policy": {},
+                "steps": [], "success_criteria": [],
+            }).to_session_profile()
+            with patch("agentnexus.skills.profile.load_prompt", return_value="CUSTOM-CONTRACT-9127"):
+                configure(profile)
+            llm.requests.clear()
+            agent.run("读取状态后回答")
+            row = {"case_id": f"custom-profile-{thinking}",
+                   "passed": bool(llm.requests) and llm.requests[0][0]["content"] == "CUSTOM-CONTRACT-9127",
+                   "requests": list(llm.requests)}
+            if not llm.requests:
+                row["unsupported"] = "Selected engine does not expose requests through the supplied LLM"
+            rows.append(row)
+        finally:
+            registry.close(wait=True)
     return rows
 
 
 def run_live(case: dict, llm, directory: Path, max_steps: int) -> dict:
     """Run the production agent against disposable tools and inspect actual artifacts."""
-    from agentnexus.agents.re_act_agent import ReActAgent
+    from agentnexus.evaluation.engine import create_evaluation_agent, result_answer, result_steps
     from agentnexus.memory.todo import SessionTodoList
     from agentnexus.skills.workflow import Workflow
     from agentnexus.tools.providers.base import ToolProviderContext
@@ -327,30 +339,38 @@ def run_live(case: dict, llm, directory: Path, max_steps: int) -> dict:
         register("lookup_release", "查询发布构建校验码，支持 primary 主源和 mirror 备用源。",
                  {"key": {"type": "string"}, "source": {"type": "string", "enum": ["primary", "mirror"]}},
                  ["key"], lookup_release)
-    agent = ReActAgent(llm, registry, max_steps=max_steps, output=lambda *_: None, confirm_fn=lambda *_: True)
-    agent._todo_list = todo
-    if case["category"] == "profile":
-        profile = Workflow.model_validate({
-            "id": "benchmark-profile", "version": "1", "display_name": "Benchmark",
-            "prompt_profile": {"system": "benchmark_custom"}, "tool_policy": {}, "steps": [],
-            "success_criteria": [],
-        }).to_session_profile()
-        with patch("agentnexus.skills.profile.load_prompt",
-                   return_value=f"这是固定输出工作流。只回复 {case['expected']}，不要调用工具。"):
-            agent.set_session_profile(profile)
+    try:
+        agent = create_evaluation_agent(llm, registry, max_steps=max_steps, output=lambda *_: None, confirm_fn=lambda *_: True)
+    except Exception:
+        registry.close(wait=True)
+        raise
+    if hasattr(agent, "todo_list"):
+        agent.todo_list = todo
     started = time.perf_counter()
     try:
+        if case["category"] == "profile":
+            configure = getattr(agent, "set_session_profile", None)
+            if not callable(configure):
+                raise RuntimeError("Selected engine does not support session profiles")
+            profile = Workflow.model_validate({
+                "id": "benchmark-profile", "version": "1", "display_name": "Benchmark",
+                "prompt_profile": {"system": "benchmark_custom"}, "tool_policy": {}, "steps": [],
+                "success_criteria": [],
+            }).to_session_profile()
+            with patch("agentnexus.skills.profile.load_prompt",
+                       return_value=f"这是固定输出工作流。只回复 {case['expected']}，不要调用工具。"):
+                configure(profile)
         result = agent.run(case["question"])
-        answer = result.answer or ""
+        answer = result_answer(result)
         grade = workspace.grade() if workspace else {"passed": (
             answer.strip() == case["expected"] if case["category"] == "profile" else
             case["expected"] in answer and any(x["key"] == case["key"]
                                                and (case["category"] != "recovery" or x["source"] == "mirror")
                                                for x in lookups))}
         return grade_delivery({**grade, "answer": answer, "lookups": lookups,
-                "steps": [{**asdict(step), "strategy_used": step.strategy_used.name} for step in result.steps],
+                "steps": result_steps(result),
                 "wall_s": time.perf_counter() - started,
-                "tool_calls": sum(len(step.tool_calls) for step in result.steps)})
+                "tool_calls": sum(len(step.get("tool_calls", [])) for step in result_steps(result))})
     except Exception as exc:
         grade = workspace.grade() if workspace else {"artifact_passed": False}
         return {**grade, "artifact_passed": grade.get("passed", False), "passed": False,
@@ -437,7 +457,9 @@ def main() -> None:
     from agentnexus.core.config import Settings, get_settings
     from agentnexus.core.llm import AgentLLM
     from agentnexus.eval.benchmarks.ratelimit import RateLimiter
+    from agentnexus.evaluation.engine import require_default_prompt_engine
 
+    require_default_prompt_engine()
     found = get_settings().find_model(args.model)
     if found is None or not args.model.startswith("agnes/"):
         parser.error("select a configured agnes/model")

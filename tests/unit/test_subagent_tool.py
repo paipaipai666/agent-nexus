@@ -112,7 +112,7 @@ class TestSubagentRun:
             captured["question"] = question
             return SimpleNamespace(answer="child answer", steps=[object(), object()])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         payload = json.loads(tool(
@@ -141,7 +141,7 @@ class TestSubagentRun:
             captured["tools"] = set(self.tool_executor.list_tools())
             return SimpleNamespace(answer="explorer answer", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         payload = json.loads(tool(task="请总结 README", role="researcher"))
@@ -163,7 +163,7 @@ class TestSubagentRun:
             captured["confirm"] = self._confirm
             return SimpleNamespace(answer="executor answer", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         bridge = ConfirmBridge()
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=False, subagent_confirm=bridge)
@@ -180,7 +180,7 @@ class TestSubagentRun:
     def test_subagent_run_falls_back_to_explorer_default_tools_when_requested_tools_are_unsafe(self, monkeypatch):
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
         monkeypatch.setattr(
-            "agentnexus.tools.subagent.ReActAgent.run",
+            "agentnexus.agents.re_act_agent.ReActAgent.run",
             lambda self, question, memory_manager=None: SimpleNamespace(answer="fallback answer", steps=[]),
         )
 
@@ -209,7 +209,7 @@ class TestSubagentRun:
                 return SimpleNamespace(answer="", steps=[])
             return SimpleNamespace(answer="retry answer", steps=[object()])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         payload = json.loads(tool(task="请执行并验证", role="executor"))
@@ -231,7 +231,7 @@ class TestSubagentRun:
                 steps=[SimpleNamespace(content='{"answer"： "从步骤中提取"}', reasoning_content="")],
             )
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
         payload = json.loads(tool(task="请执行并验证", role="executor"))
@@ -249,7 +249,7 @@ class TestSubagentRun:
             captured["tools"] = set(self.tool_executor.list_tools())
             return SimpleNamespace(answer="mcp answer", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = make_subagent_run(
             parent_llm=MagicMock(),

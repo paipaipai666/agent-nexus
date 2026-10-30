@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
 from agentnexus.tools.confirm_bridge import SubagentBridge
 from agentnexus.tools.subagent import make_subagent_run
@@ -101,7 +101,7 @@ class TestSubagentVisibilityEvents:
                 "TOOL_DONE", name="file_read", result="ok", id="c1", duration_ms=5), None, None)
             return SimpleNamespace(answer="子任务结论", steps=[object()])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service)
         payload = json.loads(tool(task="总结 README", name="调研A"))
@@ -136,7 +136,7 @@ class TestSubagentVisibilityEvents:
             runs.append(1)
             return SimpleNamespace(answer="x", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service, ctx_cls=_AutoCancelContext)
         payload = json.loads(tool(task="queued task"))
@@ -156,7 +156,7 @@ class TestSubagentVisibilityEvents:
             runs.append(1)
             raise AgentCancelled("cancelled")
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
 
         tool = self._tool_with_bridge(service)
         payload = json.loads(tool(task="slow task"))
@@ -172,7 +172,7 @@ class TestSubagentVisibilityEvents:
     def test_no_bridge_preserves_legacy_behavior(self, monkeypatch):
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _p: MagicMock())
         monkeypatch.setattr(
-            "agentnexus.tools.subagent.ReActAgent.run",
+            "agentnexus.agents.re_act_agent.ReActAgent.run",
             lambda self, question, memory_manager=None: SimpleNamespace(answer="ok", steps=[]),
         )
 

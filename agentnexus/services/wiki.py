@@ -1,6 +1,13 @@
 """Wiki management operations shared by terminal and HTTP clients."""
 
 
+def get_wiki_service(module_host=None):
+    """Resolve the selected Wiki implementation for this application."""
+    from agentnexus.core.modules import get_module_host
+
+    return (module_host or get_module_host()).require("wiki")
+
+
 def backfill_wiki(service, namespace: str):
     """Rebuild a namespace from its existing knowledge documents."""
     from agentnexus.rag.store import get_knowledge_base_catalog
@@ -12,9 +19,9 @@ def backfill_wiki(service, namespace: str):
     documents = catalog.list_documents(kb.kb_id)
     if not documents:
         return {"created": 0, "deleted": 0, "message": "No documents in RAG"}
-    pages = service.store.list_pages(source_namespace=namespace)
+    pages = service.list_pages(source_namespace=namespace)
     for page in pages:
-        service.store.delete_page(page.page_id)
+        service.delete_page(page.page_id)
     created, errors = 0, []
     for doc in documents:
         text = doc.raw_text or doc.indexed_text or doc.content

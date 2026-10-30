@@ -32,9 +32,9 @@ class ReActAgentRunner:
         error: str | None = None
 
         try:
-            from agentnexus.agents.re_act_agent import ReActAgent
             from agentnexus.core.config import get_settings
             from agentnexus.core.llm import AgentLLM
+            from agentnexus.core.modules import ModuleContext, get_module_host
             from agentnexus.tools.registry import ToolRegistry
 
             settings = self._settings or get_settings()
@@ -51,11 +51,13 @@ class ReActAgentRunner:
                 mcp_manager=None,
                 todo_list=None,
             )
-            agent = ReActAgent(
-                llm_client=llm,
-                tool_executor=tool_registry,
+            agent = get_module_host().require("agent", ModuleContext(
+                settings=settings,
+                llm=llm,
+                tools=tool_registry,
                 max_steps=task.max_turns or getattr(settings, "max_agent_steps", 5),
-            )
+                conversation_mode=False,
+            ))
 
             prompt = task.input.get("prompt", "")
             trace_ctx = self._start_trace(task)
@@ -102,7 +104,7 @@ class ReActAgentRunner:
     def _start_trace(task: EvalTask) -> Any | None:
         """Open a real trace context for the trial, unless one is already active."""
         try:
-            from agentnexus.observability.tracer import trace_manager
+            from agentnexus.core.telemetry import trace_manager
             if trace_manager.active is not None:
                 return None
             return trace_manager.start_trace(task.id, metadata={"eval_task": task.id})
@@ -114,7 +116,7 @@ class ReActAgentRunner:
         if trace_ctx is None:
             return
         try:
-            from agentnexus.observability.tracer import trace_manager
+            from agentnexus.core.telemetry import trace_manager
             trace_manager.end_trace()
         except Exception:
             pass
@@ -122,9 +124,9 @@ class ReActAgentRunner:
     @staticmethod
     def _span_to_transcript(span: Any, trace_id: str) -> dict[str, Any]:
         """Serialize a TraceSpan to the grader transcript format (real clock)."""
-        from agentnexus.observability.tracer import TraceManager
+        from agentnexus.core.telemetry import span_record
 
-        record = TraceManager._span_record(trace_id, span)
+        record = span_record(trace_id, span)
         if record["name"] == "plan_node":
             record["name"] = "llm"
         return record
@@ -235,14 +237,6 @@ class TranscriptCollector:
         self._spans = []
         self._active = True
         self._trace_id = trace_id
-
-        try:
-            from agentnexus.observability.tracer import TraceManager
-            tm = TraceManager()
-            if hasattr(tm, "on_span_end"):
-                tm.on_span_end(self._on_span)
-        except Exception:
-            pass
 
     def stop(self) -> list[dict[str, Any]]:
         """停止收集并返回 spans。"""

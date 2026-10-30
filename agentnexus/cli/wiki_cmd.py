@@ -15,8 +15,9 @@ wiki_app.add_typer(review_app, name="review")
 
 
 def _get_wiki_service():
-    from agentnexus.wiki.wiki_service import WikiService
-    return WikiService()
+    from agentnexus.services.wiki import get_wiki_service
+
+    return get_wiki_service()
 
 
 @wiki_app.command("init")
@@ -24,17 +25,12 @@ def wiki_init(
     namespace: str = typer.Argument(..., help="wiki 绑定的 RAG 命名空间"),
 ):
     """为 RAG 命名空间初始化 wiki。"""
-    from agentnexus.rag.store import get_knowledge_base_catalog
-    from agentnexus.wiki.store import get_wiki_store
-
-    catalog = get_knowledge_base_catalog()
-    kb = catalog.get_knowledge_base(namespace)
-    if not kb:
-        console.print(f"[red]RAG namespace '{namespace}' not found. Add documents first with `nexus kb add`.[/red]")
-        raise typer.Exit(1)
-
-    store = get_wiki_store()
-    stats = store.get_stats(namespace)
+    service = _get_wiki_service()
+    try:
+        stats = service.initialize_namespace(namespace)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
     console.print(f"[green]Wiki initialized for namespace '{namespace}'[/green]")
     console.print(f"  Existing pages: {stats['page_count']}")
     console.print(f"  Existing statements: {stats['statement_count']}")
@@ -136,10 +132,7 @@ def review_list(
     limit: int = typer.Option(20, "--limit", "-l", help="最多显示的条目数"),
 ):
     """列出审查队列条目。"""
-    from agentnexus.wiki.store import get_wiki_store
-
-    store = get_wiki_store()
-    items = store.list_review_items(status=status, limit=limit)
+    items = _get_wiki_service().list_review_items(status=status, limit=limit)
 
     if not items:
         console.print(f"[green]No {status} review items.[/green]")
@@ -171,10 +164,7 @@ def review_resolve(
     item_id: str = typer.Argument(..., help="要解决的审查条目 ID"),
 ):
     """解决一个审查条目。"""
-    from agentnexus.wiki.store import get_wiki_store
-
-    store = get_wiki_store()
-    store.resolve_review_item(item_id)
+    _get_wiki_service().resolve_review_item(item_id)
     console.print(f"[green]✓ Resolved {item_id}[/green]")
 
 
@@ -232,28 +222,15 @@ def wiki_calibrate(
         ...
     ]
     """
-    from agentnexus.wiki.calibration import CalibrationSample
-
     path = Path(sample_file)
     if not path.exists():
         console.print(f"[red]Sample file not found: {sample_file}[/red]")
         raise typer.Exit(1)
 
     raw = json.loads(path.read_text(encoding="utf-8"))
-    samples = [
-        CalibrationSample(
-            statement_id=s["statement_id"],
-            text=s["text"],
-            source_chunk_ids=s["source_chunk_ids"],
-            source_texts=s["source_texts"],
-            human_label=s["human_label"],
-        )
-        for s in raw
-    ]
-
-    console.print(f"Running calibration with {len(samples)} samples...")
+    console.print(f"Running calibration with {len(raw)} samples...")
     service = _get_wiki_service()
-    result = service.calibrate(samples)
+    result = service.calibrate_records(raw)
 
     console.print("[green]✓ Calibration complete[/green]")
     console.print(f"  Thresholds: {json.dumps(result['thresholds'], indent=2)}")
@@ -267,49 +244,19 @@ def wiki_backfill(
     namespace: str = typer.Option("default", "--namespace", "-n", help="RAG 命名空间"),
 ):
     """从零重建 wiki：删除所有现有页面，再从 RAG 重新生成。"""
-    from agentnexus.rag.store import get_knowledge_base_catalog
-    from agentnexus.wiki.store import get_wiki_store
-
-    catalog = get_knowledge_base_catalog()
-    wiki_store = get_wiki_store()
-
-    kb = catalog.get_knowledge_base(namespace)
-    if not kb:
-        console.print(f"[red]No RAG knowledge base found for namespace '{namespace}'[/red]")
-        raise typer.Exit(1)
-
-    docs = catalog.list_documents(kb.kb_id)
-    if not docs:
-        console.print("[yellow]No documents in RAG to backfill.[/yellow]")
-        return
-
-    existing_pages = wiki_store.list_pages(source_namespace=namespace)
-    for p in existing_pages:
-        wiki_store.delete_page(p.page_id)
-    if existing_pages:
-        console.print(f"Deleted {len(existing_pages)} existing wiki pages.")
-
     service = _get_wiki_service()
-    created = 0
-
-    for doc in docs:
-        source_text = doc.raw_text or doc.indexed_text or doc.content
-        if not source_text.strip():
-            continue
-
-        console.print(f"  Generating wiki for [cyan]{doc.source_uri}[/cyan]...")
-        try:
-            page = service.ingest_source(
-                source_text=source_text,
-                source_uri=doc.source_uri,
-                source_namespace=namespace,
-            )
-            console.print(f"    [green]✓[/green] {page.title} ({len(page.statements)} statements)")
-            created += 1
-        except Exception as e:
-            console.print(f"    [red]✗[/red] Failed: {e}")
-
-    console.print(f"\n[green]Done![/green] Created {created} wiki pages.")
+    try:
+        result = service.backfill(namespace)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if result.get("message"):
+        console.print(f"[yellow]{result['message']}[/yellow]")
+    if result["deleted"]:
+        console.print(f"Deleted {result['deleted']} existing wiki pages.")
+    for error in result.get("errors", []):
+        console.print(f"[red]Failed {error['source']}: {error['error']}[/red]")
+    console.print(f"\n[green]Done![/green] Created {result['created']} wiki pages.")
 
 
 @wiki_app.command("full-check")

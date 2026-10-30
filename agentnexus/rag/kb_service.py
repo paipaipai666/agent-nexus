@@ -366,9 +366,12 @@ def ingest_one_document(
     llm_client=None,
     run_id: str | None = None,
     source_uri: str | None = None,
+    module_host=None,
 ) -> tuple[IngestedDocument, IngestionRunRecord]:
     from agentnexus.core.hooks import HookType, get_hook_manager
+    from agentnexus.core.modules import get_module_host
 
+    wiki = (module_host or get_module_host()).optional("wiki")
     effective_uri = source_uri or filepath
     hook_mgr = get_hook_manager()
     hook_mgr.fire(HookType.BEFORE_KB_INGEST, {
@@ -434,17 +437,15 @@ def ingest_one_document(
         "replaced_chunks": stats["replaced_chunks"],
     })
 
-    _update_run_progress(run, stage="wiki", stage_pct=95, message="Generating wiki pages")
     try:
-        from agentnexus.wiki.wiki_service import WikiService
-
-        wiki = WikiService()
-        source_text = artifacts.document.raw_text or artifacts.document.indexed_text or artifacts.document.content
-        wiki.ingest_source(
-            source_text=source_text,
-            source_uri=effective_uri,
-            source_namespace=namespace,
-        )
+        if wiki is not None:
+            _update_run_progress(run, stage="wiki", stage_pct=95, message="Generating wiki pages")
+            source_text = artifacts.document.raw_text or artifacts.document.indexed_text or artifacts.document.content
+            wiki.ingest_source(
+                source_text=source_text,
+                source_uri=effective_uri,
+                source_namespace=namespace,
+            )
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("Wiki auto-generation failed (non-fatal): %s", exc)

@@ -4,19 +4,7 @@ import typer
 from rich import box
 from rich.table import Table
 
-from agentnexus.observability.audit_log import (
-    ThreadSafeAuditLog,
-    append_audit,
-    get_audit_log,
-)
-
 from . import app, console
-
-__all__ = [
-    "ThreadSafeAuditLog",
-    "append_audit",
-    "get_audit_log",
-]
 
 
 @app.command("audit")
@@ -25,7 +13,7 @@ def audit(
     tool: str = typer.Option("", "--tool", "-t", help="按工具名过滤"),
 ):
     """显示工具调用审计日志。"""
-    from agentnexus.observability.audit_log import get_audit_log as _get_audit_log
+    from agentnexus.core.telemetry import get_audit_log as _get_audit_log
 
     entries = _get_audit_log()
     if tool:

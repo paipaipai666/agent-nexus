@@ -9,6 +9,7 @@ from agentnexus.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentnexus.core.llm import AgentLLM
+    from agentnexus.core.modules import ModuleHost
     from agentnexus.memory.todo import SessionTodoList
     from agentnexus.tools.confirm_bridge import ConfirmBridge
     from agentnexus.tools.mcp.adapter import MCPManager
@@ -37,6 +38,7 @@ class ToolProviderContext:
     generation: int = 0
     registered_tools: list[str] = field(default_factory=list)
     todo_list: "SessionTodoList | None" = None
+    modules: "ModuleHost | None" = None
 
     def want(self, name: str) -> bool:
         return self.include_tools is None or name in self.include_tools
@@ -84,6 +86,7 @@ class ToolProviderContext:
             generation=self.generation if generation is None else generation,
             registered_tools=self.registered_tools,
             todo_list=self.todo_list,
+            modules=self.modules,
         )
 
 

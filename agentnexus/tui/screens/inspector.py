@@ -101,7 +101,7 @@ class InspectorScreen(ActionScreen[None]):
         self._recovery = self.chat.get_session_recovery(self.sid)
         waiting = sum(child.get("waiting_questions", 0) for child in children)
         self.query_one("#task-detail", Static).update(Text(f"待答复 {waiting} · 子任务 {len(children)} · ") + task_summary(self._recovery))
-        todo = getattr(self.chat.session_agent(self.sid), "_todo_list", None)
+        todo = getattr(self.chat.session_agent(self.sid, required=False), "todo_list", None)
         items = todo.list_items() if todo is not None else []
         self.query_one("#task-todos", Static).update(Text("\n".join(f"{item.status} · {item.description}" for item in items)))
         self.query_one("#task-todos").display = bool(items)
@@ -127,7 +127,7 @@ class InspectorScreen(ActionScreen[None]):
         self.show_child()
 
     def _messages(self, child):
-        from agentnexus.observability.timeline import get_timeline_store
+        from agentnexus.storage.timeline import get_timeline_store
 
         return get_timeline_store().list_collaboration_messages(self.sid, child["subagent_id"], run_id=child.get("run_id"))
 

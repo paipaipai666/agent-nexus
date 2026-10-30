@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 _current_runtime: Any = None
+_request_runtime: ContextVar[Any] = ContextVar("agentnexus_server_runtime", default=None)
 
 
 def set_runtime(rt: Any) -> None:
@@ -17,9 +19,37 @@ def set_runtime(rt: Any) -> None:
 
 
 def _get_runtime() -> Any:
+    current = _request_runtime.get()
+    if current is not None:
+        return current
     if _current_runtime is None:
         raise RuntimeError("Server runtime not initialized")
     return _current_runtime
+
+
+class RuntimeContextMiddleware:
+    """Bind the owning runtime for HTTP and WebSocket request lifetimes."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+        from agentnexus.core.modules import ModuleHost
+
+        runtime = getattr(scope["app"].state, "runtime", None)
+        if runtime is None:
+            await self.app(scope, receive, send)
+            return
+        token = _request_runtime.set(runtime)
+        modules = getattr(runtime, "modules", None)
+        try:
+            with modules.activate() if isinstance(modules, ModuleHost) else nullcontext():
+                await self.app(scope, receive, send)
+        finally:
+            _request_runtime.reset(token)
 
 
 def _mark_stale_ingestion_runs() -> None:
@@ -58,33 +88,34 @@ def _mark_stale_ingestion_runs() -> None:
 
 def create_app(runtime: Any | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
+    from agentnexus.core.modules import active_module_host
+
+    selected_modules = active_module_host()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         from agentnexus.app.runtime import AppRuntime
 
-        if runtime is not None:
-            set_runtime(runtime)
-        else:
-            set_runtime(AppRuntime.build(profile="server"))
-
-        _mark_stale_ingestion_runs()
-
-        yield
+        rt = runtime if runtime is not None else AppRuntime.build(profile="server", modules=selected_modules)
+        app.state.runtime = rt
         try:
-            rt = _get_runtime()
-            chat = getattr(rt, "chat", None)
-            if chat is not None and hasattr(chat, "cancel_all_runs"):
-                chat.cancel_all_runs(reason="server_shutdown")
-        except Exception:
-            pass
-        _current_runtime.close()
+            _mark_stale_ingestion_runs()
+            yield
+        finally:
+            try:
+                chat = getattr(rt, "chat", None)
+                if chat is not None and hasattr(chat, "cancel_all_runs"):
+                    chat.cancel_all_runs(reason="server_shutdown")
+            finally:
+                rt.close()
 
     app = FastAPI(
         title="AgentNexus API",
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.state.runtime = runtime
+    app.add_middleware(RuntimeContextMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

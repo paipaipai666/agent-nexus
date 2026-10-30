@@ -12,7 +12,14 @@ from agentnexus.cli import console, eval_app
 
 
 @eval_app.command("fg")
-def eval_fine_grained(
+def eval_fine_grained(scope: str=typer.Option('full', '--scope', '-s', help='评测范围: perception | planning | tools | e2e | memory | core_module | full'), judge: bool=typer.Option(False, '--judge', help='启用 LLM judge（质量类指标必需）'), json_out: str=typer.Option('', '--json', help='把完整结果写到指定 JSON 文件')):
+    '精细化评测：按模块拆解的质量 × 成本 × 性能指标（数据优先，非 PASS/FAIL）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_fine_grained(scope, judge, json_out)
+
+
+def _default_eval_fine_grained(
     scope: str = typer.Option("full", "--scope", "-s",
                               help="评测范围: perception | planning | tools | e2e | memory | core_module | full"),
     judge: bool = typer.Option(False, "--judge", help="启用 LLM judge（质量类指标必需）"),

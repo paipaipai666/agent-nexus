@@ -17,7 +17,7 @@ class TestMultiTurnLTM:
 
         if mock_ltm is None:
             mock_ltm = MagicMock()
-            mock_ltm.search.return_value = []
+            mock_ltm.search_text.return_value = []
             mock_ltm.write_counter = 0
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
@@ -66,7 +66,7 @@ class TestMultiTurnLTM:
 
     def test_init_session_returns_empty_when_no_memories(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)
         ctx = mgr.init_session("hello")
@@ -75,7 +75,7 @@ class TestMultiTurnLTM:
     def test_init_session_returns_ltm_context(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        mock_ltm.search.return_value = [
+        mock_ltm.search_text.return_value = [
             {"category": "user_preference", "_score": 0.8, "content": "用户喜欢Python"},
         ]
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)
@@ -95,7 +95,7 @@ class TestMultiTurnLTM:
     def test_conclude_extracts_memories(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
         mock_ltm.write_counter = 0
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
@@ -108,8 +108,8 @@ class TestMultiTurnLTM:
 
         mgr.conclude("你好", "你好！")
 
-        mock_ltm.save.assert_called()
-        call_kwargs = mock_ltm.save.call_args
+        mock_ltm.save_text.assert_called()
+        call_kwargs = mock_ltm.save_text.call_args
         assert call_kwargs[1]["content"] == "用户喜欢简洁回答"
         assert call_kwargs[1]["category"] == "preference"
 
@@ -119,7 +119,7 @@ class TestMultiTurnLTM:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
-        mock_ltm.search.side_effect = [
+        mock_ltm.search_text.side_effect = [
             [],
             [{"category": "user_preference", "_score": 0.8, "content": "用户喜欢Python"}],
         ]
@@ -146,7 +146,7 @@ class TestMultiTurnLTM:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
-        mock_ltm.search.side_effect = [
+        mock_ltm.search_text.side_effect = [
             [],
             [{"category": "entity_fact", "_score": 0.7, "content": "用户有Flask项目"}],
             [
@@ -185,7 +185,7 @@ class TestMultiTurnLTM:
 
     def test_conclude_does_not_corrupt_prior_stm(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)
@@ -211,7 +211,7 @@ class TestMultiTurnLTM:
 
     def test_has_new_memories_after_conclude(self, temp_agentnexus_home):
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
 
         mgr = self._make_mgr(temp_agentnexus_home, mock_ltm)

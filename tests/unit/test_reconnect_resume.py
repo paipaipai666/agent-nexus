@@ -26,8 +26,8 @@ def _make_service() -> tuple[ChatService, MagicMock]:
     agent.llm_client.last_error = ""
     agent.agent_id = "mock-agent"
     agent.max_steps = 5
-    agent._total_usage = {}
-    agent._step_count = 0
+    agent.total_usage = {}
+    agent.step_count = 0
     service = ChatService(
         agent_factory=lambda _sid=None: agent,
         memory_factory_builder=lambda _sid: lambda: MagicMock(),
@@ -40,7 +40,7 @@ def _run_with_events(service: ChatService, agent: MagicMock, session_id: str, ev
     emitted = []
 
     def side_effect(_question, **kwargs):
-        on_event = agent._on_event
+        on_event = agent.event_handler
         for e in events:
             on_event(e, None, None)
         return "mock answer"
@@ -68,7 +68,7 @@ class TestTokenBufferSemantics:
         captured = {}
 
         def side_effect(_q, **kwargs):
-            on_event = agent2._on_event
+            on_event = agent2.event_handler
             on_event(_ev("STREAM_TOKEN", token="T1"), None, None)
             on_event(_ev("STREAM_REASONING", token="R1"), None, None)
             on_event(_ev("STREAM_TOKEN", token="T2"), None, None)
@@ -127,7 +127,7 @@ class TestStepScopedSnapshot:
         captured = {}
 
         def side_effect(_q, **kwargs):
-            on_event = agent._on_event
+            on_event = agent.event_handler
             on_event(_ev("STREAM_TOKEN", token="AAA"), None, None)
             on_event(_ev("TOOL_START", name="file_read", arguments={}), None, None)
             on_event(_ev("STREAM_TOKEN", token="BB"), None, None)
@@ -144,7 +144,7 @@ class TestStepScopedSnapshot:
         captured = {}
 
         def side_effect(_q, **kwargs):
-            on_event = agent._on_event
+            on_event = agent.event_handler
             on_event(_ev("STREAM_TOKEN", token="AAA"), None, None)
             on_event(_ev("TOOL_START", name="file_read", arguments={}), None, None)
             captured.update(service.get_run_token_snapshot(session.id))

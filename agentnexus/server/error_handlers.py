@@ -18,6 +18,15 @@ class APIError(Exception):
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    from agentnexus.core.modules import ModuleUnavailable
+
+    @app.exception_handler(ModuleUnavailable)
+    async def module_unavailable_handler(request: Request, exc: ModuleUnavailable):
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"code": "module_unavailable", "message": str(exc)}},
+        )
+
     @app.exception_handler(APIError)
     async def api_error_handler(request: Request, exc: APIError):
         return JSONResponse(

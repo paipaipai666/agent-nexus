@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from agentnexus.observability.tracer import trace_span
+from agentnexus.core.telemetry import trace_span
 
 logger = logging.getLogger(__name__)
 

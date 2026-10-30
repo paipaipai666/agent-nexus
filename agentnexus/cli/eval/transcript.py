@@ -100,7 +100,14 @@ def _format_span(span: dict, index: int) -> str:
 
 
 @app.command("show")
-def transcript_show(
+def transcript_show(trace_id: str=typer.Argument(help='Trace ID'), grader: bool=typer.Option(False, '--grader', '-g', help='显示 grader 评分详情'), json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '显示单个 transcript 的完整执行记录。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_transcript_show(trace_id, grader, json_output)
+
+
+def _default_transcript_show(
     trace_id: str = typer.Argument(help="Trace ID"),
     grader: bool = typer.Option(False, "--grader", "-g", help="显示 grader 评分详情"),
     json_output: bool = typer.Option(False, "--json", help="JSON 输出"),
@@ -185,7 +192,14 @@ def _show_grader_scores(spans: list[dict]) -> None:
 
 
 @app.command("list")
-def transcript_list(
+def transcript_list(days: int=typer.Option(1, '-d', '--days', help='查看最近几天'), limit: int=typer.Option(20, '-n', '--limit', help='最多显示几条'), tool: str | None=typer.Option(None, '--tool', '-t', help='按工具名过滤'), json_output: bool=typer.Option(False, '--json', help='JSON 输出')) -> None:
+    '列出最近的 transcripts。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_transcript_list(days, limit, tool, json_output)
+
+
+def _default_transcript_list(
     days: int = typer.Option(1, "-d", "--days", help="查看最近几天"),
     limit: int = typer.Option(20, "-n", "--limit", help="最多显示几条"),
     tool: str | None = typer.Option(None, "--tool", "-t", help="按工具名过滤"),
@@ -264,7 +278,14 @@ def transcript_list(
 
 
 @app.command("search")
-def transcript_search(
+def transcript_search(tool: str | None=typer.Option(None, '--tool', '-t', help='按工具名搜索'), keyword: str | None=typer.Option(None, '--keyword', '-k', help='按关键字搜索'), days: int=typer.Option(7, '-d', '--days', help='搜索最近几天'), limit: int=typer.Option(10, '-n', '--limit', help='最多显示几条')) -> None:
+    '搜索 transcripts。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_transcript_search(tool, keyword, days, limit)
+
+
+def _default_transcript_search(
     tool: str | None = typer.Option(None, "--tool", "-t", help="按工具名搜索"),
     keyword: str | None = typer.Option(None, "--keyword", "-k", help="按关键字搜索"),
     days: int = typer.Option(7, "-d", "--days", help="搜索最近几天"),
@@ -329,7 +350,14 @@ def transcript_search(
 
 
 @app.command("failures")
-def transcript_failures(
+def transcript_failures(days: int=typer.Option(1, '-d', '--days', help='查看最近几天'), limit: int=typer.Option(10, '-n', '--limit', help='最多显示几条')) -> None:
+    '列出失败的 transcripts (无 final_answer 或有 error)。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_transcript_failures(days, limit)
+
+
+def _default_transcript_failures(
     days: int = typer.Option(1, "-d", "--days", help="查看最近几天"),
     limit: int = typer.Option(10, "-n", "--limit", help="最多显示几条"),
 ) -> None:

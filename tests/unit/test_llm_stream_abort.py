@@ -10,8 +10,8 @@ import threading
 import time
 from unittest.mock import PropertyMock, patch
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.capabilities import ModelCapabilities
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.llm import AgentLLM
 from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 

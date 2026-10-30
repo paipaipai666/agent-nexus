@@ -17,7 +17,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.agents.react_types import (
@@ -30,6 +29,7 @@ from agentnexus.agents.react_types import (
     RetryReason,
     Transition,
 )
+from agentnexus.core.exceptions import AgentCancelled
 
 S = ReActState
 E = ReActEventType

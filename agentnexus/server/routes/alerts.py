@@ -9,9 +9,9 @@ router = APIRouter(tags=["alerts"])
 
 @router.get("/alerts")
 def list_alerts(days: int = 7, severity: str | None = None):
-    from agentnexus.observability.alerting import get_alert_manager
+    from agentnexus.core.modules import get_module_host
 
-    manager = get_alert_manager()
+    manager = get_module_host().require("observability").alert_manager
     alerts = manager.get_history(days=days, severity=severity)
     return {
         "alerts": [
@@ -31,13 +31,13 @@ def list_alerts(days: int = 7, severity: str | None = None):
 
 @router.get("/alerts/rules")
 def list_alert_rules():
-    from agentnexus.observability.alerting import get_alert_manager
+    from agentnexus.core.modules import get_module_host
 
-    manager = get_alert_manager()
+    manager = get_module_host().require("observability").alert_manager
     return {
         "rules": [
             {"type": type(r).__name__, "index": i}
-            for i, r in enumerate(manager._rules)
+            for i, r in enumerate(manager.rules)
         ],
-        "total": len(manager._rules),
+        "total": len(manager.rules),
     }

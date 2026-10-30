@@ -9,13 +9,6 @@ from agentnexus.observability.tracer import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _reset_trace_manager():
-    TraceManager._instance = None
-    yield
-    TraceManager._instance = None
-
-
 class TestTraceContextStartEndSpan:
 
     def test_start_span_creates_valid_span(self):
@@ -65,12 +58,13 @@ class TestEndSpanIdempotent:
         assert len(ctx.spans) == 1
 
 
-class TestTraceManagerSingleton:
+class TestTraceManagerOwnership:
 
-    def test_singleton_returns_same_instance(self):
+    def test_instances_keep_independent_active_traces(self):
         tm1 = TraceManager()
         tm2 = TraceManager()
-        assert tm1 is tm2
+        tm1.start_trace("first")
+        assert tm2.active is None
 
     def test_configure_sets_dir(self, tmp_path):
         tm = TraceManager()

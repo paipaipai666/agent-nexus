@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentnexus.core.config import get_settings
+from agentnexus.core.modules import get_module_host
 from agentnexus.tools.providers.base import ProviderSpec, ToolProviderContext
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry
 
@@ -13,6 +13,10 @@ class SubagentToolProvider:
 
     def register(self, executor: ToolRegistry, context: ToolProviderContext) -> None:
         if not context.enable_subagent or not any(context.want(name) for name in ("subagent_run", "subagent_start", "subagent_send", "subagent_wait")):
+            return
+
+        modules = context.modules or get_module_host()
+        if not modules.is_enabled("agent"):
             return
 
         from agentnexus.tools.subagent import make_subagent_run
@@ -45,7 +49,7 @@ class SubagentToolProvider:
                 rate_limit_per_min=10,
                 concurrency_safe=True,
                 lane="subagent",
-                timeout_sec=get_settings().subagent_timeout_sec,
+                timeout_sec=modules.settings.subagent_timeout_sec,
         )
         if context.want("subagent_run"):
             executor.register(
@@ -57,6 +61,7 @@ class SubagentToolProvider:
                     mcp_manager=context.mcp_manager,
                     cancel_bridge=executor.cancel_bridge,
                     subagent_bridge=executor.subagent_bridge,
+                    modules=modules,
                 ),
             )
         from agentnexus.tools.collaboration import register_parent_collaboration

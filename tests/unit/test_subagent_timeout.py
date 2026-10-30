@@ -12,8 +12,8 @@ import time
 import pytest
 
 import agentnexus.core.config as config_mod
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core import llm as llm_mod
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.tools.subagent import _run_subagent_attempt
 
 

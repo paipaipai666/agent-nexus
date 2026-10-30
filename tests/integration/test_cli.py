@@ -622,7 +622,7 @@ class TestCliLogsView:
             try:
                 result = runner.invoke(app, ["logs", "view", "--trace-id", "any"])
                 assert result.exit_code == 0
-                assert "No" in result.stdout
+                assert "Trace not found: any" in result.stdout
             finally:
                 cfg._settings_cache = None
                 del os.environ["AGENTNEXUS_HOME"]

@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import logging
 import time
-from types import SimpleNamespace
 from typing import Any
 
+from agentnexus.evaluation.engine import create_evaluation_agent, result_answer
 from agentnexus.evaluation.fine_grained.cases import (
     JUDGE_CALIBRATION,
     EvalCase,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def _usage_snapshot(agent: Any) -> tuple[int, int]:
-    usage = getattr(agent.llm_client, "total_usage", None) or {}
+    usage = getattr(agent, "total_usage", None) or getattr(getattr(agent, "llm_client", None), "total_usage", None) or {}
     return (int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)))
 
 
@@ -62,9 +62,9 @@ def _collect_run_metrics(agent: Any, result: Any, wall_ms: float,
                 "result_preview": result_preview,
             })
         rm.json_retries += getattr(s, "json_retries", 0) or 0
-    usage = getattr(agent.llm_client, "total_usage", None) or {}
-    rm.input_tokens = int(usage.get("input_tokens", 0)) - usage_before[0]
-    rm.output_tokens = int(usage.get("output_tokens", 0)) - usage_before[1]
+    usage = _usage_snapshot(agent)
+    rm.input_tokens = usage[0] - usage_before[0]
+    rm.output_tokens = usage[1] - usage_before[1]
     rm.llm_calls = rm.steps
     return rm
 
@@ -139,8 +139,7 @@ class FineGrainedRunner:
         return out
 
     def _make_agent(self, registry: Any) -> Any:
-        from agentnexus.agents.re_act_agent import ReActAgent
-        return ReActAgent(
+        return create_evaluation_agent(
             self.generator, registry,
             max_steps=self.max_steps,
             output=lambda *_: None,
@@ -156,7 +155,7 @@ class FineGrainedRunner:
         result = agent.run(case.user_input)
         wall_ms = (time.monotonic() - t0) * 1000
         rm = _collect_run_metrics(agent, result, wall_ms, usage_before=before)
-        answer = result.answer or ""
+        answer = result_answer(result)
 
         out = CaseOutcome(case_id=case.id, dataset=case.dataset, run=rm)
         called = rm.real_tool_names
@@ -237,19 +236,13 @@ class FineGrainedRunner:
         return out
 
     def _run_multi_turn(self, case: EvalCase) -> CaseOutcome:
+        from agentnexus.core.modules import get_module_host
         from agentnexus.memory.manager import MemoryManager
-        from agentnexus.memory.short_term import ShortTermMemory
 
         registry = build_mock_registry()
         agent = self._make_agent(registry)
-        mgr = MemoryManager.__new__(MemoryManager)
-        mgr.session_id = f"eval_{case.id}"
-        mgr.short_term = ShortTermMemory()
-        mgr.long_term = None
-        mgr.project = None
-        mgr._settings = SimpleNamespace(
-            offload_enabled=False, time_microcompact_interval=0, transcript_enabled=False,
-        )
+        mgr = MemoryManager(f"eval_{case.id}", llm=self.generator, enable_long_term=False,
+                            modules=get_module_host())
         mgr.compact_threshold = 10**9
 
         turns_out: list[str] = []
@@ -257,15 +250,16 @@ class FineGrainedRunner:
         before = _usage_snapshot(agent)
         t0 = time.monotonic()
         for turn in case.chain:
+            mgr.begin_turn()
             r = agent.run(turn["user_input"], memory_manager=mgr)
-            answer = r.answer or ""
+            answer = result_answer(r)
             turns_out.append(f"用户: {turn['user_input']}\n助手: {answer}")
             kws = turn.get("expected_contains", [])
             if kws:
                 turn_keyword_rates.append(sum(1 for k in kws if k in answer) / len(kws))
-        usage = agent.llm_client.total_usage or {}
-        total_in = int(usage.get("input_tokens", 0)) - before[0]
-        total_out = int(usage.get("output_tokens", 0)) - before[1]
+        usage = _usage_snapshot(agent)
+        total_in = usage[0] - before[0]
+        total_out = usage[1] - before[1]
 
         out = CaseOutcome(case_id=case.id, dataset=case.dataset)
         out.run = RunMetrics(
@@ -311,7 +305,7 @@ class FineGrainedRunner:
         rm = _collect_run_metrics(agent, result, (time.monotonic() - t0) * 1000,
                                   usage_before=before)
         out = CaseOutcome(case_id=case.id, dataset=case.dataset, run=rm,
-                          answer_preview=(result.answer or "")[:300])
+                          answer_preview=result_answer(result)[:300])
         called = rm.real_tool_names
         wanted = case.expected_any_tools or ([case.expected_tool] if case.expected_tool else [])
         correct = 1.0 if any(w in called for w in wanted) else 0.0
@@ -347,7 +341,7 @@ class FineGrainedRunner:
         try:
             before = _usage_snapshot(agent)
             result = agent.run(case.user_input)
-            answer = result.answer or ""
+            answer = result_answer(result)
             out.run = _collect_run_metrics(agent, result, (time.monotonic() - t0) * 1000,
                                            usage_before=before)
         except Exception as e:

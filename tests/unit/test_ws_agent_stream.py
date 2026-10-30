@@ -14,7 +14,7 @@ from agentnexus.services.chat import ChatService
 def _mock_trace_manager():
     """Prevent trace_manager from trying to serialize MagicMock objects."""
     mock_tm = MagicMock()
-    with patch("agentnexus.observability.tracer.trace_manager", mock_tm):
+    with patch("agentnexus.core.telemetry.trace_manager", mock_tm):
         yield
 
 
@@ -91,8 +91,8 @@ class TestWebSocketAgentStream:
         runtime, chat, session, agent = mock_runtime
 
         def simulate_run(_text, memory_manager=None):
-            if hasattr(agent, "_on_event") and agent._on_event:
-                agent._on_event(
+            if hasattr(agent, "event_handler") and agent.event_handler:
+                agent.event_handler(
                     ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "analyzing..."}),
                     None,
                     None,
@@ -149,23 +149,23 @@ class TestWebSocketAgentStream:
         runtime, chat, session, agent = mock_runtime
 
         def simulate_run(_text, memory_manager=None):
-            if hasattr(agent, "_on_event") and agent._on_event:
-                agent._on_event(
+            if hasattr(agent, "event_handler") and agent.event_handler:
+                agent.event_handler(
                     ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "thinking..."}),
                     None,
                     None,
                 )
-                agent._on_event(
+                agent.event_handler(
                     ReActEvent(ReActEventType.TOOL_START, {"name": "search", "arguments": {}}),
                     None,
                     None,
                 )
-                agent._on_event(
+                agent.event_handler(
                     ReActEvent(ReActEventType.TOOL_DONE, {"name": "search", "result": "ok"}),
                     None,
                     None,
                 )
-                agent._on_event(
+                agent.event_handler(
                     ReActEvent(ReActEventType.STREAM_TOKEN, {"token": "hello"}),
                     None,
                     None,

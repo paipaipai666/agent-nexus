@@ -106,11 +106,11 @@ class TestChatServiceAnswerFlow:
         agent = MagicMock()
 
         def simulate_agent_run(text, memory_manager=None):
-            if hasattr(agent, '_on_event') and agent._on_event:
+            if hasattr(agent, 'event_handler') and agent.event_handler:
                 from agentnexus.agents.react_types import ReActEvent, ReActEventType
-                agent._on_event(ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "thinking..."}), None, None)
-                agent._on_event(ReActEvent(ReActEventType.TOOL_START, {"name": "search"}), None, None)
-                agent._on_event(ReActEvent(ReActEventType.TOOL_DONE, {"name": "search", "result": "data"}), None, None)
+                agent.event_handler(ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "thinking..."}), None, None)
+                agent.event_handler(ReActEvent(ReActEventType.TOOL_START, {"name": "search"}), None, None)
+                agent.event_handler(ReActEvent(ReActEventType.TOOL_DONE, {"name": "search", "result": "data"}), None, None)
             return ReActResult(answer="final answer from agent", steps=[])
 
         agent.run.side_effect = simulate_agent_run
@@ -261,9 +261,9 @@ class TestBackendOutputSuppression:
     """Backend should not print agent output to stdout."""
 
     def test_send_message_does_not_print_to_stdout(self):
-        """ChatService.send_message() should suppress agent _output (print)."""
+        """ChatService.send_message() should suppress agent output (print)."""
         agent = MagicMock()
-        agent._output = print
+        agent.output = print
         agent.run.return_value = "final answer"
 
         service = ChatService(agent_factory=lambda _sid=None: agent, memory_factory_builder=lambda _sid: lambda: MagicMock())
@@ -286,13 +286,13 @@ class TestBackendOutputSuppression:
 
     def test_send_message_suppresses_output_with_real_agent(self):
         agent = MagicMock()
-        agent._output = print
+        agent.output = print
 
         def run_that_outputs(_text, memory_manager=None):
-            agent._output("思考: some thought")
-            agent._output("行动: search(query)")
-            agent._output("观察: result")
-            agent._output("最终答案: the answer")
+            agent.output("思考: some thought")
+            agent.output("行动: search(query)")
+            agent.output("观察: result")
+            agent.output("最终答案: the answer")
             return "the answer"
 
         agent.run.side_effect = run_that_outputs
@@ -314,14 +314,14 @@ class TestBackendOutputSuppression:
         assert "观察:" not in output
         assert "最终答案:" not in output
 
-    def test_send_message_suppresses_output_even_with_on_event(self):
+    def test_send_message_suppresses_output_even_with_event_handler(self):
         from agentnexus.agents.react_types import ReActEvent, ReActEventType
 
         agent = MagicMock()
 
         def run_with_events(_text, memory_manager=None):
-            if agent._on_event:
-                agent._on_event(
+            if agent.event_handler:
+                agent.event_handler(
                     ReActEvent(ReActEventType.TOOLS_FOUND, {"thought": "I need to search"}),
                     None, None,
                 )

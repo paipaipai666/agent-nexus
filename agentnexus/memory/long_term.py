@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timezone
 
 from agentnexus.core.config import get_settings
-from agentnexus.observability.tracer import trace_span
+from agentnexus.core.telemetry import trace_span
 
 logger = logging.getLogger(__name__)
 SCHEMA = """
@@ -54,20 +54,14 @@ CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_memories(status);
 
 
 LTM_COLLECTION = "long_term_memories"
-_ltm_collection = None
 
 
-def _get_ltm_collection():
-    global _ltm_collection
-    from agentnexus.storage.chroma import chroma_operation_lock, get_collection
+def _get_ltm_collection(settings=None):
+    from agentnexus.storage.chroma import get_collection_at
 
-    with chroma_operation_lock():
-        if _ltm_collection is None:
-            _ltm_collection = get_collection(
-                name=LTM_COLLECTION,
-                metadata={"hnsw:space": "cosine"},
-            )
-        return _ltm_collection
+    settings = settings if settings is not None else get_settings()
+    return get_collection_at(settings.chroma_persist_dir, name=LTM_COLLECTION,
+                             metadata={"hnsw:space": "cosine"})
 
 
 _ltm_instances: dict[str, "LongTermMemory"] = {}
@@ -84,19 +78,18 @@ def get_long_term_memory():
 
 def _reset_long_term_memory():
     """Close connections and clear the singleton cache. Used by tests."""
-    global _ltm_collection
     for inst in _ltm_instances.values():
         try:
             inst._conn.close()
         except Exception:
             pass
     _ltm_instances.clear()
-    _ltm_collection = None
 
 
 class LongTermMemory:
-    def __init__(self):
-        settings = get_settings()
+    def __init__(self, settings=None):
+        settings = settings if settings is not None else get_settings()
+        self._settings = settings
         db_path = settings.memory_db_path
         self._max_memories = settings.max_memories
         self._ttl_days = settings.memory_ttl_days
@@ -112,6 +105,47 @@ class LongTermMemory:
         self._chroma_col = None
         self._write_counter: int = 0
         self._lock = threading.RLock()
+
+    def close(self) -> None:
+        """Release the connection owned by this memory provider."""
+        with self._lock:
+            self._conn.close()
+
+    def save_text(self, session_id: str, content: str, category: str = "general",
+                  importance: float = 0.5, metadata: dict | None = None):
+        """Save natural-language memory using this backend's embedding policy."""
+        from agentnexus.memory.extraction import _embed_text
+        from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
+
+        try:
+            context = (metadata or {}).get("context", "")
+            embedding = embedding_to_list(get_embedding_model().encode(
+                _embed_text(content, context), normalize_embeddings=True))
+        except Exception:
+            embedding = []
+        return self.save(session_id, content, category, importance, metadata, embedding)
+
+    def search_text(self, query: str, category: str | None = None, limit: int = 5,
+                    min_similarity: float = 0.25, rewrite_query: bool = False) -> list[dict]:
+        """Search natural-language memory without exposing an embedding backend."""
+        from agentnexus.rag.embeddings import embedding_to_list, get_embedding_model
+
+        if rewrite_query:
+            from agentnexus.memory.query import rewrite_query as rewrite
+
+            query = rewrite(query)
+        embedding = embedding_to_list(get_embedding_model().encode(query, normalize_embeddings=True))
+        return self.search(embedding, category=category, limit=limit, min_similarity=min_similarity)
+
+    def reflect(self, days: int = 7, max_memories: int = 50) -> dict:
+        """Run this backend's reflection workflow with its own model dependencies."""
+        from agentnexus.core.llm import AgentLLM
+        from agentnexus.memory.reflection import run_reflection
+        from agentnexus.rag.embeddings import get_embedding_model
+
+        return run_reflection(llm=AgentLLM(), embed_model=get_embedding_model(),
+                              long_term=self, session_id="reflection",
+                              days=days, max_memories=max_memories)
 
     def _get_schema_version(self) -> int:
         """Get the current schema version."""
@@ -204,7 +238,7 @@ class LongTermMemory:
 
     def _ensure_chroma(self):
         if self._chroma_col is None:
-            self._chroma_col = _get_ltm_collection()
+            self._chroma_col = _get_ltm_collection(self._settings)
 
     def _update_last_accessed(self, ids: list[int]):
         """Update last_accessed_at and increment access_count for the given memory ids."""

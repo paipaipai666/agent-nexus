@@ -60,7 +60,7 @@ def _insert_session(db_path: str, session_id: str, workspace: str = "test_ws",
 class _FakeAgent:
     model_id = "test-model"
     total_usage = {"input_tokens": 0, "output_tokens": 0}
-    _step_count = 0
+    step_count = 0
 
 
 class _FakeMemoryManager:
@@ -119,7 +119,7 @@ def server_app(temp_agentnexus_home, db_dir):
 
     active_agent = _FakeAgent()
     active_agent.total_usage = {"input_tokens": 5000, "output_tokens": 2500}
-    active_agent._step_count = 8
+    active_agent.step_count = 8
     chat._agents["active-1"] = active_agent
     chat._memory_managers["active-1"] = _FakeMemoryManager()
     chat._sessions["active-1"] = type("Handle", (), {"id": "active-1", "skill": None, "profile": None})()

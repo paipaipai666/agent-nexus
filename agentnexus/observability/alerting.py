@@ -230,6 +230,11 @@ class AlertManager:
     def history(self) -> list[Alert]:
         return list(self._history)
 
+    @property
+    def rules(self) -> tuple[AlertRule, ...]:
+        """Inspect configured rules without exposing mutable manager state."""
+        return tuple(self._rules)
+
     def get_history(self, days: int = 7, severity: str | None = None) -> list[Alert]:
         """获取告警历史"""
         cutoff = time.time() - days * 86400
@@ -250,9 +255,9 @@ def get_alert_manager() -> AlertManager:
     return _global_alert_manager
 
 
-def setup_default_alerts(traces_dir: str | None = None) -> AlertManager:
+def setup_default_alerts(traces_dir: str | None = None, *, manager: AlertManager | None = None) -> AlertManager:
     """设置默认的告警规则和通道"""
-    manager = get_alert_manager()
+    manager = manager if manager is not None else get_alert_manager()
 
     manager.add_rule(CostExceedRule(threshold_cny=10.0))
     manager.add_rule(ToolFailureSpikeRule(threshold=0.3))
@@ -265,7 +270,7 @@ def setup_default_alerts(traces_dir: str | None = None) -> AlertManager:
     return manager
 
 
-def evaluate_stats(stats: Any, *, drift_critical_count: int = 0) -> list[Alert]:
+def evaluate_stats(stats: Any, *, drift_critical_count: int = 0, manager: AlertManager | None = None) -> list[Alert]:
     """Run alert rules against aggregated TokenStats (or any object with the same fields)."""
     metrics = {
         "total_cost_cny": getattr(stats, "total_cost_cny", 0.0),
@@ -275,12 +280,12 @@ def evaluate_stats(stats: Any, *, drift_critical_count: int = 0) -> list[Alert]:
         "total_tasks": getattr(stats, "total_tasks", 0),
         "drift_critical_count": drift_critical_count,
     }
-    return get_alert_manager().evaluate(metrics)
+    return (manager if manager is not None else get_alert_manager()).evaluate(metrics)
 
 
-def emit_drift_alerts(signals: list[Any], *, trace_id: str = "") -> list[Alert]:
+def emit_drift_alerts(signals: list[Any], *, trace_id: str = "", manager: AlertManager | None = None) -> list[Alert]:
     """Emit one CRITICAL alert per drift signal (event path, not metric rules)."""
-    manager = get_alert_manager()
+    manager = manager if manager is not None else get_alert_manager()
     emitted: list[Alert] = []
     for signal in signals or []:
         severity = getattr(getattr(signal, "severity", None), "value", "")

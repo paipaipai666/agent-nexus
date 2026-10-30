@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 from rich.console import Console
 from rich.text import Text
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.core.capabilities import (
     ModelCapabilities,
     ModelCapabilitySnapshot,
@@ -21,8 +20,9 @@ from agentnexus.core.capabilities import (
 )
 from agentnexus.core.capability_discovery import CapabilityDiscovery, probe_capabilities
 from agentnexus.core.config import get_settings
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.providers.router import select_provider
-from agentnexus.observability.tracer import trace_manager
+from agentnexus.core.telemetry import trace_manager
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -341,7 +341,7 @@ class AgentLLM:
                     context_refs.append(f"tool_result:{msg.get('name', 'unknown')}")
                 elif role == "assistant" and msg.get("tool_calls"):
                     context_refs.append("assistant_tool_calls")
-            span = ctx.start_span("llm", {
+            span = trace_manager.start_span("llm", {
                 "model": model,
                 "messages_count": len(messages),
                 "tool_count": len(tools) if tools else 0,
@@ -425,7 +425,7 @@ class AgentLLM:
             logger.error("LLM 错误%s: %s", retry_tag, error_msg)
 
             if ctx and span:
-                ctx.end_span(span, metadata={
+                trace_manager.end_span(span, metadata={
                     "model": model, "status": "error", "error": error_msg,
                     "retry_attempt": attempt + 1, "transient": is_transient,
                 })
@@ -534,7 +534,7 @@ class AgentLLM:
             meta["cache_miss_tokens"] = cache_miss
             total_cache = cache_hit + cache_miss
             meta["cache_hit_rate"] = cache_hit / total_cache if total_cache > 0 else 0.0
-        ctx.end_span(
+        trace_manager.end_span(
             span,
             output_data={"output_preview": _preview(result_text), "output_length": len(result_text)},
             metadata=meta,

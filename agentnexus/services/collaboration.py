@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable
 
-from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.services.subagents import SubagentEntry
 
 

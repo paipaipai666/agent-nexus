@@ -51,7 +51,7 @@ async def smoke(target):
         os.environ["AGENTNEXUS_HOME"] = home
         from agentnexus.core.config import get_settings
         from agentnexus.memory.versioned import ConversationVersionManager
-        from agentnexus.observability.timeline import get_timeline_store
+        from agentnexus.storage.timeline import get_timeline_store
 
         version = ConversationVersionManager("smoke-session", get_settings().memory_db_path, workspace_path=home)
         timeline = get_timeline_store()

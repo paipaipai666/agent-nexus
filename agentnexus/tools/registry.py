@@ -19,8 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from agentnexus.observability.audit_log import ThreadSafeAuditLog
-from agentnexus.observability.tracer import trace_manager
+from agentnexus.core.telemetry import AuditLog, trace_manager
 from agentnexus.skills.profile import filter_tool_meta
 from agentnexus.tools.result_format import summarize_tool_result
 
@@ -134,7 +133,7 @@ class ToolRegistry:
     def __init__(self, audit_log: Any | None = None):
         self._tools: dict[str, tuple[ToolMeta, Callable]] = {}
         self._rate_counters: dict[str, list[float]] = defaultdict(list)
-        self._audit_log = audit_log if audit_log is not None else ThreadSafeAuditLog()
+        self._audit_log = audit_log if audit_log is not None else AuditLog()
         self._param_validators: dict[str, Any] = {}
         self._output_validators: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=4)

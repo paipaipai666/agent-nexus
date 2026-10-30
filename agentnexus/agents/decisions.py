@@ -19,8 +19,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from agentnexus.agents import json_helpers
 from agentnexus.agents.react_types import CallingStrategy, RetryReason
+from agentnexus.core import json_helpers
 
 _THOUGHT_MARKER_RE = re.compile(
     r"^\s*[*_]{0,2}\s*(?:thought|thinking|分析思考|思考过程|思考|想法|分析)\s*[*_]{0,2}\s*[:：]\s*",

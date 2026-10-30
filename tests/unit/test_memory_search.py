@@ -3,7 +3,8 @@
 import json
 from unittest.mock import patch
 
-from agentnexus.tools.memory_search import _rewrite_query, _score_stars, memory_search
+from agentnexus.memory.query import rewrite_query
+from agentnexus.tools.memory_search import _score_stars, memory_search
 
 
 class TestScoreStars:
@@ -29,93 +30,93 @@ class TestScoreStars:
 
 
 class TestRewriteQuery:
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_successful_rewrite(self, MockLLM):
         MockLLM.return_value.think.return_value = "keyword1 keyword2"
-        result = _rewrite_query("What is the weather?")
+        result = rewrite_query("What is the weather?")
         assert result == "keyword1 keyword2"
 
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_rewrite_returns_original_on_failure(self, MockLLM):
         MockLLM.return_value.think.side_effect = Exception("LLM error")
-        result = _rewrite_query("test query")
+        result = rewrite_query("test query")
         assert result == "test query"
 
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_rewrite_returns_original_on_short_result(self, MockLLM):
         MockLLM.return_value.think.return_value = "x"
-        result = _rewrite_query("test query")
+        result = rewrite_query("test query")
         assert result == "test query"
 
 
 class TestMemorySearch:
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_found_results(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "python preference"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = [
+        mock_ltm.return_value.search_text.return_value = [
             {"_score": 0.85, "category": "user_preference", "content": "User likes Python"},
             {"_score": 0.55, "category": "entity_fact", "content": "Python version 3.11"},
         ]
         result = memory_search("What does user like?")
         assert "相关记忆" in result
-        assert "python preference" in result
+        assert "What does user like?" in result
         assert "★★★" in result
         assert "★★☆" in result
         assert "User likes Python" in result
         assert "Python version 3.11" in result
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_no_results(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "keywords"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = []
+        mock_ltm.return_value.search_text.return_value = []
         result = memory_search("something")
         assert "未找到相关记忆" in result
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
-    def test_embedding_unavailable(self, mock_embed):
-        mock_embed.return_value.encode.side_effect = Exception("model fail")
-        result = memory_search("test")
-        assert "嵌入模型不可用" in result
-
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    def test_backend_unavailable(self, mock_ltm):
+        mock_ltm.return_value.search_text.side_effect = RuntimeError("model fail")
+        result = memory_search("test")
+        assert "记忆检索失败" in result
+
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
+    @patch("agentnexus.tools.memory_search.get_long_term_memory")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_query_rewrite_used(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "rewritten keywords"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = []
+        mock_ltm.return_value.search_text.return_value = []
         memory_search("original query")
-        mock_embed.return_value.encode.assert_called_with(
-            "rewritten keywords", normalize_embeddings=True
-        )
+        mock_ltm.return_value.search_text.assert_called_with(
+            "original query", category=None, limit=5, min_similarity=0.25, rewrite_query=True)
+        mock_embed.return_value.encode.assert_not_called()
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_category_filter(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "keywords"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
         memory_search("query", category="user_preference")
-        _, kwargs = mock_ltm.return_value.search.call_args
+        _, kwargs = mock_ltm.return_value.search_text.call_args
         assert kwargs["category"] == "preference"
 
         memory_search("query")
-        _, kwargs = mock_ltm.return_value.search.call_args
+        _, kwargs = mock_ltm.return_value.search_text.call_args
         assert kwargs["category"] is None
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_context_rendered_when_present(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "周杰伦 推荐"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = [
+        mock_ltm.return_value.search_text.return_value = [
             {
                 "_score": 0.85,
                 "category": "preference",
@@ -130,26 +131,26 @@ class TestMemorySearch:
         assert "用户喜欢周杰伦" in result
         assert "推荐歌曲时用户否定了莫文蔚、选择周杰伦" in result
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_no_context_output_unchanged(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "python preference"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = [
+        mock_ltm.return_value.search_text.return_value = [
             {"_score": 0.85, "category": "user_preference", "content": "User likes Python"},
         ]
         result = memory_search("What does user like?")
         assert "User likes Python" in result
         assert "来源" not in result
 
-    @patch("agentnexus.tools.memory_search.get_embedding_model")
+    @patch("agentnexus.rag.embeddings.get_embedding_model")
     @patch("agentnexus.tools.memory_search.get_long_term_memory")
-    @patch("agentnexus.tools.memory_search.AgentLLM")
+    @patch("agentnexus.core.llm.AgentLLM")
     def test_empty_context_metadata_no_source_line(self, MockLLM, mock_ltm, mock_embed):
         MockLLM.return_value.think.return_value = "keywords"
         mock_embed.return_value.encode.return_value.tolist.return_value = [0.1]
-        mock_ltm.return_value.search.return_value = [
+        mock_ltm.return_value.search_text.return_value = [
             {
                 "_score": 0.85,
                 "category": "fact",

@@ -40,10 +40,10 @@ async def preview(output, size, theme):
     from agentnexus.core.config import get_settings
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.memory.versioned import ConversationVersionManager
-    from agentnexus.observability.timeline import get_timeline_store
     from agentnexus.services.chat import ChatService, SessionHandle
     from agentnexus.services.collaboration import ChildTask, CollaborationRun
     from agentnexus.services.subagents import SubagentRunContext
+    from agentnexus.storage.timeline import get_timeline_store
     from agentnexus.tui.app import AgentNexusTUI
     from agentnexus.tui.widgets.input_bar import Composer
     from agentnexus.tui.widgets.message import ToolCall

@@ -6,7 +6,14 @@ from agentnexus.cli import console, eval_app
 
 
 @eval_app.command("humaneval")
-def eval_humaneval(
+def eval_humaneval(dataset: str=typer.Option('', '--dataset', '-D', help='HumanEval JSONL 数据集路径'), trace_id: str=typer.Option('', '--trace', '-t', help='按 trace_id 过滤单个题目')):
+    '评估 HumanEval 代码生成质量（需要 solutions JSON）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_humaneval(dataset, trace_id)
+
+
+def _default_eval_humaneval(
     dataset: str = typer.Option(
         "", "--dataset", "-D", help="HumanEval JSONL 数据集路径",
     ),
@@ -43,7 +50,14 @@ def eval_humaneval(
 
 
 @eval_app.command("swe-bench")
-def eval_swebench(
+def eval_swebench(dataset: str=typer.Option('', '--dataset', '-D', help='SWE-bench JSONL 数据集路径')):
+    '评估 SWE-bench issue 修复质量（需要 patches JSON）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_swebench(dataset)
+
+
+def _default_eval_swebench(
     dataset: str = typer.Option(
         "", "--dataset", "-D", help="SWE-bench JSONL 数据集路径",
     ),

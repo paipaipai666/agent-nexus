@@ -41,6 +41,13 @@ def _build_backend(name: str):
 
 @memory_bench_app.command("list")
 def memory_bench_list():
+    '列出内置样例套件的对话与题型分布。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_memory_bench_list()
+
+
+def _default_memory_bench_list():
     """列出内置样例套件的对话与题型分布。"""
     from collections import Counter
 
@@ -66,7 +73,14 @@ def memory_bench_list():
 
 
 @memory_bench_app.command("convert")
-def memory_bench_convert(
+def memory_bench_convert(source: str=typer.Argument(..., help='公开数据源: locomo | longmemeval-s'), output: str=typer.Option(..., '--output', '-o', help='输出套件 JSONL 路径'), offline: bool=typer.Option(False, '--offline', help='不联网,只读缓存')):
+    '下载并转换公开记忆基准(LoCoMo / LongMemEval-S)为套件 JSONL。\n\n数据缓存在 ~/.cache/agentnexus/benchmarks/memory/,可用环境变量\nAGENTNEXUS_BENCHMARK_CACHE 覆盖。LoCoMo 为 CC BY-NC 4.0,仅限研究/内部评测。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_memory_bench_convert(source, output, offline)
+
+
+def _default_memory_bench_convert(
     source: str = typer.Argument(..., help="公开数据源: locomo | longmemeval-s"),
     output: str = typer.Option(..., "--output", "-o", help="输出套件 JSONL 路径"),
     offline: bool = typer.Option(False, "--offline", help="不联网,只读缓存"),
@@ -92,7 +106,14 @@ def memory_bench_convert(
 
 
 @memory_bench_app.command("re-judge")
-def memory_bench_rejudge(
+def memory_bench_rejudge(input_report: str=typer.Option(..., '--input', '-i', help='已生成的评测报告 JSON'), output: str=typer.Option('', '--output', '-o', help='输出路径(默认覆盖原报告)'), skip_judged: bool=typer.Option(False, '--skip-judged', help='跳过已有 judge 结论的题(换 judge 重判时不要带此项)')):
+    '对存盘报告逐题补 judge 结论——生成与判分解耦,judge 可错峰/换模型后补。\n\n只读取报告里已存的 answer,不重新生成;出错/未答的题跳过。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_memory_bench_rejudge(input_report, output, skip_judged)
+
+
+def _default_memory_bench_rejudge(
     input_report: str = typer.Option(..., "--input", "-i", help="已生成的评测报告 JSON"),
     output: str = typer.Option("", "--output", "-o", help="输出路径(默认覆盖原报告)"),
     skip_judged: bool = typer.Option(False, "--skip-judged",
@@ -137,7 +158,14 @@ def memory_bench_rejudge(
 
 
 @memory_bench_app.command("run")
-def memory_bench_run(
+def memory_bench_run(backend: str=typer.Option('nexus', '--backend', '-b', help='被测后端: nexus(产品记忆系统) 或 naive(全量上下文基线)'), dataset: str=typer.Option('sample', '--dataset', '-d', help='套件 JSONL 路径,默认内置 sample'), judge: bool=typer.Option(False, '--judge', help='启用独立 judge 模型逐题判分'), limit: int=typer.Option(0, '--limit', '-n', help='只跑前 N 段对话(0=全部)'), min_f1: float=typer.Option(0.0, '--min-f1', help='CI 门禁: overall F1 低于该值时退出码为 1'), report: str=typer.Option('', '--report', '-o', help='报告导出路径(默认 traces/evals/)'), ci: bool=typer.Option(False, '--ci', '-c', help='CI 模式: 报告写入 traces/evals/ 并打印 JSON 路径')):
+    '运行会话记忆基准:回放对话 → 逐题回答 → char-F1(可选 judge)打分。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_memory_bench_run(backend, dataset, judge, limit, min_f1, report, ci)
+
+
+def _default_memory_bench_run(
     backend: str = typer.Option("nexus", "--backend", "-b",
                                 help="被测后端: nexus(产品记忆系统) 或 naive(全量上下文基线)"),
     dataset: str = typer.Option("sample", "--dataset", "-d",

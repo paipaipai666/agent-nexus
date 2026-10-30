@@ -40,7 +40,7 @@ class TestInitSessionWithContext:
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
@@ -55,7 +55,7 @@ class TestInitSessionWithContext:
 
             mgr.init_session("讲解一下")
 
-            call_args = mock_embed.encode.call_args
+            call_args = mock_ltm.search_text.call_args
             query_text = call_args[0][0]
             assert "讲解一下" in query_text
             assert "快速排序" in query_text
@@ -67,7 +67,7 @@ class TestInitSessionWithContext:
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
 
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
             mgr = MemoryManager.__new__(MemoryManager)
@@ -82,7 +82,7 @@ class TestInitSessionWithContext:
 
             mgr.init_session("讲解一下")
 
-            call_args = mock_embed.encode.call_args
+            call_args = mock_ltm.search_text.call_args
             query_text = call_args[0][0]
             assert query_text == "讲解一下"
 
@@ -99,7 +99,7 @@ class TestInitSessionWithContext:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = [
+        mock_ltm.search_text.return_value = [
             {"category": "user_preference", "_score": 0.8, "content": "喜欢Python"},
             {"category": "entity_fact", "_score": 0.5, "content": "使用VSCode"},
         ]
@@ -127,7 +127,7 @@ class TestInitSessionWithContext:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = []
+        mock_ltm.search_text.return_value = []
         mock_ltm.write_counter = 0
 
         with patch("agentnexus.memory.manager.get_embedding_model", return_value=mock_embed):
@@ -820,7 +820,7 @@ class TestChatScreenAnswerRender:
             def __init__(self):
                 self.llm_client = FakeLLM()
                 self.total_usage = {"input_tokens": 1, "output_tokens": 1}
-                self._on_event = None
+                self.event_handler = None
                 self._confirm = None
                 self.agent_id = "fake-agent"
                 self.max_steps = 10
@@ -830,7 +830,7 @@ class TestChatScreenAnswerRender:
                 self._available_skill_context = ""
                 self._mcp_context = ""
                 self._workflow_context = ""
-                self._todo_list = None
+                self.todo_list = None
                 self.conversation_mode = False
 
             @property
@@ -838,7 +838,7 @@ class TestChatScreenAnswerRender:
                 return "fake-model"
 
             def run(self, text, memory_manager=None):
-                self._on_event(
+                self.event_handler(
                     ReActEvent(
                         ReActEventType.TOOLS_FOUND,
                         {
@@ -849,7 +849,7 @@ class TestChatScreenAnswerRender:
                     None,
                     None,
                 )
-                self._on_event(
+                self.event_handler(
                     ReActEvent(
                         ReActEventType.TOOL_START,
                         {"name": "web_search", "arguments": {"query": text}},
@@ -857,7 +857,7 @@ class TestChatScreenAnswerRender:
                     None,
                     None,
                 )
-                self._on_event(
+                self.event_handler(
                     ReActEvent(
                         ReActEventType.TOOL_DONE,
                         {
@@ -870,7 +870,7 @@ class TestChatScreenAnswerRender:
                     None,
                     None,
                 )
-                self._on_event(
+                self.event_handler(
                     ReActEvent(
                         ReActEventType.ANSWER_THOUGHT,
                         {"thought": "The tool result is enough to answer now."},
@@ -1175,7 +1175,7 @@ class TestRefreshLtmContext:
         mock_embed = MagicMock()
         mock_embed.encode.return_value.tolist.return_value = [0.1] * 384
         mock_ltm = MagicMock()
-        mock_ltm.search.return_value = [
+        mock_ltm.search_text.return_value = [
             {"category": "user_preference", "_score": 0.8, "content": "喜欢Python"},
         ]
         mock_ltm.write_counter = 0
@@ -1224,29 +1224,29 @@ class TestConclude:
 
     def test_parses_llm_response_and_saves_memories(self):
         mgr = self._make_mgr()
-        mgr.long_term.search.return_value = []
+        mgr.long_term.search_text.return_value = []
         json_response = json.dumps({
             "preference": ["likes Python", "prefers dark mode"],
             "fact": ["uses VSCode"],
         })
         mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("Test", "Answer")
-        assert mgr.long_term.save.call_count == 3
+        assert mgr.long_term.save_text.call_count == 3
 
     def test_handles_markdown_code_block_response(self):
         mgr = self._make_mgr()
-        mgr.long_term.search.return_value = []
+        mgr.long_term.search_text.return_value = []
         json_response = '```json\n{"preference": ["likes Python"]}\n```'
         mgr._llm.think.side_effect = ["yes", json_response]
         mgr.conclude("test", "Python")
-        assert mgr.long_term.save.call_count == 1
-        save_call = mgr.long_term.save.call_args
+        assert mgr.long_term.save_text.call_count == 1
+        save_call = mgr.long_term.save_text.call_args
         assert save_call[1]["content"] == "likes Python"
         assert save_call[1]["category"] == "preference"
 
     def test_masks_pii_in_question_instead_of_skipping(self):
         mgr = self._make_mgr()
-        mgr.long_term.search.return_value = []
+        mgr.long_term.search_text.return_value = []
         mgr._llm.think.side_effect = ["yes", "{}"]
         mgr.conclude("email me at user@example.com", "sure thing")
         assert mgr._llm.think.call_count == 2
@@ -1256,7 +1256,7 @@ class TestConclude:
 
     def test_masks_pii_in_answer_instead_of_skipping(self):
         mgr = self._make_mgr()
-        mgr.long_term.search.return_value = []
+        mgr.long_term.search_text.return_value = []
         mgr._llm.think.side_effect = ["yes", "{}"]
         mgr.conclude("hello", "call 13800138000")
         assert mgr._llm.think.call_count == 2

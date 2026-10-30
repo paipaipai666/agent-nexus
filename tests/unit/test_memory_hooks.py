@@ -1,6 +1,6 @@
 """Unit tests for memory operation hooks."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,16 +15,13 @@ def clean_hooks():
 
 
 def _make_memory_manager():
-    with patch("agentnexus.memory.manager.ShortTermMemory"), \
-         patch("agentnexus.memory.manager.get_long_term_memory", return_value=None), \
-         patch("agentnexus.memory.manager.AgentLLM"):
-        from agentnexus.memory.manager import MemoryManager
+    from agentnexus.memory.manager import MemoryManager
 
-        mm = MemoryManager(session_id="test", enable_long_term=False)
-        mm.short_term = MagicMock()
-        mm.short_term.token_count = 0
-        mm.short_term.estimate_tokens.return_value = 0
-        return mm
+    conversation = MagicMock()
+    conversation.token_count = 0
+    conversation.estimate_tokens.return_value = 0
+    return MemoryManager(session_id="test", enable_long_term=False,
+                         short_term=conversation, llm=MagicMock())
 
 
 class TestMemoryHooks:

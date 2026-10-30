@@ -10,12 +10,9 @@ import logging
 import time as _time
 from typing import Any, Callable
 
-from agentnexus.agents import decisions, json_helpers, react_runtime
-from agentnexus.agents.context_usage import ContextFragment, ContextUsageSnapshot, estimate_context_usage
-from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.agents import decisions, react_runtime
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
-from agentnexus.agents.plan_mode import EXIT_PLAN_MODE_TOOL, PLAN_MODE_PROMPT, PlanModeBinding
 from agentnexus.agents.prompt_builder import (
     assemble_react_messages,
     build_conversation_context,
@@ -33,11 +30,14 @@ from agentnexus.agents.react_types import (
 )
 from agentnexus.agents.runtime_context import build_environment_block, load_project_instructions
 from agentnexus.agents.tool_runner import execute_tool
+from agentnexus.core import json_helpers
 from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
+from agentnexus.core.context_usage import ContextFragment, ContextUsageSnapshot, estimate_context_usage
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.llm import AgentLLM
-from agentnexus.observability.drift_detector import DriftDetector, DriftSignalType
-from agentnexus.observability.tracer import trace_manager
+from agentnexus.core.plan_mode import EXIT_PLAN_MODE_TOOL, PLAN_MODE_PROMPT, PlanModeBinding
+from agentnexus.core.telemetry import create_drift_detector, emit_drift_alerts, trace_manager
 from agentnexus.prompts import load_prompt
 from agentnexus.skills import (
     CompiledSessionProfile,
@@ -134,6 +134,47 @@ class ReActAgent:
         return dict(self._total_usage)
 
     @property
+    def event_handler(self):
+        """Read the engine's optional event callback."""
+        return self._on_event
+
+    @event_handler.setter
+    def event_handler(self, handler) -> None:
+        self._on_event = handler
+
+    @property
+    def confirm_handler(self):
+        """Read the optional interactive approval callback."""
+        return self._confirm
+
+    @confirm_handler.setter
+    def confirm_handler(self, handler) -> None:
+        self._confirm = handler
+
+    @property
+    def output(self):
+        """Read the engine's output destination."""
+        return self._output
+
+    @output.setter
+    def output(self, destination) -> None:
+        self._output = destination
+
+    @property
+    def todo_list(self):
+        """Read this actor's application-owned task list."""
+        return self._todo_list
+
+    @todo_list.setter
+    def todo_list(self, todo_list) -> None:
+        self._todo_list = todo_list
+
+    @property
+    def step_count(self) -> int:
+        """Return the number of executed engine steps."""
+        return self._step_count
+
+    @property
     def model_id(self) -> str:
         return self.llm_client.model
 
@@ -199,7 +240,7 @@ class ReActAgent:
         Silent during bounded retries (logs only). Callers must not enter
         the next ReAct round after a raise.
         """
-        from agentnexus.agents.exceptions import MemoryCommitError
+        from agentnexus.core.exceptions import MemoryCommitError
 
         fn = getattr(self, "_round_persist", None)
         if fn is None:
@@ -254,7 +295,7 @@ class ReActAgent:
                 })
                 return ReActResult(answer=refusal, steps=[])
             question = prompt_ctx.payload.get("prompt", question)
-        self._drift_detector = DriftDetector(
+        self._drift_detector = create_drift_detector(
             original_goal=question,
             max_steps=self.max_steps if isinstance(self.max_steps, int) else 0,
         )
@@ -430,7 +471,7 @@ class ReActAgent:
             try:
                 trace_ctx = trace_manager.active
                 if trace_ctx:
-                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+                    trace_manager.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
             except Exception:
                 pass
             ctx.run_state._current_step_span = None
@@ -439,7 +480,7 @@ class ReActAgent:
 
         trace_ctx = trace_manager.active
         if trace_ctx:
-            step_span = trace_ctx.start_span("plan_node", {
+            step_span = trace_manager.start_span("plan_node", {
                 "step_index": ctx.run_state.current_step,
                 "strategy": ctx.run_state.strategy.name,
                 "question_preview": ctx.run_state.question[:200],
@@ -452,14 +493,12 @@ class ReActAgent:
                 current_goal=ctx.run_state.question[:200],
             )
             if drift_signals:
-                if trace_ctx:
-                    with trace_ctx._lock:
-                        for signal in drift_signals:
-                            logger.warning(
-                                "[漂移检测] step=%d type=%s severity=%s: %s",
-                                signal.step_index, signal.signal_type.value,
-                                signal.severity.value, signal.detail,
-                            )
+                for signal in drift_signals:
+                    logger.warning(
+                        "[漂移检测] step=%d type=%s severity=%s: %s",
+                        signal.step_index, signal.signal_type.value,
+                        signal.severity.value, signal.detail,
+                    )
                 for signal in drift_signals:
                     ctx.emit(ReActEventType.DRIFT_SIGNAL,
                              signal_type=signal.signal_type.value,
@@ -468,8 +507,6 @@ class ReActAgent:
                 critical = [s for s in drift_signals if s.severity.value == "critical"]
                 if critical:
                     try:
-                        from agentnexus.observability.alerting import emit_drift_alerts
-
                         emit_drift_alerts(critical, trace_id=getattr(trace_ctx, "trace_id", "") or "")
                     except Exception as alert_exc:
                         logger.debug("Drift alert emit failed: %s", alert_exc)
@@ -732,7 +769,7 @@ class ReActAgent:
         if not hasattr(self, "_drift_detector"):
             return
         signals = self._drift_detector.check(step_index=ctx.run_state.current_step)
-        repeated = [s for s in signals if s.signal_type is DriftSignalType.REPEATED_STEPS]
+        repeated = [s for s in signals if s.signal_type.value == "repeated_steps"]
         if not repeated:
             return
         detail = repeated[0].detail
@@ -924,7 +961,7 @@ class ReActAgent:
             try:
                 trace_ctx = trace_manager.active
                 if trace_ctx:
-                    trace_ctx.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
+                    trace_manager.end_span(prev_span, metadata={"status": "ok", "step_type": "plan"})
             except Exception:
                 pass
             ctx.run_state._current_step_span = None

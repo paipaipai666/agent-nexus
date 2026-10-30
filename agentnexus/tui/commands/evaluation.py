@@ -7,10 +7,9 @@ from . import COMMAND_HELP, split_action
 
 def run(context, command, args, sid):
     """Inspect tasks and run suites with the desktop's baseline semantics."""
-    from agentnexus.core.config import get_settings
-    from agentnexus.services.eval import EvalService
+    from agentnexus.services.eval import get_eval_service
 
-    service = EvalService(settings=get_settings())
+    service = get_eval_service(getattr(context.runtime, "modules", None))
     action, rest = split_action(args, "suites")
     if action == "suites":
         return {"suites": service.list_suites()}

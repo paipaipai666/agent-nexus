@@ -14,14 +14,12 @@ from . import app, console
 @app.command()
 def stats(days: int = typer.Option(7, "--days", "-d", help="统计最近 N 天")):
     """显示 token 成本统计。"""
-    from agentnexus.core.config import get_settings
-    from agentnexus.observability.stats import compute_stats
+    from agentnexus.core.modules import get_module_host
 
     try:
-        s = compute_stats(get_settings().traces_dir, days)
-        from agentnexus.observability.alerting import evaluate_stats
-
-        evaluate_stats(s)
+        observer = get_module_host().require("observability")
+        s = observer.stats(days)
+        observer.evaluate_stats(s)
     except Exception:
         logger.exception("Failed to compute statistics")
         console.print("[red]Failed to compute statistics. Check that trace files are valid.[/red]")

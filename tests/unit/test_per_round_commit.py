@@ -139,7 +139,6 @@ class TestWriteFailureBlocksNextRound:
     def test_tools_commit_failure_aborts_without_next_llm_call(self):
         from unittest.mock import MagicMock
 
-        from agentnexus.agents.exceptions import MemoryCommitError
         from agentnexus.agents.re_act_agent import ReActAgent
         from agentnexus.agents.react_types import (
             AgentStep,
@@ -148,6 +147,7 @@ class TestWriteFailureBlocksNextRound:
             ReActEvent,
             ReActEventType,
         )
+        from agentnexus.core.exceptions import MemoryCommitError
         from agentnexus.memory.manager import MemoryManager
         from agentnexus.tools.registry import ToolMeta, ToolRegistry
 

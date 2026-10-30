@@ -6,7 +6,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from agentnexus.observability.tracer import trace_manager
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.tools.confirm_bridge import CancelBridge
 from agentnexus.tools.dispatcher import ToolDispatcher
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
@@ -169,7 +169,7 @@ class TestCancelBridgePropagation:
             received["checker"] = self._cancel_checker
             return MagicMock(answer="ok", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
         monkeypatch.setattr("agentnexus.tools.subagent._register_child_tools", lambda *a, **k: None)
 
         bridge = CancelBridge()
@@ -192,7 +192,7 @@ class TestCancelBridgePropagation:
             received["checker"] = self._cancel_checker
             return MagicMock(answer="ok", steps=[])
 
-        monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", fake_run)
+        monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", fake_run)
         monkeypatch.setattr("agentnexus.tools.subagent._register_child_tools", lambda *a, **k: None)
 
         tool = make_subagent_run(parent_llm=MagicMock(), non_interactive=True)
@@ -241,7 +241,7 @@ class TestInheritedTraceLinkage:
         have no active trace, so the link arrives via the dispatcher)."""
         monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _parent: MagicMock())
         monkeypatch.setattr(
-            "agentnexus.tools.subagent.ReActAgent.run",
+            "agentnexus.agents.re_act_agent.ReActAgent.run",
             lambda self, question, memory_manager=None: MagicMock(answer="ok", steps=[]),
         )
         monkeypatch.setattr("agentnexus.tools.subagent._register_child_tools", lambda *a, **k: None)

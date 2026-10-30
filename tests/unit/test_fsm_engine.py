@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.agents.exceptions import AgentCancelled, FSMError
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.react_types import (
     ExecutionContext,
@@ -12,6 +11,7 @@ from agentnexus.agents.react_types import (
     ReActState,
     Transition,
 )
+from agentnexus.core.exceptions import AgentCancelled, FSMError
 
 
 class TestStateMachineInit:

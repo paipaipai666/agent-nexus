@@ -1,16 +1,12 @@
 """memory_search tool — allows agents to actively query long-term memory."""
 
-from agentnexus.core.llm import AgentLLM
+from agentnexus.core.modules import get_module_host
 from agentnexus.memory.extraction import _parse_context
-from agentnexus.memory.long_term import get_long_term_memory
-from agentnexus.rag.embeddings import get_embedding_model
 
-_QUERY_REWRITE_PROMPT = """\
-将以下用户查询改写为3-5个关键词或短语，用空格分隔，用于向量搜索。提取核心概念和人名/地名/专有名词，去除语气词和冗余描述。只输出关键词。
 
-查询: {query}
-关键词:"""
-
+def get_long_term_memory():
+    """Resolve the selected provider for standalone tool calls."""
+    return get_module_host().optional("long_term")
 
 _ENTITY_QUERY_KEYWORDS = frozenset([
     "名字", "姓名", "叫什么", "几岁", "多大", "哪里人", "在哪工作",
@@ -65,20 +61,7 @@ def _diversify_results(results: list[dict], limit: int = 5) -> list[dict]:
     return diversified[:limit]
 
 
-def _rewrite_query(query: str) -> str:
-    """Use a lightweight LLM call to extract search-optimized keywords."""
-    try:
-        llm = AgentLLM()
-        prompt = _QUERY_REWRITE_PROMPT.format(query=query)
-        rewritten = llm.think([{"role": "user", "content": prompt}], silent=True)
-        if rewritten and len(rewritten.strip()) >= 2:
-            return rewritten.strip()
-    except Exception:
-        pass
-    return query
-
-
-def memory_search(query: str, category: str = "") -> str:
+def memory_search(query: str, category: str = "", *, modules=None) -> str:
     """Search long-term memory for relevant past interactions, user preferences, or facts.
 
     Args:
@@ -88,29 +71,27 @@ def memory_search(query: str, category: str = "") -> str:
     Returns:
         Formatted search results with similarity scores, or a message if nothing found.
     """
-    ltm = get_long_term_memory()
-    model = get_embedding_model()
-
-    search_query = _rewrite_query(query)
-
-    try:
-        raw = model.encode(search_query, normalize_embeddings=True)
-        embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
-    except Exception as e:
-        return f"[memory_search] 嵌入模型不可用: {e}"
+    ltm = modules.optional("long_term") if modules is not None else get_long_term_memory()
+    if ltm is None:
+        return "[memory_search] 长期记忆不可用"
+    search_query = query
 
     cat = _CATEGORY_MIGRATION.get(category, category) if category else None
     min_sim = 0.25
 
-    results = ltm.search(query_embedding=embedding, category=cat, limit=5, min_similarity=min_sim)
+    try:
+        results = ltm.search_text(search_query, category=cat, limit=5,
+                                  min_similarity=min_sim, rewrite_query=True)
+    except Exception as exc:
+        return f"[memory_search] 记忆检索失败: {exc}"
     if not results:
         return "[memory_search] 未找到相关记忆"
 
     if _is_entity_query(query) and not category:
         has_fact = any(r["category"] in ("fact", "entity_fact") for r in results)
         if not has_fact:
-            fact_results = ltm.search(
-                query_embedding=embedding, category="fact",
+            fact_results = ltm.search_text(
+                search_query, category="fact",
                 limit=3, min_similarity=min_sim,
             )
             if fact_results:

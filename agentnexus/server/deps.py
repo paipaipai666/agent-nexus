@@ -20,15 +20,15 @@ if TYPE_CHECKING:
 
 
 def get_runtime() -> Any:
-    """The process-global AppRuntime (installed via ``set_runtime``)."""
+    """Return the runtime bound to the current server request."""
     return _get_runtime()
 
 
 def get_ltm() -> "LongTermMemory":
-    """Long-term memory singleton. Always available once settings load."""
-    from agentnexus.memory.long_term import get_long_term_memory
+    """Resolve the owning runtime's selected long-term memory provider."""
+    from agentnexus.core.modules import get_module_host
 
-    return get_long_term_memory()
+    return get_module_host().require("long_term")
 
 
 def get_mcp_manager() -> "MCPManager":
@@ -45,15 +45,7 @@ def get_mcp_manager_optional() -> "MCPManager | None":
 
 
 def get_wiki_service() -> "WikiService":
-    """WikiService cached on the runtime (built on first use)."""
-    runtime = _get_runtime()
-    service = getattr(runtime, "wiki_service", None)
-    if service is None:
-        from agentnexus.wiki.wiki_service import WikiService
+    """Resolve the owning runtime's selected Wiki provider."""
+    from agentnexus.core.modules import get_module_host
 
-        service = WikiService()
-        try:
-            runtime.wiki_service = service
-        except Exception:
-            pass
-    return service
+    return get_module_host().require("wiki")

@@ -138,12 +138,15 @@ class TestInvoke:
             r.invoke("test_tool", {})
 
     def test_audit_log_populated(self):
+        from agentnexus.core.telemetry import get_audit_log
+
         r = ToolRegistry()
         meta = _make_meta()
         r.register(meta, lambda: "done")
         r.invoke("test_tool", {})
-        assert len(r._audit_log) == 1
-        entry = r._audit_log[0]
+        entries = get_audit_log()
+        assert len(entries) == 1
+        entry = entries[0]
         assert entry.tool_name == "test_tool"
         assert entry.duration_ms >= 0
 

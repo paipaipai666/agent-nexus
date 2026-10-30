@@ -9,6 +9,7 @@ import pytest
 @pytest.fixture
 def terminal(tmp_path):
     from agentnexus.core.config import get_settings
+    from agentnexus.core.modules import get_module_host
     from agentnexus.memory.short_term import ShortTermMemory
     from agentnexus.services.chat import ChatService
     from agentnexus.tui.commands import TerminalCommands
@@ -19,16 +20,17 @@ def terminal(tmp_path):
     agent = MagicMock()
     agent.agent_id = "test-agent"
     agent.max_steps = 5
-    agent._todo_list = None
-    agent._on_event = None
-    agent._step_count = 0
-    agent._total_usage = {}
+    agent.todo_list = None
+    agent.event_handler = None
+    agent.step_count = 0
+    agent.total_usage = {}
     agent.llm_client.model = "test-model"
     agent.llm_client.base_url = ""
     agent.run.return_value = SimpleNamespace(answer="command answer")
     chat = ChatService(lambda _sid: agent, memory_factory)
     session = chat.start_session(workspace=str(tmp_path))
-    runtime = SimpleNamespace(chat=chat, settings=get_settings(), llm=MagicMock(), wiki_service=None, capability_runtime=None)
+    runtime = SimpleNamespace(chat=chat, settings=get_settings(), llm=MagicMock(), wiki_service=None,
+                              capability_runtime=None, modules=get_module_host())
     return TerminalCommands(runtime), session.id
 
 
@@ -55,10 +57,8 @@ def test_attachments_use_windows_paths_and_remain_in_their_session(terminal, tmp
 
 
 def test_memory_list_delete_and_clear_use_the_real_store(terminal):
-    from agentnexus.memory.long_term import get_long_term_memory
-
     commands, sid = terminal
-    store = get_long_term_memory()
+    store = commands.runtime.modules.require("long_term")
     store.save(sid, "terminal regression memory", category="fact")
     items = commands.run("/memory", "list", sid).value
     assert items[0]["content"] == "terminal regression memory"
@@ -75,10 +75,13 @@ def test_knowledge_list_works_without_downloading_models(terminal):
 
 
 def test_wiki_page_and_review_commands_use_persisted_records(terminal):
+    from agentnexus.core.modules import ModuleFactories, ModuleHost
     from agentnexus.wiki.models import ReviewItem, WikiPage
     from agentnexus.wiki.store import get_wiki_store
+    from agentnexus.wiki.wiki_service import WikiService
 
     commands, sid = terminal
+    commands.runtime.modules = ModuleHost(factories=ModuleFactories(wiki=lambda context: WikiService()))
     store = get_wiki_store()
     store.upsert_page(WikiPage(page_id="tui-page", title="Terminal page", content="Known content", source_namespace="default"))
     store.add_review_item(ReviewItem(item_id="tui-review", page_id="tui-page", description="Check source"))
@@ -91,7 +94,7 @@ def test_wiki_page_and_review_commands_use_persisted_records(terminal):
 
 
 def test_audit_commands_show_real_tool_entries(terminal):
-    from agentnexus.observability.audit_log import append_audit
+    from agentnexus.core.telemetry import append_audit
 
     commands, sid = terminal
     append_audit({"tool_name": "tui_fixture", "success": True})
@@ -170,7 +173,7 @@ def test_subagent_reply_preserves_attempt_question_and_request_identity(terminal
 def test_timeline_and_context_are_scoped_to_the_target_session(terminal):
     import json
 
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     commands, sid = terminal
     store = get_timeline_store()
@@ -191,7 +194,7 @@ def test_shared_events_preserve_full_tool_result_for_terminal_rendering(terminal
     original = "header\n" + "result line\n" * 100 + "final result"
 
     def run(*args, **kwargs):
-        agent._on_event(ReActEvent(ReActEventType.TOOL_DONE, {"name": "file_read", "result": original}), None, None)
+        agent.event_handler(ReActEvent(ReActEventType.TOOL_DONE, {"name": "file_read", "result": original}), None, None)
         return SimpleNamespace(answer="done")
 
     agent.run.side_effect = run
@@ -325,10 +328,11 @@ def test_wiki_query_and_file_import_use_the_shared_service(terminal, tmp_path):
 
 
 def test_statistics_health_and_alerts_show_actual_records(terminal):
-    from agentnexus.observability.alerting import Alert, AlertSeverity, AlertType, get_alert_manager
+    from agentnexus.core.modules import get_module_host
+    from agentnexus.observability.alerting import Alert, AlertSeverity, AlertType
 
     commands, sid = terminal
-    manager = get_alert_manager()
+    manager = get_module_host().require("observability").alert_manager
     manager.emit(Alert(AlertType.HUMAN_TAKEOVER, AlertSeverity.WARNING, "needs attention"))
     alerts = commands.run("/alerts", "7 warning", sid).value
     assert any(alert["message"] == "needs attention" for alert in alerts)

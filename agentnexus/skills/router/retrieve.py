@@ -7,6 +7,7 @@ import math
 
 logger = logging.getLogger(__name__)
 
+from agentnexus.core.text_tokens import get_token_encoding
 from agentnexus.skills.registry import SkillEntry
 from agentnexus.skills.router.normalize import tokenize
 from agentnexus.skills.router.types import (
@@ -21,9 +22,7 @@ def estimate_text_tokens(text: str) -> int:
     if not text:
         return 0
     try:
-        from agentnexus.memory.short_term import _get_tiktoken_encoding
-
-        enc = _get_tiktoken_encoding()
+        enc = get_token_encoding()
         return len(enc.encode(text))
     except Exception:
         return max(1, (len(text) + 1) // 2)

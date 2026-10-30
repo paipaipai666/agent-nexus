@@ -71,12 +71,14 @@ class ChatExecution:
                     skill.use(skill_id)
                 elif session_profile is not None:
                     agent.set_session_profile(session_profile)
-            old_confirm = getattr(agent, "_confirm", None)
+            has_confirm_handler = hasattr(agent, "confirm_handler")
+            old_confirm = getattr(agent, "confirm_handler", None)
             bridge = getattr(self.app, "_subagent_confirm", None)
             thread_id = threading.get_ident()
             def confirm(summary):
                 return self._confirm_execution(sid, started, summary)
-            agent._confirm = confirm
+            if has_confirm_handler:
+                agent.confirm_handler = confirm
             if bridge is not None:
                 bridge.set_target(confirm, thread_id=thread_id)
             try:
@@ -84,7 +86,8 @@ class ChatExecution:
                     "attachments": submission["attachments"], "client_message_id": submission["client_message_id"],
                 })
             finally:
-                agent._confirm = old_confirm
+                if has_confirm_handler:
+                    agent.confirm_handler = old_confirm
                 if bridge is not None:
                     bridge.set_target(None, thread_id=thread_id)
 

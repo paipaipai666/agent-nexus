@@ -19,8 +19,8 @@ from textual.widgets import Button, Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from agentnexus.core.config import get_settings
+from agentnexus.core.memory_contracts import restore_snapshot
 from agentnexus.core.text_utils import collapse_and_truncate
-from agentnexus.memory.short_term import ShortTermMemory
 from agentnexus.services.chat import ChatService, SessionHandle
 from agentnexus.skills import (
     SkillEntry,
@@ -580,7 +580,8 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             return
         snapshot = self._version.get_head_stm()
         if snapshot and self._memory:
-            self._memory.short_term = ShortTermMemory.from_json(snapshot)
+            if getattr(self._memory, "retention_enabled", True) is not False:
+                restore_snapshot(self._memory.short_term, snapshot)
 
     def _commit_if_answered(self, question: str, answer: str):
         """Auto-commit after a successful answer."""
@@ -780,7 +781,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         self._save_input_draft(self.query_one("#chat-input", Composer).value, session_id=old_id)
         self._terminal.load_draft(session_id)
         self._chat_session = self._chat_service.get_session_snapshot(session_id)["session"]
-        self._agent = self._chat_service.session_agent(session_id)
+        self._agent = self._chat_service.session_agent(session_id, required=False)
         self._memory = self._chat_service.session_memory(session_id)
         self._version = self._chat_service.session_version(session_id)
         self._skill_service = self._chat_service.session_skills(session_id)
@@ -1515,7 +1516,7 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
         if not hasattr(self, '_side_panel') or not self._agent:
             return
         try:
-            todo_list = getattr(self._agent, '_todo_list', None)
+            todo_list = getattr(self._agent, 'todo_list', None)
             if todo_list is None:
                 self._side_panel.update_todo([])
                 return

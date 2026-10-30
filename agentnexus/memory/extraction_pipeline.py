@@ -99,7 +99,7 @@ class MemoryExtractionPipeline:
         try:
             with gate.protect():
                 prompt = GATE_PROMPT.format(question=question[:500], answer=answer[:500])
-                result = self._mgr._llm.think([{"role": "user", "content": prompt}], silent=True)
+                result = self._mgr.llm.think([{"role": "user", "content": prompt}], silent=True)
                 normalized = result.strip().lower().strip('"').strip("'").strip(".")
                 if normalized == "yes" or normalized.startswith("yes"):
                     return True
@@ -128,8 +128,8 @@ class MemoryExtractionPipeline:
             question = _mask_pii(question)
             answer = _mask_pii(answer)
         extract_and_save_memories(
-            llm=mgr._llm,
-            embed_model=mgr._get_embed_model(),
+            llm=mgr.llm,
+            embed_model=None,
             long_term=mgr.long_term,
             session_id=mgr.session_id,
             question=question,

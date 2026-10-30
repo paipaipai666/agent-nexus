@@ -12,14 +12,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.agents.plan_mode import (
+from agentnexus.agents.re_act_agent import ReActAgent
+from agentnexus.core.plan_mode import (
     EXIT_PLAN_MODE_TOOL,
     PLAN_REJECTED_ANSWER,
     PLAN_REVIEW_MARKER,
     PlanModeBinding,
     PlanModeManager,
 )
-from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.tools.confirm_bridge import ConfirmBridge
 from agentnexus.tools.errors import ToolError
 from agentnexus.tools.registry import ToolMeta, ToolRegistry

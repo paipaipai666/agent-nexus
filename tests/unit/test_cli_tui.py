@@ -32,7 +32,7 @@ class TestTuiCommand:
              patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=mock_agent), \
              patch("agentnexus.tui.app.AgentNexusTUI", return_value=mock_tui_app) as mock_tui_cls, \
              patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
-             patch("agentnexus.observability.tracer.trace_manager", mock_trace):
+             patch("agentnexus.core.telemetry.trace_manager", mock_trace):
 
             result = runner.invoke(app, ["tui"])
             assert result.exit_code == 0
@@ -44,6 +44,8 @@ class TestTuiCommand:
                 mcp_manager=None,
                 extra_providers=ANY,
                 todo_list=ANY,
+                modules=ANY,
+                enable_subagent=True,
             )
             mock_tui_cls.assert_called_once_with(
                 agent=mock_agent,
@@ -54,7 +56,9 @@ class TestTuiCommand:
                 capability_runtime=ANY,
                 runtime=ANY,
             )
-            mock_trace.configure.assert_called_once_with("/tmp/traces")
+            runtime = mock_tui_cls.call_args.kwargs["runtime"]
+            assert mock_reg.call_args.kwargs["modules"] is runtime.modules
+            mock_trace.configure.assert_not_called()
 
     def test_tui_sets_subagent_confirm(self):
         mock_llm = MagicMock()
@@ -77,7 +81,7 @@ class TestTuiCommand:
              patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=mock_agent), \
              patch("agentnexus.tui.app.AgentNexusTUI", return_value=mock_tui_app), \
              patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
-             patch("agentnexus.observability.tracer.trace_manager"):
+             patch("agentnexus.core.telemetry.trace_manager"):
 
             runner.invoke(app, ["tui"])
             assert mock_tui_app._subagent_confirm == mock_confirm
@@ -103,7 +107,7 @@ class TestTuiCommand:
              patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=mock_agent), \
              patch("agentnexus.tui.app.AgentNexusTUI", return_value=mock_tui_app), \
              patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
-             patch("agentnexus.observability.tracer.trace_manager"):
+             patch("agentnexus.core.telemetry.trace_manager"):
 
             runner.invoke(app, ["tui"])
             session_id = mock_mm.call_args[0][0]
@@ -138,7 +142,7 @@ class TestTuiCommand:
              patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=mock_agent) as mock_ra, \
              patch("agentnexus.tui.app.AgentNexusTUI", return_value=mock_tui_app), \
              patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
-             patch("agentnexus.observability.tracer.trace_manager"):
+             patch("agentnexus.core.telemetry.trace_manager"):
 
             runner.invoke(app, ["tui"])
             mock_ra.assert_called_once()
@@ -170,7 +174,7 @@ class TestTuiCommand:
              patch("agentnexus.agents.re_act_agent.ReActAgent", return_value=mock_agent), \
              patch("agentnexus.tui.app.AgentNexusTUI", return_value=mock_tui_app) as mock_tui_cls, \
              patch("agentnexus.core.config.get_settings", return_value=mock_settings), \
-             patch("agentnexus.observability.tracer.trace_manager"):
+             patch("agentnexus.core.telemetry.trace_manager"):
 
             runner.invoke(app, ["tui"])
             mock_tui_cls.assert_called_once_with(

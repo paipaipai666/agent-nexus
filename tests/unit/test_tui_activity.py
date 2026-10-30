@@ -39,8 +39,8 @@ async def test_concurrent_tools_keep_the_remaining_tool_visible(workspace_runtim
 
     def execute(*_args, **_kwargs):
         for identity, name in [("read", "file_read"), ("shell", "shell_exec")]:
-            runtime.agent._on_event(ReActEvent(ReActEventType.TOOL_START, {"id": identity, "name": name}), None, None)
-        runtime.agent._on_event(ReActEvent(ReActEventType.TOOL_DONE, {"id": "read", "name": "file_read", "result": "source"}), None, None)
+            runtime.agent.event_handler(ReActEvent(ReActEventType.TOOL_START, {"id": identity, "name": name}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.TOOL_DONE, {"id": "read", "name": "file_read", "result": "source"}), None, None)
         one_finished.set()
         release.wait(10)
         return SimpleNamespace(answer="所有工具已结束")
@@ -83,7 +83,7 @@ async def test_confirmation_wait_is_not_shown_as_active_work(workspace_runtime):
     approvals = []
 
     def execute(*_args, **_kwargs):
-        approvals.append(runtime.agent._confirm("仅预览，不执行外部操作"))
+        approvals.append(runtime.agent.confirm_handler("仅预览，不执行外部操作"))
         return SimpleNamespace(answer="确认完成")
 
     runtime.agent.run.side_effect = execute
@@ -105,15 +105,15 @@ async def test_activity_tracks_reasoning_tool_and_completion(workspace_runtime):
     thinking, tools, release_thinking, release_tools = (threading.Event() for _ in range(4))
 
     def execute(*_args, **_kwargs):
-        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "检查请求去重。"}), None, None)
-        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n" + "\n".join(f"检查步骤 {i}" for i in range(30))}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "检查请求去重。"}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n" + "\n".join(f"检查步骤 {i}" for i in range(30))}), None, None)
         thinking.set()
         release_thinking.wait(10)
-        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n追加的思考内容。"}), None, None)
-        runtime.agent._on_event(ReActEvent(ReActEventType.TOOL_START, {"id": "read", "name": "file_read"}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "\n追加的思考内容。"}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.TOOL_START, {"id": "read", "name": "file_read"}), None, None)
         tools.set()
         release_tools.wait(10)
-        runtime.agent._on_event(ReActEvent(ReActEventType.TOOL_DONE, {"id": "read", "name": "file_read", "result": "完整文件"}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.TOOL_DONE, {"id": "read", "name": "file_read", "result": "完整文件"}), None, None)
         return SimpleNamespace(answer="检查完成。")
 
     runtime.agent.run.side_effect = execute

@@ -9,7 +9,14 @@ from agentnexus.core.config import get_settings
 
 
 @eval_app.command("agent")
-def eval_agent(
+def eval_agent(days: int=typer.Option(7, '--days', '-d', help='回溯最近 N 天')):
+    '评估单智能体执行质量（基于 JSONL trace）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_agent(days)
+
+
+def _default_eval_agent(
     days: int = typer.Option(7, "--days", "-d", help="回溯最近 N 天"),
 ):
     """评估单智能体执行质量（基于 JSONL trace）。"""

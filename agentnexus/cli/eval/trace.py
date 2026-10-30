@@ -9,7 +9,14 @@ from agentnexus.core.config import get_settings
 
 
 @eval_app.command("trajectory")
-def eval_trajectory(
+def eval_trajectory(trace_id: str=typer.Option('', '--trace-id', '-t', help='要评估的 Trace ID（省略则评估全部）'), days: int=typer.Option(7, '--days', '-d', help='回溯最近 N 天')):
+    '运行轨迹质量评估（确定性规则，不使用 LLM-as-Judge）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_trajectory(trace_id, days)
+
+
+def _default_eval_trajectory(
     trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
     days: int = typer.Option(7, "--days", "-d", help="回溯最近 N 天"),
 ):
@@ -61,7 +68,14 @@ def eval_trajectory(
 
 
 @eval_app.command("ci")
-def eval_ci(
+def eval_ci(days: int=typer.Option(1, '--days', '-d', help='回溯最近 N 天')):
+    'CI 模式：单智能体质量评估，失败时 exit(1)。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_ci(days)
+
+
+def _default_eval_ci(
     days: int = typer.Option(1, "--days", "-d", help="回溯最近 N 天"),
 ):
     """CI 模式：单智能体质量评估，失败时 exit(1)。"""
@@ -83,6 +97,13 @@ def eval_ci(
 
 @eval_app.command("component")
 def eval_component():
+    '运行组件级评估（Coder/Researcher/Executor/Analyst）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_component()
+
+
+def _default_eval_component():
     """运行组件级评估（Coder/Researcher/Executor/Analyst）。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.component import ComponentEvaluator
@@ -123,7 +144,14 @@ def eval_component():
 
 
 @eval_app.command("hallucination")
-def eval_hallucination(
+def eval_hallucination(trace_id: str=typer.Option('', '--trace-id', '-t', help='要评估的 Trace ID（省略则评估全部）')):
+    '幻觉检测：从答案中提取声明并对照上下文验证。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_hallucination(trace_id)
+
+
+def _default_eval_hallucination(
     trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
 ):
     """幻觉检测：从答案中提取声明并对照上下文验证。"""
@@ -175,6 +203,13 @@ def eval_hallucination(
 
 @eval_app.command("tool-selection")
 def eval_tool_selection():
+    '工具选择准确率：对比实际与预期的工具选择。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_tool_selection()
+
+
+def _default_eval_tool_selection():
     """工具选择准确率：对比实际与预期的工具选择。"""
     from agentnexus.core.config import get_settings
     from agentnexus.evaluation.tool_selection import ToolSelectionEvaluator
@@ -207,7 +242,14 @@ def eval_tool_selection():
 
 
 @eval_app.command("coherence")
-def eval_coherence(
+def eval_coherence(trace_id: str=typer.Option('', '--trace-id', '-t', help='要评估的 Trace ID（省略则评估全部）')):
+    '多步推理连贯性评估（使用独立的 Judge 模型）。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_eval_coherence(trace_id)
+
+
+def _default_eval_coherence(
     trace_id: str = typer.Option("", "--trace-id", "-t", help="要评估的 Trace ID（省略则评估全部）"),
 ):
     """多步推理连贯性评估（使用独立的 Judge 模型）。"""

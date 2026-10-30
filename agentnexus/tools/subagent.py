@@ -1,4 +1,4 @@
-"""Subagent delegation tool built on top of ReActAgent."""
+"""Controlled delegation through the runtime's selected agent engine."""
 
 from __future__ import annotations
 
@@ -14,13 +14,14 @@ from typing import TYPE_CHECKING, Callable, Iterable
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from agentnexus.core.llm import AgentLLM
     from agentnexus.tools.mcp.adapter import MCPToolManager
 
-from agentnexus.agents.exceptions import AgentCancelled
-from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.core.llm import AgentLLM
+from agentnexus.core.exceptions import AgentCancelled
+from agentnexus.core.json_helpers import extract_answer_from_text
+from agentnexus.core.modules import ModuleContext, ModuleHost, get_module_host
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.core.text_utils import collapse_and_truncate
-from agentnexus.observability.tracer import trace_manager
 from agentnexus.tools.registry import ToolRegistry
 
 _SAFE_SUBAGENT_TOOLS = {
@@ -54,6 +55,8 @@ _LEGACY_ROLE_ALIASES = {
 
 
 def _clone_llm(parent_llm: AgentLLM | None) -> AgentLLM:
+    from agentnexus.core.llm import AgentLLM
+
     if parent_llm is None:
         return AgentLLM()
     return AgentLLM(
@@ -112,7 +115,8 @@ def _build_subagent_prompt(task: str, role: str, retry_reason: str | None = None
 def _register_child_tools(executor: ToolRegistry, parent_llm: AgentLLM | None,
                           non_interactive: bool, include_tools: list[str],
                           subagent_confirm: Callable[[str], bool] | None = None,
-                          mcp_manager: "MCPToolManager | None" = None) -> None:
+                          mcp_manager: "MCPToolManager | None" = None,
+                          modules: ModuleHost | None = None) -> None:
     from agentnexus.tools import register_all_tools
 
     register_all_tools(
@@ -123,6 +127,7 @@ def _register_child_tools(executor: ToolRegistry, parent_llm: AgentLLM | None,
         enable_subagent=False,
         subagent_confirm=subagent_confirm,
         mcp_manager=mcp_manager,
+        modules=modules,
     )
 
 
@@ -133,7 +138,7 @@ def _extract_step_summary(result) -> str:
             text = (candidate or "").strip()
             if not text:
                 continue
-            extracted = ReActAgent._extract_answer_from_text(text).strip()
+            extracted = extract_answer_from_text(text).strip()
             if extracted:
                 return extracted[:1000]
     return ""
@@ -148,11 +153,11 @@ def _make_child_forwarder(sctx, entry, child_run_id):
     """
     stream_counts = {"content": 0, "reasoning": 0}
 
-    def forward(event, _from_state, _to_state):
+    def forward(event, _from_state=None, _to_state=None):
         if event is None:
             return
         try:
-            etype = event.type.name
+            etype = getattr(event.type, "name", event.type)
             p = event.payload or {}
             step_id = getattr(event, "step_id", 0)
             identity = {"child_run_id": child_run_id, "step_id": step_id}
@@ -206,7 +211,21 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                           subagent_confirm: Callable[[str], bool] | None = None,
                           mcp_manager: "MCPToolManager | None" = None,
                           cancel_bridge=None,
-                          subagent_ctx=None, subagent_entry=None, mailbox=None) -> tuple[dict | None, Exception | None]:
+                          subagent_ctx=None, subagent_entry=None, mailbox=None,
+                          modules: ModuleHost | None = None) -> tuple[dict | None, Exception | None]:
+    owner = modules or get_module_host()
+    with owner.activate():
+        return _run_selected_subagent_attempt(
+            owner, parent_llm, non_interactive, task, role, tool_names, retry_reason,
+            subagent_confirm, mcp_manager, cancel_bridge, subagent_ctx, subagent_entry, mailbox,
+        )
+
+
+def _run_selected_subagent_attempt(modules: ModuleHost, parent_llm: AgentLLM | None,
+                                  non_interactive: bool, task: str, role: str,
+                                  tool_names: list[str], retry_reason: str | None,
+                                  subagent_confirm, mcp_manager, cancel_bridge,
+                                  subagent_ctx, subagent_entry, mailbox) -> tuple[dict | None, Exception | None]:
     from agentnexus.core.hooks import HookType, get_hook_manager
 
     hook_mgr = get_hook_manager()
@@ -215,7 +234,6 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
         "retry_reason": retry_reason,
     })
 
-    child_llm = _clone_llm(parent_llm)
     child_executor = ToolRegistry()
     try:
         _register_child_tools(
@@ -225,36 +243,42 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
             tool_names,
             subagent_confirm,
             mcp_manager,
+            modules,
         )
-        child_agent = ReActAgent(
-            child_llm,
-            child_executor,
+        child_agent = modules.require("agent", ModuleContext(
+            settings=modules.settings,
+            llm=parent_llm,
+            llm_factory=lambda: _clone_llm(parent_llm),
+            tools=child_executor,
             max_steps=None,
             output=lambda *_args, **_kwargs: None,
             confirm_fn=subagent_confirm,
             conversation_mode=False,
             agent_id=f"subagent_{role}",
-        )
+        ))
         if mailbox is not None:
             from agentnexus.tools.collaboration import register_child_collaboration
 
             register_child_collaboration(child_executor, mailbox)
-            child_agent.set_collaboration(mailbox)
+            set_collaboration = getattr(child_agent, "set_collaboration", None)
+            if callable(set_collaboration):
+                set_collaboration(mailbox)
         local_cancel = threading.Event()
-        child_agent.set_cancel_checker(
-            lambda: local_cancel.is_set()
+        set_cancel_checker = getattr(child_agent, "set_cancel_checker", None)
+        if callable(set_cancel_checker):
+            set_cancel_checker(lambda: local_cancel.is_set()
                     or (cancel_bridge is not None and cancel_bridge.check())
-                    or (subagent_entry is not None and subagent_entry.cancel_event.is_set())
-        )
+                    or (subagent_entry is not None and subagent_entry.cancel_event.is_set()))
         if subagent_ctx is not None and subagent_entry is not None:
             child_run_id = mailbox.child.child_run_id if mailbox else f"subrun_{uuid.uuid4().hex}"
             subagent_entry.child_run_id = child_run_id
-            child_agent._on_event = _make_child_forwarder(subagent_ctx, subagent_entry, child_run_id)
-            child_agent.set_context_observer(
-                lambda step_id, messages: subagent_ctx.snapshot(
+            if hasattr(child_agent, "event_handler"):
+                child_agent.event_handler = _make_child_forwarder(subagent_ctx, subagent_entry, child_run_id)
+            set_context_observer = getattr(child_agent, "set_context_observer", None)
+            if callable(set_context_observer):
+                set_context_observer(lambda step_id, messages: subagent_ctx.snapshot(
                     subagent_entry, child_run_id, step_id, messages,
-                ),
-            )
+                ))
             subagent_ctx.event(subagent_entry, "runtime", child_run_id=child_run_id,
                                event_type="run_started", event_payload={"role": role})
 
@@ -273,8 +297,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                 "parent_trace_id": trace_manager.get_inherited_trace() or "",
             }) as span:
                 try:
-                    from agentnexus.core.config import get_settings
-                    deadline = get_settings().subagent_timeout_sec
+                    deadline = modules.settings.subagent_timeout_sec
                 except Exception:
                     deadline = 1800
                 runner = ThreadPoolExecutor(max_workers=1, thread_name_prefix="subagent-runner")
@@ -326,7 +349,7 @@ def _run_subagent_attempt(parent_llm: AgentLLM | None, non_interactive: bool,
                     subagent_ctx.event(subagent_entry, "cancelling", status="cancelling", reason="tool_cleanup_pending")
                     child_executor.close(wait=True)
                     raise AgentCancelled("超时工具已退出，子任务已中断")
-                answer = (result.answer or "").strip()
+                answer = (result if isinstance(result, str) else getattr(result, "answer", "") or "").strip()
                 salvaged = _extract_step_summary(result)
                 if subagent_ctx is not None and subagent_entry is not None and (answer or salvaged):
                     subagent_ctx.event(subagent_entry, "runtime", child_run_id=child_run_id,
@@ -385,10 +408,17 @@ def _build_payload(status: str, role: str, answer: str, summary: str,
 def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool = False,
                       subagent_confirm: Callable[[str], bool] | None = None,
                       mcp_manager: "MCPToolManager | None" = None,
-                      cancel_bridge=None, subagent_bridge=None):
+                      cancel_bridge=None, subagent_bridge=None,
+                      modules: ModuleHost | None = None):
+    owner = modules or get_module_host()
+
     def subagent_run(task: str, role: str = "explorer",
                      allowed_tools: list[str] | None = None,
                      name: str | None = None) -> str:
+        with owner.activate():
+            return run_selected(task, role, allowed_tools, name)
+
+    def run_selected(task: str, role: str, allowed_tools: list[str] | None, name: str | None) -> str:
         effective_role = _normalize_role(role)
         tool_names, tool_recovery = _resolve_allowed_tools(effective_role, allowed_tools, mcp_manager)
         with trace_manager.span("subagent", {
@@ -438,6 +468,7 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 cancel_bridge=cancel_bridge,
                 subagent_ctx=sctx,
                 subagent_entry=entry,
+                modules=owner,
             )
             if error is not None and (isinstance(error, AgentCancelled)
                                       or (entry is not None and entry.cancel_event.is_set())):
@@ -517,6 +548,7 @@ def make_subagent_run(parent_llm: AgentLLM | None = None, non_interactive: bool 
                 cancel_bridge=cancel_bridge,
                 subagent_ctx=sctx,
                 subagent_entry=entry,
+                modules=owner,
             )
 
             if fallback_error is None and fallback_attempt is not None:

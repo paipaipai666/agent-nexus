@@ -9,33 +9,30 @@ from . import COMMAND_HELP, argument_path, split_action
 def run(context, command, args, sid):
     """Use persisted wiki records and the existing WikiService."""
     from agentnexus.core.config import get_settings
-    from agentnexus.wiki.store import get_wiki_store
+    from agentnexus.services.wiki import get_wiki_service
 
     action, rest = split_action(args)
     namespace = get_settings().rag_default_namespace
-    store = get_wiki_store()
+    service = getattr(context.runtime, "wiki_service", None)
+    if service is None:
+        service = get_wiki_service(getattr(context.runtime, "modules", None))
     if action == "list":
-        return [asdict(page) for page in store.list_pages(source_namespace=rest or namespace)]
+        return [asdict(page) for page in service.list_pages(source_namespace=rest or namespace)]
     if action == "show":
-        page = store.get_page(rest)
+        page = service.get_page(rest)
         if page is None:
             raise ValueError(f"Wiki 页面不存在: {rest}")
         return asdict(page)
     if action == "delete":
-        if store.get_page(rest) is None:
+        if service.get_page(rest) is None:
             raise ValueError(f"Wiki 页面不存在: {rest}")
-        store.delete_page(rest)
+        service.delete_page(rest)
         return {"deleted": rest}
     if action == "reviews":
-        return [asdict(item) for item in store.list_review_items(status=rest or "pending", limit=100)]
+        return [asdict(item) for item in service.list_review_items(status=rest or "pending", limit=100)]
     if action == "resolve" and rest:
-        store.resolve_review_item(rest)
+        service.resolve_review_item(rest)
         return {"status": "resolved", "item_id": rest}
-    service = context.runtime.wiki_service
-    if service is None:
-        from agentnexus.wiki.wiki_service import WikiService
-
-        service = context.runtime.wiki_service = WikiService(store=store)
     if action == "stats":
         return service.get_stats(rest or namespace)
     if action == "query":
@@ -58,7 +55,5 @@ def run(context, command, args, sid):
     if action == "process":
         return service.process_overdue_reviews()
     if action == "backfill":
-        from agentnexus.services.wiki import backfill_wiki
-
-        return backfill_wiki(service, rest or namespace)
+        return service.backfill(rest or namespace)
     raise ValueError(f"用法: {command} {COMMAND_HELP[command]}")

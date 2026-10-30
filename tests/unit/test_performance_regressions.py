@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.capabilities.runtime import CapabilityRuntime
 from agentnexus.core import config
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.llm import AgentLLM
 from agentnexus.core.providers.base import StreamResult
 from agentnexus.core.providers.openai_provider import OpenAIProvider
@@ -118,19 +118,23 @@ def test_openai_closes_stream_when_callback_fails(monkeypatch):
     client.close.assert_called_once()
 
 
-def test_application_close_releases_provider_pools(monkeypatch):
+def test_process_shutdown_releases_shared_provider_pools(monkeypatch, tmp_path):
     from agentnexus.app.runtime import AppRuntime
+    from agentnexus.core.modules import ModuleFactories
     from agentnexus.core.providers import router
 
     providers = [MagicMock(), MagicMock()]
     monkeypatch.setattr(router, "_openai_provider", providers[0])
     monkeypatch.setattr(router, "_anthropic_provider", providers[1])
-    runtime = SimpleNamespace(mcp_manager=MagicMock())
-    AppRuntime.close(runtime)
+    runtime = AppRuntime.build(module_factories=ModuleFactories.disabled(), workspace_path=str(tmp_path))
+    runtime.mcp_manager = MagicMock()
+    runtime.close()
     runtime.mcp_manager.close.assert_called_once()
     for provider in providers:
-        provider.close.assert_called_once()
+        provider.close.assert_not_called()
     router.close_providers()
+    for provider in providers:
+        provider.close.assert_called_once()
     assert router._openai_provider is None
     assert router._anthropic_provider is None
 
@@ -271,7 +275,7 @@ def test_tool_reload_preserves_session_todo_tools():
         TodoToolProvider().register(registry, ToolProviderContext(todo_list=kwargs.get("todo_list")))
 
     runtime = CapabilityRuntime(settings=SimpleNamespace(), executor=executor,
-                                agent=SimpleNamespace(_todo_list=todo), register_tools=register_tools)
+                                agent=SimpleNamespace(todo_list=todo), register_tools=register_tools)
     assert runtime.reload("tools") == {"tools": "reloaded"}
     add = executor.get_tool("todo_add")
     assert add is not None

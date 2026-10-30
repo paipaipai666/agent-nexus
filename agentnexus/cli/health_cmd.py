@@ -12,16 +12,18 @@ def health():
     """运行系统健康检查。"""
     from rich.panel import Panel
 
-    from agentnexus.core.config import get_settings
+    from agentnexus.core.modules import get_module_host
     from agentnexus.server.health_checks import run_health_checks
 
     try:
-        settings = get_settings()
+        modules = get_module_host()
         from agentnexus.core.llm import AgentLLM
 
         class _MiniRuntime:
             def __init__(self):
-                self.llm = AgentLLM()
+                self.modules = modules
+                self.settings = modules.settings
+                self.llm = AgentLLM() if modules.is_enabled("agent") else None
                 self.mcp_manager = None
                 self.memory_manager = None
 

@@ -6,13 +6,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentnexus.agents.re_act_agent import ReActAgent
-from agentnexus.observability.timeline import TimelineStore
 from agentnexus.server.deps import get_runtime
 from agentnexus.server.error_handlers import register_error_handlers
 from agentnexus.server.routes.chat import router
 from agentnexus.services.chat import ChatService
 from agentnexus.services.collaboration import CollaborationRun
 from agentnexus.services.subagents import SubagentRunContext
+from agentnexus.storage.timeline import TimelineStore
 from agentnexus.tools.confirm_bridge import ConfirmBridge
 from agentnexus.tools.providers.base import ToolProviderContext
 from agentnexus.tools.providers.subagent_provider import SubagentToolProvider
@@ -22,7 +22,7 @@ from tests.unit.test_collaboration_agents import model
 
 def test_http_receipts_validate_attempt_and_retry_id(tmp_path, monkeypatch):
     store = TimelineStore(str(tmp_path / "timeline.db"))
-    monkeypatch.setattr("agentnexus.observability.timeline.get_timeline_store", lambda: store)
+    monkeypatch.setattr("agentnexus.storage.timeline.get_timeline_store", lambda: store)
     service = ChatService(agent_factory=lambda sid: None, memory_factory_builder=lambda sid: lambda: None)
     pool = ThreadPoolExecutor(1)
     run = CollaborationRun(SubagentRunContext(service, "s", "p"), store, pool, lambda: False)
@@ -68,7 +68,7 @@ def test_real_websocket_streams_automatic_parent_child_exchange(tmp_path, monkey
     monkeypatch.setattr(settings, "traces_dir", str(tmp_path / "traces"))
     store = TimelineStore(settings.memory_db_path)
     monkeypatch.setattr("agentnexus.services.chat.get_timeline_store", lambda: store)
-    monkeypatch.setattr("agentnexus.observability.timeline.get_timeline_store", lambda: store)
+    monkeypatch.setattr("agentnexus.storage.timeline.get_timeline_store", lambda: store)
     monkeypatch.setattr(auth, "get_token", lambda: None)
     registry = ToolRegistry()
     parent, child = model(), model()

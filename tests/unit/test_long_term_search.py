@@ -2,7 +2,6 @@ from unittest.mock import patch
 
 import pytest
 
-import agentnexus.memory.long_term as ltm_module
 from agentnexus.memory.long_term import (
     _get_ltm_collection,
     _reset_long_term_memory,
@@ -13,7 +12,6 @@ from agentnexus.storage.chroma import reset_storage_client as _reset_chroma_clie
 
 def _fresh_ltm():
     from agentnexus.storage.chroma import reset_storage_client
-    ltm_module._ltm_collection = None
     reset_storage_client()
     _reset_long_term_memory()
     return get_long_term_memory()
@@ -335,13 +333,11 @@ class TestLtmCollection:
 
     def test_get_ltm_collection_singleton(self, temp_agentnexus_home):
         _reset_chroma_client()
-        ltm_module._ltm_collection = None
         col1 = _get_ltm_collection()
         col2 = _get_ltm_collection()
         assert col1 is col2
 
     def test_get_ltm_collection_name(self, temp_agentnexus_home):
         _reset_chroma_client()
-        ltm_module._ltm_collection = None
         col = _get_ltm_collection()
         assert col.name == "long_term_memories"

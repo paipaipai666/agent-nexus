@@ -17,9 +17,9 @@ def alerts(
     severity: str = typer.Option(None, "--severity", "-s", help="按级别过滤：info/warning/critical"),
 ):
     """显示告警历史。"""
-    from agentnexus.observability.alerting import get_alert_manager
+    from agentnexus.core.modules import get_module_host
 
-    manager = get_alert_manager()
+    manager = get_module_host().require("observability").alert_manager
     alert_list = manager.get_history(days=days, severity=severity)
 
     if not alert_list:

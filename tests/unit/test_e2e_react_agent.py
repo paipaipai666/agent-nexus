@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from agentnexus.agents.exceptions import AgentCancelled
 from agentnexus.agents.re_act_agent import ReActAgent
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.memory.todo import SessionTodoList
 from agentnexus.tools.registry import ToolMeta, ToolRegistry
 

@@ -13,9 +13,9 @@ from agentnexus.skills.router import SkillRouter
 
 @pytest.fixture(autouse=True)
 def persist_test_traces(tmp_path, monkeypatch):
-    from agentnexus.observability.tracer import TraceManager
+    from agentnexus.core.telemetry import trace_manager
 
-    monkeypatch.setattr(TraceManager, "_traces_dir", str(tmp_path / "traces"))
+    trace_manager.configure(str(tmp_path / "traces"))
 
 
 def recording_agent():

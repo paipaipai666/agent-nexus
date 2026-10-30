@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich import box
@@ -12,7 +13,9 @@ from rich.console import Console
 from rich.table import Table
 
 from agentnexus.cli import eval_app
-from agentnexus.eval.benchmarks.schema import SuiteReport
+
+if TYPE_CHECKING:
+    from agentnexus.eval.benchmarks.schema import SuiteReport
 
 benchmark_app = typer.Typer(help="公开基准评测(BEIR/MTEB 风格,文档级检索,无 LLM 调用)")
 eval_app.add_typer(benchmark_app, name="benchmark")
@@ -22,6 +25,13 @@ console = Console()
 
 @benchmark_app.command("list")
 def benchmark_list():
+    '列出可用的基准套件及其数据集。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_benchmark_list()
+
+
+def _default_benchmark_list():
     """列出可用的基准套件及其数据集。"""
     from agentnexus.eval.benchmarks import list_suites
 
@@ -35,7 +45,14 @@ def benchmark_list():
 
 
 @benchmark_app.command("run")
-def benchmark_run(
+def benchmark_run(suite: str=typer.Option('beir-lite', '--suite', '-s', help='基准套件名'), datasets: str=typer.Option('', '--datasets', '-d', help='只跑指定数据集,逗号分隔(默认全部)'), mode: str=typer.Option('dense', '--mode', '-m', help='检索模式:dense(官方口径)或 hybrid(RRF)'), depth: int=typer.Option(100, '--depth', help='每查询检索深度(recall@100 需要 >=100)'), k: int=typer.Option(10, '--k', help='NDCG/MAP/Precision/Hits 的截断值'), embedding_model: str=typer.Option('', '--embedding-model', '-e', help='临时切换 embedding 模型(如 BAAI/bge-small-en-v1.5)'), offline: bool=typer.Option(False, '--offline', help='只使用本地缓存的数据,不下载'), ci: bool=typer.Option(False, '--ci', '-c', help='CI 模式:结果写入报告目录并打印 JSON 路径'), report: str=typer.Option('', '--report', '-o', help='报告导出路径(默认 traces/evals/)')):
+    '运行公开基准检索评测(纯本地计算,零 LLM API 调用)。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_benchmark_run(suite, datasets, mode, depth, k, embedding_model, offline, ci, report)
+
+
+def _default_benchmark_run(
     suite: str = typer.Option("beir-lite", "--suite", "-s", help="基准套件名"),
     datasets: str = typer.Option("", "--datasets", "-d", help="只跑指定数据集,逗号分隔(默认全部)"),
     mode: str = typer.Option("dense", "--mode", "-m", help="检索模式:dense(官方口径)或 hybrid(RRF)"),
@@ -145,7 +162,14 @@ def _write_payload(out_text: str, report_opt: str, ci: bool, default_name: str) 
 
 
 @benchmark_app.command("run-rgb")
-def benchmark_run_rgb(
+def benchmark_run_rgb(language: str=typer.Option('zh', '--lang', '-l', help='语言: zh 或 en'), task: str=typer.Option('noise', '--task', '-t', help='任务: noise(噪声鲁棒) 或 rejection(负样本拒答)'), model: str=typer.Option('', '--model', '-m', help='生成模型 selector,如 agnes/agnes-3.0-flash(默认当前 active)'), limit: int=typer.Option(50, '--limit', '-n', help='评测题数(0=全部)'), passage_num: int=typer.Option(5, '--passage-num', help='每题文档数(RGB 官方=5)'), top_k: int=typer.Option(5, '--top-k', '-k', help='检索进入生成的 top-k'), mode: str=typer.Option('dense', '--mode', help='检索模式:dense 或 hybrid(生产 RRF 栈)'), reinforce_refusal: bool=typer.Option(False, '--reinforce-refusal', help='prompt 追加拒答纪律条款(拒答 A/B 实验)'), rpm: float=typer.Option(18.0, '--rpm', help='LLM 调用限速(共享池, Agnes 免费档建议 ≤20)'), offline: bool=typer.Option(False, '--offline', help='只使用本地缓存数据'), judge_only: str=typer.Option('', '--judge-only', '-j', help='跳过生成,重判指定报告里的存盘答案(错峰/换 judge 对拍)'), generate_only: bool=typer.Option(False, '--generate-only', '-g', help='只生成存盘,judge 留待 -j 重判(如 deepseek 低谷时段再判)'), embedding_model: str=typer.Option('', '--embedding-model', '-e', help='临时切换 embedding(英文任务建议 BAAI/bge-small-en-v1.5)'), ci: bool=typer.Option(False, '--ci', '-c', help='结果写入 traces/evals/ 报告'), report: str=typer.Option('', '--report', '-o', help='报告导出路径')):
+    '运行 RGB 端到端评测(检索+生成+judge,远程 LLM 按限速计费/免费档)。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_benchmark_run_rgb(language, task, model, limit, passage_num, top_k, mode, reinforce_refusal, rpm, offline, judge_only, generate_only, embedding_model, ci, report)
+
+
+def _default_benchmark_run_rgb(
     language: str = typer.Option("zh", "--lang", "-l", help="语言: zh 或 en"),
     task: str = typer.Option("noise", "--task", "-t", help="任务: noise(噪声鲁棒) 或 rejection(负样本拒答)"),
     model: str = typer.Option("", "--model", "-m", help="生成模型 selector,如 agnes/agnes-3.0-flash(默认当前 active)"),
@@ -290,7 +314,14 @@ def benchmark_run_rgb(
 
 
 @benchmark_app.command("gate")
-def benchmark_gate(
+def benchmark_gate(suite: str=typer.Option('multihop', '--suite', '-s', help='基准套件名'), metric: str=typer.Option('ndcg@10', '--metric', '-m', help='门禁指标名'), min_value: float=typer.Option(..., '--min', help='指标下限(含),低于则 exit 1'), report: str=typer.Option('', '--report', '-r', help='显式报告路径(默认取该套件最新 benchmark 报告)')):
+    'CI 回归门禁:报告指标 < 下限则 exit 1。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_benchmark_gate(suite, metric, min_value, report)
+
+
+def _default_benchmark_gate(
     suite: str = typer.Option("multihop", "--suite", "-s", help="基准套件名"),
     metric: str = typer.Option("ndcg@10", "--metric", "-m", help="门禁指标名"),
     min_value: float = typer.Option(..., "--min", help="指标下限(含),低于则 exit 1"),
@@ -326,7 +357,14 @@ def benchmark_gate(
 
 
 @benchmark_app.command("run-multihop")
-def benchmark_run_multihop(
+def benchmark_run_multihop(model: str=typer.Option('agnes/agnes-3.0-flash', '--model', '-m', help='生成模型 selector'), limit: int=typer.Option(0, '--limit', '-n', help='评测题数(0=全部 2556)'), top_k: int=typer.Option(5, '--top-k', '-k', help='检索进入生成的 top-k'), rpm: float=typer.Option(18.0, '--rpm', help='LLM 调用限速(Agnes 免费档建议 ≤20)'), generate_only: bool=typer.Option(False, '--generate-only', '-g', help='只生成存盘,judge 留待后续'), judge_only: str=typer.Option('', '--judge-only', '-j', help='跳过生成,判指定报告里的存盘答案(deepseek 低谷时段用)'), embedding_model: str=typer.Option('BAAI/bge-small-en-v1.5', '--embedding-model', '-e', help='embedding 模型'), offline: bool=typer.Option(False, '--offline', help='只使用本地缓存数据'), ci: bool=typer.Option(False, '--ci', '-c', help='报告写入 traces/evals/'), report: str=typer.Option('', '--report', '-o', help='报告导出路径')):
+    'MultiHop-RAG 端到端(检索+生成+judge)。null_query 规则判拒答(零 judge 成本)。'
+    from agentnexus.services.eval import get_eval_service
+
+    return get_eval_service().cli_benchmark_run_multihop(model, limit, top_k, rpm, generate_only, judge_only, embedding_model, offline, ci, report)
+
+
+def _default_benchmark_run_multihop(
     model: str = typer.Option("agnes/agnes-3.0-flash", "--model", "-m", help="生成模型 selector"),
     limit: int = typer.Option(0, "--limit", "-n", help="评测题数(0=全部 2556)"),
     top_k: int = typer.Option(5, "--top-k", "-k", help="检索进入生成的 top-k"),

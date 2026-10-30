@@ -30,6 +30,8 @@ DEFAULT_COLLECTION_METADATA = {"hnsw:space": "cosine"}
 _client = None
 _client_path: str | None = None
 _collections: dict[str, Any] = {}
+_path_clients: dict[str, Any] = {}
+_path_collections: dict[tuple[str, str], Any] = {}
 _chroma_lock = threading.RLock()
 
 
@@ -111,6 +113,26 @@ def get_collection(
         return _collections[collection_name]
 
 
+def get_collection_at(persist_dir: str, name: str, metadata: dict | None = None):
+    """Reuse a collection only within its explicitly selected storage path."""
+    import os
+    from pathlib import Path
+
+    path = os.path.normcase(str(Path(persist_dir).resolve()))
+    key = (path, name)
+    with chroma_operation_lock():
+        if key not in _path_collections:
+            if path not in _path_clients:
+                import chromadb
+
+                _path_clients[path] = chromadb.PersistentClient(path=path)
+            collection = _path_clients[path].get_or_create_collection(
+                name=name, metadata=metadata or DEFAULT_COLLECTION_METADATA,
+            )
+            _path_collections[key] = ThreadSafeChromaCollection(collection)
+        return _path_collections[key]
+
+
 def normalize_chroma_metadata_value(value: Any) -> str | int | float | bool:
     if isinstance(value, bool):
         return value
@@ -168,6 +190,8 @@ def reset_storage_client() -> None:
         _client = None
         _client_path = None
         _collections = {}
+        _path_clients.clear()
+        _path_collections.clear()
 
 
 def _validate_payload_lengths(
@@ -332,6 +356,7 @@ __all__ = [
     "delete_documents",
     "get_chroma_client",
     "get_collection",
+    "get_collection_at",
     "insert_documents",
     "normalize_chroma_metadata_value",
     "normalize_metadata_for_chroma",

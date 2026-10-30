@@ -29,11 +29,10 @@ def workspace_runtime(tmp_path):
         agent.llm_client.capabilities.max_context_tokens = 128000
         agent.llm_client.capabilities.supports_thinking = True
         agent.llm_client.capabilities.supports_tool_calling = True
-        agent._on_event = None
-        agent._todo_list = None
-        agent._total_usage = {}
+        agent.event_handler = None
+        agent.todo_list = None
         agent.total_usage = {}
-        agent._step_count = 0
+        agent.step_count = 0
         agent.run.return_value = SimpleNamespace(answer="Completed the requested task.")
         agents[sid] = agent
         return agent
@@ -75,7 +74,7 @@ async def test_reasoning_stream_is_visible_and_keeps_tool_order(workspace_runtim
 
     def execute(*_args, **_kwargs):
         def emit(kind, **payload):
-            runtime.agent._on_event(ReActEvent(kind, payload), None, None)
+            runtime.agent.event_handler(ReActEvent(kind, payload), None, None)
 
         emit(ReActEventType.STREAM_REASONING, token="先检查 [入口]，")
         emit(ReActEventType.STREAM_REASONING, token="再验证行为。")
@@ -145,7 +144,7 @@ async def test_running_reasoning_survives_switching_sessions(workspace_runtime):
     release = threading.Event()
 
     def execute(*_args, **_kwargs):
-        runtime.agent._on_event(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "此任务仍在分析。"}), None, None)
+        runtime.agent.event_handler(ReActEvent(ReActEventType.STREAM_REASONING, {"token": "此任务仍在分析。"}), None, None)
         assert release.wait(timeout=30)
         return SimpleNamespace(answer="完成")
 
@@ -225,7 +224,7 @@ async def test_restored_history_skips_the_large_welcome_logo(workspace_runtime):
     runtime.memory_manager.short_term.append("user", "previous request")
     runtime.memory_manager.estimate_stm_tokens = lambda: 4000
     runtime.agent.total_usage = {"input_tokens": 1234, "output_tokens": 567}
-    runtime.agent._todo_list = SimpleNamespace(list_items=lambda: [SimpleNamespace(id="restored", status="pending", description="恢复的任务")])
+    runtime.agent.todo_list = SimpleNamespace(list_items=lambda: [SimpleNamespace(id="restored", status="pending", description="恢复的任务")])
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
@@ -472,9 +471,9 @@ async def test_inspector_replies_to_the_selected_child_question_and_shows_receip
 
     from textual.widgets import TextArea
 
-    from agentnexus.observability.timeline import get_timeline_store
     from agentnexus.services.collaboration import ChildTask, CollaborationRun
     from agentnexus.services.subagents import SubagentRunContext
+    from agentnexus.storage.timeline import get_timeline_store
 
     runtime, _ = workspace_runtime
     store = get_timeline_store()
@@ -596,7 +595,7 @@ async def test_session_switch_replaces_timeline_todos_usage_and_capabilities(wor
     runtime, _ = workspace_runtime
     runtime.agent.total_usage = {"input_tokens": 1234, "output_tokens": 567}
     runtime.agent.llm_client.capabilities.supports_thinking = False
-    runtime.agent._todo_list = SimpleNamespace(list_items=lambda: [SimpleNamespace(id="one", status="pending", description="旧会话任务")])
+    runtime.agent.todo_list = SimpleNamespace(list_items=lambda: [SimpleNamespace(id="one", status="pending", description="旧会话任务")])
     runtime.memory_manager.estimate_stm_tokens = lambda: 128
     app = AgentNexusTUI(runtime=runtime)
     async with app.run_test(size=(120, 32)) as pilot:

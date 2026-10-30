@@ -6,49 +6,10 @@ import time
 from collections import deque
 from pathlib import Path
 
+from agentnexus.core.memory_contracts import compute_importance
+from agentnexus.core.text_tokens import get_token_encoding
+
 logger = logging.getLogger(__name__)
-
-_tiktoken_encoding = None
-_tiktoken_loaded = False
-
-
-def _get_tiktoken_encoding():
-    global _tiktoken_encoding, _tiktoken_loaded
-    if not _tiktoken_loaded:
-        import tiktoken
-
-        _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
-        _tiktoken_loaded = True
-    return _tiktoken_encoding
-
-
-_ROLE_WEIGHTS = {"system": 0.9, "user": 0.8, "assistant": 0.5, "tool": 0.3}
-_IMPORTANCE_KEYWORDS = frozenset([
-    "记住", "重要", "约束", "决策", "规则", "必须", "不要", "禁止",
-    "优先", "关键", "核心", "目标", "需求", "偏好", "我是", "我叫",
-])
-
-
-def compute_importance(msg: dict, position: int, total: int) -> float:
-    """Compute an importance score for a message (0.0 ~ 1.0).
-
-    Considers role weight, recency, and content signals.
-    """
-    score = 0.0
-    role = msg.get("role", "")
-    score += _ROLE_WEIGHTS.get(role, 0.4) * 0.4
-
-    recency = position / max(total - 1, 1) if total > 1 else 1.0
-    score += recency * 0.3
-
-    content = msg.get("content", "")
-    if any(kw in content for kw in _IMPORTANCE_KEYWORDS):
-        score += 0.2
-    if len(content) > 500:
-        score += 0.1
-
-    return min(score, 1.0)
-
 
 class ShortTermMemory:
     def __init__(self, max_messages: int = 50, max_tokens: int = 0,
@@ -240,7 +201,7 @@ class ShortTermMemory:
 
     def estimate_tokens(self) -> int:
         with self._lock:
-            enc = _get_tiktoken_encoding()
+            enc = get_token_encoding()
             total = 0
             for m in self._messages:
                 content = m.get("content", "")
@@ -250,7 +211,7 @@ class ShortTermMemory:
     def _estimate_msg_tokens(self, msg: dict) -> int:
         """Token estimate for a single message."""
         content = msg.get("content", "")
-        enc = _get_tiktoken_encoding()
+        enc = get_token_encoding()
         return len(enc.encode(content))
 
     @property
@@ -286,16 +247,14 @@ class ShortTermMemory:
                 self._flush_wal()
 
     def restore(self, other: "ShortTermMemory") -> None:
-        """Replace messages/summary from another STM instance (checkpoint undo/redo).
+        """Restore another conversation through its public snapshot methods."""
+        self.load_snapshot(other.get_all(), other.get_summary())
 
-        Mirrors the legacy direct private-field assignment: the deque is
-        replaced (not copied), and the incremental token counter is
-        intentionally left untouched — it stays stale until the next
-        structural rewrite recalculates it.
-        """
+    def load_snapshot(self, messages: list[dict], summary: str = "") -> None:
+        """Replace a checkpoint and recalculate its token accounting atomically."""
         with self._lock:
-            self._messages = other._messages
-            self._summary = other._summary
+            self._summary = summary
+            self.replace_messages(messages)
 
     def clear(self):
         with self._lock:

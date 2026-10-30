@@ -20,7 +20,7 @@ from agentnexus.services.chat import ChatService
 @pytest.fixture(autouse=True)
 def _mock_trace_manager():
     mock_tm = MagicMock()
-    with patch("agentnexus.observability.tracer.trace_manager", mock_tm):
+    with patch("agentnexus.core.telemetry.trace_manager", mock_tm):
         yield
 
 

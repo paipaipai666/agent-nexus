@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 def check_llm_health(runtime: Any) -> dict[str, Any]:
     """检查 LLM 连通性"""
     try:
+        from agentnexus.core.modules import ModuleHost
+
+        modules = getattr(runtime, "modules", None)
+        if isinstance(modules, ModuleHost):
+            state = modules.status()["agent"]["state"]
+            if state in {"disabled", "unavailable"}:
+                return {"status": "ok", "detail": f"Agent module {state}"}
         llm = runtime.llm
+        if llm is None and isinstance(modules, ModuleHost):
+            return {"status": "ok", "detail": "Selected agent manages its own LLM"}
         if not llm.api_key:
             return {"status": "degraded", "detail": "API key not configured"}
         if not llm.base_url:
@@ -74,6 +83,16 @@ def check_memory_health(runtime: Any) -> dict[str, Any]:
 def check_traces_dir(runtime: Any) -> dict[str, Any]:
     """检查 traces 目录可写"""
     try:
+        from agentnexus.core.modules import ModuleHost
+
+        modules = getattr(runtime, "modules", None)
+        if isinstance(modules, ModuleHost):
+            backend = modules.optional("observability")
+            if backend is None:
+                state = modules.status()["observability"]["state"]
+                return {"status": "ok", "detail": f"Observability module {state}"}
+            health = getattr(backend, "health", None)
+            return health() if callable(health) else {"status": "ok", "detail": "Observability provider ready"}
         from agentnexus.core.config import get_settings
         traces_dir = Path(get_settings().traces_dir)
         if not traces_dir.exists():

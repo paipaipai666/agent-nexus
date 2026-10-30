@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentnexus.observability.timeline import TimelineStore
 from agentnexus.services.collaboration import ChildTask, CollaborationRun
 from agentnexus.services.subagents import SubagentRegistry, SubagentRunContext
+from agentnexus.storage.timeline import TimelineStore
 
 
 def make_run(tmp_path):
@@ -195,7 +195,7 @@ def test_managed_timeout_reports_deadline_and_retains_worker_until_exit(tmp_path
 
     store = TimelineStore(str(tmp_path / "timeline.db"))
     monkeypatch.setattr("agentnexus.services.chat.get_timeline_store", lambda: store)
-    monkeypatch.setattr("agentnexus.observability.timeline.get_timeline_store", lambda: store)
+    monkeypatch.setattr("agentnexus.storage.timeline.get_timeline_store", lambda: store)
     monkeypatch.setattr(get_settings(), "subagent_timeout_sec", .05)
     monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _: MagicMock())
     monkeypatch.setattr("agentnexus.tools.subagent._register_child_tools", lambda *a, **kw: None)
@@ -207,7 +207,7 @@ def test_managed_timeout_reports_deadline_and_retains_worker_until_exit(tmp_path
         release.wait(2)
         return MagicMock(answer="late answer", steps=[])
 
-    monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", agent_run)
+    monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", agent_run)
     service = ChatService(agent_factory=lambda _: None, memory_factory_builder=lambda _: lambda: None)
     pool = ThreadPoolExecutor(1)
     context = SubagentRunContext(service, "s", "p")
@@ -248,7 +248,7 @@ def test_managed_child_holds_capacity_until_timed_out_tool_exits(tmp_path, monke
 
     store = TimelineStore(str(tmp_path / "timeline.db"))
     monkeypatch.setattr("agentnexus.services.chat.get_timeline_store", lambda: store)
-    monkeypatch.setattr("agentnexus.observability.timeline.get_timeline_store", lambda: store)
+    monkeypatch.setattr("agentnexus.storage.timeline.get_timeline_store", lambda: store)
     monkeypatch.setattr("agentnexus.tools.subagent._clone_llm", lambda _: MagicMock())
     release, returned = threading.Event(), threading.Event()
 
@@ -264,7 +264,7 @@ def test_managed_child_holds_capacity_until_timed_out_tool_exits(tmp_path, monke
             returned.set()
         return MagicMock(answer="premature result", steps=[])
 
-    monkeypatch.setattr("agentnexus.tools.subagent.ReActAgent.run", agent_run)
+    monkeypatch.setattr("agentnexus.agents.re_act_agent.ReActAgent.run", agent_run)
     service = ChatService(agent_factory=lambda _: None, memory_factory_builder=lambda _: lambda: None)
     pool = ThreadPoolExecutor(1)
     context = SubagentRunContext(service, "s", "p")

@@ -4,7 +4,6 @@ import logging
 from collections import deque
 from typing import Callable
 
-from agentnexus.agents.exceptions import AgentCancelled, FSMError
 from agentnexus.agents.react_types import (
     ExecutionContext,
     ReActEvent,
@@ -12,6 +11,7 @@ from agentnexus.agents.react_types import (
     ReActState,
     Transition,
 )
+from agentnexus.core.exceptions import AgentCancelled, FSMError
 
 logger = logging.getLogger(__name__)
 

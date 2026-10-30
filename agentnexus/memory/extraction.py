@@ -174,11 +174,13 @@ def extract_and_save_memories(
             metrics.incr("pii_masked_count")
             logger.warning("PII detected in extracted memory context, masked: %s", context[:60])
 
-        vec = embedding_to_list(embed_model.encode(_embed_text(item, context), normalize_embeddings=True))
+        vec = (embedding_to_list(embed_model.encode(_embed_text(item, context), normalize_embeddings=True))
+               if embed_model is not None else None)
 
         with _extraction_lock:
-            if vec:
-                existing = long_term.search(query_embedding=vec, limit=3, min_similarity=0.90)
+            if vec or vec is None:
+                existing = (long_term.search_text(_embed_text(item, context), limit=3, min_similarity=0.90)
+                            if vec is None else long_term.search(query_embedding=vec, limit=3, min_similarity=0.90))
                 if existing:
                     metrics.incr("writes_skipped_dedup")
                     logger.debug("Skipping duplicate memory: %s", item[:80])
@@ -189,18 +191,23 @@ def extract_and_save_memories(
             "content": item,
             "category": category,
             "importance": importance,
-            "embedding": vec,
         }
+        if vec is not None:
+            save_kwargs["embedding"] = vec
         if context:
             save_kwargs["metadata"] = {"context": context}
         with _extraction_lock:
-            if vec:
-                recheck = long_term.search(query_embedding=vec, limit=1, min_similarity=0.90)
+            if vec or vec is None:
+                recheck = (long_term.search_text(_embed_text(item, context), limit=1, min_similarity=0.90)
+                           if vec is None else long_term.search(query_embedding=vec, limit=1, min_similarity=0.90))
                 if recheck:
                     metrics.incr("writes_skipped_dedup")
                     continue
 
-            long_term.save(**save_kwargs)
+            if vec is None:
+                long_term.save_text(**save_kwargs)
+            else:
+                long_term.save(**save_kwargs)
             metrics.incr("writes_total")
             saved_count += 1
 

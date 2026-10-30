@@ -9,7 +9,7 @@ import threading
 import traceback
 from typing import Any, Callable
 
-from agentnexus.agents.exceptions import AgentCancelled
+from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.hooks import HookType, fire_hook
 from agentnexus.tools.errors import ToolError, ToolErrorCode
 

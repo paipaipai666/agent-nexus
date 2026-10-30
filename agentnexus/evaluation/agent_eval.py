@@ -144,7 +144,7 @@ class AgentEvaluator:
             for tid, spans in load_trace_spans(f).items():
                 traces[tid].extend(spans)
 
-        records = [self._evaluate_trace(tid, spans) for tid, spans in traces.items()]
+        records = [self._evaluate_trace(tid, spans) for tid, spans in traces.items() if self._is_agent_trace(spans)]
         report = self._aggregate(records)
 
         hook_mgr.fire(HookType.AFTER_EVAL_RUN, {
@@ -156,9 +156,14 @@ class AgentEvaluator:
     def evaluate_trace(self, trace_id: str, traces_dir: str) -> TraceRecord | None:
         """Evaluate a single trace by ID."""
         spans = find_trace(traces_dir, trace_id)
-        if spans:
+        if spans and self._is_agent_trace(spans):
             return self._evaluate_trace(trace_id, spans)
         return None
+
+    @staticmethod
+    def _is_agent_trace(spans: list[dict]) -> bool:
+        """Identify task execution while retaining legacy LLM-only traces."""
+        return any(span.get("name") in {"task", "llm"} for span in spans)
 
     @staticmethod
     def _evaluate_trace(trace_id: str, spans: list[dict]) -> TraceRecord:

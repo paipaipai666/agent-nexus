@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from agentnexus.observability.tracer import trace_manager
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.skills.runtime import WorkflowRunState, WorkflowRuntime
 from agentnexus.skills.workflow import Workflow
 from agentnexus.tools.registry import RiskLevel, ToolMeta, ToolRegistry

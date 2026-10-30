@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator, model_validat
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agentnexus.core.hook_schemas import HookConfig
+from agentnexus.core.modules import ModulesConfig, ModuleSelection
 
 
 class MCPServerConfig(BaseModel):
@@ -185,11 +186,15 @@ class Settings(BaseSettings):
         capabilities = data.pop("capabilities", None)
         persona = data.pop("persona", None)
         super().__init__(**data)
+        if "wiki" not in self.modules.model_fields_set:
+            self.modules = self.modules.model_copy(update={"wiki": ModuleSelection(enabled=self.wiki_enabled)})
+        self.wiki_enabled = self.modules.wiki.enabled
         self._migrate_llm_profiles()
         self._raw_capabilities: dict[str, Any] = capabilities if isinstance(capabilities, dict) else {}
         self._raw_persona: dict[str, Any] = persona if isinstance(persona, dict) else {}
 
     llm_api_key: SecretStr = Field(default=SecretStr(""))
+    modules: ModulesConfig = Field(default_factory=ModulesConfig)
     llm_model_id: str = Field(default="")
     llm_base_url: str = Field(default="")
     llm_timeout: int = Field(default=60, ge=1)
@@ -467,8 +472,27 @@ def _set_restrictive_permissions(path: Path) -> None:
         pass
 
 
-def _write_yaml_config(data: dict) -> Path:
+def _write_yaml_config(data: dict, *, changed_keys: tuple[str, ...] | None = None) -> Path:
     with _settings_lock:
+        from agentnexus.core.modules import active_module_host
+
+        owner = active_module_host()
+        updated_settings = None
+        if owner is not None and isinstance(owner.settings, Settings):
+            previous = _load_yaml()
+            keys = changed_keys if changed_keys is not None else {
+                name for name in data.keys() | previous.keys()
+                if data.get(name) != previous.get(name) or (name in data) != (name in previous)
+            }
+            fields = Settings.model_fields
+            values = owner.settings.model_dump()
+            values.update(capabilities=owner.settings.capabilities.model_dump(), persona=owner.settings.persona.model_dump())
+            for name in keys:
+                if name in {"capabilities", "persona"}:
+                    values[name] = data.get(name, {})
+                elif name in fields and name != "modules":
+                    values[name] = data.get(name, fields[name].get_default(call_default_factory=True))
+            updated_settings = Settings(**{**values, "modules": owner.config})
         config_path = _config_dir() / "config.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -488,6 +512,8 @@ def _write_yaml_config(data: dict) -> Path:
             _set_restrictive_permissions(config_path)
             global _settings_cache
             _settings_cache = None
+            if updated_settings is not None:
+                owner.settings = updated_settings
             return config_path
         except Exception:
             try:
@@ -497,8 +523,8 @@ def _write_yaml_config(data: dict) -> Path:
             raise
 
 
-def write_config_yaml(data: dict) -> Path:
-    return _write_yaml_config(data)
+def write_config_yaml(data: dict, *, changed_keys: tuple[str, ...] | None = None) -> Path:
+    return _write_yaml_config(data, changed_keys=changed_keys)
 
 
 def _default_paths() -> dict:
@@ -529,6 +555,11 @@ _settings_lock = threading.RLock()
 
 
 def get_settings() -> Settings:
+    from agentnexus.core.modules import active_module_host
+
+    owner = active_module_host()
+    if owner is not None:
+        return owner.settings
     global _settings_cache
     with _settings_lock:
         if _settings_cache is None:

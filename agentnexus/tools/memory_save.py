@@ -1,8 +1,11 @@
 """memory_save tool — allows agents to proactively save facts to long-term memory."""
 
-from agentnexus.memory.extraction import _embed_text
-from agentnexus.memory.long_term import get_long_term_memory
-from agentnexus.rag.embeddings import get_embedding_model
+from agentnexus.core.modules import get_module_host
+
+
+def get_long_term_memory():
+    """Resolve the selected provider for standalone tool calls."""
+    return get_module_host().optional("long_term")
 
 _VALID_CATEGORIES = {
     "fact", "preference", "note",
@@ -23,7 +26,7 @@ _CATEGORY_MIGRATION = {
 
 def memory_save(content: str, category: str = "fact", importance: float = 0.85,
                 context: str = "", scope: str = "user", kind: str = "memo",
-                tags: str = "") -> str:
+                tags: str = "", *, modules=None) -> str:
     """Save a fact, preference, or conclusion to long-term memory for future recall.
 
     Use this when the user explicitly shares personal info (name, preferences, background),
@@ -75,25 +78,19 @@ def memory_save(content: str, category: str = "fact", importance: float = 0.85,
     importance = max(0.0, min(1.0, importance))
     context = (context or "").strip()
 
-    ltm = get_long_term_memory()
-    model = get_embedding_model()
-
-    try:
-        raw = model.encode(_embed_text(content, context), normalize_embeddings=True)
-        embedding = raw.tolist() if hasattr(raw, "tolist") else list(raw)
-    except Exception:
-        embedding = []
+    ltm = modules.optional("long_term") if modules is not None else get_long_term_memory()
+    if ltm is None:
+        return "[memory_save] 长期记忆不可用"
 
     save_kwargs: dict = {
         "session_id": "agent_written",
         "content": content.strip(),
         "category": category,
         "importance": importance,
-        "embedding": embedding,
     }
     if context:
         save_kwargs["metadata"] = {"context": context}
-    ltm.save(**save_kwargs)
+    ltm.save_text(**save_kwargs)
     return f"[memory_save] 已保存 [{category}] {content.strip()[:100]}"
 
 

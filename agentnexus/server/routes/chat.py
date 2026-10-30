@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from agentnexus.core.modules import ModuleUnavailable
 from agentnexus.server.deps import get_runtime
 from agentnexus.server.error_handlers import APIError
 
@@ -212,6 +213,8 @@ def send_message(req: SendMessageRequest, runtime=Depends(get_runtime)):
         }
     except KeyError as e:
         raise APIError(404, "not_found", str(e))
+    except ModuleUnavailable:
+        raise
     except Exception as e:
         raise APIError(500, "internal_error", str(e))
 
@@ -430,7 +433,7 @@ class CollaborationMessageInput(BaseModel):
 @router.get("/session/{session_id}/subagents/{subagent_id}/messages")
 def list_collaboration_messages(session_id: str, subagent_id: str, after: int = Query(default=0, ge=0), limit: int = Query(default=500, ge=1, le=500)):
     """Durable communication history and current delivery receipts."""
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     messages = get_timeline_store().list_collaboration_messages(session_id, subagent_id, after, limit)
     return {"messages": messages, "last_id": messages[-1]["id"] if messages else after, "count": len(messages)}
@@ -460,7 +463,7 @@ def list_session_events(session_id: str, after: int = 0, limit: int = 2000,
                         agent_id: str | None = None,
                         view: Literal["timeline", "trajectory"] = "timeline"):
     """Append-only session event log for the timeline UI (cursor: row id)."""
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     events = get_timeline_store().list_events(
         session_id, after_id=after, limit=limit, agent_id=agent_id,
@@ -474,7 +477,7 @@ def list_session_events(session_id: str, after: int = 0, limit: int = 2000,
 def get_context_snapshot(session_id: str, run_id: str, step_id: int,
                          agent_id: str | None = None):
     """Full context snapshot (the exact messages array) for one model call."""
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     snapshot = get_timeline_store().get_snapshot(session_id, run_id, step_id, agent_id=agent_id)
     if snapshot is None:
@@ -485,7 +488,7 @@ def get_context_snapshot(session_id: str, run_id: str, step_id: int,
 @router.get("/session/{session_id}/context-steps/{run_id}")
 def list_context_steps(session_id: str, run_id: str):
     """Step ids that have a context snapshot, for the timeline step picker."""
-    from agentnexus.observability.timeline import get_timeline_store
+    from agentnexus.storage.timeline import get_timeline_store
 
     steps = get_timeline_store().list_snapshot_steps(session_id, run_id)
     return {"session_id": session_id, "run_id": run_id, "steps": steps}
@@ -752,7 +755,7 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                     ready.set()
 
                 def run_agent(content=content, attachments=attachments, client_message_id=client_message_id, started=record_run_started, ready=run_started_event, holder=run_holder):
-                    from agentnexus.agents.exceptions import AgentCancelled
+                    from agentnexus.core.exceptions import AgentCancelled
                     thread_id = threading.get_ident()
                     active_thread_ids.add(thread_id)
                     confirm_bridge.set_target(ws_confirm, thread_id=thread_id)
@@ -767,6 +770,15 @@ async def ws_agent(ws: WebSocket, session_id: str, resumeFrom: int | None = None
                                 run.id,
                             ),
                         )
+                    except ModuleUnavailable as exc:
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                ws.send_json({"type": "submission_rejected", "client_message_id": client_message_id,
+                                              "code": "module_unavailable", "message": str(exc)}),
+                                main_loop,
+                            ).result(timeout=2)
+                        except Exception:
+                            pass
                     except ValueError as e:
                         try:
                             asyncio.run_coroutine_threadsafe(

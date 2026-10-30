@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from string import Formatter
 from typing import Any
 
+from agentnexus.core.telemetry import trace_manager
 from agentnexus.core.text_utils import collapse_and_truncate
-from agentnexus.observability.tracer import trace_manager
 from agentnexus.skills.profile import filter_tool_meta
 from agentnexus.skills.workflow import SessionProfile, WorkflowStep
 

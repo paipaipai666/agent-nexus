@@ -16,7 +16,6 @@ import tempfile
 import time
 import traceback
 from contextlib import ExitStack
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -356,7 +355,7 @@ def grade_answer(case: dict, row: dict) -> bool:
 
 def run_case(case: dict, llm, root: Path, max_steps: int = 16) -> dict:
     """Exercise the production Agent.run entry point against disposable project tools."""
-    from agentnexus.agents.re_act_agent import ReActAgent
+    from agentnexus.evaluation.engine import create_evaluation_agent, result_answer, result_steps
     from agentnexus.memory.todo import SessionTodoList
     from agentnexus.tools.providers.base import ToolProviderContext
     from agentnexus.tools.providers.todo_provider import TodoToolProvider
@@ -385,14 +384,18 @@ def run_case(case: dict, llm, root: Path, max_steps: int = 16) -> dict:
     else:
         register('search_records', '查询构建公告或使用量记录。query 是精确条目标识符，不是自然语言搜索词；source 为 primary 或 archive。',
                  {'query': {'type': 'string'}, 'source': {'type': 'string'}}, ['query'], lookup)
-    agent = ReActAgent(llm, registry, max_steps=max_steps, output=lambda *_: None, confirm_fn=lambda *_: True)
-    agent._todo_list = todo
+    try:
+        agent = create_evaluation_agent(llm, registry, max_steps=max_steps, output=lambda *_: None, confirm_fn=lambda *_: True)
+    except Exception:
+        registry.close(wait=True)
+        raise
+    if hasattr(agent, "todo_list"):
+        agent.todo_list = todo
     row = {}
     started = time.perf_counter()
     try:
         result = agent.run(case['question'])
-        row.update(answer=result.answer or '', steps=[{**asdict(step), 'strategy_used': step.strategy_used.name}
-                                                      for step in result.steps])
+        row.update(answer=result_answer(result), steps=result_steps(result))
     except Exception as exc:
         row.update(answer='', steps=[], agent_error=f'{type(exc).__name__}: {exc}', traceback=traceback.format_exc())
     finally:
@@ -407,7 +410,9 @@ def run_child(args) -> None:
     """Record one model attempt without exposing configured credentials."""
     from agentnexus.core.config import Settings, get_settings
     from agentnexus.core.llm import AgentLLM
+    from agentnexus.evaluation.engine import require_default_prompt_engine
 
+    require_default_prompt_engine()
     manifest = json.loads((args.output / 'manifest.json').read_text(encoding='utf-8'))
     expected = {**manifest['runtime'], **{f'agentnexus/prompts/{name}': digest(text)
                                          for name, text in manifest['prompts'][args.arm].items()}}

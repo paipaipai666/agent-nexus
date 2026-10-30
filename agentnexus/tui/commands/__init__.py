@@ -124,6 +124,13 @@ class TerminalCommands:
 
     def run(self, command: str, args: str, session_id: str) -> CommandResult:
         """Execute a documented terminal command for an explicit session."""
+        modules = getattr(self.runtime, "modules", None)
+        if modules is None:
+            return self._run(command, args, session_id)
+        with modules.activate():
+            return self._run(command, args, session_id)
+
+    def _run(self, command: str, args: str, session_id: str) -> CommandResult:
         if command not in _DOMAINS:
             raise ValueError(f"未知命令: {command}")
         self.load_draft(session_id)

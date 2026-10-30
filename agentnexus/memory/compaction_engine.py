@@ -25,13 +25,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentnexus.core.hooks import HookType, get_hook_manager
+from agentnexus.core.memory_contracts import compute_importance
+from agentnexus.core.telemetry import trace_span
 from agentnexus.memory.circuit_breaker import CircuitBreaker
 from agentnexus.memory.compaction import is_recoverable_tool
 from agentnexus.memory.compaction import parse_tool_message as _parse_tool_message
 from agentnexus.memory.projection import build_projection as build_projected_messages
 from agentnexus.memory.projection import microcompact_messages
-from agentnexus.memory.short_term import compute_importance
-from agentnexus.observability.tracer import trace_span
 from agentnexus.prompts import load_prompt
 
 if TYPE_CHECKING:
@@ -221,12 +221,6 @@ class CompactionEngine:
         """
         if not self._mgr.long_term:
             return
-        embed_model = None
-        try:
-            embed_model = self._mgr._get_embed_model(timeout=5)
-        except Exception:
-            pass
-
         drained = 0
         for i, msg in enumerate(messages):
             role = msg.get("role", "")
@@ -240,18 +234,11 @@ class CompactionEngine:
                 continue
             save_content = content[:2000]
             try:
-                embedding = None
-                if embed_model:
-                    from agentnexus.rag.embeddings import embedding_to_list
-                    embedding = embedding_to_list(
-                        embed_model.encode(save_content, normalize_embeddings=True)
-                    )
-                self._mgr.long_term.save(
+                self._mgr.long_term.save_text(
                     session_id=self._mgr.session_id,
                     content=save_content,
                     category="note",
                     importance=imp,
-                    embedding=embedding,
                 )
                 drained += 1
             except Exception as e:
@@ -437,7 +424,7 @@ class CompactionEngine:
         if not isinstance(seg_size, int):
             seg_size = 20
         result = segment_summarize(
-            all_msgs_after, mgr._llm,
+            all_msgs_after, mgr.llm,
             keep_recent=6,
             seg_size=seg_size,
             custom_instructions=custom_instructions,

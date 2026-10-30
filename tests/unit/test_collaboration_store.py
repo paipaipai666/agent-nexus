@@ -1,6 +1,6 @@
 import pytest
 
-from agentnexus.observability.timeline import TimelineStore
+from agentnexus.storage.timeline import TimelineStore
 
 
 def message(**fields):

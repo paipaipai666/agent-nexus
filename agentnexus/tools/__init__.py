@@ -22,6 +22,7 @@ def register_all_tools(
     mcp_manager=None,
     extra_providers: list[ToolProvider] | None = None,
     todo_list=None,
+    modules=None,
 ):
     """Register all available tools on the given executor.
 
@@ -38,9 +39,19 @@ def register_all_tools(
         subagent_confirm=subagent_confirm,
         mcp_manager=mcp_manager,
         todo_list=todo_list,
+        modules=modules,
     )
     providers = [*default_tool_providers(), *(extra_providers or [])]
-    return register_tool_providers(executor, providers, context)
+    registered = register_tool_providers(executor, providers, context)
+    from agentnexus.core.config import get_settings
+
+    settings = modules.settings if modules is not None else get_settings()
+    enabled = settings.capabilities.tools
+    for name in registered:
+        meta = executor.get_meta(name)
+        if meta is not None:
+            meta.enabled = bool(enabled.get(name, True))
+    return registered
 
 
 __all__ = [

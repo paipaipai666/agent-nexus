@@ -4,11 +4,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentnexus.agents.context_usage import ContextFragment, estimate_context_usage
 from agentnexus.agents.llm_strategy import call_llm
 from agentnexus.agents.re_act_agent import ReActAgent
 from agentnexus.agents.react_types import CallingStrategy, ExecutionContext
 from agentnexus.core.config import get_settings
+from agentnexus.core.context_usage import ContextFragment, estimate_context_usage
 from agentnexus.core.llm import AgentLLM
 from agentnexus.core.providers.base import StreamResult
 from agentnexus.memory.compaction_engine import CompactionEngine
