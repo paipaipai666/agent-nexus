@@ -4,9 +4,13 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from textual.app import App
+from textual.widgets import Tooltip
 
 from agentnexus.agents.react_types import ReActEvent, ReActEventType
+from agentnexus.tui.activity import Activity
 from agentnexus.tui.app import AgentNexusTUI
+from agentnexus.tui.widgets.activity import ActivityStatus
 from agentnexus.tui.widgets.input_bar import Composer
 from tests.unit.test_tui_workspace import settle
 from tests.unit.test_tui_workspace import workspace_runtime as workspace_runtime
@@ -14,6 +18,79 @@ from tests.unit.test_tui_workspace import workspace_runtime as workspace_runtime
 
 def activity_text(app):
     return str(app.screen.query_one("#agent-activity").render())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activity, expected", [
+    (Activity("working", "准备"), "[/] 工作中 · 准备"),
+    (Activity("working", "读取 [source].py", waiting=1, queued=2), "[/] 工作中 · 待答复 1 · 排队 2 · 读取 [source].py"),
+    (Activity(), "[ ] 空闲"),
+    (Activity("waiting", waiting=1), "[?] 等待回复 · 待答复 1"),
+    (Activity("confirming"), "[?] 等待确认"),
+    (Activity("unavailable", "状态[/]不可读取"), "[!] 状态不可用 · 状态[/]不可读取"),
+])
+async def test_activity_tooltip_preserves_literal_status_text(activity, expected):
+    class ActivityApp(App):
+        TOOLTIP_DELAY = 0.01
+
+        def compose(self):
+            yield ActivityStatus(id="status")
+
+    app = ActivityApp()
+    async with app.run_test(size=(80, 24), tooltips=True) as pilot:
+        app.query_one(ActivityStatus).update_activity(activity)
+        await pilot.hover("#status", offset=(1, 0))
+        await settle(pilot, lambda: app.screen.query_one(Tooltip).display)
+        assert str(app.screen.query_one(Tooltip).render()) == expected
+
+
+@pytest.mark.asyncio
+async def test_hovering_working_status_keeps_submitted_task_running(workspace_runtime):
+    runtime, _ = workspace_runtime
+    started, release = threading.Event(), threading.Event()
+
+    def execute(*_args, **_kwargs):
+        started.set()
+        release.wait(10)
+        return SimpleNamespace(answer="悬停后任务正常完成")
+
+    runtime.agent.run.side_effect = execute
+    app = AgentNexusTUI(runtime=runtime)
+    app.TOOLTIP_DELAY = 0.01
+    try:
+        async with app.run_test(size=(80, 24), tooltips=True) as pilot:
+            app.screen.query_one(Composer).value = "验证状态提示"
+            await pilot.press("enter")
+            await settle(pilot, started.is_set)
+            await settle(pilot, lambda: "工作中" in activity_text(app))
+            await pilot.hover("#agent-activity", offset=(1, 0))
+            await settle(pilot, lambda: app.screen.query_one(Tooltip).display)
+            assert str(app.screen.query_one(Tooltip).render()) == "[/] 工作中 · 准备"
+            release.set()
+            await settle(pilot, lambda: "空闲" in activity_text(app))
+            assert runtime.chat.get_session_recovery("workspace")["answer"] == "悬停后任务正常完成"
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_inspector_tooltip_preserves_literal_storage_error(workspace_runtime, monkeypatch):
+    runtime, _ = workspace_runtime
+
+    def unavailable(_sid):
+        raise OSError("无法读取 [/] source")
+
+    monkeypatch.setattr(runtime.chat, "list_subagents", unavailable)
+    app = AgentNexusTUI(runtime=runtime)
+    app.TOOLTIP_DELAY = 0.01
+    async with app.run_test(size=(80, 24), tooltips=True) as pilot:
+        app.screen.action_task_record()
+        await settle(pilot, lambda: bool(app.screen.query("#child-reply")))
+        await pilot.hover("#child-reply", offset=(1, 0))
+        await settle(pilot, lambda: app.screen.query_one(Tooltip).display)
+        assert str(app.screen.query_one(Tooltip).render()) == "任务状态不可用 · 无法读取 [/] source"
+        await pilot.press("escape")
+        assert app.screen.query_one(Composer).has_focus
 
 
 @pytest.mark.asyncio

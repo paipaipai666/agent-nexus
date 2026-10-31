@@ -27,7 +27,7 @@ class ActivityStatus(Static):
     def update_activity(self, activity):
         self.activity = activity
         self.set_classes(activity.mode)
-        self.tooltip = activity.label()
+        self.tooltip = Text(activity.label())
         if self.is_mounted:
             self._timer.resume() if activity.mode == "working" else self._timer.pause()
         self.update(Text(activity.label(self.frame)))

@@ -175,8 +175,9 @@ class InspectorScreen(ActionScreen[None]):
         states = {state.action.id: state for state in self.action_states()}
         for button, action_id in self.CONTROLS.items():
             control = self.query_one(f"#{button}", Button)
-            control.disabled = bool(states[action_id].disabled_reason)
-            control.tooltip = states[action_id].disabled_reason or None
+            reason = states[action_id].disabled_reason
+            control.disabled = bool(reason)
+            control.tooltip = Text(reason) if reason else None
         self.query_one(ContextFooter).show_actions([states[key] for key in ("region", "close", "help")], prefix="↑↓ 选择子任务")
 
     async def action_perform(self, action_id):
