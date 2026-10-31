@@ -130,6 +130,8 @@ class NexusBackend(BaseBackend):
         )
 
     def reset(self) -> None:
+        if self._mgr is not None:
+            self._mgr.close()
         if self._sandbox is not None:
             self._sandbox.close()
         self._sandbox = None
@@ -143,7 +145,7 @@ class NexusBackend(BaseBackend):
             if t.role == "user":
                 self._pending_user = t.content
             elif self._pending_user is not None:
-                self._mgr.conclude(self._pending_user, t.content)
+                self._mgr.conclude(self._pending_user, t.content).result()
                 self._pending_user = None
 
     def answer(self, question: str) -> str:
@@ -154,6 +156,8 @@ class NexusBackend(BaseBackend):
         return self._ask(system, question)
 
     def close(self) -> None:
+        if self._mgr is not None:
+            self._mgr.close()
         if self._sandbox is not None:
             self._sandbox.close()
             self._sandbox = None

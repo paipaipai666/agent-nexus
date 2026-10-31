@@ -106,7 +106,7 @@ class TestMultiTurnLTM:
             '```json\n{"preference": [{"content": "用户喜欢简洁回答"}]}\n```'
         )
 
-        mgr.conclude("你好", "你好！")
+        mgr.conclude("你好", "你好！").result(timeout=5)
 
         mock_ltm.save_text.assert_called()
         call_kwargs = mock_ltm.save_text.call_args
@@ -135,7 +135,7 @@ class TestMultiTurnLTM:
 
         mgr.append("user", "写一个排序算法")
         mgr.append("assistant", "好的，这是快速排序...")
-        mgr.conclude("写一个排序算法", "好的，这是快速排序...")
+        mgr.conclude("写一个排序算法", "好的，这是快速排序...").result(timeout=5)
 
         ctx2 = mgr.init_session("改成降序")
         assert "Python" in ctx2
@@ -167,7 +167,7 @@ class TestMultiTurnLTM:
         mgr._llm.think.return_value = (
             '```json\n{"entity_fact": [{"content": "用户有Flask项目"}]}\n```'
         )
-        mgr.conclude("项目结构", "Flask项目结构如下...")
+        mgr.conclude("项目结构", "Flask项目结构如下...").result(timeout=5)
 
         ctx2 = mgr.init_session("添加用户认证")
         assert "Flask" in ctx2
@@ -177,7 +177,7 @@ class TestMultiTurnLTM:
         mgr._llm.think.return_value = (
             '```json\n{"user_preference": [{"content": "使用SQLite数据库"}]}\n```'
         )
-        mgr.conclude("添加用户认证", "使用Flask-Login...")
+        mgr.conclude("添加用户认证", "使用Flask-Login...").result(timeout=5)
 
         ctx3 = mgr.init_session("部署方案")
         assert "Flask" in ctx3
@@ -193,7 +193,7 @@ class TestMultiTurnLTM:
 
         mgr.short_term.append("user", "第一轮问题")
         mgr.short_term.append("assistant", "第一轮回答")
-        mgr.conclude("第一轮问题", "第一轮回答")
+        mgr.conclude("第一轮问题", "第一轮回答").result(timeout=5)
 
         msgs_after_conclude = mgr.short_term.get_all()
         contents = [m["content"] for m in msgs_after_conclude]
@@ -202,7 +202,7 @@ class TestMultiTurnLTM:
 
         mgr.short_term.append("user", "第二轮问题")
         mgr.short_term.append("assistant", "第二轮回答")
-        mgr.conclude("第二轮问题", "第二轮回答")
+        mgr.conclude("第二轮问题", "第二轮回答").result(timeout=5)
 
         final_msgs = mgr.short_term.get_all()
         final_contents = [m["content"] for m in final_msgs]

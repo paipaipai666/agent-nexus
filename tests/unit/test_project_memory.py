@@ -139,14 +139,14 @@ class TestManagerIntegration:
 
     def test_conclude_logs_work(self, tmp_path):
         mgr = self._mgr_with_project(tmp_path)
-        mgr.conclude("实现项目记忆", "已完成", allow_memory=True)
+        mgr.conclude("实现项目记忆", "已完成", allow_memory=True).result(timeout=5)
         logs = list((mgr.project.root / "worklog").glob("*.md"))
         assert len(logs) == 1
         assert "实现项目记忆" in logs[0].read_text(encoding="utf-8")
 
     def test_conclude_skips_worklog_when_not_allowed(self, tmp_path):
         mgr = self._mgr_with_project(tmp_path)
-        mgr.conclude("子任务", "完成", allow_memory=False)
+        mgr.conclude("子任务", "完成", allow_memory=False).result(timeout=5)
         assert list((mgr.project.root / "worklog").glob("*.md")) == []
 
 

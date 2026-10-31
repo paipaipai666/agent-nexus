@@ -39,6 +39,12 @@ User interaction → MemoryManager (throughout Agent lifecycle)
           └── Mark original notes as superseded_by (idempotent)
 ```
 
+## Turn completion and background extraction
+
+The agent confirms completion after the final answer passes stop checks and the round is persisted, then queues long-term memory extraction. `conclude(question, answer)` returns `Future[None]`. Chat does not wait for it. Tests and batch callers that need the extracted memories immediately can call `.result(timeout=...)`.
+
+Extraction runs serially within each session and preserves each submission's module and workspace context. Its cancellation signal is independent of the foreground turn. Closing a desktop connection does not cancel memory work for a completed task. Application shutdown cancels queued work and prevents late results from being saved. This optional work is held in process memory, so shutdown or a crash may discard pending extraction; the chat result is persisted separately.
+
 ## STM Compression Pyramid
 
 `maybe_compact()` triggers bottom-up:

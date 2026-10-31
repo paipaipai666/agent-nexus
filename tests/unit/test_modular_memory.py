@@ -128,7 +128,7 @@ def test_extraction_uses_text_backend_without_embedding_model(temp_agentnexus_ho
 
     monkeypatch.setattr("agentnexus.rag.embeddings.get_embedding_model", forbidden_model)
     manager._should_extract = lambda question, answer: True
-    manager.conclude("记住蓝门", "remember the blue door")
+    manager.conclude("记住蓝门", "remember the blue door").result(timeout=5)
     assert memories.records[0]["content"] == "remember the blue door"
 
 

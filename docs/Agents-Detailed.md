@@ -75,6 +75,8 @@ Agent 在事件边界解析控制 JSON，只发布解码后的说明、答案和
 
 协议档位（`CallingStrategy`）不再是状态——它是 `AWAIT_MODEL` 的一个内部属性。
 
+最终答案通过停止钩子并完成本轮保存后，Agent 发布 `ANSWER_FINALIZED` 旁路事件，ChatService 据此确认完成。`ANSWER_READY` 仍是可能被停止钩子否决的候选答案。长期记忆提取在后台执行，完成后断连不改变终态；已保存终态的重复提交不会重复写入或报告失败。
+
 ### ReActEvent（事件）
 
 驱动状态转换的队列事件（8 个，返回值封闭集）：

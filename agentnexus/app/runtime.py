@@ -307,11 +307,14 @@ class AppRuntime:
             return
         self._closed = True
         try:
-            if self.mcp_manager is not None:
-                self.mcp_manager.close()
+            self.chat.close()
         finally:
-            if self.modules is not None:
-                self.modules.close()
+            try:
+                if self.mcp_manager is not None:
+                    self.mcp_manager.close()
+            finally:
+                if self.modules is not None:
+                    self.modules.close()
 
     def __enter__(self):
         if self._closed:

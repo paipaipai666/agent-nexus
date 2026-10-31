@@ -1018,8 +1018,19 @@ class ReActAgent:
             self._output(f"最终答案: {answer}")
             if memory_state.memory_manager:
                 memory_state.memory_manager.append("system", f"[最终答案] {answer}")
-                memory_state.memory_manager.conclude(run_state.question, answer)
             self._persist_round()
+            if run_state.cancel_checker and run_state.cancel_checker():
+                raise AgentCancelled("cancelled")
+            ctx.emit(ReActEventType.ANSWER_FINALIZED, text=answer)
+            if run_state.cancel_checker and run_state.cancel_checker():
+                raise AgentCancelled("cancelled")
+            if memory_state.memory_manager:
+                try:
+                    memory_state.memory_manager.conclude(run_state.question, answer)
+                except AgentCancelled:
+                    logger.debug("Optional memory conclusion cancelled")
+                except Exception as exc:
+                    logger.warning("Memory conclusion failed (non-fatal): %s", exc, exc_info=True)
             span.output = {
                 "answer": str(answer)[:500],
                 "subagent_answer": str((tool_state.last_subagent_payload or {}).get("answer", ""))[:500],

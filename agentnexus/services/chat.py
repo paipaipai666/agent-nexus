@@ -11,6 +11,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator
@@ -1133,6 +1134,10 @@ class ChatService:
             event_type = getattr(getattr(event, "type", None), "name", str(getattr(event, "type", "")))
             payload = getattr(event, "payload", {}) or {}
 
+            if event_type == "ANSWER_FINALIZED":
+                self._run_snapshots[run_id] = turn.finish(payload.get("text") or "")
+                return
+
             if event_type in ("STREAM_TOKEN", "STREAM_REASONING"):
                 token = payload.get("token", "")
                 if token:
@@ -1317,6 +1322,17 @@ class ChatService:
                     self.cancel_run(run_id, reason=reason)
             except Exception:
                 logger.exception("Failed to cancel run %s during shutdown", run_id)
+
+    def close(self) -> None:
+        """Stop runs and optional memory jobs before their providers are released."""
+        self.cancel_all_runs(reason="server_shutdown")
+        memories = {id(memory): memory for memory in self._memory_managers.values()}
+        closers = [close for memory in memories.values() if callable(close := getattr(memory, "close", None))]
+        for close in closers:
+            close(timeout=0)
+        deadline = time.monotonic() + 1.0
+        for close in closers:
+            close(timeout=max(0, deadline - time.monotonic()))
 
     def cancel_run(self, run_id: str, reason: str = "cancelled") -> None:
         with self._put_event_lock:

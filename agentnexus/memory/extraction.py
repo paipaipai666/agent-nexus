@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from agentnexus.core.pii import contains_pii, mask_pii
@@ -152,12 +153,15 @@ def extract_and_save_memories(
     session_id: str,
     question: str,
     answer: str,
+    cancel_checker: Callable[[], bool] | None = None,
 ) -> None:
     metrics = get_metrics()
     metrics.incr("extraction_attempts")
 
     prompt = EXTRACT_PROMPT.format(question=question, answer=answer)
     response = llm.think([{"role": "user", "content": prompt}], silent=True) or "{}"
+    if cancel_checker is not None and cancel_checker():
+        return
     data = parse_memory_payload(response)
     saved_count = 0
 
@@ -197,6 +201,8 @@ def extract_and_save_memories(
         if context:
             save_kwargs["metadata"] = {"context": context}
         with _extraction_lock:
+            if cancel_checker is not None and cancel_checker():
+                return
             if vec or vec is None:
                 recheck = (long_term.search_text(_embed_text(item, context), limit=1, min_similarity=0.90)
                            if vec is None else long_term.search(query_embedding=vec, limit=1, min_similarity=0.90))

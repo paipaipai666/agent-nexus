@@ -58,7 +58,7 @@ class TestMultiTurnContext:
         mgr.short_term.append("assistant", "好的，以下是Python计算器实现...")
 
         mgr._llm.think.return_value = '```json\n{"user_preference": [{"content": "用户要求使用Python"}]}\n```'
-        mgr.conclude("用Python实现一个计算器", "好的，以下是Python计算器实现...")
+        mgr.conclude("用Python实现一个计算器", "好的，以下是Python计算器实现...").result(timeout=5)
 
         context = mgr.init_session("添加GUI界面")
 
@@ -97,7 +97,7 @@ class TestMultiTurnContext:
             "yes",
             '```json\n{"fact": [{"content": "定义了User模型"}]}\n```',
         ]
-        mgr.conclude("定义User模型", "class User(Base): ...")
+        mgr.conclude("定义User模型", "class User(Base): ...").result(timeout=5)
         turn1_save_count = mock_ltm.save_text.call_count
 
         mgr.short_term.append("user", "添加email字段")
@@ -106,7 +106,7 @@ class TestMultiTurnContext:
             "yes",
             '```json\n{"fact": [{"content": "添加了email字段"}]}\n```',
         ]
-        mgr.conclude("添加email字段", "email = Column(String)")
+        mgr.conclude("添加email字段", "email = Column(String)").result(timeout=5)
         turn2_save_count = mock_ltm.save_text.call_count
 
         assert turn2_save_count > turn1_save_count

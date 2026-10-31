@@ -519,7 +519,7 @@ def _probe_gatebench_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
     cat_hits = cat_total = 0
     for row in rows:
         before = {r["content"] for r in sb.ltm.list_recent(limit=500)}
-        mgr.conclude(row["question"], row["answer"])
+        mgr.conclude(row["question"], row["answer"]).result()
         new_rows = [r for r in sb.ltm.list_recent(limit=500) if r["content"] not in before]
         wrote = bool(new_rows)
         pairs.append((row["expect_write"], wrote))
@@ -693,7 +693,7 @@ def _probe_judge_admission_pipeline(sb: MemorySandbox, res: CaseResult) -> None:
     misses: list[str] = []
     for q, a, expect_write, key in ADMISSION_SET:
         before = {r["content"] for r in sb.ltm.list_recent(limit=100)}
-        mgr.conclude(q, a)
+        mgr.conclude(q, a).result()
         after = {r["content"] for r in sb.ltm.list_recent(limit=100)}
         new_rows = after - before
         wrote = bool(new_rows)

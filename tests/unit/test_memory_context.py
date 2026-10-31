@@ -1218,7 +1218,7 @@ class TestConclude:
     def test_calls_llm_with_extract_prompt(self):
         mgr = self._make_mgr()
         mgr._llm.think.return_value = '{"user_preference": ["likes Python"]}'
-        mgr.conclude("编程语言讨论", "Python")
+        mgr.conclude("编程语言讨论", "Python").result(timeout=5)
         mgr._llm.think.assert_called_once()
         prompt_arg = mgr._llm.think.call_args[0][0][0]["content"]
         assert "编程语言讨论" in prompt_arg
@@ -1232,7 +1232,7 @@ class TestConclude:
             "fact": ["uses VSCode"],
         })
         mgr._llm.think.side_effect = ["yes", json_response]
-        mgr.conclude("Test", "Answer")
+        mgr.conclude("Test", "Answer").result(timeout=5)
         assert mgr.long_term.save_text.call_count == 3
 
     def test_handles_markdown_code_block_response(self):
@@ -1240,7 +1240,7 @@ class TestConclude:
         mgr.long_term.search_text.return_value = []
         json_response = '```json\n{"preference": ["likes Python"]}\n```'
         mgr._llm.think.side_effect = ["yes", json_response]
-        mgr.conclude("test", "Python")
+        mgr.conclude("test", "Python").result(timeout=5)
         assert mgr.long_term.save_text.call_count == 1
         save_call = mgr.long_term.save_text.call_args
         assert save_call[1]["content"] == "likes Python"
@@ -1250,7 +1250,7 @@ class TestConclude:
         mgr = self._make_mgr()
         mgr.long_term.search_text.return_value = []
         mgr._llm.think.side_effect = ["yes", "{}"]
-        mgr.conclude("email me at user@example.com", "sure thing")
+        mgr.conclude("email me at user@example.com", "sure thing").result(timeout=5)
         assert mgr._llm.think.call_count == 2
         gate_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
         assert "***" in gate_text
@@ -1260,7 +1260,7 @@ class TestConclude:
         mgr = self._make_mgr()
         mgr.long_term.search_text.return_value = []
         mgr._llm.think.side_effect = ["yes", "{}"]
-        mgr.conclude("hello", "call 13800138000")
+        mgr.conclude("hello", "call 13800138000").result(timeout=5)
         assert mgr._llm.think.call_count == 2
         extraction_text = mgr._llm.think.call_args_list[1][0][0][0]["content"]
         assert "****" in extraction_text
@@ -1268,21 +1268,21 @@ class TestConclude:
 
     def test_skips_when_allow_memory_false(self):
         mgr = self._make_mgr()
-        mgr.conclude("hello", "world", allow_memory=False)
+        mgr.conclude("hello", "world", allow_memory=False).result(timeout=5)
         mgr._llm.think.assert_not_called()
 
     def test_catches_exceptions_never_propagates(self):
         mgr = self._make_mgr()
         mgr._llm.think.side_effect = RuntimeError("LLM failed")
-        mgr.conclude("hello", "world")
+        mgr.conclude("hello", "world").result(timeout=5)
 
     def test_skips_when_answer_empty(self):
         mgr = self._make_mgr()
-        mgr.conclude("hello", "")
+        mgr.conclude("hello", "").result(timeout=5)
         mgr._llm.think.assert_not_called()
 
     def test_skips_when_ltm_is_none(self):
         mgr = self._make_mgr()
         mgr.long_term = None
-        mgr.conclude("hello", "world")
+        mgr.conclude("hello", "world").result(timeout=5)
         mgr._llm.think.assert_not_called()

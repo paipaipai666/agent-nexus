@@ -105,8 +105,12 @@ class TurnRuntime:
         ReAct round (raise MemoryCommitError / emit fatal FAULT).
         """
         with self._state_lock:
-            if self._version is None or self._persisted:
+            if self._persisted:
+                return True
+            if self._version is None:
                 return False
+            if self._record.status != "running":
+                return self.persist_snapshot()
             new_msgs = self._collect_uncommitted()
             if not new_msgs:
                 return True
@@ -183,10 +187,10 @@ class TurnRuntime:
             return self._record
 
     def cancel(self, reason: str = "user_cancelled") -> TurnRecord:
-        self._cancelled.set()
         with self._state_lock:
             if self._record.status != "running":
                 return self._record
+            self._cancelled.set()
             answer = self._build_interrupted_answer(status="interrupted", reason=reason)
             self._record = TurnRecord(
                 run_id=self.run_id,

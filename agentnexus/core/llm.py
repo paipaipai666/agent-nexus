@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Dict, List
 
+import httpx
+
 if TYPE_CHECKING:
     from agentnexus.core.providers.base import BaseLLMProvider, StreamResult
 
@@ -39,6 +41,8 @@ _PROVIDER_COOLDOWN_SECONDS = 60
 
 def _is_transient_error(exc: Exception) -> bool:
     """网络层瞬态错误判定——与 _call 的重试分类保持一致。"""
+    if isinstance(exc, httpx.TransportError):
+        return True
     msg = str(exc).lower()
     name = type(exc).__name__.lower()
     if any(k in name or k in msg for k in (
@@ -425,6 +429,11 @@ class AgentLLM:
 
                 return result.text
             except Exception as exc:
+                if isinstance(exc, AgentCancelled):
+                    raise
+                call = self._cs().active_call
+                if call is not None and call.checker is not None and call.checker():
+                    raise AgentCancelled("cancelled") from exc
                 if unsupported_capability(exc) is None:
                     with _provider_health_lock:
                         fail_count, _ = _provider_health.get(provider_key, (0, 0))

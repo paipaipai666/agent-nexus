@@ -8,8 +8,14 @@ model) are borrowed from the owning MemoryManager via ``self._mgr``.
 from __future__ import annotations
 
 import logging
+import threading
+from collections import deque
+from concurrent.futures import Future
+from contextvars import Context, copy_context
 from typing import TYPE_CHECKING
 
+from agentnexus.core.exceptions import AgentCancelled
+from agentnexus.core.llm import AgentLLM
 from agentnexus.core.pii import contains_pii as _contains_pii
 from agentnexus.core.pii import mask_pii as _mask_pii
 from agentnexus.memory.circuit_breaker import CircuitBreaker, CircuitOpenError
@@ -39,19 +45,74 @@ class MemoryExtractionPipeline:
     def __init__(self, mgr: MemoryManager):
         self._mgr = mgr
         self.gate_circuit = CircuitBreaker(failure_threshold=3, recovery_seconds=20.0)
+        self._pending: deque[tuple[Future[None], Context, str, str, bool]] = deque()
+        self._queue_lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+        self._closing = threading.Event()
+
+    def submit(self, question: str, answer: str, allow_memory: bool = True) -> Future[None]:
+        """Queue independent extraction work, serially within this session."""
+        completion: Future[None] = Future()
+        with self._queue_lock:
+            if self._closing.is_set():
+                completion.cancel()
+                return completion
+            self._pending.append((completion, copy_context(), question, answer, allow_memory))
+            if self._worker is None:
+                self._worker = threading.Thread(target=self._drain, daemon=True, name="memory-extraction")
+                self._worker.start()
+        return completion
+
+    def close(self, timeout: float = 1.0) -> None:
+        """Cancel queued work and stop active extraction before storage closes."""
+        with self._queue_lock:
+            self._closing.set()
+            pending = list(self._pending)
+            self._pending.clear()
+            worker = self._worker
+        for completion, *_ in pending:
+            completion.cancel()
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=max(0, timeout))
+
+    def _drain(self) -> None:
+        while True:
+            with self._queue_lock:
+                if not self._pending:
+                    self._worker = None
+                    return
+                completion, context, question, answer, allow_memory = self._pending.popleft()
+            if not completion.set_running_or_notify_cancel():
+                continue
+            try:
+                context.run(self._run_background, question, answer, allow_memory)
+            except Exception as exc:
+                logger.warning("Memory conclusion failed (non-fatal): %s", exc, exc_info=True)
+                completion.set_exception(exc)
+            else:
+                completion.set_result(None)
+
+    def _run_background(self, question: str, answer: str, allow_memory: bool) -> None:
+        if answer and allow_memory and self._mgr.long_term:
+            llm = self._mgr.llm
+            if isinstance(llm, AgentLLM):
+                llm.set_cancel_checker(self._closing.is_set)
+        self.run(question, answer, allow_memory)
 
     def run(self, question: str, answer: str, allow_memory: bool = True) -> None:
         """Extract memories from a concluded Q&A pair (never raises)."""
         from agentnexus.core.hooks import HookType, get_hook_manager
 
-        hook_mgr = get_hook_manager()
-        hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
-            "op": "conclude", "question": question[:200],
-            "allow_memory": allow_memory,
-        })
-
         try:
+            hook_mgr = get_hook_manager()
+            hook_mgr.fire(HookType.AFTER_MEMORY_OP, {
+                "op": "conclude", "question": question[:200],
+                "role": "assistant", "content": answer,
+                "allow_memory": allow_memory,
+            })
             self._conclude_impl(question, answer, allow_memory)
+        except AgentCancelled:
+            logger.debug("LTM extraction cancelled")
         except Exception as e:
             logger.warning("LTM extraction failed (non-fatal): %s", e, exc_info=True)
 
@@ -118,6 +179,8 @@ class MemoryExtractionPipeline:
 
     def _conclude_impl(self, question: str, answer: str, allow_memory: bool):
         mgr = self._mgr
+        if self._closing.is_set():
+            return
         if not answer or not mgr.long_term:
             return
         if not allow_memory:
@@ -134,4 +197,5 @@ class MemoryExtractionPipeline:
             session_id=mgr.session_id,
             question=question,
             answer=answer,
+            cancel_checker=self._closing.is_set,
         )

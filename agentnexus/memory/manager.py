@@ -12,6 +12,7 @@ borrow the manager as their shared context (STM/LTM/LLM/settings/session).
 
 import logging
 import threading
+from concurrent.futures import Future
 from pathlib import Path
 
 from agentnexus.core.llm import AgentLLM
@@ -318,14 +319,20 @@ class MemoryManager:
     def bridge_read(self, filepath: str, content_preview: str = "") -> None:
         self._engine.bridge_read(filepath, content_preview)
 
-    def conclude(self, question: str, answer: str, allow_memory: bool = True) -> None:
-        self._pipeline.run(question, answer, allow_memory)
+    def conclude(self, question: str, answer: str, allow_memory: bool = True) -> Future[None]:
+        """Schedule optional extraction without delaying the completed task."""
+        completion = self._pipeline.submit(question, answer, allow_memory)
         project = getattr(self, "project", None)
         if allow_memory and project is not None:
             try:
                 project.log_work("完成任务", question.strip()[:80])
             except Exception as e:
                 logger.debug("Project memory worklog failed: %s", e)
+        return completion
+
+    def close(self, timeout: float = 1.0) -> None:
+        """Stop optional work before releasing the memory providers."""
+        self._pipeline.close(timeout)
 
     def _should_extract_rules(self, question: str, answer: str) -> str:
         return self._pipeline.should_extract_rules(question, answer)
