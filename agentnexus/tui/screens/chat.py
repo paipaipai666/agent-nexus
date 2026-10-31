@@ -1495,16 +1495,10 @@ class ChatScreen(ChatWorkspace, ChatExecution, Screen):
             from agentnexus.core.llm import AgentLLM
 
             llm = getattr(self._agent, "llm_client", None)
-            if isinstance(llm, AgentLLM) and llm.capability_discovery_status == "unknown":
-                self.call_after_refresh(self._start_model_capability_discovery)
+            if isinstance(llm, AgentLLM) and llm.capability_discovery_status == "probing" and self._capability_timer is None:
+                self._capability_timer = self.set_interval(0.25, self._poll_model_capabilities)
         except Exception as e:
             logger.debug("Failed to refresh model panel: %s", e)
-
-    def _start_model_capability_discovery(self):
-        llm = self._agent.llm_client
-        llm.start_capability_discovery()
-        if llm.capability_discovery_status == "probing" and self._capability_timer is None:
-            self._capability_timer = self.set_interval(0.25, self._poll_model_capabilities)
 
     def _poll_model_capabilities(self):
         if self._agent.llm_client.capability_discovery_status != "probing":

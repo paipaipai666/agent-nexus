@@ -292,13 +292,13 @@ class TestRecoverPolicy:
         events = agent._on_recover(ctx, ReActEvent(E.FAULT, {"fatal": True, "detail": "boom"}))
         assert [e.type for e in events] == [E.ABORT]
 
-    def test_no_tools_no_text_degrades_and_continues(self):
+    def test_no_tools_no_text_retries_without_degrading(self):
         llm = _make_llm()
         agent = ReActAgent(llm, ToolRegistry(), output=lambda s: None)
         ctx = self._ctx(llm, strategy=CallingStrategy.NATIVE_TOOLS)
         events = agent._on_recover(ctx, ReActEvent(E.FAULT, {"no_tools_no_text": True}))
         assert [e.type for e in events] == [E.ROUND_READY]
-        assert "tool_calling" in llm.session_tracker.disabled_features
+        assert "tool_calling" not in llm.session_tracker.disabled_features
 
     def test_empty_response_with_budget_retries(self):
         llm = _make_llm()
@@ -310,7 +310,7 @@ class TestRecoverPolicy:
         assert [e.type for e in events] == [E.ROUND_READY]
         assert ctx.json_retries == 1
 
-    def test_parse_error_exhausted_in_json_mode_degrades(self):
+    def test_parse_error_exhausted_in_json_mode_salvages_without_degrading(self):
         llm = _make_llm()
         agent = ReActAgent(llm, ToolRegistry(), output=lambda s: None)
         ctx = self._ctx(llm, strategy=CallingStrategy.JSON_MODE)
@@ -318,8 +318,9 @@ class TestRecoverPolicy:
         ctx.last_response_text = "not json"
         events = agent._on_recover(ctx, ReActEvent(E.FAULT, {
             "reason": RetryReason.PARSE_ERROR, "detail": "broken"}))
-        assert [e.type for e in events] == [E.ROUND_READY]
-        assert "json_mode" in llm.session_tracker.disabled_features
+        assert [e.type for e in events] == [E.ANSWER_READY]
+        assert ctx.last_answer == "not json"
+        assert "json_mode" not in llm.session_tracker.disabled_features
 
     def test_parse_error_exhausted_in_prompt_json_salvages(self):
         llm = _make_llm()

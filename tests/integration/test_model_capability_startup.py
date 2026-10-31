@@ -102,6 +102,19 @@ def test_capability_http_read_returns_unknown_without_contacting_model(model_end
 
 
 @pytest.mark.asyncio
+async def test_tui_startup_does_not_probe_before_a_real_task(model_endpoint):
+    from agentnexus.agents.re_act_agent import ReActAgent
+    from agentnexus.tools.registry import ToolRegistry
+    from agentnexus.tui.app import AgentNexusTUI
+
+    app = AgentNexusTUI(agent=ReActAgent(model_endpoint.client, ToolRegistry()))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(0.2)
+        assert app.screen.query_one("#chat-input").has_focus
+        assert model_endpoint.requests == []
+
+
+@pytest.mark.asyncio
 async def test_tui_accepts_input_while_background_discovery_is_pending(model_endpoint):
     from textual.events import Key
 
@@ -111,6 +124,7 @@ async def test_tui_accepts_input_while_background_discovery_is_pending(model_end
 
     release = threading.Event()
     model_endpoint.on_request = lambda payload: release.wait(timeout=5)
+    model_endpoint.client.start_capability_discovery()
     app = AgentNexusTUI(agent=ReActAgent(model_endpoint.client, ToolRegistry()))
     async with app.run_test(size=(100, 30)):
         async with asyncio.timeout(3):
@@ -162,8 +176,8 @@ def test_first_task_preserves_native_tools_after_local_capability_read(model_end
     agent = ReActAgent(model_endpoint.client, ToolRegistry(), max_steps=2, output=lambda text: None)
     result = agent.run("Say done")
     assert result.answer == "done"
-    assert model_endpoint.client.capabilities.supports_tool_calling is True
-    assert len(model_endpoint.requests) == 3
+    assert "tool_calling" in model_endpoint.client.capabilities.unknown_features
+    assert len(model_endpoint.requests) == 1
     assert all("合法的 JSON" not in message["content"] for message in model_endpoint.requests[-1]["messages"])
 
 
@@ -266,12 +280,12 @@ def test_unusable_persistent_cache_is_rebuilt(model_endpoint, corruption):
         data["result"]["tool_calling"] = "false"
     path.write_text("incomplete" if corruption == "invalid-json" else json.dumps(data), encoding="utf-8")
     subprocess.run([sys.executable, "-c", script, model_endpoint.url], check=True, timeout=15)
-    assert len(model_endpoint.requests) == 4
+    assert len(model_endpoint.requests) == (2 if corruption == "expired" else 4)
 
 
 @pytest.mark.parametrize("mode", ["headers", "stream"])
 @pytest.mark.parametrize("wire", ["openai", "anthropic"])
-def test_discovery_has_a_short_total_deadline_and_does_not_cache_timeouts(model_endpoint, monkeypatch, mode, wire):
+def test_discovery_has_a_short_total_deadline_and_persists_retry_backoff(model_endpoint, monkeypatch, mode, wire):
     import agentnexus.core.capability_discovery as discovery
     from agentnexus.core.providers.router import select_provider
 
@@ -290,7 +304,9 @@ def test_discovery_has_a_short_total_deadline_and_does_not_cache_timeouts(model_
     assert len(model_endpoint.requests) == 1
     assert caps.from_default_fallback is True
     assert model_endpoint.client.capability_discovery_status == "failed"
-    assert list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json")) == []
+    cached = list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json"))
+    assert len(cached) == 1
+    assert json.loads(cached[0].read_text(encoding="utf-8"))["result"] == {}
     request_count = len(model_endpoint.requests)
     model_endpoint.client.start_capability_discovery()
     assert model_endpoint.client.capability_discovery_status == "failed"
@@ -312,7 +328,8 @@ def test_discovery_budget_is_shared_by_both_requests(model_endpoint, monkeypatch
     caps = model_endpoint.client.ensure_capabilities()
     assert time.monotonic() - started < 1.9
     assert len(model_endpoint.requests) == 2
-    assert caps.from_default_fallback is True
+    assert caps.supports_tool_calling is True
+    assert "parallel_tool_calls" in caps.unknown_features
     assert model_endpoint.client.capability_discovery_status == "failed"
 
 
@@ -334,7 +351,9 @@ def test_anthropic_stream_checks_deadline_when_transport_close_cannot_interrupt(
     assert caps.from_default_fallback is True
     assert model_endpoint.client.capability_discovery_status == "failed"
     assert len(model_endpoint.requests) == 1
-    assert list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json")) == []
+    cached = list((Path(os.environ["AGENTNEXUS_HOME"]) / "capability-cache").glob("*.json"))
+    assert len(cached) == 1
+    assert json.loads(cached[0].read_text(encoding="utf-8"))["result"] == {}
 
 
 def test_anthropic_deadline_interrupts_a_pending_socket_read(model_endpoint, monkeypatch):

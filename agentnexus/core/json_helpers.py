@@ -10,14 +10,14 @@ def robust_json_parse(raw_text: str) -> dict:
     if not raw_text or not raw_text.strip():
         return {"type": "error", "reason": "empty response"}
     clean = raw_text.strip()
-    markdown_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", clean, re.DOTALL)
-    if markdown_match:
-        clean = markdown_match.group(1).strip()
     try:
         data = json.loads(clean)
         return classify_parsed(data)
     except (json.JSONDecodeError, ValueError):
         pass
+    markdown_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", clean, re.DOTALL)
+    if markdown_match:
+        clean = markdown_match.group(1).strip()
     try:
         fixed = re.sub(r",\s*([}\]])", r"\1", clean)
         data = json.loads(fixed)

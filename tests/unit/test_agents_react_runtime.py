@@ -138,7 +138,7 @@ class TestRecoverGate:
     def test_no_retries_json_mode(self):
         assert decisions.retry_gate_decision(
             json_retries=2, max_json_retries=2,
-            strategy=CallingStrategy.JSON_MODE) == "degrade"
+            strategy=CallingStrategy.JSON_MODE) == "salvage"
 
     def test_fallback_text_when_not_json_mode(self):
         assert decisions.retry_gate_decision(

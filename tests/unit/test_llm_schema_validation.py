@@ -22,7 +22,7 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(
             text='{"thought": "I need to search", "action": "web_search"}',
             finish_reason="stop",
@@ -46,7 +46,7 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(
             text='{"user": {"name": "Alice", "age": 30}, "items": [1, 2, 3]}',
             finish_reason="stop",
@@ -70,7 +70,7 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(
             text='{"tools": [{"name": "search", "params": {"q": "test"}}]}',
             finish_reason="stop",
@@ -94,7 +94,7 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(text="{}", finish_reason="stop")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(
@@ -114,7 +114,7 @@ class TestLLMStructuredOutputSchema:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(text='{"incomplete": ', finish_reason="stop")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call(

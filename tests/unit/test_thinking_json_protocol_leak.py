@@ -81,12 +81,12 @@ class TestProbeThenNativeStrategy:
         strategy = decisions.select_strategy(SessionCapabilityTracker(), caps)
         assert strategy is CallingStrategy.NATIVE_TOOLS
 
-    def test_thinking_on_without_tool_calling_falls_to_prompt_json(self, monkeypatch):
-        """对照：探测失败才允许 PROMPT_JSON（这时 JSON 格式注入是预期的）。"""
+    def test_inconclusive_tool_probe_keeps_optimistic_native_protocol(self, monkeypatch):
+        """未观察到工具调用并不证明协议不支持。"""
         client = self._client_with_probe(monkeypatch, tool_calling=False, thinking=True)
         caps = client.ensure_capabilities()
         strategy = decisions.select_strategy(SessionCapabilityTracker(), caps)
-        assert strategy is CallingStrategy.PROMPT_JSON
+        assert strategy is CallingStrategy.NATIVE_TOOLS
 
 
 class TestNativeDoesNotInjectJsonFormat:

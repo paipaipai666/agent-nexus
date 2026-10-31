@@ -30,6 +30,7 @@ class ModelCapabilities:
 
     from_default_fallback: bool = True
     parallel_explicit: bool = False
+    unknown_features: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -49,15 +50,18 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
     caller may probe the endpoint (see AgentLLM.capabilities).
     Model ids are used exactly as configured (no vendor-prefix guessing).
     """
-    caps = ModelCapabilities(from_default_fallback=True)
+    caps = ModelCapabilities(from_default_fallback=True,
+                             unknown_features=frozenset({"tool_calling", "json_mode", "parallel_tool_calls"}))
 
     settings = get_settings()
     if settings.model_tool_calling is not None:
         caps.supports_tool_calling = settings.model_tool_calling
         caps.from_default_fallback = False
+        caps.unknown_features -= {"tool_calling"}
     if settings.model_json_mode is not None:
         caps.supports_json_mode = settings.model_json_mode
         caps.from_default_fallback = False
+        caps.unknown_features -= {"json_mode"}
     if settings.model_thinking is not None:
         caps.supports_thinking = settings.model_thinking
 
@@ -79,8 +83,10 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
             caps.supports_vision = ov.supports_vision
         if ov.supports_tool_calling is not None:
             caps.supports_tool_calling = ov.supports_tool_calling
+            caps.unknown_features -= {"tool_calling"}
         if ov.supports_json_mode is not None:
             caps.supports_json_mode = ov.supports_json_mode
+            caps.unknown_features -= {"json_mode"}
         if ov.supports_json_schema is not None:
             caps.supports_json_schema = ov.supports_json_schema
         if ov.supports_thinking is not None:
@@ -88,10 +94,16 @@ def detect_capabilities(model_id: str, base_url: str = "") -> ModelCapabilities:
         if ov.supports_parallel_tool_calls is not None:
             caps.supports_parallel_tool_calls = ov.supports_parallel_tool_calls
             caps.parallel_explicit = True
+            caps.unknown_features -= {"parallel_tool_calls"}
         if ov.supports_tool_calling is not None or ov.supports_json_mode is not None:
             caps.from_default_fallback = False
 
     return caps
+
+
+def protocol_available(caps: ModelCapabilities, feature: str) -> bool:
+    """Attempt an unknown protocol without contradicting confirmed capability values."""
+    return bool(getattr(caps, f"supports_{feature}") or feature in getattr(caps, "unknown_features", ()))
 
 
 @dataclass

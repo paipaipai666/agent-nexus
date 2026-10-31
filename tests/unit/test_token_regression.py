@@ -37,7 +37,7 @@ class TestTokenUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="hi")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -55,7 +55,7 @@ class TestTokenUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="hi")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -73,7 +73,7 @@ class TestTokenUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="r", usage=_EST10)
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "msg 0"}], 0, True, 0)
@@ -93,7 +93,7 @@ class TestTokenUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="", usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -110,7 +110,7 @@ class TestTokenUsageTracking:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         llm.total_usage = {"input_tokens": 100, "output_tokens": 50, "cache_hit_tokens": 0}
         result_obj = _make_result(text="r", usage=_EST10)
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
@@ -134,7 +134,7 @@ class TestUsageNoOverflow:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="ok")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "x"}], 0, True, 0)
@@ -152,7 +152,7 @@ class TestUsageNoOverflow:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(text="r")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             llm._call([{"role": "user", "content": "x"}], 0, True, 0)
@@ -171,7 +171,7 @@ class TestUsageNoOverflow:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = _make_result(
             text="ok",
             usage={"input_tokens": 20, "output_tokens": 15, "total_tokens": 35},

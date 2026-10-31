@@ -107,7 +107,7 @@ class TestTokenRegression:
         from agentnexus.core.llm import AgentLLM
         from agentnexus.core.providers.base import StreamResult
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(
             text="ok", usage={"input_tokens": 10, "output_tokens": 5},
             finish_reason="stop",
@@ -129,7 +129,7 @@ class TestTokenRegression:
         from agentnexus.core.llm import AgentLLM
         from agentnexus.core.providers.base import StreamResult
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(
             text="ok", usage={"input_tokens": 10, "output_tokens": 5},
             finish_reason="stop",

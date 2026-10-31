@@ -48,14 +48,17 @@
 
 ### CallingStrategy（调用策略）
 
-四级降级策略，当高级策略失败时自动降级到低级：
+实际任务按 `NATIVE_TOOLS → JSON_MODE → PROMPT_JSON` 尝试。未知模型优先使用原生工具；显式配置关闭的能力直接跳过。只有服务端明确拒绝协议参数时才降级，限流、超时、空响应和 JSON 解析失败不改变能力。
 
 | 策略 | 说明 | 触发条件 |
 | --- | --- | --- |
-| `NATIVE_TOOLS` | LLM 原生 tool_calls | 模型支持 tool_calling（首选） |
-| `JSON_MODE` | response_format=json_object + 文本解析 | 模型支持 json_mode |
+| `NATIVE_TOOLS` | LLM 原生 tool_calls | tool_calling 已支持或未知（首选） |
+| `JSON_MODE` | response_format=json_object + 文本解析 | 原生协议不可用，json_mode 已支持或未知 |
 | `PROMPT_JSON` | Prompt 指令输出 JSON + 文本解析 | 模型不支持结构化输出 |
-| `PLAIN_TEXT` | 纯自然语言，无结构化输出 | 最终回退 |
+
+能力证据按模型、端点和认证身份持久化，思考强度和输出预算不改变缓存身份。确认结果没有固定过期时间，手动刷新可重新确认。普通工具探测成功后，即使并行探测限流，其成功结果也会保留。
+
+Agent 在事件边界解析控制 JSON，只发布解码后的说明、答案和工具事件。普通原生文本继续流式输出，业务 JSON 和答案内的代码块保留原文；疑似控制数据等解析完成后再发布。
 
 ### ReActState（FSM 状态）
 

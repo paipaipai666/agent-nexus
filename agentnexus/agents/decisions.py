@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from agentnexus.agents.react_types import CallingStrategy, RetryReason
 from agentnexus.core import json_helpers
+from agentnexus.core.capabilities import protocol_available
 
 _THOUGHT_MARKER_RE = re.compile(
     r"^\s*[*_]{0,2}\s*(?:thought|thinking|分析思考|思考过程|思考|想法|分析)\s*[*_]{0,2}\s*[:：]\s*",
@@ -162,10 +163,10 @@ def _recover_protocol_json(
     - 显式 {"answer": ...} → 提取答案文本
     返回 None 表示正文不是协议 JSON（含普通 JSON 数据），按原样作答。
     """
-    text = response_text
+    text = json_helpers.normalize_jsonish_text(response_text)
     if not text or "{" not in text:
         return None
-    parsed = json_helpers.robust_json_parse(text)
+    parsed = json_helpers.robust_json_parse(response_text)
     ptype = parsed.get("type")
     if ptype == "tool_call" and tool_exists(parsed["tool"]):
         return ModelDecision(
@@ -252,8 +253,6 @@ def retry_gate_decision(
     """
     if json_retries < max_json_retries:
         return "round"
-    if strategy == CallingStrategy.JSON_MODE:
-        return "degrade"
     return "salvage"
 
 
@@ -261,8 +260,8 @@ def select_strategy(session_caps: Any, caps: Any) -> CallingStrategy:
     """Mirrors ReActAgent._select_strategy — capability ladder with session
     blocklist.  Kept as a free function so decisions stay framework-free.
     """
-    if session_caps.is_available("tool_calling", caps.supports_tool_calling):
+    if session_caps.is_available("tool_calling", protocol_available(caps, "tool_calling")):
         return CallingStrategy.NATIVE_TOOLS
-    if session_caps.is_available("json_mode", caps.supports_json_mode):
+    if session_caps.is_available("json_mode", protocol_available(caps, "json_mode")):
         return CallingStrategy.JSON_MODE
     return CallingStrategy.PROMPT_JSON

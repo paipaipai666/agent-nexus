@@ -159,7 +159,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         result_obj = _make_result(text="Hello world", finish_reason="stop")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -176,7 +176,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         result_obj = _make_result(text="partial", finish_reason="length")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -197,7 +197,7 @@ class TestCall:
             {"name": "get_weather", "arguments": {"city": "NYC"}},
             {"name": "search", "arguments": {"q": "test"}},
         ]
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         result_obj = _make_result(text="", tool_calls=tool_calls, finish_reason="tool_calls")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0,
@@ -217,7 +217,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         result_obj = _make_result(
             text="Final answer",
             reasoning_content="thinking step by step...",
@@ -237,7 +237,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch.object(llm, "_call_via_provider", side_effect=ValueError("invalid request")):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -252,7 +252,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch.object(llm, "_call_via_provider", side_effect=ConnectionError("connection")):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
 
@@ -268,7 +268,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("tool calling not supported")):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -284,7 +284,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("response_format unsupported")):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -300,7 +300,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch.object(llm, "_call_via_provider",
                           side_effect=ValueError("reasoning_effort not supported")):
             llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -324,7 +324,7 @@ class TestCall:
         mock_settings.return_value.find_model_override_entry.return_value = None
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         provider = MagicMock()
         provider.stream_chat.return_value = _make_result(text="ok")
         with patch("agentnexus.core.llm.select_provider", return_value=provider):
@@ -352,7 +352,7 @@ class TestCall:
         mock_settings.return_value.find_model_override_entry.return_value = None
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         with patch("agentnexus.core.capabilities.get_settings", return_value=mock_settings.return_value):
             provider = MagicMock()
             provider.stream_chat.return_value = _make_result(text="ok")
@@ -373,7 +373,7 @@ class TestCall:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model="call-fixture", api_key="key", base_url="https://api.example.test/v1", timeout=60)
         result_obj = _make_result(
             text="hello",
             usage={"input_tokens": 10, "output_tokens": 5},
@@ -412,6 +412,8 @@ class TestCapabilityProbe:
     def test_probe_enables_json_mode_when_tools_unsupported(self, temp_agentnexus_home, monkeypatch):
         class _TextOnlyProvider:
             def stream_chat(self, **kwargs):
+                if kwargs.get("tools"):
+                    raise ValueError("tools not supported")
                 return StreamResult(text='{"ok": true}')
 
         self._patch_provider(monkeypatch, _TextOnlyProvider())

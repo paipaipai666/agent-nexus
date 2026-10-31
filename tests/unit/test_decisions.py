@@ -184,20 +184,20 @@ class TestRecover:
             json_retries=1, max_json_retries=2,
             strategy=CallingStrategy.JSON_MODE) == "round"
 
-    def test_degrade_when_exhausted_in_json_mode(self):
+    def test_salvage_when_exhausted_in_json_mode(self):
         assert decisions.retry_gate_decision(
             json_retries=2, max_json_retries=2,
-            strategy=CallingStrategy.JSON_MODE) == "degrade"
+            strategy=CallingStrategy.JSON_MODE) == "salvage"
 
     def test_salvage_when_exhausted_in_prompt_json(self):
         assert decisions.retry_gate_decision(
             json_retries=2, max_json_retries=2,
             strategy=CallingStrategy.PROMPT_JSON) == "salvage"
 
-    def test_exhausted_in_json_mode_degrades(self):
+    def test_exhausted_in_json_mode_preserves_capability(self):
         assert decisions.retry_gate_decision(
             json_retries=2, max_json_retries=2,
-            strategy=CallingStrategy.JSON_MODE) == "degrade"
+            strategy=CallingStrategy.JSON_MODE) == "salvage"
 
     def test_exhausted_in_prompt_json_salvages(self):
         assert decisions.retry_gate_decision(

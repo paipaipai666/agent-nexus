@@ -228,7 +228,7 @@ def get_llm_capabilities(runtime):
 
 def refresh_llm_capabilities(runtime):
     """Request background discovery and immediately return its current snapshot."""
-    runtime.llm.start_capability_discovery()
+    runtime.llm.start_capability_discovery(force=True)
     return get_llm_capabilities(runtime)
 
 def update_config(req: ConfigUpdateRequest, runtime):

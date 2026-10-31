@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 import time as _time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from agentnexus.agents import decisions, react_runtime
 from agentnexus.agents.fsm import StateMachine
 from agentnexus.agents.llm_strategy import build_json_format_section, call_llm
+from agentnexus.agents.output_stream import ResponseOutput, is_protocol_json, partial_protocol_answer
 from agentnexus.agents.prompt_builder import (
     assemble_react_messages,
     build_conversation_context,
@@ -35,7 +36,6 @@ from agentnexus.core.capabilities import SessionCapabilityTracker
 from agentnexus.core.config import get_settings
 from agentnexus.core.context_usage import ContextFragment, ContextUsageSnapshot, estimate_context_usage
 from agentnexus.core.exceptions import AgentCancelled
-from agentnexus.core.llm import AgentLLM
 from agentnexus.core.plan_mode import EXIT_PLAN_MODE_TOOL, PLAN_MODE_PROMPT, PlanModeBinding
 from agentnexus.core.telemetry import create_drift_detector, emit_drift_alerts, trace_manager
 from agentnexus.prompts import load_prompt
@@ -48,6 +48,9 @@ from agentnexus.skills import (
 )
 from agentnexus.tools.errors import ToolError
 from agentnexus.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agentnexus.core.llm import AgentLLM
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +519,7 @@ class ReActAgent:
                     })
 
         streamed_reasoning = {"flag": False}
+        response_output = ResponseOutput(buffered=ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS)
 
         def _stream_token(token: str, is_reasoning: bool = False):
             checker = ctx.run_state.cancel_checker
@@ -525,7 +529,9 @@ class ReActAgent:
                 streamed_reasoning["flag"] = True
                 ctx.emit(ReActEventType.STREAM_REASONING, token=token)
             else:
-                ctx.emit(ReActEventType.STREAM_TOKEN, token=token)
+                visible = response_output.feed(token)
+                if visible:
+                    ctx.emit(ReActEventType.STREAM_TOKEN, token=visible)
 
         mailbox = getattr(self, "_collaboration", None)
         if mailbox is not None:
@@ -562,6 +568,9 @@ class ReActAgent:
         if self.llm_client.last_error and not response_text:
             err = self.llm_client.last_error
             self._output(f"错误: {err}")
+            unsupported = getattr(self.llm_client, "last_unsupported_capability", None)
+            if unsupported in {"tool_calling", "json_mode"}:
+                return [ReActEvent(ReActEventType.FAULT, {"unsupported_capability": unsupported, "detail": err})]
             return [ReActEvent(ReActEventType.FAULT,
                                {"fatal": True, "detail": err})]
 
@@ -601,6 +610,12 @@ class ReActAgent:
         if d.kind == "fault":
             if d.fail_pending_calls:
                 return self._fail_truncated_tool_calls(ctx)
+            if d.reason == RetryReason.TRUNCATED:
+                protocol = is_protocol_json(response_text)
+                text = partial_protocol_answer(response_text) if protocol else response_text
+                visible = response_output.finish(response_text, text, protocol=protocol)
+                if visible:
+                    ctx.emit(ReActEventType.STREAM_TOKEN, token=visible)
             return [ReActEvent(ReActEventType.FAULT, {
                 "reason": d.reason,
                 "detail": d.detail,
@@ -608,6 +623,15 @@ class ReActAgent:
             })]
 
         if d.kind == "answer":
+            if (not d.recovered_protocol_json and is_protocol_json(response_text)
+                    and json_helpers.try_fix_json(response_text) is None):
+                return [ReActEvent(ReActEventType.FAULT, {
+                    "reason": RetryReason.PARSE_ERROR, "detail": "incomplete control response",
+                })]
+            visible = response_output.finish(
+                response_text, d.text,
+                protocol=d.recovered_protocol_json or ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS,
+            )
             memory_manager = ctx.memory_state.memory_manager
             if d.recovered_protocol_json or ctx.run_state.strategy != CallingStrategy.NATIVE_TOOLS:
                 self._emit_answer_thought(ctx)
@@ -619,10 +643,13 @@ class ReActAgent:
                     memory_manager.append("assistant", d.display_thought,
                                           metadata={"display_only": True})
                 ctx.emit(ReActEventType.ANSWER_THOUGHT, thought=d.display_thought)
+            if visible:
+                ctx.emit(ReActEventType.STREAM_TOKEN, token=visible)
             ctx.last_answer = self._join_partial_answer(ctx, d.text)
             return [ReActEvent(ReActEventType.ANSWER_READY, {"text": d.text})]
 
         if d.recovered_protocol_json:
+            d.thought = self._select_visible_thought(ctx.last_response_text, ctx.last_reasoning)
             ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
                 [{
                     "id": f"recovered_{ctx.run_state.current_step}_{i}",
@@ -631,8 +658,18 @@ class ReActAgent:
                 } for i, tc in enumerate(d.tool_calls)],
                 step=ctx.run_state.current_step,
             )
-            self._on_native_tool_calls(ctx, "")
+            self._on_native_tool_calls(ctx, d.thought)
         elif ctx.run_state.strategy == CallingStrategy.NATIVE_TOOLS:
+            protocol_content = is_protocol_json(response_text)
+            if protocol_content:
+                d.text = ""
+                if d.thought == response_text.strip():
+                    d.thought = ""
+            visible = response_output.finish(
+                response_text, d.text, protocol=protocol_content,
+            )
+            if visible:
+                ctx.emit(ReActEventType.STREAM_TOKEN, token=visible)
             ctx.tool_state.pending_tool_calls = react_runtime.ensure_tool_call_ids(
                 list(d.tool_calls), step=ctx.run_state.current_step,
             )
@@ -829,14 +866,22 @@ class ReActAgent:
         """
         payload = event.payload
 
+        unsupported = payload.get("unsupported_capability")
+        if unsupported in {"tool_calling", "json_mode"}:
+            ctx.memory_state.session_caps.mark_failed(unsupported)
+            return self._degrade_and_continue(ctx)
+
         if payload.get("fatal"):
             detail = payload.get("detail") or "LLM call failed"
             self._output(f"错误: {detail}")
             return [ReActEvent(ReActEventType.ABORT)]
 
         if payload.get("no_tools_no_text"):
-            ctx.memory_state.session_caps.mark_failed("tool_calling")
-            return self._degrade_and_continue(ctx)
+            if ctx.run_state.json_retries < ctx.run_state.max_json_retries:
+                ctx.run_state.json_retries += 1
+                self._emit_retry_nudge(ctx, RetryReason.EMPTY_RESPONSE, "empty native response")
+                return [ReActEvent(ReActEventType.ROUND_READY)]
+            return [ReActEvent(ReActEventType.ABORT)]
 
         reason = payload.get("reason")
         detail = payload.get("detail", "")
@@ -852,13 +897,12 @@ class ReActAgent:
                 ctx.json_retries += 1
                 self._emit_retry_nudge(ctx, reason, detail)
                 return [ReActEvent(ReActEventType.ROUND_READY)]
-            if kind == "degrade":
-                ctx.memory_state.session_caps.mark_failed("json_mode")
-                return self._degrade_and_continue(ctx)
             if ctx.steps:
                 ctx.steps[-1].error_message = f"JSON parse failed: {detail or reason}"
-            ctx.last_answer = self._join_partial_answer(
-                ctx, self._extract_answer_from_text(ctx.last_response_text))
+            answer = self._extract_answer_from_text(ctx.last_response_text)
+            if is_protocol_json(ctx.last_response_text) and answer == ctx.last_response_text.strip():
+                answer = "模型未返回可用的最终答案，请重试。"
+            ctx.last_answer = self._join_partial_answer(ctx, answer)
             return [ReActEvent(ReActEventType.ANSWER_READY)]
 
         logger.warning("RECOVER got unhandled fault payload: %s", payload)
@@ -891,9 +935,6 @@ class ReActAgent:
             ctx.messages.append({"role": "user", "content":
                 f"你的上一次回复不是合法的 JSON。错误: {detail or reason}。\n"
                 f"{self._build_json_format_section()}"})
-            memory_manager = ctx.memory_state.memory_manager
-            if memory_manager and ctx.last_response_text:
-                memory_manager.append("assistant", ctx.last_response_text)
 
     def _degrade_and_continue(self, ctx: ExecutionContext) -> list[ReActEvent]:
         """降档协议档位并继续（原 DEGRADE 态 + _on_degraded/_on_no_retries_degrade）。"""
@@ -1002,7 +1043,7 @@ class ReActAgent:
         return []
 
     def _select_strategy(self, session_caps: SessionCapabilityTracker) -> CallingStrategy:
-        caps = self.llm_client.ensure_capabilities() if isinstance(self.llm_client, AgentLLM) else self.llm_client.capabilities
+        caps = self.llm_client.capabilities
         return decisions.select_strategy(session_caps, caps)
 
     @staticmethod
@@ -1010,14 +1051,7 @@ class ReActAgent:
         text = text or ""
         if not text:
             return
-        body = text
-        try:
-            import json as _json
-            parsed = _json.loads(text.strip())
-            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
-                body = parsed["answer"]
-        except Exception:
-            body = text
+        body = partial_protocol_answer(text) if is_protocol_json(text) else text
         ctx.run_state.partial_answer = (ctx.run_state.partial_answer or "") + body
 
     @staticmethod

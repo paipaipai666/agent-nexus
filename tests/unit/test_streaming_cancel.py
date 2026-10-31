@@ -20,7 +20,7 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(text="Hello world", finish_reason="stop")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -35,7 +35,7 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         result_obj = StreamResult(text="Hello world", finish_reason="stop")
         with patch.object(llm, "_call_via_provider", return_value=result_obj):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
@@ -50,7 +50,7 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         with patch.object(llm, "_call_via_provider", side_effect=ValueError("bad request")):
             result = llm._call([{"role": "user", "content": "hi"}], 0, True, 0)
             assert result == ""
@@ -64,7 +64,7 @@ class TestStreamingInterruption:
         mock_settings.return_value.llm_timeout = 60
         mock_trace.active = None
 
-        llm = AgentLLM()
+        llm = AgentLLM(model='test-model', api_key='sk-test', base_url='http://localhost:9999', timeout=60)
         with patch.object(llm, "_call_via_provider", side_effect=RuntimeError("Connection failed")):
             result = llm.think([{"role": "user", "content": "hi"}])
             assert result == ""

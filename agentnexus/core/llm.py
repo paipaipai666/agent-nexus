@@ -17,8 +17,9 @@ from agentnexus.core.capabilities import (
     ModelCapabilitySnapshot,
     SessionCapabilityTracker,
     detect_capabilities,
+    protocol_available,
 )
-from agentnexus.core.capability_discovery import CapabilityDiscovery, probe_capabilities
+from agentnexus.core.capability_discovery import CapabilityDiscovery, probe_capabilities, unsupported_capability
 from agentnexus.core.config import get_settings
 from agentnexus.core.exceptions import AgentCancelled
 from agentnexus.core.providers.router import select_provider
@@ -63,6 +64,17 @@ class _ActiveCall:
     thread_id: int
     checker: Callable[[], bool] | None
     provider: "BaseLLMProvider | None" = None
+
+
+@dataclass(frozen=True)
+class _RequestTarget:
+    model: str
+    base_url: str
+    api_key: str
+    timeout: int
+    capabilities: ModelCapabilities
+    discovery: CapabilityDiscovery
+    tracker: SessionCapabilityTracker
 
 
 def get_default_llm() -> "AgentLLM":
@@ -137,6 +149,7 @@ class AgentLLM:
             s.reasoning_content = ""
             s.reasoning_buf = ""
             s.active_call = None
+            s.unsupported_capability = None
         return s
 
     @property
@@ -179,6 +192,11 @@ class AgentLLM:
     def last_reasoning_content(self, value: str) -> None:
         self._cs().reasoning_content = value
 
+    @property
+    def last_unsupported_capability(self) -> str | None:
+        """Return a confirmed protocol rejection from the current thread's last call."""
+        return self._cs().unsupported_capability
+
     def configure(self, *, model: str, base_url: str, api_key: str, timeout: int | None = None) -> None:
         """Hot-switch the underlying model/provider (shared instance — every
         agent holding this client picks the change up on its next call)."""
@@ -204,34 +222,45 @@ class AgentLLM:
             if self._capabilities is None:
                 self._capabilities = detect_capabilities(self.model, self.base_url)
             caps = self._capabilities
-            if not caps.from_default_fallback:
+            if not caps.unknown_features:
                 return ModelCapabilitySnapshot(caps, "config", "ready")
             snapshot = self._get_discovery(caps).snapshot()
             if snapshot.result is not None:
-                caps = replace(caps, supports_tool_calling=snapshot.result["tool_calling"],
-                               supports_json_mode=snapshot.result["json_mode"],
-                               supports_parallel_tool_calls=caps.supports_parallel_tool_calls if caps.parallel_explicit else snapshot.result["parallel_tool_calls"],
-                               from_default_fallback=False)
-                return ModelCapabilitySnapshot(caps, "probe", "ready")
-            return ModelCapabilitySnapshot(caps, "unknown", snapshot.status)
+                values = {name: value for name, value in snapshot.result.items() if name in caps.unknown_features}
+                if values:
+                    caps = replace(caps, **{f"supports_{name}": value for name, value in values.items()},
+                                   unknown_features=caps.unknown_features - frozenset(values),
+                                   from_default_fallback=False if {"tool_calling", "json_mode"} & values.keys() else caps.from_default_fallback)
+                    return ModelCapabilitySnapshot(caps, "probe", snapshot.status)
+            source = "unknown" if caps.from_default_fallback else "config"
+            return ModelCapabilitySnapshot(caps, source, snapshot.status if source == "unknown" else "ready")
 
     def _get_discovery(self, caps: ModelCapabilities) -> CapabilityDiscovery:
         if self._discovery is None:
-            self._discovery = CapabilityDiscovery(self.model, self.base_url, self.api_key, asdict(caps))
+            configuration = {name: value for name, value in asdict(caps).items() if name != "unknown_features"}
+            self._discovery = CapabilityDiscovery(self.model, self.base_url, self.api_key, configuration)
         return self._discovery
 
-    def _probe_loader(self):
+    def _probe_loader(self, discovery):
         model, base_url, api_key, timeout = self.model, self.base_url, self.api_key, self.timeout
         return lambda: probe_capabilities(select_provider(model, base_url),
-                                          model=model, api_key=api_key, base_url=base_url, timeout=timeout)
+                                          model=model, api_key=api_key, base_url=base_url, timeout=timeout,
+                                          on_evidence=discovery.record)
+
+    def _request_target(self) -> _RequestTarget:
+        with self._capability_lock:
+            caps = self.capabilities
+            return _RequestTarget(self.model, self.base_url, self.api_key, self.timeout,
+                                  caps, self._get_discovery(caps), self.session_tracker)
 
     def ensure_capabilities(self) -> ModelCapabilities:
-        """Confirm an unknown protocol before executing a model task."""
+        """Explicitly probe unknown protocol capabilities and retain confirmed facts."""
         with self._capability_lock:
             caps = self.capabilities
             if not caps.from_default_fallback or not self.api_key or not self.base_url:
                 return caps
-            discovery, loader = self._get_discovery(caps), self._probe_loader()
+            discovery = self._get_discovery(caps)
+            loader = self._probe_loader(discovery)
         discovery.ensure(loader)
         return self.capabilities
 
@@ -240,12 +269,13 @@ class AgentLLM:
         """Read discovery progress without waiting for its worker."""
         return self.capability_snapshot().status
 
-    def start_capability_discovery(self) -> None:
+    def start_capability_discovery(self, *, force: bool = False) -> None:
         """Warm unknown protocol capabilities without blocking the caller."""
         with self._capability_lock:
             caps = self.capabilities
-            if caps.from_default_fallback and self.api_key and self.base_url:
-                self._get_discovery(caps).start(self._probe_loader())
+            if (force or caps.from_default_fallback) and self.api_key and self.base_url:
+                discovery = self._get_discovery(caps)
+                discovery.start(self._probe_loader(discovery), force=force)
 
     @property
     def session_tracker(self) -> SessionCapabilityTracker:
@@ -271,6 +301,7 @@ class AgentLLM:
 
         self.last_tool_calls = []
         self.last_error = ""
+        self._cs().unsupported_capability = None
         self._cs().tool_call_mode = tools is not None and len(tools) > 0
         self._cs().non_transient = False
 
@@ -309,6 +340,8 @@ class AgentLLM:
                     break
                 if self._cs().non_transient:
                     break
+                if self.last_unsupported_capability in {"parallel_tool_calls", "stream_options", "thinking"}:
+                    continue
                 if attempt < attempts - 1:
                     import random
                     delay = LLM_RETRY_BASE_DELAY * (2 ** attempt) * (0.5 + random.random())
@@ -327,7 +360,9 @@ class AgentLLM:
 
     def _call(self, messages, temperature, silent, attempt, tools=None, response_format=None, thinking=None,
               on_token=None, effort=None) -> str:
-        model = self.model
+        target = self._request_target()
+        model = target.model
+        self._cs().unsupported_capability = None
 
         ctx = trace_manager.active
         span = None
@@ -353,8 +388,8 @@ class AgentLLM:
         self.last_reasoning_content = ""
 
         try:
-            provider = select_provider(model, self.base_url)
-            provider_key = f"{type(provider).__name__}/{self.model}"
+            provider = select_provider(model, target.base_url)
+            provider_key = f"{type(provider).__name__}/{model}"
             with _provider_health_lock:
                 health = _provider_health.get(provider_key)
                 if health and health[0] >= _PROVIDER_FAILURE_THRESHOLD:
@@ -367,7 +402,7 @@ class AgentLLM:
             try:
                 result = self._call_via_provider(
                     provider, messages, temperature, tools,
-                    response_format, thinking, on_token, effort=effort,
+                    response_format, thinking, on_token, effort=effort, target=target,
                 )
                 self.last_tool_calls = result.tool_calls
                 self.last_error = ""
@@ -390,9 +425,10 @@ class AgentLLM:
 
                 return result.text
             except Exception as exc:
-                with _provider_health_lock:
-                    fail_count, _ = _provider_health.get(provider_key, (0, 0))
-                    _provider_health[provider_key] = (fail_count + 1, time.time())
+                if unsupported_capability(exc) is None:
+                    with _provider_health_lock:
+                        fail_count, _ = _provider_health.get(provider_key, (0, 0))
+                        _provider_health[provider_key] = (fail_count + 1, time.time())
                 if _is_transient_error(exc):
                     logger.warning("Provider failed (transient, will retry): %s", exc)
                     raise
@@ -409,15 +445,12 @@ class AgentLLM:
             error_msg = str(e)
             self.last_error = error_msg
 
-            error_lower = error_msg.lower()
-            if any(kw in error_lower for kw in ("tool", "function_call", "function calling")) and \
-               any(kw in error_lower for kw in ("not support", "unsupported", "invalid", "unknown parameter")):
-                self.session_tracker.mark_failed("tool_calling")
-            if "response_format" in error_lower and \
-               any(kw in error_lower for kw in ("not support", "unsupported", "invalid", "unknown parameter")):
-                self.session_tracker.mark_failed("json_mode")
-            if "reasoning_effort" in error_lower or "thinking" in error_lower:
-                self.session_tracker.mark_failed("thinking")
+            rejected = unsupported_capability(e)
+            if rejected is not None:
+                self._cs().unsupported_capability = rejected
+                target.tracker.mark_failed(rejected)
+                if rejected in {"tool_calling", "json_mode", "parallel_tool_calls"}:
+                    target.discovery.record(rejected, False)
 
             is_transient = _is_transient_error(e)
 
@@ -430,7 +463,7 @@ class AgentLLM:
                     "retry_attempt": attempt + 1, "transient": is_transient,
                 })
 
-            if not is_transient:
+            if not is_transient and rejected not in {"parallel_tool_calls", "stream_options", "thinking"}:
                 self._cs().non_transient = True
                 return ""
 
@@ -446,16 +479,18 @@ class AgentLLM:
         thinking: bool | None,
         on_token: Callable[[str], None] | None = None,
         effort: str | None = None,
+        target: _RequestTarget | None = None,
     ) -> "StreamResult":
         """Call LLM via a direct provider (OpenAI SDK)."""
-        caps = self.ensure_capabilities()
-        tracker = self.session_tracker
+        target = target or self._request_target()
+        caps = target.capabilities
+        tracker = target.tracker
 
         provider_tools = None
         parallel = None
-        if tools and tracker.is_available("tool_calling", caps.supports_tool_calling):
+        if tools and tracker.is_available("tool_calling", protocol_available(caps, "tool_calling")):
             provider_tools = tools
-            if caps.supports_parallel_tool_calls:
+            if tracker.is_available("parallel_tool_calls", caps.supports_parallel_tool_calls):
                 parallel = True
 
         if effort == "none":
@@ -472,33 +507,48 @@ class AgentLLM:
 
         provider_response_format = None
         if response_format:
-            if tracker.is_available("json_mode", caps.supports_json_mode):
+            if tracker.is_available("json_mode", protocol_available(caps, "json_mode")):
                 provider_response_format = response_format
             elif isinstance(response_format, dict) and response_format.get("type") == "json_schema":
                 if tracker.is_available("json_schema", caps.supports_json_schema):
                     provider_response_format = response_format
 
-        stream_opts = {"include_usage": True}
+        stream_opts = {"include_usage": True} if tracker.is_available("stream_options", True) else None
 
         call = self._cs().active_call
         if call is not None:
             call.provider = provider
         try:
-            return provider.stream_chat(
+            result = provider.stream_chat(
                 messages=messages,
-                model=self.model,
-                api_key=self.api_key,
-                base_url=self.base_url,
+                model=target.model,
+                api_key=target.api_key,
+                base_url=target.base_url,
                 temperature=temperature,
                 tools=provider_tools,
                 response_format=provider_response_format,
                 max_tokens=caps.max_output_tokens,
-                timeout=self.timeout,
+                timeout=target.timeout,
                 parallel_tool_calls=parallel,
                 stream_options=stream_opts,
                 reasoning_effort=reasoning_effort,
                 on_token=on_token,
             )
+            discovery = target.discovery
+            if result.tool_calls:
+                discovery.record("tool_calling", True)
+                if len(result.tool_calls) > 1:
+                    discovery.record("parallel_tool_calls", True)
+            if provider_response_format and not result.truncated:
+                import json
+
+                try:
+                    json.loads(result.text)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    discovery.record("json_mode", True)
+            return result
         finally:
             if call is not None:
                 call.provider = None

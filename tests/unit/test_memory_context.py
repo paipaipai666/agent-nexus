@@ -718,7 +718,8 @@ class TestReActAgentConversationMode:
         _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
                           ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
         assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
-            (ReActEventType.ANSWER_THOUGHT, {"thought": "The tool result is sufficient to answer now."})
+            (ReActEventType.ANSWER_THOUGHT, {"thought": "The tool result is sufficient to answer now."}),
+            (ReActEventType.STREAM_TOKEN, {"token": "Final answer"}),
         ]
         assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]
         assert returned[0].payload["text"] == "Final answer"
@@ -742,7 +743,8 @@ class TestReActAgentConversationMode:
         _OBSERVABILITY = {ReActEventType.LLM_CALL, ReActEventType.DRIFT_SIGNAL,
                           ReActEventType.MEMORY_REFRESH, ReActEventType.COMPACTION}
         assert [(t, p) for t, p in emitted if t not in _OBSERVABILITY] == [
-            (ReActEventType.ANSWER_THOUGHT, {"thought": "The search result is enough to answer now."})
+            (ReActEventType.ANSWER_THOUGHT, {"thought": "The search result is enough to answer now."}),
+            (ReActEventType.STREAM_TOKEN, {"token": "Final answer"}),
         ]
         assert [event.type for event in returned] == [ReActEventType.ANSWER_READY]
         assert ctx.last_answer == "Final answer"
